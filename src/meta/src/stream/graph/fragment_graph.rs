@@ -12,136 +12,242 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
+use std::collections::HashMap;
 
-use risingwave_common::ensure;
-use risingwave_common::error::Result;
-use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::{DispatchStrategy, StreamNode};
 
-use crate::model::FragmentId;
+use crate::model::LocalFragmentId;
+
+/// An edge between the nodes in the fragment graph.
+#[derive(Debug, Clone)]
+pub struct StreamFragmentEdge {
+    /// Dispatch strategy for the fragment.
+    pub dispatch_strategy: DispatchStrategy,
+
+    /// Whether the two linked nodes should be placed on the same worker node
+    pub same_worker_node: bool,
+
+    /// A unique identifer of this edge. Generally it should be exchange node's operator id. When
+    /// rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
+    /// virtual links generated.
+    pub link_id: u64,
+}
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
 #[derive(Clone, Debug)]
 pub struct StreamFragment {
     /// the allocated fragment id.
-    fragment_id: FragmentId,
+    pub fragment_id: LocalFragmentId,
 
     /// root stream node in this fragment.
-    node: Arc<StreamNode>,
+    pub node: Option<Box<StreamNode>>,
 
     /// type of this fragment.
-    fragment_type: FragmentType,
+    pub fragment_type: FragmentType,
 
     /// mark whether this fragment should only have one actor.
-    is_singleton: bool,
+    pub is_singleton: bool,
+
+    /// mark whether this fragment has been sealed.
+    pub is_sealed: bool,
 }
 
 impl StreamFragment {
-    pub fn new(fragment_id: FragmentId, node: Arc<StreamNode>) -> Self {
+    pub fn new(fragment_id: LocalFragmentId) -> Self {
         Self {
             fragment_id,
-            node,
             fragment_type: FragmentType::Others,
             is_singleton: false,
+            node: None,
+            is_sealed: false,
         }
     }
 
-    pub fn get_fragment_id(&self) -> FragmentId {
-        self.fragment_id
+    /// Seal the stream node content.
+    pub fn seal_node(&mut self, node: StreamNode) {
+        assert!(self.node.is_none());
+        assert!(!self.is_sealed);
+        self.node = Some(Box::new(node));
     }
 
-    pub fn get_node(&self) -> Arc<StreamNode> {
-        self.node.clone()
+    fn visit(node: &mut StreamNode, (offset, len): (u32, u32)) {
+        for input in &mut node.input {
+            Self::visit(input, (offset, len));
+        }
+        if let Some(Node::LookupNode(ref mut lookup)) = node.node {
+            assert!(lookup.arrange_local_fragment_id < len);
+            lookup.arrange_fragment_id = lookup.arrange_local_fragment_id + offset;
+        }
     }
 
-    pub fn set_fragment_type(&mut self, fragment_type: FragmentType) {
-        self.fragment_type = fragment_type;
+    /// Seal the fragment and rewrite local ids inside the node.
+    /// TODO: when we add support of arrangement id in catalog, we won't need to rewrite stream node
+    /// content any more.
+    pub fn seal(&mut self, offset: u32, len: u32) {
+        Self::visit(self.node.as_mut().unwrap(), (offset, len));
+        self.is_sealed = true;
     }
 
-    pub fn is_singleton(&self) -> bool {
-        self.is_singleton
-    }
-
-    pub fn set_singleton(&mut self, is_singleton: bool) {
-        self.is_singleton = is_singleton;
+    pub fn get_node(&self) -> &StreamNode {
+        assert!(self.is_sealed);
+        self.node.as_ref().unwrap()
     }
 }
 
-/// [`StreamFragmentGraph`] stores a fragment graph with a root fragment(id: `fragment_id`).
+/// [`StreamFragmentGraph`] stores a fragment graph (DAG).
 pub struct StreamFragmentGraph {
-    /// represent the root fragment of the graph.
-    fragment_id: FragmentId,
-
     /// stores all the fragments in the graph.
-    fragments: HashMap<FragmentId, StreamFragment>,
+    fragments: HashMap<LocalFragmentId, StreamFragment>,
 
-    /// stores fragment relations: parent_fragment => set(child_fragment).
-    child_edges: HashMap<FragmentId, BTreeSet<FragmentId>>,
+    /// stores edges between fragments: upstream => downstream.
+    downstreams: HashMap<LocalFragmentId, HashMap<LocalFragmentId, StreamFragmentEdge>>,
+
+    /// stores edges between fragments: downstream -> upstream.
+    upstreams: HashMap<LocalFragmentId, HashMap<LocalFragmentId, StreamFragmentEdge>>,
+
+    /// whether the graph is sealed and verified
+    sealed: bool,
 }
 
 impl StreamFragmentGraph {
-    pub fn new(fragment_id: Option<FragmentId>) -> Self {
+    pub fn new() -> Self {
         Self {
-            fragment_id: fragment_id.unwrap_or(0),
             fragments: HashMap::new(),
-            child_edges: HashMap::new(),
+            downstreams: HashMap::new(),
+            upstreams: HashMap::new(),
+            sealed: false,
         }
     }
 
-    pub fn get_root_fragment(&self) -> StreamFragment {
-        self.fragments.get(&self.fragment_id).unwrap().clone()
+    pub fn fragments(&self) -> &HashMap<LocalFragmentId, StreamFragment> {
+        &self.fragments
     }
 
-    pub fn add_fragment(&mut self, stream_fragment: StreamFragment, is_root: bool) {
-        if is_root {
-            self.fragment_id = stream_fragment.fragment_id;
-        }
-        self.fragments
+    /// Adds a fragment to the graph.
+    pub fn add_fragment(&mut self, stream_fragment: StreamFragment) {
+        assert!(!self.sealed);
+        assert!(stream_fragment.fragment_id.is_local());
+        let id = stream_fragment.fragment_id;
+        let ret = self
+            .fragments
             .insert(stream_fragment.fragment_id, stream_fragment);
+        assert!(ret.is_none(), "fragment already exists: {:?}", id);
     }
 
-    /// Links `child_id` to its belonging parent fragment.
-    pub fn link_child(&mut self, parent_id: FragmentId, child_id: FragmentId) {
-        self.child_edges
-            .entry(parent_id)
-            .or_insert_with(BTreeSet::new)
-            .insert(child_id);
-    }
+    /// Links upstream to downstream in the graph.
+    pub fn add_edge(
+        &mut self,
+        upstream_id: LocalFragmentId,
+        downstream_id: LocalFragmentId,
+        edge: StreamFragmentEdge,
+    ) {
+        assert!(!self.sealed);
+        assert!(upstream_id.is_local());
+        assert!(downstream_id.is_local());
 
-    pub fn has_upstream(&self, fragment_id: FragmentId) -> bool {
-        self.child_edges.contains_key(&fragment_id)
-    }
-
-    pub fn get_upstream_fragments(&self, fragment_id: FragmentId) -> Option<BTreeSet<FragmentId>> {
-        self.child_edges.get(&fragment_id).cloned()
-    }
-
-    pub fn get_fragment_by_id(&self, fragment_id: FragmentId) -> Option<StreamFragment> {
-        self.fragments.get(&fragment_id).cloned()
-    }
-
-    pub fn get_fragment_type_by_id(&self, fragment_id: FragmentId) -> Result<FragmentType> {
-        ensure!(
-            self.fragments.contains_key(&fragment_id),
-            "fragment id not exist!"
+        let ret = self
+            .downstreams
+            .entry(upstream_id)
+            .or_insert_with(HashMap::new)
+            .insert(downstream_id, edge.clone());
+        assert!(
+            ret.is_none(),
+            "edge already exists: {:?}",
+            (upstream_id, downstream_id, edge)
         );
-        Ok(self.fragments.get(&fragment_id).unwrap().fragment_type)
+
+        let ret = self
+            .upstreams
+            .entry(downstream_id)
+            .or_insert_with(HashMap::new)
+            .insert(upstream_id, edge.clone());
+        assert!(
+            ret.is_none(),
+            "edge already exists: {:?}",
+            (upstream_id, downstream_id, edge)
+        );
     }
 
-    pub fn get_distribution_type_by_id(
+    pub fn get_fragment(&self, fragment_id: LocalFragmentId) -> Option<&StreamFragment> {
+        assert_eq!(fragment_id.is_global(), self.sealed);
+        self.fragments.get(&fragment_id)
+    }
+
+    pub fn get_downstreams(
         &self,
-        fragment_id: FragmentId,
-    ) -> Result<FragmentDistributionType> {
-        ensure!(
-            self.fragments.contains_key(&fragment_id),
-            "fragment id not exist!"
-        );
-        Ok(if self.fragments.get(&fragment_id).unwrap().is_singleton {
-            FragmentDistributionType::Single
-        } else {
-            FragmentDistributionType::Hash
-        })
+        fragment_id: LocalFragmentId,
+    ) -> &HashMap<LocalFragmentId, StreamFragmentEdge> {
+        lazy_static::lazy_static! {
+            static ref EMPTY_HASHMAP: HashMap<LocalFragmentId, StreamFragmentEdge> = HashMap::new();
+        }
+        assert_eq!(fragment_id.is_global(), self.sealed);
+        self.downstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
+    }
+
+    pub fn get_upstreams(
+        &self,
+        fragment_id: LocalFragmentId,
+    ) -> &HashMap<LocalFragmentId, StreamFragmentEdge> {
+        lazy_static::lazy_static! {
+            static ref EMPTY_HASHMAP: HashMap<LocalFragmentId, StreamFragmentEdge> = HashMap::new();
+        }
+        assert_eq!(fragment_id.is_global(), self.sealed);
+        self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
+    }
+
+    /// Convert all local ids to global ids by `local_id + offset`
+    pub fn seal(&mut self, offset: u32, len: u32) {
+        self.sealed = true;
+        self.fragments = std::mem::take(&mut self.fragments)
+            .into_iter()
+            .map(|(id, mut fragment)| {
+                let id = id.to_global_id(offset, len);
+                fragment.seal(offset, len);
+                (
+                    id,
+                    StreamFragment {
+                        fragment_id: id,
+                        ..fragment
+                    },
+                )
+            })
+            .collect();
+
+        self.downstreams = std::mem::take(&mut self.downstreams)
+            .into_iter()
+            .map(|(upstream, links)| {
+                let upstream = upstream.to_global_id(offset, len);
+                let links = links
+                    .into_iter()
+                    .map(|(downstream, dispatcher)| {
+                        let downstream = downstream.to_global_id(offset, len);
+                        (downstream, dispatcher)
+                    })
+                    .collect();
+                (upstream, links)
+            })
+            .collect();
+
+        self.upstreams = std::mem::take(&mut self.upstreams)
+            .into_iter()
+            .map(|(downstream, links)| {
+                let downstream = downstream.to_global_id(offset, len);
+                let links = links
+                    .into_iter()
+                    .map(|(upstream, dispatcher)| {
+                        let upstream = upstream.to_global_id(offset, len);
+                        (upstream, dispatcher)
+                    })
+                    .collect();
+                (downstream, links)
+            })
+            .collect();
+    }
+
+    /// Number of fragments
+    pub fn fragment_len(&self) -> usize {
+        self.fragments.len()
     }
 }

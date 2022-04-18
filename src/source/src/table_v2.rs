@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{BatchSourceReader, Source, StreamSourceReader};
+use crate::{Source, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -111,21 +111,6 @@ pub struct TableV2ReaderContext;
 #[derive(Debug)]
 pub struct TableV2BatchReader;
 
-#[async_trait]
-impl BatchSourceReader for TableV2BatchReader {
-    async fn open(&mut self) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-        unimplemented!()
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        unimplemented!()
-    }
-}
-
 /// [`TableV2StreamReader`] reads changes from a certain table continuously.
 /// This struct should be only used for associated materialize task, thus the reader should be
 /// created only once. Further streaming task relying on this table source should follow the
@@ -174,16 +159,7 @@ impl StreamSourceReader for TableV2StreamReader {
 #[async_trait]
 impl Source for TableSourceV2 {
     type ReaderContext = TableV2ReaderContext;
-    type BatchReader = TableV2BatchReader;
     type StreamReader = TableV2StreamReader;
-
-    fn batch_reader(
-        &self,
-        _context: Self::ReaderContext,
-        _column_ids: Vec<ColumnId>,
-    ) -> Result<Self::BatchReader> {
-        unreachable!("should use table_scan instead of stream_scan to read the table source")
-    }
 
     fn stream_reader(
         &self,
@@ -210,7 +186,6 @@ impl Source for TableSourceV2 {
 
 #[cfg(test)]
 mod tests {
-
     use std::sync::Arc;
 
     use assert_matches::assert_matches;

@@ -209,6 +209,22 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
+        if schema_name == "pg_catalog" {
+            // TODO: support pg_catalog.
+            return Err(ErrorCode::NotImplemented(
+                // TODO: We can ref the document of `SHOW` commands here if ready.
+                r###"pg_catalog is not supported, please use `SHOW` commands for now.
+`SHOW TABLES`,
+`SHOW MATERIALIZED VIEWS`,
+`DESCRIBE <table>`,
+`SHOW COLUMNS FROM [table]`
+"###
+                .into(),
+                1695.into(),
+            )
+            .into());
+        }
+
         let (ret, columns) = {
             let catalog = &self.catalog;
 
@@ -218,7 +234,10 @@ impl Binder {
                 .or_else(|_| {
                     catalog
                         .get_source_by_name(&self.db_name, schema_name, table_name)
-                        .map(|s| (Relation::Source(Box::new(s.into())), s.columns.clone()))
+                        .map(|s| {
+                            let source = s.clone().flatten();
+                            (Relation::Source(Box::new((&source).into())), source.columns)
+                        })
                 })
                 .map_err(|_| {
                     RwError::from(CatalogError::NotFound(

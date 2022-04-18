@@ -19,10 +19,10 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, Sstable};
+use super::Sstable;
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::SstableStoreRef;
+use crate::hummock::{BlockIterator, SstableStoreRef};
 
 pub trait SSTableIteratorBase: HummockIterator {}
 
@@ -147,6 +147,7 @@ impl SSTableIteratorBase for SSTableIterator {}
 
 impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
+
     const DIRECTION: usize = FORWARD;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
@@ -167,7 +168,6 @@ mod tests {
         default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
-
     #[tokio::test]
     async fn test_table_iterator() {
         // Build remote table

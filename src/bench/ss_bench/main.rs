@@ -125,6 +125,7 @@ async fn main() {
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
+        shared_buffer_threshold_size: 268435456, // 256 MB
         bloom_false_positive: opts.bloom_false_positive,
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
@@ -152,14 +153,16 @@ async fn main() {
     .expect("Failed to get state_store");
     let mut context = None;
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
-        context = Some(Arc::new(CompactorContext {
-            options: config.clone(),
-            local_version_manager: hummock.inner().local_version_manager().clone(),
-            hummock_meta_client: mock_hummock_meta_client.clone(),
-            sstable_store: hummock.inner().sstable_store(),
-            stats: state_store_stats.clone(),
-            is_share_buffer_compact: false,
-        }));
+        context = Some((
+            Arc::new(CompactorContext {
+                options: config.clone(),
+                hummock_meta_client: mock_hummock_meta_client.clone(),
+                sstable_store: hummock.inner().sstable_store(),
+                stats: state_store_stats.clone(),
+                is_share_buffer_compact: false,
+            }),
+            hummock.inner().local_version_manager().clone(),
+        ));
     }
 
     dispatch_state_store!(state_store, store, {

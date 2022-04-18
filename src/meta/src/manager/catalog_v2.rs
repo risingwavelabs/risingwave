@@ -723,6 +723,10 @@ where
             .remove(&(source.database_id, source.schema_id, source.name.clone()))
     }
 
+    pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
+        Source::select(self.env.meta_store(), &id).await
+    }
+
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
         self.relation_ref_count.get(&relation_id).cloned()
     }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
@@ -23,7 +24,7 @@ use uuid::Uuid;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
@@ -128,13 +129,22 @@ impl Query {
 }
 
 /// Fragment part of `Query`.
-#[derive(Debug)]
 pub struct QueryStage {
     pub query_id: QueryId,
     pub id: StageId,
     pub root: Arc<ExecutionPlanNode>,
     pub exchange_info: ExchangeInfo,
     pub parallelism: u32,
+}
+
+impl Debug for QueryStage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryStage")
+            .field("id", &self.id)
+            .field("parallelism", &self.parallelism)
+            .field("exchange_info", &self.exchange_info)
+            .finish()
+    }
 }
 
 pub(crate) type QueryStageRef = Arc<QueryStage>;
@@ -395,7 +405,7 @@ mod tests {
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, StageId};
-    use crate::scheduler::schedule::WorkerNodeManager;
+    use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::session::OptimizerContext;
     use crate::utils::Condition;
 

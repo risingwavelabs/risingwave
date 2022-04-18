@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::{deserialize_column_id, NULL_ROW_SPECIAL_CELL_ID};
+use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 #[derive(Clone)]
@@ -34,7 +34,6 @@ pub struct CellBasedRowDeserializer {
     /// which should also be done on the caller side.
     pk_bytes: Option<Vec<u8>>,
 }
-
 impl CellBasedRowDeserializer {
     pub fn new(table_column_descs: Vec<ColumnDesc>) -> Self {
         let num_cells = table_column_descs.len();
@@ -60,20 +59,20 @@ impl CellBasedRowDeserializer {
     ) -> Result<Option<(Vec<u8>, Row)>> {
         let pk_with_cell_id = pk_with_cell_id.to_vec();
         let pk_vec_len = pk_with_cell_id.len();
-        let cur_pk_bytes = &pk_with_cell_id[0..pk_vec_len - 4];
+        if pk_vec_len < 4 {
+            return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
+        }
+        let (cur_pk_bytes, cell_id_bytes) = pk_with_cell_id.split_at(pk_vec_len - 4);
         let mut result = None;
-        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes {
+        let cell_id = deserialize_column_id(cell_id_bytes)?;
+        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes  {
             result = self.take();
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
         } else if self.pk_bytes.is_none() {
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
         }
 
-        let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
-        let cell_id = deserialize_column_id(cell_id_bytes)?;
-        if cell_id == NULL_ROW_SPECIAL_CELL_ID {
-            // do nothing
-        } else if let Some((column_desc, index)) = self.columns.get(&cell_id) {
+        if let Some((column_desc, index)) = self.columns.get(&cell_id) {
             let mut de = value_encoding::Deserializer::new(cell.clone());
             if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
@@ -82,6 +81,7 @@ impl CellBasedRowDeserializer {
         } else {
             // ignore this cell
         }
+
         Ok(result)
     }
 
@@ -140,7 +140,6 @@ mod tests {
         let bytes2 = serialize_pk_and_row(&pk2, &Some(row2.clone()), &column_ids).unwrap();
         let bytes3 = serialize_pk_and_row(&pk3, &Some(row3.clone()), &column_ids).unwrap();
         let bytes = [bytes1, bytes2, bytes3].concat();
-
         let partial_table_column_descs = table_column_descs.into_iter().skip(1).take(3).collect();
         let mut result = vec![];
         let mut deserializer = CellBasedRowDeserializer::new(partial_table_column_descs);
@@ -153,6 +152,7 @@ mod tests {
             }
         }
         let pk_and_row = deserializer.take();
+
         result.push(pk_and_row.unwrap().1);
 
         for (expected, result) in [row1, row2, row3].into_iter().zip_eq(result.into_iter()) {

@@ -12,11 +12,13 @@ risedev:
     # - use: aws-s3
     #   bucket: some-bucket
 
-    # if you want to enable etcd backend, uncomment the following line.
+    # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
+    #   unsafe-no-fsync: true
 
     - use: meta-node
       enable-dashboard-v2: false
+      unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
 
@@ -29,6 +31,13 @@ risedev:
 
     # If you want to use the legacy frontend, uncomment the following line.
     # - use: frontend-legacy
+
+    # If you want to create source from Kafka, uncomment the following lines
+    # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
+    # - use: zookeeper
+    #   persist-data: true
+    # - use: kafka
+    #   persist-data: true
 
   legacy:
     - use: meta-node
@@ -62,25 +71,39 @@ risedev:
     - use: compute-node
     - use: frontend
       user-managed: true
+  
+  full:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+    - use: prometheus
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
 
   #################################
   ### Configurations used on CI ###
   #################################
 
-  ci-default:
+  ci-1cn-1fe:
     - use: minio
-    # - use: etcd
-    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: etcd
+      unsafe-no-fsync: true
     - use: meta-node
+      unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
 
-  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend-legacy and 1 MinIO.
-  ci-3node-frontend-v2:
+  ci-3cn-1fe:
     - use: minio
-    # - use: etcd
-    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: etcd
+      unsafe-no-fsync: true
     - use: meta-node
+      unsafe-disable-recovery: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -92,12 +115,12 @@ risedev:
       exporter-port: 1224
     - use: frontend
 
-  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend-legacy and 1 MinIO.
   ci-3node:
     - use: minio
-    # - use: etcd
-    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: etcd
+      unsafe-no-fsync: true
     - use: meta-node
+      unsafe-disable-recovery: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -109,14 +132,27 @@ risedev:
       exporter-port: 1224
     - use: frontend-legacy
 
-  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend-legacy and 1 MinIO.
   ci-1node:
     - use: minio
-    # - use: etcd
-    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: etcd
+      unsafe-no-fsync: true
     - use: meta-node
+      unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend-legacy
+
+  ci-kafka:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -238,6 +274,9 @@ template:
     # Whether to enable dashboard-v2
     enable-dashboard-v2: false
 
+    # Whether to disable recovery mode
+    unsafe-disable-recovery: false
+
   prometheus:
     # Listen address of Prometheus
     address: "127.0.0.1"
@@ -324,3 +363,37 @@ template:
     bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
+
+  # Apache Kafka service
+  kafka:
+    # Id to be picked-up by services
+    id: kafka-${port}
+
+    # Listen address of Kafka
+    address: "127.0.0.1"
+
+    # Listen port of Kafka
+    port: 29092
+
+    # ZooKeeper used by this Kafka instance
+    provide-zookeeper: "zookeeper*"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
+    broker-id: 0
+
+  # Apache ZooKeeper service
+  zookeeper:
+    # Id to be picked-up by services
+    id: zookeeper-${port}
+
+    # Listen address of ZooKeeper
+    address: "127.0.0.1"
+
+    # Listen port of ZooKeeper
+    port: 2181
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true

@@ -16,7 +16,9 @@ use std::cmp::Ordering;
 
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode;
 use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -80,9 +82,13 @@ impl Executor for SortMergeJoinExecutor {
                         let build_row = &self.last_join_results[self.last_join_results_write_idx];
                         self.last_join_results_write_idx += 1;
                         // Concatenate to get the final join results.
-                        let join_row =
-                            Self::combine_two_row_ref(cur_probe_row.clone(), build_row.into());
-                        if let Some(ret_chunk) = self.chunk_builder.append_one_row_ref(join_row)? {
+                        let datum_refs = cur_probe_row
+                            .values()
+                            .chain(build_row.0.iter().map(to_datum_ref));
+                        if let Some(ret_chunk) = self
+                            .chunk_builder
+                            .append_one_row_from_datum_refs(datum_refs)?
+                        {
                             return Ok(Some(ret_chunk));
                         }
                     }
@@ -103,16 +109,8 @@ impl Executor for SortMergeJoinExecutor {
 
             match (cur_probe_row_opt, cur_build_row_opt) {
                 (Some(cur_probe_row_ref), Some(cur_build_row_ref)) => {
-                    let probe_key = Row::from(
-                        cur_probe_row_ref
-                            .value_by_slice(&self.probe_key_idxs)
-                            .clone(),
-                    );
-                    let build_key = Row::from(
-                        cur_build_row_ref
-                            .value_by_slice(&self.build_key_idxs)
-                            .clone(),
-                    );
+                    let probe_key = cur_probe_row_ref.row_by_indices(&self.probe_key_idxs);
+                    let build_key = cur_build_row_ref.row_by_indices(&self.build_key_idxs);
 
                     // TODO: [`Row`] may not be PartialOrd. May use some trait like
                     // [`ScalarPartialOrd`].
@@ -150,12 +148,12 @@ impl Executor for SortMergeJoinExecutor {
                             // Matched rows. Write into chunk builder and maintain last join
                             // results.
                             self.last_join_results
-                                .push(cur_build_row_ref.clone().into());
-                            let join_row = Self::combine_two_row_ref(
-                                cur_probe_row_ref.clone(),
-                                cur_build_row_ref.clone(),
-                            );
-                            let ret = self.chunk_builder.append_one_row_ref(join_row.clone())?;
+                                .push(cur_build_row_ref.to_owned_row());
+                            let join_datum_refs =
+                                cur_probe_row_ref.values().chain(cur_build_row_ref.values());
+                            let ret = self
+                                .chunk_builder
+                                .append_one_row_from_datum_refs(join_datum_refs)?;
                             self.build_side_source.advance_row();
                             if let Some(ret_chunk) = ret {
                                 return Ok(Some(ret_chunk));
@@ -165,11 +163,8 @@ impl Executor for SortMergeJoinExecutor {
                 }
 
                 (Some(cur_probe_row_ref), None) => {
-                    self.last_probe_key = Some(
-                        cur_probe_row_ref
-                            .value_by_slice(&self.probe_key_idxs)
-                            .into(),
-                    );
+                    self.last_probe_key =
+                        Some(cur_probe_row_ref.row_by_indices(&self.probe_key_idxs));
                     self.probe_side_source.advance_row();
                 }
                 // Once probe row is None, consume all results or terminate.
@@ -222,22 +217,14 @@ impl SortMergeJoinExecutor {
             identity,
         }
     }
+
     fn compare_with_last_row(&self, cur_row: Option<RowRef>) -> bool {
         self.last_probe_key
             .clone()
             .zip(cur_row)
             .map_or(false, |(row1, row2)| {
-                row1 == row2.value_by_slice(&self.probe_key_idxs).into()
+                row1 == row2.row_by_indices(&self.probe_key_idxs)
             })
-    }
-
-    fn combine_two_row_ref<'a>(left_row: RowRef<'a>, right_row: RowRef<'a>) -> RowRef<'a> {
-        let row_vec = left_row
-            .0
-            .into_iter()
-            .chain(right_row.0.into_iter())
-            .collect::<Vec<_>>();
-        RowRef::new(row_vec)
     }
 }
 
@@ -303,7 +290,11 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                             .fuse(),
                         ))
                     }
-                    _ => unimplemented!("Do not support {:?} join type now.", join_type),
+                    _ => Err(ErrorCode::NotImplemented(
+                        format!("Do not support {:?} join type now.", join_type),
+                        None.into(),
+                    )
+                    .into()),
                 }
             }
             (_, _) => Err(InternalError("Filter must have one children".to_string()).into()),

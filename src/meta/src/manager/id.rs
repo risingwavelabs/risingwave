@@ -18,6 +18,7 @@ use std::sync::Arc;
 use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
+use crate::cluster::META_NODE_ID;
 use crate::storage::{self, MetaStore, DEFAULT_COLUMN_FAMILY};
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
@@ -162,7 +163,10 @@ where
             database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
             schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
             table: Arc::new(StoredIdGenerator::new(meta_store.clone(), "table", None).await),
-            worker: Arc::new(StoredIdGenerator::new(meta_store.clone(), "worker", None).await),
+            worker: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as i32 + 1))
+                    .await,
+            ),
             fragment: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "fragment", Some(1)).await,
             ),

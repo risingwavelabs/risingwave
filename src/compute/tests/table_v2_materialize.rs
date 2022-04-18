@@ -161,6 +161,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
+        vec![],
     )?;
 
     // Create a `Materialize` to write the changes to storage
@@ -172,7 +173,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         all_column_ids.clone(),
         2,
         "MaterializeExecutor".to_string(),
-        vec![],
     ))
     .v1();
 

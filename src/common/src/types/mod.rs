@@ -198,35 +198,6 @@ impl DataType {
                 | DataType::Decimal
         )
     }
-
-    pub fn is_string(&self) -> bool {
-        matches!(self, DataType::Varchar)
-    }
-
-    pub fn is_date_or_timestamp(&self) -> bool {
-        matches!(self, DataType::Date | DataType::Timestamp)
-    }
-
-    /// Type index is used to find the least restrictive type that is of the larger index.
-    pub fn type_index(&self) -> i32 {
-        match self {
-            DataType::Boolean => 1,
-            DataType::Int16 => 2,
-            DataType::Int32 => 3,
-            DataType::Int64 => 4,
-            DataType::Float32 => 5,
-            DataType::Float64 => 6,
-            DataType::Decimal => 7,
-            DataType::Date => 8,
-            DataType::Varchar => 9,
-            DataType::Time => 10,
-            DataType::Timestamp => 11,
-            DataType::Timestampz => 12,
-            DataType::Interval => 13,
-            DataType::Struct { .. } => 14,
-            DataType::List { .. } => 15,
-        }
-    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation
@@ -330,6 +301,11 @@ for_all_scalar_variants! { scalar_impl_enum }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
+
+/// Convert a [`Datum`] to a [`DatumRef`].
+pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
+    datum.as_ref().map(|d| d.as_scalar_ref_impl())
+}
 
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_ref_into(

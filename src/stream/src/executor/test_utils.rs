@@ -60,21 +60,13 @@ impl MockSource {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
         Self {
             schema,
             pk_indices,
             epoch: 0,
             msgs: msgs.into(),
-        }
-    }
-
-    pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            epoch: 0,
-            msgs: chunks.into_iter().map(Message::Chunk).collect(),
         }
     }
 

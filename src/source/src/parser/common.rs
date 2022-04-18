@@ -95,6 +95,10 @@ pub(crate) fn json_parse_value(
                 Err(e) => Err(e),
             },
         },
-        _ => unimplemented!(),
+        _ => Err(ErrorCode::NotImplemented(
+            "unsupported type for json_parse_value".to_string(),
+            None.into(),
+        )
+        .into()),
     }
 }

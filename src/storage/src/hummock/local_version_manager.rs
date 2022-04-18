@@ -27,10 +27,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
 
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, INVALID_VERSION_ID,
 };
 
 #[derive(Debug)]
@@ -79,7 +78,6 @@ impl ScopedLocalVersion {
 /// versions in storage service.
 pub struct LocalVersionManager {
     current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
-    sstable_store: SstableStoreRef,
 
     update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
     unpin_worker_tx: UnboundedSender<Arc<HummockVersion>>,
@@ -89,14 +87,19 @@ pub struct LocalVersionManager {
     committed_epoch_refcnts: Mutex<BTreeMap<u64, u64>>,
 }
 
+impl Default for LocalVersionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalVersionManager {
-    pub fn new(sstable_store: SstableStoreRef) -> LocalVersionManager {
+    pub fn new() -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
         let (unpin_worker_tx, unpin_worker_rx) = tokio::sync::mpsc::unbounded_channel();
 
         LocalVersionManager {
             current_version: RwLock::new(None),
-            sstable_store,
             update_notifier_tx,
             unpin_worker_tx,
             unpin_worker_rx: Mutex::new(Some(unpin_worker_rx)),
@@ -126,7 +129,9 @@ impl LocalVersionManager {
         }
     }
 
-    /// Updates cached version if the new version is of greater id
+    /// Updates cached version if the new version is of greater id.
+    /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
+    /// being referenced by some readers.
     pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
         let new_version_id = hummock_version.id;
         if validate_table_key_range(&hummock_version.levels).is_err() {
@@ -185,14 +190,6 @@ impl LocalVersionManager {
             None => Err(HummockError::meta_error("No version found.")),
             Some(current_version) => Ok(current_version.clone()),
         }
-    }
-
-    pub async fn pick_few_tables(&self, sst_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
-        let mut ssts = Vec::with_capacity(sst_ids.len());
-        for sst_id in sst_ids {
-            ssts.push(self.sstable_store.sstable(*sst_id).await?);
-        }
-        Ok(ssts)
     }
 
     async fn start_pin_worker(
@@ -282,9 +279,9 @@ impl LocalVersionManager {
                     },
                 }
             }
-            // if versions_to_unpin.is_empty() {
-            //     continue;
-            // }
+            if versions_to_unpin.is_empty() {
+                continue;
+            }
             // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
             match hummock_meta_client
                 .unpin_version(&versions_to_unpin.iter().map(|v| v.id).collect_vec())
@@ -351,6 +348,16 @@ impl LocalVersionManager {
             }
         }
     }
+
+    #[cfg(test)]
+    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
+        let last_pinned = match self.current_version.read().as_ref() {
+            None => INVALID_VERSION_ID,
+            Some(v) => v.version.id,
+        };
+        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
+        self.try_set_version(version)
+    }
 }
 
 #[cfg(test)]
@@ -383,7 +390,7 @@ mod tests {
     async fn test_shared_buffer_cleanup() {
         let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
         let sstable_store = mock_sstable_store_with_object_store(object_store);
-        let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+        let local_version_manager = Arc::new(LocalVersionManager::new());
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -403,6 +410,7 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[0]
         shared_buffer_manager
             .write_batch(gen_dummy_batch(epochs[0]), epochs[0])
+            .await
             .unwrap();
         assert!(!shared_buffer_manager.get_shared_buffer().is_empty());
 
@@ -422,6 +430,7 @@ mod tests {
         for epoch in epochs.iter().skip(1) {
             shared_buffer_manager
                 .write_batch(gen_dummy_batch(*epoch), *epoch)
+                .await
                 .unwrap();
             local_version_manager.ref_committed_epoch(*epoch);
         }

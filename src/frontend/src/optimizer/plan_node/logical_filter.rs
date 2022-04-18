@@ -76,9 +76,11 @@ impl PlanTreeNodeUnary for LogicalFilter {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.predicate.clone())
     }
+
     #[must_use]
     fn rewrite_with_input(
         &self,
@@ -212,7 +214,7 @@ mod tests {
         assert_eq!(filter.schema().fields()[1], fields[2]);
         assert_eq!(filter.id().0, 3);
 
-        let expr = filter.predicate.clone().to_expr();
+        let expr: ExprImpl = filter.predicate.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         let values = filter.input();
@@ -237,18 +239,9 @@ mod tests {
         let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],
@@ -281,7 +274,7 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        let expr = filter.predicate.clone().to_expr();
+        let expr: ExprImpl = filter.predicate.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
 

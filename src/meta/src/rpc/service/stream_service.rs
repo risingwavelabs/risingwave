@@ -78,12 +78,16 @@ where
         );
 
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext {
+            is_legacy_frontend: true,
+            ..Default::default()
+        };
 
-        let mut fragmenter = StreamFragmenter::new(
+        let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             hash_mapping,
+            true,
         );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)

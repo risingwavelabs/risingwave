@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::fmt::{Debug, Formatter};
 
 use futures::Stream;
@@ -13,7 +27,7 @@ use uuid::Uuid;
 use super::HummockSnapshotManagerRef;
 use crate::scheduler::execution::QueryExecution;
 use crate::scheduler::plan_fragmenter::Query;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::ExecutionContextRef;
 
 pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
@@ -32,39 +46,28 @@ pub struct QueryResultFetcher {
 pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
-    /// Option to specify how to execute query, in single or distributed mode.
-    ///
-    /// This should be a session variable, but currently we don't support `set` statement, so we
-    /// pass in startup environment.
-    ///
-    /// TODO: Remove this after we support `set` statement.
-    dist_query: bool,
 }
 
 impl QueryManager {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
-        dist_query: bool,
     ) -> Self {
         Self {
             worker_node_manager,
             hummock_snapshot_manager,
-            dist_query,
         }
     }
 
-    pub fn dist_query(&self) -> bool {
-        self.dist_query
-    }
-
     /// Schedule query to single node.
+    ///
+    /// This is kept for dml only.
     pub async fn schedule_single(
         &self,
         _context: ExecutionContextRef,
         plan: BatchPlanProst,
     ) -> Result<impl Stream<Item = Result<DataChunk>>> {
-        let worker_node_addr = self.worker_node_manager.next_random().host.unwrap();
+        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
         let compute_client: ComputeClient = ComputeClient::new((&worker_node_addr).into()).await?;
 
         // Build task id and task sink id

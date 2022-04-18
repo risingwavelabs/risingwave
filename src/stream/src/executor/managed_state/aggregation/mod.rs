@@ -14,24 +14,25 @@
 
 //! Aggregators with state store support
 
-mod value;
-
-use risingwave_expr::expr::AggKind;
-pub use value::*;
-mod extreme;
-mod extreme_serializer;
-mod string_agg;
-
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
+pub use value::*;
 
-use super::super::{AggCall, PkDataTypes};
+use super::super::PkDataTypes;
+use crate::executor_v2::aggregation::AggCall;
+
+mod extreme;
+mod extreme_serializer;
+mod string_agg;
+mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == data[x].len()`.
@@ -104,6 +105,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         row_count: Option<usize>,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
+        key_hash_code: Option<HashCode>,
     ) -> Result<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -119,13 +121,19 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
                         pk_data_types,
+                        key_hash_code,
                     )
                     .await?,
                 ))
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                unimplemented!()
+                Err(ErrorCode::NotImplemented(
+                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`"
+                        .to_string(),
+                    None.into(),
+                )
+                .into())
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.

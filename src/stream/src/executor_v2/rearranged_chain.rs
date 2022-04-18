@@ -14,16 +14,16 @@
 
 use std::sync::Arc;
 
+use either::Either;
 use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
-use futures::{stream, Stream, StreamExt};
+use futures::{stream, FutureExt, Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::{StreamExecutorResult, TracedStreamExecutorError};
-use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
-use crate::executor::Epoch;
+use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::executor_v2::error::StreamExecutorError;
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
@@ -65,8 +65,18 @@ fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
 #[derive(Debug)]
 enum RearrangedMessage {
     RearrangedBarrier(Barrier),
-    PhantomBarrier(Epoch),
+    PhantomBarrier(Barrier),
     Chunk(StreamChunk),
+}
+
+impl RearrangedMessage {
+    fn into_message_ignore_rearranged(self) -> Option<Message> {
+        match self {
+            RearrangedMessage::RearrangedBarrier(_) => None,
+            RearrangedMessage::PhantomBarrier(barrier) => Message::Barrier(barrier).into(),
+            RearrangedMessage::Chunk(chunk) => Message::Chunk(chunk).into(),
+        }
+    }
 }
 
 impl From<Message> for RearrangedMessage {
@@ -108,23 +118,16 @@ impl RearrangedChainExecutor {
 
         // 1. Poll the upstream to get the first barrier.
         let first_msg = upstream.next().await.unwrap()?;
-        let barrier = first_msg
+        let first_barrier = first_msg
             .as_barrier()
+            .cloned()
             .expect("the first message received by chain must be a barrier");
-        let create_epoch = barrier.epoch;
+        let create_epoch = first_barrier.epoch;
 
-        let to_consume_snapshot = match barrier.mutation.as_ref().cloned().as_deref() {
-            // If the barrier is a conf change of creating this mview, init snapshot from its epoch
-            // and begin to consume the snapshot.
-            Some(Mutation::AddOutput(map)) => map
-                .values()
-                .flatten()
-                .any(|info| info.actor_id == self.actor_id),
-
-            // If the barrier is not a conf change, it means we've recovered and the snapshot is
-            // already consumed.
-            _ => false,
-        };
+        // If the barrier is a conf change of creating this mview, init snapshot from its epoch
+        // and begin to consume the snapshot.
+        // Otherwise, it means we've recovered and the snapshot is already consumed.
+        let to_consume_snapshot = first_barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
         yield first_msg;
@@ -143,7 +146,7 @@ impl RearrangedChainExecutor {
 
             // 2. Actually, the `first_msg` is rearranged too. So we need to put a phantom barrier.
             upstream_tx
-                .unbounded_send(RearrangedMessage::PhantomBarrier(create_epoch))
+                .unbounded_send(RearrangedMessage::PhantomBarrier(first_barrier))
                 .unwrap();
 
             // 3. Spawn the background task.
@@ -163,7 +166,7 @@ impl RearrangedChainExecutor {
                 .chain(upstream_rx.map(Ok));
 
             // 5. Merge the rearranged barriers with chunks, with the priority of barrier.
-            let rearranged = select_with_strategy(
+            let mut rearranged = select_with_strategy(
                 rearranged_barrier_rx.map(Ok),
                 rearranged_chunks,
                 |_state: &mut ()| stream::PollNext::Left,
@@ -171,27 +174,24 @@ impl RearrangedChainExecutor {
 
             // Record the epoch of the last rearranged barrier we received.
             let mut last_rearranged_epoch = create_epoch;
-            // When we stop the rearrangement task, we should also tell the barrier manager that
-            // we've finish the creation.
             let mut stop_rearrange_tx = Some(stop_rearrange_tx);
 
             // 6. Consume the merged `rearranged` stream.
             #[for_await]
-            for rearranged_msg in rearranged {
+            for rearranged_msg in &mut rearranged {
                 match rearranged_msg? {
                     // If we received a phantom barrier, check whether we catches up with the
                     // progress of upstream MV.
                     //
                     // Note that there's no phantom barrier in the snapshot. So we must have already
                     // consumed the whole snapshot and be on the upstream now.
-                    RearrangedMessage::PhantomBarrier(epoch) => {
-                        if epoch.curr >= last_rearranged_epoch.curr {
-                            if let Some(stop_tx) = stop_rearrange_tx.take() {
-                                // Stop the background rearrangement task.
-                                stop_tx.send(()).map_err(|_| {
-                                    StreamExecutorError::channel_closed("stop_rearrange")
-                                })?;
-                            }
+                    RearrangedMessage::PhantomBarrier(barrier) => {
+                        if barrier.epoch.curr >= last_rearranged_epoch.curr {
+                            // Stop the background rearrangement task.
+                            stop_rearrange_tx.take().unwrap().send(()).map_err(|_| {
+                                StreamExecutorError::channel_closed("stop rearrange")
+                            })?;
+                            break;
                         }
                     }
 
@@ -204,24 +204,44 @@ impl RearrangedChainExecutor {
                 }
             }
 
-            // The rearrangement must have finished because we told it to stop.
+            // 7. Rearranged task finished.
+            // The reason for finish must be that we told it to stop.
+            tracing::debug!(actor = self.actor_id, "rearranged task finished");
             if stop_rearrange_tx.is_some() {
-                // Log the error. We will throw the error on the joining below.
                 tracing::error!(actor = self.actor_id, "rearrangement finished passively");
             }
 
-            // 7. Rearranged stream finished. Now we take back the remaining upstream.
+            // Now we take back the remaining upstream.
+            // If there's any error in the rearrangement task, it will be thrown.
             let remaining_upstream = upstream_poll_handle.await.unwrap()?;
-            // Then notify about the finish.
-            self.notifier.notify(create_epoch.curr);
 
-            // 8. Begin to consume remaining upstream.
-            tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
+            // 8. Assemble the remaining messages.
+            // Note that there may still be some messages in `rearranged`. However the rearranged
+            // barriers must be ignored, we should take the phantoms.
+            let remaining_rearranged = Box::pin(rearranged.filter_map(|result| async {
+                result
+                    .map(RearrangedMessage::into_message_ignore_rearranged)
+                    .transpose()
+            }));
+
+            // Chain the remainings.
+            let remaining = remaining_rearranged.chain(remaining_upstream);
+
+            // 9. Begin to consume remainings.
+            tracing::debug!(actor = self.actor_id, "begin to consume remainings");
+
+            let mut notifier = Some(self.notifier);
 
             #[for_await]
-            for msg in remaining_upstream {
-                let msg = msg?;
+            for msg in remaining {
+                let msg: Message = msg?;
+                let is_barrier = msg.as_barrier().is_some();
                 yield msg;
+
+                if is_barrier && let Some(notifier) = notifier.take()  {
+                    // Notify about the finish after the first barrier.
+                    notifier.notify(create_epoch.curr);
+                }
             }
         } else {
             // If there's no need to consume the snapshot ...
@@ -229,53 +249,66 @@ impl RearrangedChainExecutor {
 
             #[for_await]
             for msg in upstream {
-                let msg = msg?;
-                yield msg;
+                yield msg?;
             }
         }
     }
 
     /// Background rearrangement task. Check `execute_inner` for more details.
     async fn rearrange(
-        mut upstream: impl Stream<Item = StreamExecutorResult<Message>> + std::marker::Unpin,
+        upstream: impl Stream<Item = StreamExecutorResult<Message>> + std::marker::Unpin,
         upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
         rearranged_barrier_tx: mpsc::UnboundedSender<RearrangedMessage>,
-        mut stop_rearrange_rx: oneshot::Receiver<()>,
+        stop_rearrange_rx: oneshot::Receiver<()>,
     ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<Message>>> {
+        // Stop when `stop_rearrange_rx` is received.
+        // TODO(bugen): clearer way to select from both, since the left side is an oneshot
+        let mut selected = select_with_strategy(
+            stop_rearrange_rx.into_stream().map(Either::Left),
+            upstream.map(Either::Right),
+            |_: &mut ()| stream::PollNext::Left,
+        );
+
         #[for_await]
-        for msg in &mut upstream {
-            let msg = msg?;
-            match msg {
-                // If we polled a chunk, simply put it to the `upstream_tx`.
-                Message::Chunk(chunk) => {
-                    upstream_tx
-                        .unbounded_send(RearrangedMessage::Chunk(chunk))
-                        .map_err(|_| StreamExecutorError::channel_closed("upstream"))?;
+        for either in &mut selected {
+            match either {
+                // Future `stop_rx` ready.
+                Either::Left(Ok(_)) => break,
+                Either::Left(Err(_e)) => {
+                    return Err(StreamExecutorError::channel_closed("stop rearrange"));
                 }
 
-                // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
-                // a phantom barrier in-place.
-                Message::Barrier(barrier) => {
-                    upstream_tx
-                        .unbounded_send(RearrangedMessage::PhantomBarrier(barrier.epoch))
-                        .map_err(|_| StreamExecutorError::channel_closed("upstream"))?;
-                    rearranged_barrier_tx
-                        .unbounded_send(RearrangedMessage::RearrangedBarrier(barrier))
-                        .map_err(|_| StreamExecutorError::channel_closed("rearranged barrier"))?;
-                }
-            };
+                // Receive a message from the upstream.
+                Either::Right(msg) => match msg? {
+                    // If we polled a chunk, simply put it to the `upstream_tx`.
+                    Message::Chunk(chunk) => {
+                        upstream_tx
+                            .unbounded_send(RearrangedMessage::Chunk(chunk))
+                            .map_err(|_| {
+                                StreamExecutorError::channel_closed("rearranged upstream")
+                            })?;
+                    }
 
-            // Check that whether we should stop.
-            if stop_rearrange_rx
-                .try_recv()
-                .map_err(|_| StreamExecutorError::channel_closed("stop rearrange"))?
-                .is_some()
-            {
-                break;
+                    // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
+                    // a phantom barrier in-place.
+                    Message::Barrier(barrier) => {
+                        rearranged_barrier_tx
+                            .unbounded_send(RearrangedMessage::RearrangedBarrier(barrier.clone()))
+                            .map_err(|_| {
+                                StreamExecutorError::channel_closed("rearranged barrier")
+                            })?;
+                        upstream_tx
+                            .unbounded_send(RearrangedMessage::PhantomBarrier(barrier))
+                            .map_err(|_| {
+                                StreamExecutorError::channel_closed("rearranged upstream")
+                            })?;
+                    }
+                },
             }
         }
 
-        // Return the remaining upstream back. There's no need to rearrange it any more.
+        // Resume the upstream from `selected`.
+        let upstream = selected.map(Either::unwrap_right);
         Ok(upstream)
     }
 }

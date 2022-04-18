@@ -31,7 +31,7 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    FragmentManagerRef, GlobalSourceManagerRef, GlobalStreamManagerRef, StreamFragmenter,
+    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
 };
 
 #[derive(Clone)]
@@ -40,7 +40,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
 
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: GlobalSourceManagerRef<S>,
+    source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -53,7 +53,7 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: GlobalSourceManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -171,12 +171,14 @@ where
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
+        source.id = id;
 
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await
             .map_err(tonic_err)?;
 
+        // QUESTION(patrick): why do we need to contact compute node on create source
         if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
@@ -185,7 +187,6 @@ where
             return Err(e.to_grpc_status());
         }
 
-        source.id = id;
         let version = self
             .catalog_manager
             .finish_create_source_procedure(&source)
@@ -279,7 +280,10 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
-        if let Err(e) = self.create_mview_on_compute_node(stream_node, id).await {
+        if let Err(e) = self
+            .create_mview_on_compute_node(stream_node, id, None)
+            .await
+        {
             self.catalog_manager
                 .cancel_create_table_procedure(&mview)
                 .await
@@ -377,6 +381,7 @@ where
         &self,
         mut stream_node: StreamNode,
         id: TableId,
+        affiliated_source: Option<Source>,
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
@@ -404,11 +409,15 @@ where
 
         // Resolve fragments.
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
-        let mut fragmenter = StreamFragmenter::new(
+        let mut ctx = CreateMaterializedViewContext {
+            affiliated_source,
+            ..Default::default()
+        };
+        let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             hash_mapping,
+            false,
         );
         let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
         let table_fragments = TableFragments::new(mview_id, graph);
@@ -481,8 +490,9 @@ where
         mview.id = mview_id;
 
         // Create mview on compute node.
+        // Noted that this progress relies on the source just created, so we pass it here.
         if let Err(e) = self
-            .create_mview_on_compute_node(stream_node, mview_id)
+            .create_mview_on_compute_node(stream_node, mview_id, Some(source.clone()))
             .await
         {
             self.catalog_manager

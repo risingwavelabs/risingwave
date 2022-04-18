@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::fmt::Debug;
 use std::marker::Send;
 use std::sync::Arc;
@@ -13,14 +27,14 @@ use risingwave_storage::StateStore;
 use tokio::sync::Mutex;
 
 use crate::common::SourceChunkBuilder;
-use crate::{SourceColumnDesc, SourceParser, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
 /// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReader`] simply
 /// loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
-    pub parser: Arc<dyn SourceParser + Send + Sync>,
+    pub parser: Arc<SourceParserImpl>,
     pub reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
     pub column_descs: Vec<SourceColumnDesc>,
 }
@@ -35,7 +49,7 @@ impl Debug for ConnectorSource {
 
 impl ConnectorSource {
     pub fn new(
-        parser: Arc<dyn SourceParser + Send + Sync>,
+        parser: Arc<SourceParserImpl>,
         reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
         column_descs: Vec<SourceColumnDesc>,
     ) -> Self {

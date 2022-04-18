@@ -12,7 +12,7 @@ import "hummock.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
-// Hash mapping for meta. Stores mapping from virtual key to parallel unit id.
+// Hash mapping for meta. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
   repeated uint32 hash_mapping = 1;
 }

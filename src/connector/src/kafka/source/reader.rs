@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,27 +20,28 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::stream_consumer::StreamPartitionQueue;
-use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
-use rdkafka::{ClientConfig, Message, TopicPartitionList};
+use rdkafka::consumer::{DefaultConsumerContext, StreamConsumer};
+use rdkafka::ClientConfig;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::RwError;
 
 use crate::base::{InnerMessage, SourceReader};
-use crate::kafka::split::{KafkaOffset, KafkaSplit};
+use crate::kafka::split::KafkaSplit;
+use crate::kafka::KAFKA_CONFIG_BROKERS_KEY;
+use crate::Properties;
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct KafkaSplitReader {
     consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
-    partition_queue: StreamPartitionQueue<DefaultConsumerContext>,
-    topic: String,
-    assigned_split: KafkaSplit,
+    assigned_splits: HashMap<String, Vec<KafkaSplit>>,
 }
 
 #[async_trait]
 impl SourceReader for KafkaSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
         let mut stream = self
-            .partition_queue
+            .consumer
             .stream()
             .ready_chunks(KAFKA_MAX_FETCH_MESSAGES);
 
@@ -48,76 +50,26 @@ impl SourceReader for KafkaSplitReader {
             Some(chunk) => chunk,
         };
 
-        let mut ret = Vec::with_capacity(chunk.len());
-
-        for msg in chunk {
-            let msg = msg.map_err(|e| anyhow!(e))?;
-
-            let offset = msg.offset();
-
-            if let KafkaOffset::Offset(stopping_offset) = self.assigned_split.stop_offset {
-                if offset >= stopping_offset {
-                    // `self.partition_queue` will expire when it's done
-                    // FIXME(chen): error handling
-                    self.consumer
-                        .assign(&TopicPartitionList::new())
-                        .map_err(|e| anyhow!(e))?;
-
-                    break;
-                }
-            }
-
-            ret.push(InnerMessage::from(msg));
-        }
-
-        Ok(Some(ret))
+        chunk
+            .into_iter()
+            .map(|msg| msg.map_err(|e| anyhow!(e)).map(InnerMessage::from))
+            .collect::<Result<Vec<InnerMessage>>>()
+            .map(Some)
     }
 
-    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
-    //     let kafka_split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
-    //     let mut tpl = TopicPartitionList::new();
-
-    //     let offset = match kafka_split.start_offset {
-    //         KafkaOffset::None | KafkaOffset::Earliest => Offset::Beginning,
-    //         KafkaOffset::Latest => Offset::End,
-    //         KafkaOffset::Offset(offset) => Offset::Offset(offset),
-    //         KafkaOffset::Timestamp(_) => unimplemented!(),
-    //     };
-
-    //     tpl.add_partition_offset(self.topic.as_str(), kafka_split.partition, offset)
-    //         .map_err(|e| anyhow!(e))?;
-
-    //     self.consumer.assign(&tpl).map_err(|e| anyhow!(e))?;
-
-    //     let partition_queue = self
-    //         .consumer
-    //         .split_partition_queue(self.topic.as_str(), kafka_split.partition)
-    //         .ok_or_else(|| anyhow!("Failed to split partition queue"))?;
-
-    //     self.partition_queue = partition_queue;
-    //     self.assigned_split = kafka_split;
-
-    //     Ok(())
-    // }
-
-    async fn new(
-        _config: std::collections::HashMap<String, String>,
-        _state: Option<crate::ConnectorState>,
-    ) -> Result<Self>
+    async fn new(properties: Properties, _state: Option<crate::ConnectorState>) -> Result<Self>
     where
         Self: Sized,
     {
-        todo!()
-    }
-}
+        let bootstrap_servers = properties.get_kafka(KAFKA_CONFIG_BROKERS_KEY)?;
 
-impl KafkaSplitReader {
-    fn create_consumer(&self) -> Result<StreamConsumer<DefaultConsumerContext>> {
         let mut config = ClientConfig::new();
 
-        config.set("topic.metadata.refresh.interval.ms", "30000");
-        config.set("fetch.message.max.bytes", "134217728");
-        config.set("auto.offset.reset", "earliest");
+        // disable partition eof
+        config.set("enable.partition.eof", "false");
+        config.set("enable.auto.commit", "false");
+        config.set("auto.offset.reset", "smallest");
+        config.set("bootstrap.servers", bootstrap_servers);
 
         if config.get("group.id").is_none() {
             config.set(
@@ -132,14 +84,14 @@ impl KafkaSplitReader {
             );
         }
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
-        config.set("enable.auto.commit", "false");
-        // config.set("bootstrap.servers", self.bootstrap_servers.join(","));
-
-        config
-            .set_log_level(RDKafkaLogLevel::Debug)
+        let consumer = config
+            .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| anyhow!(e))
+            .map_err(|e| RwError::from(InternalError(format!("consumer creation failed {}", e))))?;
+
+        Ok(Self {
+            consumer: Arc::new(consumer),
+            assigned_splits: HashMap::new(),
+        })
     }
 }

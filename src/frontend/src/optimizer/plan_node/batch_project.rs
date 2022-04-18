@@ -59,6 +59,7 @@ impl PlanTreeNodeUnary for BatchProject {
     fn input(&self) -> PlanRef {
         self.logical.input()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.logical.clone_with_input(input))
     }
@@ -71,6 +72,7 @@ impl ToDistributedBatch for BatchProject {
         let new_input = self.input().to_distributed();
         self.clone_with_input(new_input).into()
     }
+
     fn to_distributed_with_required(
         &self,
         required_order: &Order,

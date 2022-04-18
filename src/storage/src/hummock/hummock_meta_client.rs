@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
     CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
@@ -110,11 +110,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn commit_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented("commit_epoch unsupported".to_string(), None.into()).into())
     }
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented("abort_epoch unsupported".to_string(), None.into()).into())
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {

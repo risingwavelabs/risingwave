@@ -15,7 +15,7 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_smithy_http::byte_stream::ByteStream;
@@ -39,7 +39,7 @@ use crate::filesystem::s3::s3_dir::{
     new_s3_client, new_share_config, AwsCredential, AwsCustomConfig, S3SourceBasicConfig,
     S3SourceConfig, SqsReceiveMsgConfig,
 };
-use crate::ConnectorState;
+use crate::{ConnectorState, Properties};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -68,6 +68,8 @@ impl Default for S3File {
         }
     }
 }
+
+const S3_SPLIT_TYPE: &str = "s3";
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct S3FileSplit {
@@ -126,6 +128,14 @@ impl SourceSplit for S3FileSplit {
         } else {
             Err(anyhow::Error::from(split_str.err().unwrap()))
         }
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+
+    fn get_type(&self) -> String {
+        S3_SPLIT_TYPE.to_string()
     }
 }
 
@@ -346,14 +356,11 @@ impl SourceReader for S3FileReader {
     /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's access_key
     /// and secret. For now, only static credential is supported.
     /// 2. The identifier of the State is the Path of S3 - S3://bucket_name/object_key
-    async fn new(
-        config: HashMap<String, String>,
-        state: Option<crate::ConnectorState>,
-    ) -> Result<Self>
+    async fn new(props: Properties, state: Option<crate::ConnectorState>) -> Result<Self>
     where
         Self: Sized,
     {
-        let s3_basic_config = S3SourceBasicConfig::from(config);
+        let s3_basic_config = S3SourceBasicConfig::from(props.0);
         let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
             AwsCredential::Default
         } else {
@@ -389,13 +396,13 @@ impl SourceReader for S3FileReader {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
 
     use bytes::Bytes;
+    use maplit::hashmap;
 
     use crate::base::SourceReader;
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
-    use crate::ConnectorState;
+    use crate::{ConnectorState, Properties};
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
@@ -404,18 +411,12 @@ mod test {
     const SMALL_JSON_FILE_NAME: &str = "2022-02-28-09:32:34-example.json";
     const EMPTY_JSON_DATA: &str = r#""#;
 
-    fn test_config_map() -> HashMap<String, String> {
-        let config: HashMap<String, String> = vec![
-            ("s3.region_name".to_string(), TEST_REGION_NAME.to_string()),
-            ("s3.bucket_name".to_string(), BUCKET_NAME.to_string()),
-            (
-                "sqs_queue_name".to_string(),
-                "s3-dd-storage-notify-queue".to_string(),
-            ),
-        ]
-        .into_iter()
-        .collect();
-        config
+    fn test_config_map() -> Properties {
+        Properties::new(hashmap! {
+            "s3.region_name".to_string() => TEST_REGION_NAME.to_string(),
+            "s3.bucket_name".to_string() => BUCKET_NAME.to_string(),
+            "sqs_queue_name".to_string() => "s3-dd-storage-notify-queue".to_string(),
+        })
     }
 
     fn new_test_connect_state(file_name: String) -> ConnectorState {

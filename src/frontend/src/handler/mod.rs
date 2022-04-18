@@ -21,16 +21,18 @@ use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub mod create_mv;
-mod create_source;
+pub mod create_source;
 pub mod create_table;
 mod describe;
+pub mod dml;
 pub mod drop_mv;
+pub mod drop_source;
 pub mod drop_table;
 mod explain;
 mod flush;
 #[allow(dead_code)]
-mod query;
-mod query_single;
+pub mod query;
+mod set;
 mod show;
 pub mod util;
 
@@ -50,9 +52,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::Describe { name } => describe::handle_describe(context, name).await,
         // TODO: support complex sql for `show columns from <table>`
         Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
-        Statement::ShowCommand(show_object) => {
-            show::handle_show_command(context, show_object).await
-        }
+        Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
         Statement::Drop(DropStatement {
             object_type, name, ..
         }) => {
@@ -60,12 +60,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             match object_type {
                 ObjectType::Table => drop_table::handle_drop_table(context, name).await,
                 ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, name).await,
-                ObjectType::MaterializedSource => {
-                    // FIXME: We currently treat MATERIALIZE SOURCE as an alias TABLE, while
-                    // this assumption is not correct. DROP MATERIALIZE SOURCE should only drops
-                    // materialized sources.
-                    drop_table::handle_drop_table(context, name).await
-                }
+                ObjectType::Source => drop_source::handle_drop_source(context, name).await,
                 _ => Err(ErrorCode::InvalidInputSyntax(format!(
                     "DROP {} is unsupported",
                     object_type
@@ -73,16 +68,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
                 .into()),
             }
         }
-        Statement::Query(_) => {
-            if context.session_ctx.env().query_manager().dist_query() {
-                query::handle_query(context, stmt).await
-            } else {
-                query_single::handle_query_single(context, stmt).await
-            }
-        }
-        Statement::Insert { .. } | Statement::Delete { .. } => {
-            query_single::handle_query_single(context, stmt).await
-        }
+        Statement::Query(_) => query::handle_query(context, stmt).await,
+        Statement::Insert { .. } | Statement::Delete { .. } => dml::handle_dml(context, stmt).await,
         Statement::CreateView {
             materialized: true,
             or_replace: false,
@@ -91,6 +78,11 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ..
         } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
+        Statement::SetVariable {
+            local: _,
+            variable,
+            value,
+        } => set::handle_set(context, variable, value),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }

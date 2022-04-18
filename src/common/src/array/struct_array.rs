@@ -26,7 +26,7 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -128,13 +128,10 @@ pub struct StructArray {
 }
 
 impl Array for StructArray {
-    type RefItem<'a> = StructRef<'a>;
-
-    type OwnedItem = StructValue;
-
     type Builder = StructArrayBuilder;
-
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = StructValue;
+    type RefItem<'a> = StructRef<'a>;
 
     fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
         if !self.is_null(idx) {
@@ -300,11 +297,7 @@ impl<'a> StructRef<'a> {
             StructRef::Indexed { arr, idx } => {
                 arr.children.iter().map(|a| a.value_at(*idx)).collect()
             }
-            StructRef::ValueRef { val } => val
-                .fields
-                .iter()
-                .map(|d| d.as_ref().map(|s| s.as_scalar_ref_impl()))
-                .collect::<Vec<DatumRef<'a>>>(),
+            StructRef::ValueRef { val } => val.fields.iter().map(to_datum_ref).collect(),
         }
     }
 }

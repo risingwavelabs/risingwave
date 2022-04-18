@@ -20,7 +20,8 @@ use bytes::Bytes;
 use crate::hummock::iterator::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{key, HummockResult};
+use crate::hummock::{key, HummockEpoch, HummockResult};
+use crate::storage_value::VALUE_META_SIZE;
 
 pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
@@ -28,14 +29,30 @@ pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 #[derive(Clone, Debug)]
 pub struct SharedBufferBatch {
     pub(super) inner: Arc<[SharedBufferItem]>,
-    pub(super) epoch: u64,
+    pub(super) epoch: HummockEpoch,
+    pub(super) size: u64,
 }
 
 impl SharedBufferBatch {
-    pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: u64) -> Self {
+    pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: HummockEpoch) -> Self {
+        // size = Sum(length of full key + length of user value)
+        let size: u64 = sorted_items
+            .iter()
+            .map(|(k, v)| {
+                let vsize = {
+                    match v {
+                        HummockValue::Put(_, val) => VALUE_META_SIZE + val.len(),
+                        HummockValue::Delete(_) => VALUE_META_SIZE,
+                    }
+                };
+                (k.len() + vsize) as u64
+            })
+            .sum();
+
         Self {
             inner: sorted_items.into(),
             epoch,
+            size,
         }
     }
 
@@ -166,7 +183,10 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
                             self.current_idx += 1;
                         }
                     }
-                    Err(i) => self.current_idx = self.inner.len() - i - 1,
+                    // Seek to one item before the seek partition_point:
+                    // If i == 0, the iterator will be invalidated with self.current_idx ==
+                    // self.inner.len().
+                    Err(i) => self.current_idx = self.inner.len() - i,
                 }
             }
             _ => unreachable!(),
@@ -272,24 +292,44 @@ mod tests {
         let epoch = 1;
         let shared_buffer_items = vec![
             (
-                iterator_test_key_of_epoch(0, epoch),
+                iterator_test_key_of_epoch(1, epoch),
                 HummockValue::put(b"value1".to_vec()),
             ),
             (
-                iterator_test_key_of_epoch(1, epoch),
+                iterator_test_key_of_epoch(2, epoch),
                 HummockValue::put(b"value2".to_vec()),
             ),
             (
-                iterator_test_key_of_epoch(2, epoch),
+                iterator_test_key_of_epoch(3, epoch),
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
         let shared_buffer_batch =
             SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
 
-        // Seek to 2nd key with current epoch, expect last two items to return
+        // FORWARD: Seek to a key < 1st key, expect all three items to return
         let mut iter = shared_buffer_batch.iter();
-        iter.seek(&iterator_test_key_of_epoch(1, epoch))
+        iter.seek(&iterator_test_key_of_epoch(0, epoch))
+            .await
+            .unwrap();
+        for item in &shared_buffer_items {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // FORWARD: Seek to a key > the last key, expect no items to return
+        let mut iter = shared_buffer_batch.iter();
+        iter.seek(&iterator_test_key_of_epoch(4, epoch))
+            .await
+            .unwrap();
+        assert!(!iter.is_valid());
+
+        // FORWARD: Seek to 2nd key with current epoch, expect last two items to return
+        let mut iter = shared_buffer_batch.iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch))
             .await
             .unwrap();
         for item in &shared_buffer_items[1..] {
@@ -300,9 +340,9 @@ mod tests {
         }
         assert!(!iter.is_valid());
 
-        // Seek to 2nd key with future epoch, expect last two items to return
+        // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
         let mut iter = shared_buffer_batch.iter();
-        iter.seek(&iterator_test_key_of_epoch(1, epoch + 1))
+        iter.seek(&iterator_test_key_of_epoch(2, epoch + 1))
             .await
             .unwrap();
         for item in &shared_buffer_items[1..] {
@@ -313,9 +353,9 @@ mod tests {
         }
         assert!(!iter.is_valid());
 
-        // Seek to 2nd key with old epoch, expect last item to return
+        // FORWARD: Seek to 2nd key with old epoch, expect last item to return
         let mut iter = shared_buffer_batch.iter();
-        iter.seek(&iterator_test_key_of_epoch(1, epoch - 1))
+        iter.seek(&iterator_test_key_of_epoch(2, epoch - 1))
             .await
             .unwrap();
         let item = shared_buffer_items.last().unwrap();
@@ -323,6 +363,64 @@ mod tests {
         assert_eq!(iter.key(), item.0.as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to a key < 1st key, expect no items to return
+        let mut iter = shared_buffer_batch.reverse_iter();
+        iter.seek(&iterator_test_key_of_epoch(0, epoch))
+            .await
+            .unwrap();
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to a key > the last key, expect all items to return
+        let mut iter = shared_buffer_batch.reverse_iter();
+        iter.seek(&iterator_test_key_of_epoch(4, epoch))
+            .await
+            .unwrap();
+        for item in shared_buffer_items.iter().rev() {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to 2nd key with current epoch, expect first two items to return
+        let mut iter = shared_buffer_batch.reverse_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch))
+            .await
+            .unwrap();
+        for item in shared_buffer_items[0..=1].iter().rev() {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
+        let mut iter = shared_buffer_batch.reverse_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch + 1))
+            .await
+            .unwrap();
+        assert!(iter.is_valid());
+        let item = shared_buffer_items.first().unwrap();
+        assert_eq!(iter.key(), item.0.as_slice());
+        assert_eq!(iter.value(), item.1.as_slice());
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
+        let mut iter = shared_buffer_batch.reverse_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch - 1))
+            .await
+            .unwrap();
+        for item in shared_buffer_items[0..=1].iter().rev() {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
         assert!(!iter.is_valid());
     }
 }

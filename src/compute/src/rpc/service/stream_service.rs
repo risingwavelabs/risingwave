@@ -20,7 +20,7 @@ use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::Barrier;
+use risingwave_stream::executor::{Barrier, Epoch};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -116,8 +116,12 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
+        let epoch = req.epoch.unwrap();
         self.mgr
-            .stop_all_actors()
+            .stop_all_actors(Epoch {
+                curr: epoch.curr,
+                prev: epoch.prev,
+            })
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(ForceStopActorsResponse {
@@ -215,7 +219,6 @@ impl StreamServiceImpl {
                     .create_source_v2(&id, info.to_owned())
                     .await?;
             }
-
             Info::TableSource(info) => {
                 let columns = info
                     .columns

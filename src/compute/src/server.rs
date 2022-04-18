@@ -81,7 +81,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(client_addr.clone(), WorkerType::ComputeNode)
+        .register(&client_addr, WorkerType::ComputeNode)
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
@@ -99,8 +99,9 @@ pub async fn compute_node_serve(
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
+    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
@@ -117,7 +118,6 @@ pub async fn compute_node_serve(
     if let Some(hummock) = state_store.as_hummock_state_store() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().options().clone(),
-            hummock.inner().local_version_manager().clone(),
             hummock.inner().hummock_meta_client().clone(),
             hummock.inner().sstable_store(),
             state_store_metrics,
@@ -195,7 +195,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(client_addr.clone()).await.unwrap();
+    meta_client.activate(&client_addr).await.unwrap();
 
     (join_handle, shutdown_send)
 }

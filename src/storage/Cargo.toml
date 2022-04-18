@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [dependencies]
@@ -21,11 +21,13 @@ crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
 enum-as-inner = "0.4"
+fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
+libc = "0.2"
 log = "0.4"
 lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
@@ -66,14 +68,19 @@ twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
+procfs = { version = "0.12", default-features = false }
+
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
 
-# [features]
+[features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
+failpoints = ["fail/failpoints"]
 
 [[bench]]
 name = "bench_block_iter"

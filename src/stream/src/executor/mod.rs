@@ -18,8 +18,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
-pub use aggregation::*;
 use async_trait::async_trait;
+pub use barrier_align::*;
 pub use batch_query::*;
 pub use chain::*;
 pub use debug::*;
@@ -31,7 +31,6 @@ pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
-pub use lookup::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
@@ -58,10 +57,10 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
+use crate::executor_v2::{LookupExecutorBuilder, UnionExecutorBuilder};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
-mod aggregation;
 mod barrier_align;
 mod batch_query;
 mod chain;
@@ -72,7 +71,6 @@ mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
-mod lookup;
 pub(crate) mod managed_state;
 mod merge;
 pub mod monitor;
@@ -179,6 +177,16 @@ impl Barrier {
 
     pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
+    }
+
+    pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
+        matches!(
+            self.mutation.as_deref(),
+            Some(Mutation::AddOutput(map)) if map
+                .values()
+                .flatten()
+                .any(|info| info.actor_id == actor_id)
+        )
     }
 }
 
@@ -484,7 +492,11 @@ pub fn create_executor(
     node: &stream_plan::StreamNode,
     store: impl StateStore,
 ) -> Result<Box<dyn Executor>> {
-    let real_executor = build_executor! { executor_params,node,store,stream,
+    let real_executor = build_executor! {
+        executor_params,
+        node,
+        store,
+        stream,
         Node::SourceNode => SourceExecutorBuilder,
         Node::ProjectNode => ProjectExecutorBuilder,
         Node::TopNNode => TopNExecutorBuilder,
@@ -497,27 +509,12 @@ pub fn create_executor(
         Node::BatchPlanNode => BatchQueryExecutorBuilder,
         Node::MergeNode => MergeExecutorBuilder,
         Node::MaterializeNode => MaterializeExecutorBuilder,
-        Node::FilterNode => FilterExecutorBuilder
+        Node::FilterNode => FilterExecutorBuilder,
+        Node::ArrangeNode => ArrangeExecutorBuilder,
+        Node::LookupNode => LookupExecutorBuilder,
+        Node::UnionNode => UnionExecutorBuilder
     }?;
     Ok(real_executor)
-}
-
-/// `SimpleExecutor` accepts a single chunk as input.
-pub trait SimpleExecutor: Executor {
-    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
-    fn input(&mut self) -> &mut dyn Executor;
-}
-
-/// Most executors don't care about the control messages, and therefore
-/// this method provides a default implementation helper for them.
-async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Message> {
-    match executor.input().next().await {
-        Ok(message) => match message {
-            Message::Chunk(chunk) => executor.consume_chunk(chunk),
-            Message::Barrier(_) => Ok(message),
-        },
-        Err(e) => Err(e),
-    }
 }
 
 /// `StreamConsumer` is the last step in an actor

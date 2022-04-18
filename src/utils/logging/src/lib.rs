@@ -41,7 +41,7 @@ fn configure_risingwave_targets_jaeger(targets: filter::Targets) -> filter::Targ
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
-    let targets = targets
+    targets
         // enable trace for most modules
         .with_target("risingwave_stream", Level::DEBUG)
         .with_target("risingwave_batch", Level::DEBUG)
@@ -50,13 +50,13 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
-        .with_target("events", Level::ERROR);
+        .with_target("events", Level::ERROR)
 
-    if let Ok(x) = std::env::var("RW_CI") && x == "true" {
-            targets.with_target("events::meta", Level::TRACE)
-        } else {
-            targets
-        }
+    // if env_var_is_true("RW_CI") {
+    //     targets.with_target("events::meta::server_heartbeat", Level::TRACE)
+    // } else {
+    //     targets
+    // }
 }
 
 /// Init logger for RisingWave binaries.
@@ -147,7 +147,7 @@ pub fn oneshot_common() {
             std::process::abort();
         }));
 
-        // TODO: deadlock detection as a feature insetad of always enabling
+        // TODO: deadlock detection as a feature instead of always enabling
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(3));
             let deadlocks = parking_lot::deadlock::check_deadlock();

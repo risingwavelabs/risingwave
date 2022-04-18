@@ -21,15 +21,16 @@ use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
-use tokio::sync::oneshot;
 
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
+use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{
-    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, SimpleAggExecutor,
+    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor,
+    SimpleAggExecutor,
 };
-use crate::task::{ActorHandle, SharedContext};
+use crate::task::SharedContext;
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,
@@ -66,7 +67,7 @@ impl StreamConsumer for MockConsumer {
 #[tokio::test]
 async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
-    let make_actor = |input_rx, stop_rx| {
+    let make_actor = |input_rx| {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -98,7 +99,7 @@ async fn test_merger_sum_aggr() {
         let consumer =
             SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
-        let actor = Actor::new(Box::new(consumer), 0, context, stop_rx);
+        let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
     };
 
@@ -114,13 +115,9 @@ async fn test_merger_sum_aggr() {
     // create 17 local aggregation actors
     for _ in 0..17 {
         let (tx, rx) = channel(16);
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let (actor, channel) = make_actor(rx, stop_rx);
+        let (actor, channel) = make_actor(rx);
         outputs.push(channel);
-        handles.push(ActorHandle {
-            handle: tokio::spawn(async { actor.run().await.unwrap() }),
-            stop_tx,
-        });
+        handles.push(tokio::spawn(actor.run()));
         inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
@@ -132,17 +129,15 @@ async fn test_merger_sum_aggr() {
     let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
-        DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),
+        vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
+            inputs,
+        ))],
         0,
         ctx,
     );
     let context = SharedContext::for_test().into();
-    let (stop_tx, stop_rx) = oneshot::channel();
-    let actor = Actor::new(Box::new(dispatcher), 0, context, stop_rx);
-    handles.push(ActorHandle {
-        handle: tokio::spawn(async { actor.run().await.unwrap() }),
-        stop_tx,
-    });
+    let actor = Actor::new(Box::new(dispatcher), 0, context);
+    handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
     let merger = Box::new(MergeExecutor::new(schema, vec![], 0, outputs)).v1();
@@ -173,7 +168,7 @@ async fn test_merger_sum_aggr() {
     )
     .v1();
 
-    let projection = ProjectExecutor::new(
+    let projection = Box::new(ProjectExecutor::new_from_v1(
         Box::new(aggregator),
         vec![],
         vec![
@@ -182,16 +177,13 @@ async fn test_merger_sum_aggr() {
         ],
         3,
         "ProjectExecutor".to_string(),
-    );
+    ))
+    .v1();
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
     let context = SharedContext::for_test().into();
-    let (stop_tx, stop_rx) = oneshot::channel();
-    let actor = Actor::new(Box::new(consumer), 0, context, stop_rx);
-    handles.push(ActorHandle {
-        handle: tokio::spawn(async { actor.run().await.unwrap() }),
-        stop_tx,
-    });
+    let actor = Actor::new(Box::new(consumer), 0, context);
+    handles.push(tokio::spawn(actor.run()));
 
     let mut epoch = 1;
     input
@@ -228,7 +220,7 @@ async fn test_merger_sum_aggr() {
 
     // wait for all actors
     for handle in handles {
-        handle.handle.await.unwrap();
+        handle.await.unwrap().unwrap();
     }
 
     let data = items.lock().unwrap();

@@ -22,6 +22,9 @@ use super::*;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
+use crate::storage_value::StorageValue;
+use crate::store::StateStoreIter;
+use crate::StateStore;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -65,7 +68,7 @@ async fn test_snapshot() {
         64 << 20,
         64 << 20,
     ));
-    let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+    let vm = Arc::new(LocalVersionManager::new());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -96,6 +99,8 @@ async fn test_snapshot() {
         .await
         .unwrap();
     hummock_storage.sync(Some(epoch1)).await.unwrap();
+    mock_hummock_meta_client.commit_epoch(epoch1).await.unwrap();
+    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
     let epoch2 = epoch1 + 1;
@@ -111,6 +116,8 @@ async fn test_snapshot() {
         .await
         .unwrap();
     hummock_storage.sync(Some(epoch2)).await.unwrap();
+    mock_hummock_meta_client.commit_epoch(epoch2).await.unwrap();
+    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
@@ -127,6 +134,8 @@ async fn test_snapshot() {
         .await
         .unwrap();
     hummock_storage.sync(Some(epoch3)).await.unwrap();
+    mock_hummock_meta_client.commit_epoch(epoch3).await.unwrap();
+    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -143,7 +152,7 @@ async fn test_snapshot_range_scan() {
         64 << 20,
         64 << 20,
     ));
-    let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+    let vm = Arc::new(LocalVersionManager::new());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -176,7 +185,8 @@ async fn test_snapshot_range_scan() {
         .await
         .unwrap();
     hummock_storage.sync(Some(epoch)).await.unwrap();
-
+    mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
+    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx)).to_vec()
@@ -202,7 +212,7 @@ async fn test_snapshot_reverse_range_scan() {
         64 << 20,
         64 << 20,
     ));
-    let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+    let vm = Arc::new(LocalVersionManager::new());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -237,7 +247,7 @@ async fn test_snapshot_reverse_range_scan() {
         .unwrap();
     hummock_storage.sync(Some(epoch)).await.unwrap();
     mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
-
+    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     hummock_storage
         .ingest_batch(
             vec![
@@ -255,6 +265,8 @@ async fn test_snapshot_reverse_range_scan() {
         .commit_epoch(epoch + 1)
         .await
         .unwrap();
+    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx)).to_vec()
