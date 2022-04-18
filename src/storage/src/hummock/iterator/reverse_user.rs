@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
-use crate::hummock::iterator::{DirectionalHummockIterator, ReverseMergeIterator};
+use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
 use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -274,8 +274,7 @@ mod tests {
         gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::variants::BACKWARD;
-    use crate::hummock::iterator::{BoxedBackwardHummockIterator, BoxedHummockIterator};
+    use crate::hummock::iterator::{BoxedBackwardHummockIterator, BoxedForwardHummockIterator};
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;

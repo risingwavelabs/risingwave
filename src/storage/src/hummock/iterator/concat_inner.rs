@@ -18,13 +18,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use super::variants::*;
-use crate::hummock::iterator::DirectionalHummockIterator;
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
 /// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
-pub struct ConcatIteratorInner<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>> {
+pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// The iterator of the current table.
     sstable_iter: Option<TI::SSTableIterator>,
 
@@ -37,9 +36,7 @@ pub struct ConcatIteratorInner<const DIRECTION: usize, TI: SSTableIteratorType<D
     sstable_store: SstableStoreRef,
 }
 
-impl<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>>
-    ConcatIteratorInner<DIRECTION, TI>
-{
+impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
@@ -72,9 +69,9 @@ impl<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>>
 }
 
 #[async_trait]
-impl<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>>
-    DirectionalHummockIterator<DIRECTION> for ConcatIteratorInner<DIRECTION, TI>
-{
+impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+    type Direction = <TI::SSTableIterator as HummockIterator>::Direction;
+
     async fn next(&mut self) -> HummockResult<()> {
         let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
         sstable_iter.next().await?;
@@ -106,16 +103,15 @@ impl<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>>
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let table_idx = self
             .tables
-            .partition_point(|table| match DIRECTION {
-                FORWARD => {
+            .partition_point(|table| match Self::Direction::direction() {
+                DirectionEnum::Forward => {
                     let ord = VersionedComparator::compare_key(&table.meta.smallest_key, key);
                     ord == Less || ord == Equal
                 }
-                BACKWARD => {
+                DirectionEnum::Backward => {
                     let ord = VersionedComparator::compare_key(&table.meta.largest_key, key);
                     ord == Greater || ord == Equal
                 }
-                _ => unreachable!(),
             })
             .saturating_sub(1); // considering the boundary of 0
 

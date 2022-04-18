@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::iterator::variants::BACKWARD;
 use crate::hummock::ReverseSSTableIterator;
 
 /// Reversely iterates on multiple non-overlapping tables.
 #[allow(dead_code)]
-pub type ReverseConcatIterator = ConcatIteratorInner<BACKWARD, ReverseSSTableIterator>;
+pub type ReverseConcatIterator = ConcatIteratorInner<ReverseSSTableIterator>;
 
 /// Mirrors the tests used for `SSTableIterator`
 #[cfg(test)]
@@ -30,7 +29,7 @@ mod tests {
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::DirectionalHummockIterator;
+    use crate::hummock::iterator::HummockIterator;
 
     #[tokio::test]
     async fn test_reverse_concat_iterator() {

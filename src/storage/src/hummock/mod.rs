@@ -51,7 +51,7 @@ pub mod value;
 pub use error::*;
 use value::*;
 
-use self::iterator::DirectionalHummockIterator;
+use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;

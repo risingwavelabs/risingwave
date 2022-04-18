@@ -20,60 +20,64 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use super::variants::*;
-use crate::hummock::iterator::{BoxedDirectionalHummockIterator, DirectionalHummockIterator};
+use crate::hummock::iterator::{
+    BoxedHummockIterator, DirectionEnum, HummockIterator, HummockIteratorDirection,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StateStoreMetrics;
 
-pub struct Node<'a, const DIRECTION: usize, T: Send + Sync> {
-    iter: BoxedDirectionalHummockIterator<'a, DIRECTION>,
+pub struct Node<'a, D: HummockIteratorDirection, T: Send + Sync> {
+    iter: BoxedHummockIterator<'a, D>,
     extra_info: T,
 }
 
-impl<T: Eq + Send + Sync, const DIRECTION: usize> PartialEq for Node<'_, DIRECTION, T> {
+impl<T: Eq + Send + Sync, D: HummockIteratorDirection> PartialEq for Node<'_, D, T> {
     fn eq(&self, other: &Self) -> bool {
         self.iter.key() == other.iter.key() && self.extra_info.eq(&other.extra_info)
     }
 }
 
-impl<T: Eq + Send + Sync, const DIRECTION: usize> Eq for Node<'_, DIRECTION, T> {}
+impl<T: Eq + Send + Sync, D: HummockIteratorDirection> Eq for Node<'_, D, T> {}
 
-impl<T: Ord + Send + Sync, const DIRECTION: usize> PartialOrd for Node<'_, DIRECTION, T> {
+impl<T: Ord + Send + Sync, D: HummockIteratorDirection> PartialOrd for Node<'_, D, T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<T: Ord + Send + Sync, const DIRECTION: usize> Ord for Node<'_, DIRECTION, T> {
+impl<T: Ord + Send + Sync, D: HummockIteratorDirection> Ord for Node<'_, D, T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
         //
         // The `extra_info` is used as a tie-breaker when the keys are equal.
 
-        match DIRECTION {
-            FORWARD => VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-                .then_with(|| other.extra_info.cmp(&self.extra_info)),
-            BACKWARD => VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-                .then_with(|| self.extra_info.cmp(&other.extra_info)),
-            _ => unreachable!(),
+        match D::direction() {
+            DirectionEnum::Forward => {
+                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
+                    .then_with(|| other.extra_info.cmp(&self.extra_info))
+            }
+            DirectionEnum::Backward => {
+                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
+                    .then_with(|| self.extra_info.cmp(&other.extra_info))
+            }
         }
     }
 }
 
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
-pub struct MergeIteratorInner<'a, const DIRECTION: usize, NE: Send + Sync> {
+pub struct MergeIteratorInner<'a, D: HummockIteratorDirection, NE: Send + Sync> {
     /// Invalid or non-initialized iterators.
-    unused_iters: LinkedList<Node<'a, DIRECTION, NE>>,
+    unused_iters: LinkedList<Node<'a, D, NE>>,
 
     /// The heap for merge sort.
-    heap: BinaryHeap<Node<'a, DIRECTION, NE>>,
+    heap: BinaryHeap<Node<'a, D, NE>>,
 
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
 
-impl<'a, const DIRECTION: usize, NE: Send + Sync + Ord> MergeIteratorInner<'a, DIRECTION, NE> {
+impl<'a, D: HummockIteratorDirection, NE: Send + Sync + Ord> MergeIteratorInner<'a, D, NE> {
     /// Moves all iterators from the `heap` to the linked list.
     fn reset_heap(&mut self) {
         self.unused_iters.extend(self.heap.drain());
@@ -100,12 +104,11 @@ trait MergeIteratorNext<'a> {
 
 /// An order aware merge iterator. `usize` as the `extra_info` is used to define the order of
 /// iterators.
-pub type OrderedMergeIteratorInner<'a, const DIRECTION: usize> =
-    MergeIteratorInner<'a, DIRECTION, usize>;
+pub type OrderedMergeIteratorInner<'a, D> = MergeIteratorInner<'a, D, usize>;
 
-impl<'a, const DIRECTION: usize> OrderedMergeIteratorInner<'a, DIRECTION> {
+impl<'a, D: HummockIteratorDirection> OrderedMergeIteratorInner<'a, D> {
     pub fn new(
-        iterators: impl IntoIterator<Item = BoxedDirectionalHummockIterator<'a, DIRECTION>>,
+        iterators: impl IntoIterator<Item = BoxedHummockIterator<'a, D>>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
         Self {
@@ -124,9 +127,7 @@ impl<'a, const DIRECTION: usize> OrderedMergeIteratorInner<'a, DIRECTION> {
 }
 
 #[async_trait]
-impl<'a, const DIRECTION: usize> MergeIteratorNext<'a>
-    for OrderedMergeIteratorInner<'a, DIRECTION>
-{
+impl<'a, D: HummockIteratorDirection> MergeIteratorNext<'a> for OrderedMergeIteratorInner<'a, D> {
     async fn next(&mut self) -> HummockResult<()> {
         let top_node = self.heap.pop().expect("no inner iter");
         let mut popped_nodes = vec![];
@@ -173,12 +174,11 @@ impl<'a, const DIRECTION: usize> MergeIteratorNext<'a>
     }
 }
 
-pub type UnorderedMergeIteratorInner<'a, const DIRECTION: usize> =
-    MergeIteratorInner<'a, DIRECTION, ()>;
+pub type UnorderedMergeIteratorInner<'a, D> = MergeIteratorInner<'a, D, ()>;
 
-impl<'a, const DIRECTION: usize> UnorderedMergeIteratorInner<'a, DIRECTION> {
+impl<'a, D: HummockIteratorDirection> UnorderedMergeIteratorInner<'a, D> {
     pub fn new(
-        iterators: impl IntoIterator<Item = BoxedDirectionalHummockIterator<'a, DIRECTION>>,
+        iterators: impl IntoIterator<Item = BoxedHummockIterator<'a, D>>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
         Self {
@@ -196,9 +196,7 @@ impl<'a, const DIRECTION: usize> UnorderedMergeIteratorInner<'a, DIRECTION> {
 }
 
 #[async_trait]
-impl<'a, const DIRECTION: usize> MergeIteratorNext<'a>
-    for UnorderedMergeIteratorInner<'a, DIRECTION>
-{
+impl<'a, D: HummockIteratorDirection> MergeIteratorNext<'a> for UnorderedMergeIteratorInner<'a, D> {
     async fn next(&mut self) -> HummockResult<()> {
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
@@ -231,11 +229,13 @@ impl<'a, const DIRECTION: usize> MergeIteratorNext<'a>
 }
 
 #[async_trait]
-impl<'a, const DIRECTION: usize, NE: Send + Sync + Ord> DirectionalHummockIterator<DIRECTION>
-    for MergeIteratorInner<'a, DIRECTION, NE>
+impl<'a, D: HummockIteratorDirection, NE: Send + Sync + Ord> HummockIterator
+    for MergeIteratorInner<'a, D, NE>
 where
     Self: MergeIteratorNext<'a>,
 {
+    type Direction = D;
+
     async fn next(&mut self) -> HummockResult<()> {
         (self as &mut (dyn MergeIteratorNext<'a> + Send + Sync))
             .next()

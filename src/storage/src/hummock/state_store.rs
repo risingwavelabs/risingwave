@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
-    BoxedHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator,
+    BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator,
     ReverseConcatIterator, ReverseMergeIterator, ReverseUserIterator, UserIterator,
 };
 use super::utils::{range_overlap, validate_epoch, validate_table_key_range};
@@ -87,7 +87,7 @@ impl HummockStorage {
                                 table,
                                 self.sstable_store(),
                             ))
-                                as BoxedHummockIterator);
+                                as BoxedForwardHummockIterator);
                         };
                     }
                 }
@@ -104,7 +104,7 @@ impl HummockStorage {
                             tables,
                             self.sstable_store(),
                         ))
-                            as BoxedHummockIterator);
+                            as BoxedForwardHummockIterator);
                     };
                 }
             }
@@ -155,7 +155,7 @@ impl HummockStorage {
                     .shared_buffer_manager
                     .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
                     .into_iter()
-                    .map(|i| Box::new(i) as BoxedHummockIterator);
+                    .map(|i| Box::new(i) as BoxedForwardHummockIterator);
                 MergeIterator::new(
                     overlapped_shared_buffer_iters.chain(overlapped_forward_sstable_iters),
                     self.stats.clone(),

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::SSTableIterator;
 
 /// Iterates on multiple non-overlapping tables.
-pub type ConcatIterator = ConcatIteratorInner<FORWARD, SSTableIterator>;
+pub type ConcatIterator = ConcatIteratorInner<SSTableIterator>;
 
 #[cfg(test)]
 mod tests {
@@ -28,7 +27,7 @@ mod tests {
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::ForwardHummockIterator;
 
     #[tokio::test]
     async fn test_concat_iterator() {

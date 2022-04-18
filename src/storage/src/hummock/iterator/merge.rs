@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::variants::FORWARD;
 use crate::hummock::iterator::merge_inner::{
     OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
 };
+use crate::hummock::iterator::Forward;
 
-pub type MergeIterator<'a> = UnorderedMergeIteratorInner<'a, FORWARD>;
-pub type OrderedAwareMergeIterator<'a> = OrderedMergeIteratorInner<'a, FORWARD>;
+pub type MergeIterator<'a> = UnorderedMergeIteratorInner<'a, Forward>;
+pub type OrderedAwareMergeIterator<'a> = OrderedMergeIteratorInner<'a, Forward>;
 
 #[cfg(test)]
 mod test {
@@ -30,7 +30,7 @@ mod test {
         gen_merge_iterator_interleave_test_sstable_iters, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedHummockIterator, DirectionalHummockIterator};
+    use crate::hummock::iterator::{BoxedForwardHummockIterator, HummockIterator};
     use crate::hummock::sstable::SSTableIterator;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
@@ -48,7 +48,7 @@ mod test {
         );
 
         // Test both ordered and unordered iterators
-        let test_iters: Vec<&mut dyn DirectionalHummockIterator<FORWARD>> =
+        let test_iters: Vec<&mut dyn HummockIterator<Direction = Forward>> =
             vec![&mut unordered_iter, &mut ordered_iter];
         for iter in test_iters {
             let mut i = 0;
@@ -84,7 +84,7 @@ mod test {
         );
 
         // Test both ordered and unordered iterators
-        let test_iters: Vec<&mut dyn DirectionalHummockIterator<FORWARD>> =
+        let test_iters: Vec<&mut dyn HummockIterator<Direction = Forward>> =
             vec![&mut unordered_iter, &mut ordered_iter];
 
         for iter in test_iters {
@@ -156,24 +156,24 @@ mod test {
         let mut unordered_iter = MergeIterator::new(
             vec![
                 Box::new(SSTableIterator::new(table0.clone(), sstable_store.clone()))
-                    as BoxedHummockIterator,
+                    as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(table1.clone(), sstable_store.clone()))
-                    as BoxedHummockIterator,
+                    as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
         );
         let mut ordered_iter = OrderedAwareMergeIterator::new(
             vec![
                 Box::new(SSTableIterator::new(table0.clone(), sstable_store.clone()))
-                    as BoxedHummockIterator,
+                    as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(table1.clone(), sstable_store.clone()))
-                    as BoxedHummockIterator,
+                    as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
         );
 
         // Test both ordered and unordered iterators
-        let test_iters: Vec<&mut dyn DirectionalHummockIterator<FORWARD>> =
+        let test_iters: Vec<&mut dyn HummockIterator<Direction = Forward>> =
             vec![&mut unordered_iter, &mut ordered_iter];
 
         for iter in test_iters {
@@ -249,15 +249,15 @@ mod test {
                 Box::new(SSTableIterator::new(
                     non_overlapped_sstable,
                     sstable_store.clone(),
-                )) as BoxedHummockIterator,
+                )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
                     overlapped_new_sstable,
                     sstable_store.clone(),
-                )) as BoxedHummockIterator,
+                )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
                     overlapped_old_sstable,
                     sstable_store.clone(),
-                )) as BoxedHummockIterator,
+                )) as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
         );

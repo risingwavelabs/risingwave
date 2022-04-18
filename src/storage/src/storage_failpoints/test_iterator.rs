@@ -21,10 +21,10 @@ use crate::hummock::iterator::test_utils::{
     gen_iterator_test_sstable_base_without_buf, iterator_test_key_of, iterator_test_value_of,
     mock_sstable_store, TEST_KEYS_COUNT,
 };
-use crate::hummock::iterator::variants::{BACKWARD, FORWARD};
 use crate::hummock::iterator::{
-    BoxedBackwardHummockIterator, BoxedHummockIterator, ConcatIterator, DirectionalHummockIterator,
-    MergeIterator, ReverseConcatIterator, ReverseMergeIterator, ReverseUserIterator, UserIterator,
+    Backward, BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
+    HummockIterator, MergeIterator, ReverseConcatIterator, ReverseMergeIterator,
+    ReverseUserIterator, UserIterator,
 };
 use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::{ReverseSSTableIterator, SSTableIterator};
@@ -158,7 +158,7 @@ async fn test_failpoint_merge_invalid_key() {
     let mut mi = MergeIterator::new(
         tables
             .iter()
-            .map(|table| -> Box<dyn DirectionalHummockIterator<FORWARD>> {
+            .map(|table| -> Box<dyn HummockIterator<Direction = Forward>> {
                 Box::new(SSTableIterator::new(table.clone(), sstable_store.clone()))
             }),
         Arc::new(StateStoreMetrics::unused()),
@@ -202,7 +202,7 @@ async fn test_failpoint_reverse_merge_invalid_key() {
     let mut mi = ReverseMergeIterator::new(
         tables
             .iter()
-            .map(|table| -> Box<dyn DirectionalHummockIterator<BACKWARD>> {
+            .map(|table| -> Box<dyn HummockIterator<Direction = Backward>> {
                 Box::new(ReverseSSTableIterator::new(
                     table.clone(),
                     sstable_store.clone(),
@@ -245,7 +245,7 @@ async fn test_failpoint_user_read_err() {
         200,
     )
     .await;
-    let iters: Vec<BoxedHummockIterator> = vec![
+    let iters: Vec<BoxedForwardHummockIterator> = vec![
         Box::new(SSTableIterator::new(
             Arc::new(table0),
             sstable_store.clone(),

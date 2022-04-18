@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use sstable_store::{SstableStore, SstableStoreRef};
 
-use crate::hummock::iterator::BoxedHummockIterator;
+use crate::hummock::iterator::BoxedForwardHummockIterator;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{gen_test_sstable, gen_test_sstable_inner};
 use crate::hummock::{
@@ -141,7 +141,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 
 pub fn gen_merge_iterator_interleave_test_sstable_iters(
     count: usize,
-) -> Vec<BoxedHummockIterator<'static>> {
+) -> Vec<BoxedForwardHummockIterator<'static>> {
     let sstable_store = mock_sstable_store();
     (0..count)
         .map(|i: usize| {
@@ -153,7 +153,7 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 TEST_KEYS_COUNT,
             ));
             Box::new(SSTableIterator::new(Arc::new(table), sstable_store.clone()))
-                as BoxedHummockIterator
+                as BoxedForwardHummockIterator
         })
         .collect_vec()
 }

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 
-use crate::hummock::iterator::variants::*;
-use crate::hummock::iterator::DirectionalHummockIterator;
+use crate::hummock::iterator::{
+    Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 use crate::storage_value::VALUE_META_SIZE;
@@ -68,12 +70,12 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn iter(&self) -> SharedBufferBatchIterator<FORWARD> {
-        SharedBufferBatchIterator::<FORWARD>::new(self.inner.clone())
+    pub fn iter(&self) -> SharedBufferBatchIterator<Forward> {
+        SharedBufferBatchIterator::<Forward>::new(self.inner.clone())
     }
 
-    pub fn reverse_iter(&self) -> SharedBufferBatchIterator<BACKWARD> {
-        SharedBufferBatchIterator::<BACKWARD>::new(self.inner.clone())
+    pub fn reverse_iter(&self) -> SharedBufferBatchIterator<Backward> {
+        SharedBufferBatchIterator::<Backward>::new(self.inner.clone())
     }
 
     #[allow(dead_code)]
@@ -99,34 +101,35 @@ impl SharedBufferBatch {
     }
 }
 
-pub struct SharedBufferBatchIterator<const DIRECTION: usize> {
+pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
     inner: Arc<[SharedBufferItem]>,
     current_idx: usize,
+    _phantom: PhantomData<D>,
 }
 
-impl<const DIRECTION: usize> SharedBufferBatchIterator<DIRECTION> {
+impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     pub fn new(inner: Arc<[SharedBufferItem]>) -> Self {
         Self {
             inner,
             current_idx: 0,
+            _phantom: Default::default(),
         }
     }
 
     fn current_item(&self) -> &SharedBufferItem {
         assert!(self.is_valid());
-        let idx = match DIRECTION {
-            FORWARD => self.current_idx,
-            BACKWARD => self.inner.len() - self.current_idx - 1,
-            _ => unreachable!(),
+        let idx = match D::direction() {
+            DirectionEnum::Forward => self.current_idx,
+            DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
         self.inner.get(idx).unwrap()
     }
 }
 
 #[async_trait]
-impl<const DIRECTION: usize> DirectionalHummockIterator<DIRECTION>
-    for SharedBufferBatchIterator<DIRECTION>
-{
+impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<D> {
+    type Direction = D;
+
     async fn next(&mut self) -> HummockResult<()> {
         assert!(self.is_valid());
         self.current_idx += 1;
@@ -157,8 +160,8 @@ impl<const DIRECTION: usize> DirectionalHummockIterator<DIRECTION>
             .inner
             .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
         let seek_key_epoch = key::get_epoch(key);
-        match DIRECTION {
-            FORWARD => {
+        match D::direction() {
+            DirectionEnum::Forward => {
                 match partition_point {
                     Ok(i) => {
                         self.current_idx = i;
@@ -173,7 +176,7 @@ impl<const DIRECTION: usize> DirectionalHummockIterator<DIRECTION>
                     Err(i) => self.current_idx = i,
                 }
             }
-            BACKWARD => {
+            DirectionEnum::Backward => {
                 match partition_point {
                     Ok(i) => {
                         self.current_idx = self.inner.len() - i - 1;
@@ -191,7 +194,6 @@ impl<const DIRECTION: usize> DirectionalHummockIterator<DIRECTION>
                     Err(i) => self.current_idx = self.inner.len() - i,
                 }
             }
-            _ => unreachable!(),
         }
 
         Ok(())
