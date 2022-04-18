@@ -23,7 +23,8 @@ use crate::array::{ArrayImpl, Row, RowRef};
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
+    DatumRef,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
@@ -75,7 +76,19 @@ impl OrderedRowSerializer {
     }
 
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
-        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
+        self.serialize_datums(row.values(), append_to)
+    }
+
+    pub fn serialize_ref(&self, row_ref: RowRef<'_>, append_to: &mut Vec<u8>) {
+        self.serialize_datum_refs(row_ref.values(), append_to)
+    }
+
+    pub fn serialize_datums<'a>(
+        &self,
+        datums: impl Iterator<Item = &'a Datum>,
+        append_to: &mut Vec<u8>,
+    ) {
+        for (datum, order_type) in datums.zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
@@ -83,11 +96,15 @@ impl OrderedRowSerializer {
         }
     }
 
-    pub fn serialize_row_ref(&self, row: &RowRef<'_>, append_to: &mut Vec<u8>) {
-        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
+    pub fn serialize_datum_refs<'a>(
+        &self,
+        datum_refs: impl Iterator<Item = DatumRef<'a>>,
+        append_to: &mut Vec<u8>,
+    ) {
+        for (datum, order_type) in datum_refs.zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
-            serialize_datum_ref_into(datum, &mut serializer).unwrap();
+            serialize_datum_ref_into(&datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
     }

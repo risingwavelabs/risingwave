@@ -417,25 +417,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         ht.get_mut(key).await
     }
 
-    fn hash_key_from_row_ref(row: &RowRef, key_indices: &[usize]) -> HashKeyType {
-        let key = key_indices
-            .iter()
-            .map(|idx| row[*idx].to_owned_datum())
-            .collect_vec();
-        Row(key)
-    }
-
-    fn row_from_row_ref(row: &RowRef) -> Row {
-        let value = (0..row.size())
-            .map(|idx| row[idx].to_owned_datum())
-            .collect_vec();
-        Row(value)
-    }
-
-    fn pk_from_row_ref(row: &RowRef, pk_indices: &[usize]) -> Row {
-        row.row_by_slice(pk_indices)
-    }
-
     fn row_concat(
         row_update: &RowRef<'_>,
         update_start_pos: usize,
@@ -443,8 +424,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         matched_start_pos: usize,
     ) -> Row {
         let mut new_row = vec![None; row_update.size() + row_matched.size()];
-        for i in 0..row_update.size() {
-            new_row[i + update_start_pos] = row_update[i].to_owned_datum();
+        for (i, datum_ref) in row_update.values().enumerate() {
+            new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
         for i in 0..row_matched.size() {
             new_row[i + matched_start_pos] = row_matched[i].clone();
@@ -507,9 +488,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         )?;
 
         for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
-            let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
-            let value = Self::row_from_row_ref(&row);
-            let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+            let key = row.row_by_indices(&side_update.key_indices);
+            let value = row.to_owned_row();
+            let pk = row.row_by_indices(&side_update.pk_indices);
+
             let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht).await;
             if let Some(matched_rows) = matched_rows {
                 match *op {

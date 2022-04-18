@@ -120,7 +120,7 @@ pub(crate) fn generate_output(
         let mut data_chunk_builder = DataChunkBuilder::new_with_default_size(schema.data_types());
         for row in &new_rows {
             data_chunk_builder
-                .append_one_row_ref(row.into())
+                .append_one_row_from_datums(row.0.iter())
                 .map_err(StreamExecutorError::eval_error)?;
         }
         // since `new_rows` is not empty, we unwrap directly
