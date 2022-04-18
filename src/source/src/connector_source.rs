@@ -19,10 +19,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lazy_static::__Deref;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::base::SourceReader;
-use risingwave_connector::state;
+use risingwave_connector::{new_connector, state, ConnectorState, Properties};
 use risingwave_storage::StateStore;
 use tokio::sync::Mutex;
 
@@ -35,8 +35,9 @@ use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub parser: Arc<SourceParserImpl>,
-    pub reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
+    pub reader: Option<Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>>,
     pub column_descs: Vec<SourceColumnDesc>,
+    pub config: Properties,
 }
 
 impl SourceChunkBuilder for ConnectorSource {}
@@ -48,21 +49,11 @@ impl Debug for ConnectorSource {
 }
 
 impl ConnectorSource {
-    pub fn new(
-        parser: Arc<SourceParserImpl>,
-        reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
-        column_descs: Vec<SourceColumnDesc>,
-    ) -> Self {
-        Self {
-            parser,
-            reader,
-            column_descs,
-        }
-    }
-
     pub async fn next(&mut self) -> Result<StreamChunk> {
         let payload = self
             .reader
+            .as_ref()
+            .unwrap()
             .lock()
             .await
             .next()
@@ -93,6 +84,22 @@ impl ConnectorSource {
                 ))
             }
         }
+    }
+
+    pub async fn build_reader(&self, state: Option<ConnectorState>) -> Result<Self> {
+        let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
+            Arc::new(tokio::sync::Mutex::new(
+                new_connector(self.config.clone(), state)
+                    .await
+                    .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+            ));
+
+        Ok(Self {
+            reader: Some(split_reader),
+            parser: self.parser.clone(),
+            column_descs: self.column_descs.clone(),
+            config: self.config.clone(),
+        })
     }
 }
 

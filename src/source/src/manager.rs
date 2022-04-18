@@ -110,24 +110,13 @@ impl SourceManager for MemSourceManager {
         row_id_index: Option<usize>,
     ) -> Result<()> {
         let source = match config {
-            SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
-                config.clone(),
-                Arc::new(columns.clone()),
-                parser.clone(),
-            )),
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(Properties::new(config.clone()), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
-            }
+            SourceConfig::Connector(config) => SourceImpl::Connector(ConnectorSource {
+                parser,
+                reader: None,
+                column_descs: columns.clone(),
+                config: Properties::new(config.clone()),
+            }),
+            _ => panic!("high level kafka is no longer supported."),
         };
 
         let desc = SourceDesc {
@@ -197,25 +186,23 @@ impl SourceManager for MemSourceManager {
             )))),
         }?;
 
-        let source =
-            match config {
-                SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(
-                    HighLevelKafkaSource::new(config, Arc::new(columns.clone()), parser.clone()),
-                ),
-                SourceConfig::Connector(config) => {
-                    let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                        Arc::new(tokio::sync::Mutex::new(
-                            new_connector(Properties::new(config.clone()), None)
-                                .await
-                                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                        ));
-                    SourceImpl::Connector(ConnectorSource {
-                        parser: parser.clone(),
-                        reader: split_reader,
-                        column_descs: columns.clone(),
-                    })
-                }
-            };
+        let source = match config {
+            SourceConfig::Connector(config) => {
+                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
+                    Arc::new(tokio::sync::Mutex::new(
+                        new_connector(Properties::new(config.clone()), None)
+                            .await
+                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+                    ));
+                SourceImpl::Connector(ConnectorSource {
+                    parser: parser.clone(),
+                    reader: None,
+                    column_descs: columns.clone(),
+                    config: Properties::new(config.clone()),
+                })
+            }
+            _ => panic!("high level kafka is no longer supported."),
+        };
 
         let desc = SourceDesc {
             source: Arc::new(source),
