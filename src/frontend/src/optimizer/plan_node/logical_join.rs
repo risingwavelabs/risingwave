@@ -83,6 +83,8 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
+    // Please note that the modification here is just a temporary fix for bug of LogicalJoin.
+    // Related issue is #1849.
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
             JoinType::Inner

@@ -8,6 +8,10 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMapping;
 
+/// This rule is for pattern: Apply->Project->Agg, and it will be converted into Project->Agg->Apply.
+/// Scalar agg will be converted into group agg using all columns of apply's left child, which is different from original formula.
+/// Project will have all columns of Apply's left child at its beginning.
+/// Please note that Project's input is Agg here, so we don't have to worry about edge cases of pulling up Project.
 pub struct ApplyProjAggRule {}
 impl Rule for ApplyProjAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -26,7 +30,7 @@ impl Rule for ApplyProjAggRule {
         // To pull LogicalAgg up on top of LogicalApply, we need to convert scalar agg to group agg
         // using pks of apply.left as its group keys and convert count(*) to count(pk).
         let (mut agg_calls, agg_call_alias, mut group_keys, input) = agg.clone().decompose();
-        // We currently on support scalar agg in correlated subquery.
+        // We currently only support scalar agg in correlated subquery.
         assert!(group_keys.is_empty());
 
         // We use all columns of apply's left child as pks here, which is different from original
@@ -49,7 +53,7 @@ impl Rule for ApplyProjAggRule {
 
         let agg = LogicalAgg::new(agg_calls, agg_call_alias, group_keys, new_apply.into());
 
-        // Old apply's left child's columns should be in the left.
+        // Columns of old apply's left child should be in the left.
         let mut exprs: Vec<ExprImpl> = apply
             .left()
             .schema()

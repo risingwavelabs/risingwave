@@ -4,6 +4,9 @@ use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
+/// This rule is for pattern: Apply->Project->Filter.
+/// To unnest, we just pull predicates contain correlated variables in Filter into Apply, and
+/// convert it into corresponding type of Join.
 pub struct ApplyProjFilterRule {}
 impl Rule for ApplyProjFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -16,7 +19,6 @@ impl Rule for ApplyProjFilterRule {
 
         let input = project.input();
         let filter = input.as_logical_filter()?;
-        // let input = filter.input();
 
         // Remove expressions contain correlated_input_ref from LogicalFilter.
         let mut cor_exprs = vec![];
@@ -45,6 +47,7 @@ impl Rule for ApplyProjFilterRule {
             }
         });
 
+        // TODO: remove LogicalFilter with always true condition.
         let filter = LogicalFilter::new(
             filter.input(),
             Condition {
@@ -66,8 +69,9 @@ impl Rule for ApplyProjFilterRule {
     }
 }
 
+// TODO: use a better name for this struct.
 struct CheckCorrelated {
-    // This flag is used to indicate whether this expression has correlated_input_ref.
+    // This flag is used to indicate whether the expression has correlated_input_ref.
     flag: bool,
 
     // All uncorrelated input_refs in the expression.
@@ -94,7 +98,7 @@ impl ExprRewriter for CheckCorrelated {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let data_type = input_ref.return_type();
 
-        // It will be append to exprs in LogicalProject, so its index remain the same.
+        // It will be appended to exprs in LogicalProject, so its index remain the same.
         self.input_refs.push(input_ref);
 
         // Rewrite input_ref's index to its new location.
