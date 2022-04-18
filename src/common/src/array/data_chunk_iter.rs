@@ -78,8 +78,9 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
 }
 
 pub struct RowRef<'a> {
-    pub(super) chunk: &'a DataChunk,
-    pub(super) idx: usize,
+    chunk: &'a DataChunk,
+
+    idx: usize,
 }
 
 impl<'a> std::fmt::Debug for RowRef<'a> {
@@ -89,6 +90,11 @@ impl<'a> std::fmt::Debug for RowRef<'a> {
 }
 
 impl<'a> RowRef<'a> {
+    pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
+        debug_assert!(idx < chunk.capacity());
+        Self { chunk, idx }
+    }
+
     pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
         // TODO: It's safe to use value_at_unchecked here.

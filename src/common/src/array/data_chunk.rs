@@ -383,10 +383,7 @@ impl DataChunk {
     /// # Arguments
     /// * `pos` - Index of look up tuple
     pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
-        RowRef {
-            chunk: self,
-            idx: pos,
-        }
+        RowRef::new(self, pos)
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
