@@ -38,24 +38,23 @@ impl Rule for ApplyProjFilterRule {
         let mut cor_exprs = vec![];
         let mut uncor_exprs = vec![];
         filter.predicate().clone().into_iter().for_each(|expr| {
-            let mut check_correlated = CheckCorrelated {
+            let mut split_expressions = SplitExpressions {
                 flag: false,
                 input_refs: vec![],
                 index: exprs.len() + apply.left().schema().fields().len(),
             };
-            let rewritten_expr = check_correlated.rewrite_expr(expr.clone());
+            let rewritten_expr = split_expressions.rewrite_expr(expr.clone());
 
-            if check_correlated.flag {
+            if split_expressions.flag {
                 cor_exprs.push(rewritten_expr);
-                // Append input_refs in expression which contains correlated_input_ref to exprs used
-                // to construct new LogicalProject
+                // Append input_refs in expression which contains correlated_input_ref to `exprs`
+                // used to construct new LogicalProject.
                 exprs.extend(
-                    check_correlated
+                    split_expressions
                         .input_refs
                         .drain(..)
                         .map(|input_ref| input_ref.into()),
                 );
-                check_correlated.flag = false;
             } else {
                 uncor_exprs.push(expr);
             }
@@ -83,8 +82,7 @@ impl Rule for ApplyProjFilterRule {
     }
 }
 
-// TODO: use a better name for this struct.
-struct CheckCorrelated {
+struct SplitExpressions {
     // This flag is used to indicate whether the expression has correlated_input_ref.
     flag: bool,
 
@@ -94,7 +92,7 @@ struct CheckCorrelated {
     pub index: usize,
 }
 
-impl ExprRewriter for CheckCorrelated {
+impl ExprRewriter for SplitExpressions {
     fn rewrite_correlated_input_ref(
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
@@ -102,6 +100,7 @@ impl ExprRewriter for CheckCorrelated {
         self.flag = true;
 
         // Convert correlated_input_ref to input_ref.
+        // Need to change.
         InputRef::new(
             correlated_input_ref.index(),
             correlated_input_ref.return_type(),

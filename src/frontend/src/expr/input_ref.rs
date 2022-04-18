@@ -23,7 +23,7 @@ use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct InputRef {
-    pub index: usize,
+    index: usize,
     data_type: DataType,
 }
 
@@ -101,6 +101,11 @@ impl InputRef {
     /// Get a reference to the input ref's index.
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    // Shift the input ref's index with offset.
+    pub fn shift_with_offset(&mut self, offset: isize) {
+        self.index = (self.index as isize + offset) as usize;
     }
 
     /// Convert [`InputRef`] to an arg of agg call.

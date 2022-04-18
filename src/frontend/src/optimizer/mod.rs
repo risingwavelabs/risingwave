@@ -117,7 +117,11 @@ impl PlanRoot {
 
         // Subquery Unnesting.
         plan = {
-            let rules = vec![ApplyProjAggRule::create(), ApplyProjFilterRule::create()];
+            let rules = vec![
+                // This rule should be applied first to pull up LogicalAgg.
+                ApplyProjAggRule::create(),
+                ApplyProjFilterRule::create(),
+            ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -138,7 +142,8 @@ impl PlanRoot {
 
         plan = {
             let rules = vec![
-                ProjectMergeRule::create(), // merge should be applied before eliminate
+                // merge should be applied before eliminate
+                ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);

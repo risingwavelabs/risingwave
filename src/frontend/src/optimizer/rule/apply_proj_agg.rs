@@ -22,10 +22,13 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMapping;
 
-/// This rule is for pattern: Apply->Project->Agg, and it will be converted into Project->Agg->Apply.
-/// Scalar agg will be converted into group agg using all columns of apply's left child, which is different from original formula.
+/// This rule is for pattern: Apply->Project->Agg, and it will be converted into
+/// Project->Agg->Apply.
+/// Scalar agg will be converted into group agg using all columns of apply's
+/// left child, which is different from original formula.
 /// Project will have all columns of Apply's left child at its beginning.
-/// Please note that Project's input is Agg here, so we don't have to worry about edge cases of pulling up Project.
+/// Please note that Project's input is Agg here, so we don't have to
+/// worry about edge cases of pulling up Project.
 pub struct ApplyProjAggRule {}
 impl Rule for ApplyProjAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -57,14 +60,12 @@ impl Rule for ApplyProjAggRule {
             let input_ref = InputRef::new(input.pk_indices()[0], count.return_type.clone());
             count.inputs.push(input_ref);
         }
-        // Rewrite!
         // Shift index of agg_calls' input_ref with offset.
         agg_calls.iter_mut().for_each(|agg_call| {
             agg_call.inputs.iter_mut().for_each(|input_ref| {
-                input_ref.index += apply_left_len;
+                input_ref.shift_with_offset(apply_left_len as isize);
             });
         });
-
         let agg = LogicalAgg::new(agg_calls, agg_call_alias, group_keys, new_apply.into());
 
         // Columns of old apply's left child should be in the left.
