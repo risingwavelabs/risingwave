@@ -156,7 +156,7 @@ impl ObserverManager {
             }
             Some(Info::HummockSnapshot(hummock_snapshot)) => {
                 self.hummock_snapshot_manager
-                    .update_snapshot(hummock_snapshot.epoch)
+                    .update_snapshot_status(hummock_snapshot.epoch)
                     .await;
             }
             None => panic!("receive an unsupported notify {:?}", resp),

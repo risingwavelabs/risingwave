@@ -24,7 +24,7 @@ use tonic::Streaming;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion>;
     async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()>;
-    async fn pin_snapshot(&self, epoch: HummockEpoch) -> Result<HummockEpoch>;
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch>;
     async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()>;
     async fn get_new_table_id(&self) -> Result<HummockSSTableId>;
     async fn add_tables(

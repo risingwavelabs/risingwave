@@ -311,10 +311,10 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self, epoch: HummockEpoch) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
-            epoch,
+            last_pinned,
         };
         let resp = self.inner.pin_snapshot(req).await?;
         Ok(resp.snapshot.unwrap().epoch)

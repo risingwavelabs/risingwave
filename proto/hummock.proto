@@ -95,7 +95,7 @@ message UnpinVersionResponse {
 
 message PinSnapshotRequest {
   uint32 context_id = 1;
-  uint64 epoch = 2;
+  uint64 last_pinned = 2;
 }
 
 message PinSnapshotResponse {

@@ -21,7 +21,7 @@ use std::time::Duration;
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
     INVALID_EPOCH,
@@ -578,13 +578,14 @@ where
         Ok(ret_hummock_version)
     }
 
-    /// Pin and return `max_commited_epoch` when `epoch` is less than or equal to
-    /// `max_commited_epoch` and was never pinned. Return `epoch` when epoch was pinned. Return
-    /// error when `epoch` is bigger than `max_commited_epoch`.
+    /// Make sure `max_commited_epoch` is pinned and return it.
+    /// Assume that frontend will only pass the latest epoch value recorded by frontend to
+    /// `last_pinned`. Meta will unpin snapshots which are pinned and in (`last_pinned`,
+    /// `max_commited_epoch`).
     pub async fn pin_snapshot(
         &self,
         context_id: HummockContextId,
-        mut epoch: HummockEpoch,
+        last_pinned: HummockEpoch,
     ) -> Result<HummockSnapshot> {
         let mut versioning_guard = self.versioning.write().await;
 
@@ -599,7 +600,6 @@ where
             .max_committed_epoch;
 
         let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
-
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
@@ -608,28 +608,41 @@ where
             },
         );
 
-        if epoch <= max_committed_epoch {
-            if context_pinned_snapshot.snapshot_id.contains(&epoch) {
-                abort_multi_var!(context_pinned_snapshot);
-            } else {
-                epoch = max_committed_epoch;
-                context_pinned_snapshot.pin_snapshot(epoch);
-                commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
-            }
-
-            #[cfg(test)]
-            {
-                drop(versioning_guard);
-                self.check_state_consistency().await;
-            }
-
-            Ok(HummockSnapshot { epoch })
-        } else {
-            Err(RwError::from(ErrorCode::InternalError(format!(
-                "epoch {} is bigger than max_commited_epoch",
-                epoch
-            ))))
+        // Unpin the snapshots pinned by meta but frontend doesn't know.
+        let to_unpin = context_pinned_snapshot
+            .snapshot_id
+            .iter()
+            .filter(|e| **e > last_pinned && **e < max_committed_epoch)
+            .cloned()
+            .collect_vec();
+        let mut snapshots_change = !to_unpin.is_empty();
+        for epoch in to_unpin {
+            context_pinned_snapshot.unpin_snapshot(epoch);
         }
+
+        if !context_pinned_snapshot
+            .snapshot_id
+            .contains(&max_committed_epoch)
+        {
+            snapshots_change = true;
+            context_pinned_snapshot.pin_snapshot(max_committed_epoch);
+        }
+
+        if snapshots_change {
+            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+        } else {
+            abort_multi_var!(context_pinned_snapshot);
+        }
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        Ok(HummockSnapshot {
+            epoch: max_committed_epoch,
+        })
     }
 
     pub async fn unpin_snapshot(

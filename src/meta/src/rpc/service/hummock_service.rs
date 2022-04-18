@@ -132,7 +132,7 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .pin_snapshot(req.context_id, req.epoch)
+            .pin_snapshot(req.context_id, req.last_pinned)
             .await;
         match result {
             Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
