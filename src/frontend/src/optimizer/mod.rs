@@ -119,8 +119,8 @@ impl PlanRoot {
         plan = {
             let rules = vec![
                 // This rule should be applied first to pull up LogicalAgg.
-                ApplyProjAggRule::create(),
-                ApplyProjFilterRule::create(),
+                UnnestAggForLOJ::create(),
+                PullUpCorrelatedPredicate::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
