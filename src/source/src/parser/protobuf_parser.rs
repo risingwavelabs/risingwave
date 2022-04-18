@@ -483,21 +483,21 @@ mod tests {
         let city = vec![
             ColumnDesc::new_atomic(
                 DataType::Varchar.to_protobuf(),
-                "country.city.address",
+                "address",
                 3,
                 true,
             ),
             ColumnDesc::new_atomic(
                 DataType::Varchar.to_protobuf(),
-                "country.city.zipcode",
+                "zipcode",
                 4,
                 true,
             ),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2, true),
-            ColumnDesc::new_struct("country.city", 5, ".test.City", city, true),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6, true),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2, true),
+            ColumnDesc::new_struct("city", 5, ".test.City", city, true),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 6, true),
         ];
         assert_eq!(
             columns,
