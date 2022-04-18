@@ -69,11 +69,6 @@ impl MemTable {
     pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter> {
         todo!();
     }
-
-    pub async fn drain(&mut self) -> StorageResult<MemTableIter> {
-        /// clear the memtable and flush them into cell_based table
-        todo!()
-    }
 }
 
 pub struct MemTableIter {
