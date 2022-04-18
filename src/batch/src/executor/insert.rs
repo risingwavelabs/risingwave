@@ -225,6 +225,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| {
+                // use column index as column id
                 ColumnDesc::with_name(f.data_type.clone(), f.name.clone(), ColumnId::new(i as i32))
             })
             .collect();

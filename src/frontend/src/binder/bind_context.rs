@@ -21,9 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
-    // pub column_name: String,
     pub index: usize,
-    // pub data_type: DataType,
     pub is_hidden: bool,
     pub desc: ColumnDesc,
 }
