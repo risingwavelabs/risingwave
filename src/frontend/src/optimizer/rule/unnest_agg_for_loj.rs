@@ -23,16 +23,18 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMapping;
 
-/// This rule is for pattern: Apply->Project->Agg, and it will be converted into
-/// Project->Agg->Apply.
+/// This rule is for pattern: Apply->Project(p1)->Agg->Project(p2), and it will be converted into
+/// Project(p1')->Agg->Apply->Project(p2').
 ///
 /// Scalar agg will be converted into group agg using pks of Apply's left child, while we use
 /// all columns of Apply's left child here in order to align with Project. Besides, count(*) will be
 /// converted to count(pk).
 ///
-/// Project will have all columns of Apply's left child at its beginning.
+/// Project p1' will have all columns of Apply's left child at its beginning.
 ///
-/// Please note that Project's input is Agg here, so we don't have to
+/// Project p2' will have one constant column at the end of its `exprs`.
+///
+/// Please note that the input of Project p1 is Agg here, so we don't have to
 /// worry about edge cases of pulling up Project.
 pub struct UnnestAggForLOJ {}
 impl Rule for UnnestAggForLOJ {
@@ -46,15 +48,25 @@ impl Rule for UnnestAggForLOJ {
         let input = project.input();
         let agg = input.as_logical_agg()?;
 
+        let input = agg.input();
+        let input_project = input.as_logical_project()?;
+        let (mut exprs, mut expr_aliases, input) = input_project.clone().decompose();
+
         if !matches!(apply.join_type(), JoinType::LeftOuter) {
             return None;
         }
 
-        let new_apply = apply.clone_with_left_right(apply.left(), agg.input());
+        // Add a constant column at the end of `input_project`.
+        exprs.push(ExprImpl::literal_int(1));
+        expr_aliases.push(Some("1".into()));
+        let idx_of_constant = exprs.len() - 1;
+        let new_project = LogicalProject::new(input, exprs, expr_aliases);
+
+        let new_apply = apply.clone_with_left_right(apply.left(), new_project.into());
 
         // To pull LogicalAgg up on top of LogicalApply, we need to convert scalar agg to group agg
         // using pks of Apply.left as its group keys and convert count(*) to count(pk).
-        let (mut agg_calls, agg_call_alias, mut group_keys, input) = agg.clone().decompose();
+        let (mut agg_calls, agg_call_alias, mut group_keys, _) = agg.clone().decompose();
         // TODO: currently only scalar agg is supported in correlated subquery.
         if !group_keys.is_empty() {
             return None;
@@ -66,7 +78,7 @@ impl Rule for UnnestAggForLOJ {
         if let Some(count) = agg_calls.iter_mut().find(|agg_call| {
             matches!(agg_call.agg_kind, AggKind::Count) && agg_call.inputs.is_empty()
         }) {
-            let input_ref = InputRef::new(input.pk_indices()[0], count.return_type.clone());
+            let input_ref = InputRef::new(idx_of_constant, count.return_type.clone());
             count.inputs.push(input_ref);
         }
         // Shift index of agg_calls' input_ref with `apply_left_len`.

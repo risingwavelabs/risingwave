@@ -31,7 +31,7 @@ impl Rule for PullUpCorrelatedPredicate {
 
         let right = apply.right();
         let project = right.as_logical_project()?;
-        let (mut exprs, mut expr_alias) = project.clone().decompose();
+        let (mut exprs, mut expr_alias, _) = project.clone().decompose();
         let begin = exprs.len();
 
         let input = project.input();

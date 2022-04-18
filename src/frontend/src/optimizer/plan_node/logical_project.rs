@@ -199,8 +199,8 @@ impl LogicalProject {
                 })
     }
 
-    pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
-        (self.exprs, self.expr_alias)
+    pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>, PlanRef) {
+        (self.exprs, self.expr_alias, self.input)
     }
 }
 
