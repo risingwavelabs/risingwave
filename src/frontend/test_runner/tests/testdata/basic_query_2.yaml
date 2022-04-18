@@ -148,6 +148,7 @@
             StreamExchange { dist: HashShard([2]) }
               StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
 - sql: |
+    /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
     select min(v1), sum(v1 + v2) from t group by v1 + v2;
   logical_plan: |
@@ -156,6 +157,7 @@
         LogicalProject { exprs: [($1 + $2), $1], expr_alias: [ ,  ] }
           LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
 - sql: |
+    /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v1 * v2) as sum from t group by (v1 + v2) / v3, v1;
   logical_plan: |
@@ -163,6 +165,21 @@
       LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2)] }
         LogicalProject { exprs: [(($1 + $2) / $3), $1, ($1 * $2)], expr_alias: [ ,  ,  ] }
           LogicalScan { table: t, columns: [_row_id#0, v1, v2, v3] }
+- sql: |
+    /* test logical_agg with complex group expression */
+    create table t(v1 int, v2 int);
+    select v1 + v2 from t group by v1 + v2
+  logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [ ] }
+      LogicalAgg { group_keys: [0], agg_calls: [] }
+        LogicalProject { exprs: [($1 + $2)], expr_alias: [ ] }
+          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+- sql: |
+    /* test logical_agg with complex group expression */
+    /* should complain about nested agg call */
+    create table t(v1 int, v2 int);
+    select avg(sum(v1 + v2)) from t group by v1 + v2
+  planner_error: 'Invalid input syntax: Aggregation calls should not be nested'
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;

@@ -152,6 +152,15 @@ impl ExprRewriter for ExprHandler {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs) = agg_call.decompose();
 
+        for i in &inputs {
+            if i.has_agg_call() {
+                self.error = Some(ErrorCode::InvalidInputSyntax(
+                    "Aggregation calls should not be nested".into(),
+                ));
+                return AggCall::new(agg_kind, inputs).unwrap().into();
+            }
+        }
+
         let mut index = self.project.len();
         let mut input_refs = vec![];
         self.project.extend(inputs.into_iter().filter(|expr| {
@@ -211,6 +220,21 @@ impl ExprRewriter for ExprHandler {
                 self.group_key_len + self.agg_calls.len() - 1,
                 return_type,
             ))
+        }
+    }
+
+    /// When there is an `FunctionCall` (outside of agg call), it must refers to a group column.
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        let expr = func_call.into();
+        if let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
+            InputRef::new(*index, expr.return_type()).into()
+        } else {
+            let (func_type, inputs, ret) = expr.into_function_call().unwrap().decompose();
+            let inputs = inputs
+                .into_iter()
+                .map(|expr| self.rewrite_expr(expr))
+                .collect();
+            FunctionCall::new_with_return_type(func_type, inputs, ret).into()
         }
     }
 
