@@ -26,6 +26,7 @@ pub mod create_table;
 mod describe;
 pub mod dml;
 pub mod drop_mv;
+pub mod drop_source;
 pub mod drop_table;
 mod explain;
 mod flush;
@@ -59,12 +60,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             match object_type {
                 ObjectType::Table => drop_table::handle_drop_table(context, name).await,
                 ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, name).await,
-                ObjectType::MaterializedSource => {
-                    // FIXME: We currently treat MATERIALIZE SOURCE as an alias TABLE, while
-                    // this assumption is not correct. DROP MATERIALIZE SOURCE should only drops
-                    // materialized sources.
-                    drop_table::handle_drop_table(context, name).await
-                }
+                ObjectType::Source => drop_source::handle_drop_source(context, name).await,
                 _ => Err(ErrorCode::InvalidInputSyntax(format!(
                     "DROP {} is unsupported",
                     object_type

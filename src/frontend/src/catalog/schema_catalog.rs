@@ -68,7 +68,12 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_some())
+            .filter(|(_, v)| {
+                // Internally, a table with an associated source can be
+                // MATERIALIZED SOURCE or TABLE.
+                v.associated_source_id.is_some()
+                    && self.get_source_by_name(v.name()).unwrap().source_type == SourceType::Table
+            })
             .map(|(_, v)| v)
     }
 
