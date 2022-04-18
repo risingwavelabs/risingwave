@@ -224,6 +224,7 @@ impl ExprRewriter for ExprHandler {
     }
 
     /// When there is an `FunctionCall` (outside of agg call), it must refers to a group column.
+    /// Or all `InputRef`s appears in it must refer to a group column.
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
         let expr = func_call.into();
         if let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
