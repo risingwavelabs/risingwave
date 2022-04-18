@@ -242,6 +242,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         E::LessThanOrEqual,
         E::GreaterThan,
         E::GreaterThanOrEqual,
+        E::In,
     ];
     for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
         map.insert(

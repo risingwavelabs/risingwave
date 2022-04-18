@@ -88,6 +88,11 @@ impl Binder {
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => self.bind_in_list(*expr, list, negated),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -116,6 +121,26 @@ impl Binder {
             },
         )?
         .into())
+    }
+
+    pub(super) fn bind_in_list(
+        &mut self,
+        expr: Expr,
+        list: Vec<Expr>,
+        _negated: bool,
+    ) -> Result<ExprImpl> {
+        // FIXME: Handle `not in`.
+        let mut bound_expr_list = vec![self.bind_expr(expr)?];
+        for elem in list {
+            bound_expr_list.push(self.bind_expr(elem)?);
+        }
+        // Only look the first two. [0] is the value, [1] is the first of target list and all
+        // subsequent elements in target list should have same type.
+        Ok(
+            FunctionCall::new_with_first_n(ExprType::In, bound_expr_list, 2)
+                .unwrap()
+                .into(),
+        )
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
