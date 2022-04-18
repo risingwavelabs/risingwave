@@ -232,15 +232,8 @@ impl Condition {
         let mut res: Vec<ExprImpl> = Vec::new();
         let mut visited: HashSet<ExprImpl> = HashSet::new();
         for expr in conjunctions {
-            if let Some(v) = try_get_bool_constant(&expr) {
-                if !v {
-                    // if there is a `false` in conjunctions, the whole condition will be `false`
-                    res.clear();
-                    res.push(ExprImpl::literal_bool(false));
-                    break;
-                }
-            } else if !expr.has_subquery() {
-                // factorization_expr requires hash-able ExprImpl
+            // factorization_expr requires hash-able ExprImpl
+            if !expr.has_subquery() {
                 let results_of_factorization = factorization_expr(expr);
                 res.extend(
                     results_of_factorization
@@ -250,7 +243,26 @@ impl Condition {
                 );
                 visited.extend(results_of_factorization);
             } else {
+                // for subquery, simply give up factorization
                 res.push(expr);
+            }
+        }
+        // remove all constant boolean `true`
+        res.retain(|expr| {
+            if let Some(v) = try_get_bool_constant(expr) && v {
+                false
+            } else {
+                true
+            }
+        });
+        // if there is a `false` in conjunctions, the whole condition will be `false`
+        for expr in &mut res {
+            if let Some(v) = try_get_bool_constant(expr) {
+                if !v {
+                    res.clear();
+                    res.push(ExprImpl::literal_bool(false));
+                    break;
+                }
             }
         }
         Self { conjunctions: res }

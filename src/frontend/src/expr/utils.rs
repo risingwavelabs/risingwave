@@ -282,6 +282,7 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
     greatest_common_divider
         .into_iter()
         .chain(std::iter::once(remaining))
+        .map(fold_boolean_constant)
         .collect()
 }
 
