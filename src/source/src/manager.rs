@@ -295,7 +295,6 @@ impl Default for MemSourceManager {
 
 #[cfg(test)]
 mod tests {
-    
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
