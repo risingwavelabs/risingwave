@@ -118,9 +118,6 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 
     /// Finish build and return a new array.
     fn finish(self) -> Result<Self::ArrayType>;
-
-    /// Take all elements and return a new array.
-    fn take(&mut self) -> Result<Self::ArrayType>;
 }
 
 /// A trait over all array.
@@ -440,12 +437,6 @@ macro_rules! impl_array_builder {
             pub fn finish(self) -> Result<ArrayImpl> {
                 match self {
                     $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
-                }
-            }
-
-            pub fn take(&mut self) -> Result<ArrayImpl> {
-                match self {
-                    $( Self::$variant_name(inner) => Ok(inner.take()?.into()), )*
                 }
             }
 

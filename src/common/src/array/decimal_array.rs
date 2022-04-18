@@ -168,16 +168,6 @@ impl ArrayBuilder for DecimalArrayBuilder {
             data: self.data,
         })
     }
-
-    fn take(&mut self) -> Result<DecimalArray> {
-        let DecimalArrayBuilder {
-            mut bitmap, data, ..
-        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
-        Ok(DecimalArray {
-            bitmap: bitmap.finish(),
-            data,
-        })
-    }
 }
 
 #[cfg(test)]

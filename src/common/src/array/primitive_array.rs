@@ -214,16 +214,6 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
             data: self.data,
         })
     }
-
-    fn take(&mut self) -> Result<PrimitiveArray<T>> {
-        let PrimitiveArrayBuilder {
-            mut bitmap, data, ..
-        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
-        Ok(PrimitiveArray {
-            bitmap: bitmap.finish(),
-            data,
-        })
-    }
 }
 
 #[cfg(test)]

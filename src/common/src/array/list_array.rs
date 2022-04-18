@@ -114,33 +114,6 @@ impl ArrayBuilder for ListArrayBuilder {
             len: self.len,
         })
     }
-
-    fn take(&mut self) -> Result<ListArray> {
-        let ListArrayBuilder {
-            mut bitmap,
-            offsets,
-            value,
-            value_type,
-            len,
-            ..
-        } = std::mem::replace(
-            self,
-            Self::new_with_meta(
-                self.capacity,
-                ArrayMeta::List {
-                    datatype: Box::new(self.value_type.clone()),
-                },
-            )?,
-        );
-        let value = Box::new(value.finish()?);
-        Ok(ListArray {
-            bitmap: bitmap.finish(),
-            offsets,
-            value,
-            value_type,
-            len,
-        })
-    }
 }
 
 /// This is a naive implementation of list array.

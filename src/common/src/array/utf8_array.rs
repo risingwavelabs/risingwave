@@ -191,20 +191,6 @@ impl ArrayBuilder for Utf8ArrayBuilder {
             offset: self.offset,
         })
     }
-
-    fn take(&mut self) -> Result<Utf8Array> {
-        let Utf8ArrayBuilder {
-            offset,
-            mut bitmap,
-            data,
-            ..
-        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
-        Ok(Utf8Array {
-            bitmap: bitmap.finish(),
-            data,
-            offset,
-        })
-    }
 }
 
 impl Utf8ArrayBuilder {

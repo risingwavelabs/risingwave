@@ -157,18 +157,6 @@ impl ArrayBuilder for BoolArrayBuilder {
             data: self.data.finish(),
         })
     }
-
-    fn take(&mut self) -> Result<BoolArray> {
-        let BoolArrayBuilder {
-            mut bitmap,
-            mut data,
-            ..
-        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
-        Ok(BoolArray {
-            bitmap: bitmap.finish(),
-            data: data.finish(),
-        })
-    }
 }
 
 #[cfg(test)]

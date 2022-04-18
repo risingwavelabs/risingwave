@@ -151,18 +151,6 @@ impl ArrayBuilder for IntervalArrayBuilder {
             interval_buffer: self.interval_buffer,
         })
     }
-
-    fn take(&mut self) -> Result<Self::ArrayType> {
-        let IntervalArrayBuilder {
-            mut bitmap,
-            interval_buffer,
-            ..
-        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
-        Ok(IntervalArray {
-            bitmap: bitmap.finish(),
-            interval_buffer,
-        })
-    }
 }
 
 #[cfg(test)]

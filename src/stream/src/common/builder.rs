@@ -14,8 +14,9 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, RowRef, StreamChunk};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
@@ -26,6 +27,9 @@ pub struct StreamChunkBuilder {
 
     /// arrays in the data chunk to build
     column_builders: Vec<ArrayBuilderImpl>,
+
+    /// Data types of columns
+    data_types: Vec<DataType>,
 
     /// The start position of the columns of the side
     /// stream coming from. If the coming side is the
@@ -64,6 +68,7 @@ impl StreamChunkBuilder {
         Ok(Self {
             ops,
             column_builders,
+            data_types: data_types.to_owned(),
             update_start_pos,
             matched_start_pos,
             capacity,
@@ -153,12 +158,14 @@ impl StreamChunkBuilder {
 
     pub fn take(&mut self) -> Result<Option<StreamChunk>> {
         self.size = 0;
-        let new_arrays = self
+        let new_arrays: Vec<ArrayImpl> = self
             .column_builders
             .iter_mut()
-            .map(|builder| builder.take())
-            .try_collect::<Vec<_>>()?;
-
+            .zip_eq(&self.data_types)
+            .map(|(builder, datatype)| {
+                std::mem::replace(builder, datatype.create_array_builder(self.capacity)?).finish()
+            })
+            .try_collect()?;
         let new_columns = new_arrays
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))

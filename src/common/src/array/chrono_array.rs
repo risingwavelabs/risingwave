@@ -156,16 +156,6 @@ macro_rules! get_chrono_array {
                         data: self.data,
                     })
                 }
-
-                fn take(&mut self) -> Result<Self::ArrayType> {
-                    let $builder {
-                        mut bitmap, data, ..
-                    } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
-                    Ok(Self::ArrayType {
-                        bitmap: bitmap.finish(),
-                        data,
-                    })
-                }
             }
         )*
     };

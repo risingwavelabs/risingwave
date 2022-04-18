@@ -119,35 +119,6 @@ impl ArrayBuilder for StructArrayBuilder {
             len: self.len,
         })
     }
-
-    fn take(&mut self) -> Result<StructArray> {
-        let StructArrayBuilder {
-            mut bitmap,
-            children_array,
-            children_type,
-            len,
-            ..
-        } = std::mem::replace(
-            self,
-            Self::new_with_meta(
-                self.capacity,
-                ArrayMeta::Struct {
-                    children: self.children_type.clone(),
-                },
-            )?,
-        );
-
-        let children = children_array
-            .into_iter()
-            .map(|b| b.finish())
-            .try_collect()?;
-        Ok(StructArray {
-            bitmap: bitmap.finish(),
-            children,
-            children_type,
-            len,
-        })
-    }
 }
 
 #[derive(Debug)]
