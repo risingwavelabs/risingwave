@@ -150,10 +150,7 @@ impl<'a> Iterator for RowRefIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::RowRef;
-    use crate::array::Row;
     use crate::test_utils::test_stream_chunk::{TestStreamChunk, WhatEverStreamChunk};
-    use crate::types::ToOwnedDatum;
 
     #[test]
     fn test_chunk_rows() {

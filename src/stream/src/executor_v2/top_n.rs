@@ -237,7 +237,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
         let mut new_ops = vec![];
         let mut new_rows = vec![];
 
-        for row_ref in chunk.rows() {
+        for (op, row_ref) in chunk.rows() {
             let pk_row = Row(self
                 .pk_indices
                 .iter()
@@ -246,7 +246,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
             let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
             let row = row_ref.to_owned_row();
 
-            match row_ref.op() {
+            match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.managed_lowest_state.total_count() < self.offset {
                         // `elem` is in the range of `[0, offset)`,

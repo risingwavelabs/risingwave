@@ -201,8 +201,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         let mut new_ops = vec![];
         let mut new_rows = vec![];
 
-        for row_ref in chunk.rows() {
-            assert_eq!(row_ref.op(), Op::Insert);
+        for (op, row_ref) in chunk.rows() {
+            assert_eq!(op, Op::Insert);
 
             let pk_row = Row(self
                 .pk_indices
