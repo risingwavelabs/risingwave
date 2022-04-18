@@ -92,6 +92,8 @@ impl<'a, const DIRECTION: usize, NE: Send + Sync + Ord> MergeIteratorInner<'a, D
 }
 
 #[async_trait]
+/// The behaviour of `next` of order aware merge iterator is different from the normal one, so we
+/// extract this trait.
 trait MergeIteratorNext<'a> {
     async fn next(&mut self) -> HummockResult<()>;
 }
