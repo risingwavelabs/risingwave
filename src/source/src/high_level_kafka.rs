@@ -29,7 +29,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use crate::common::SourceChunkBuilder;
-use crate::{BatchSourceReader, Source, SourceColumnDesc, SourceParser, StreamSourceReader};
+use crate::{BatchSourceReader, Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// `KAFKA_SYNC_CALL_TIMEOUT` provides a timeout parameter for `rdkafka` calls, note that currently
 /// we only use `committed_offsets` and `fetch_metadata` for synchronization calls, these two calls
@@ -45,7 +45,7 @@ const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct HighLevelKafkaSource {
     pub config: HighLevelKafkaSourceConfig,
     pub column_descs: Arc<Vec<SourceColumnDesc>>,
-    pub parser: Arc<dyn SourceParser>,
+    pub parser: Arc<SourceParserImpl>,
 }
 
 /// `HighLevelKafkaSourceConfig` is the configuration for `HighLevelKafkaSource`, providing the
@@ -71,7 +71,7 @@ pub struct HighLevelKafkaSourceReaderContext {
 /// when there is no message will stop here
 pub struct HighLevelKafkaSourceStreamReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
-    parser: Arc<dyn SourceParser>,
+    parser: Arc<SourceParserImpl>,
     columns: Arc<Vec<SourceColumnDesc>>,
 }
 
@@ -82,7 +82,7 @@ pub struct HighLevelKafkaSourceStreamReader {
 /// it will return None to end the generation.
 pub struct HighLevelKafkaSourceBatchReader {
     consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
-    parser: Arc<dyn SourceParser>,
+    parser: Arc<SourceParserImpl>,
     columns: Arc<Vec<SourceColumnDesc>>,
     bounds: HashMap<i32, (i64, i64)>,
     topic: String,
@@ -93,7 +93,7 @@ impl HighLevelKafkaSource {
     pub fn new(
         config: HighLevelKafkaSourceConfig,
         column_descs: Arc<Vec<SourceColumnDesc>>,
-        parser: Arc<dyn SourceParser>,
+        parser: Arc<SourceParserImpl>,
     ) -> Self {
         HighLevelKafkaSource {
             config,
