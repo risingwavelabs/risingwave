@@ -256,13 +256,12 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
         .into_iter()
         .map(|x| to_conjunctions(x).into_iter().collect())
         .collect();
-    let mut last = disjunctions.pop().unwrap();
+    let (last, remaining) = disjunctions.split_last_mut().unwrap();
     // now greatest_common_factor == [C, D]
     let greatest_common_divider: Vec<_> = last
-        .drain_filter(|factor| disjunctions.iter().all(|expr| expr.contains(factor)))
+        .drain_filter(|factor| remaining.iter().all(|expr| expr.contains(factor)))
         .collect();
-    disjunctions.push(last);
-    for disjunction in &mut disjunctions {
+    for disjunction in remaining {
         // remove common factors
         disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
