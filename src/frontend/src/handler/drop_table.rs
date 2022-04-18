@@ -31,11 +31,12 @@ pub async fn handle_drop_table(
 
     {
         let reader = catalog_reader.read_guard();
-        let source = reader.get_source_by_name(session.database(), &schema_name, &table_name)?;
-        if source.source_type == SourceType::Source {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP SOURCE` to drop a source.".to_owned(),
-            )));
+        if let Ok(s) = reader.get_source_by_name(session.database(), &schema_name, &table_name) {
+            if s.source_type == SourceType::Source {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP SOURCE` to drop a source.".to_owned(),
+                )));
+            }
         }
     }
 
