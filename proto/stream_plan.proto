@@ -143,6 +143,15 @@ message LookupNode {
   // By default, lookup executor will produce `<arrangement side, stream side>`. We
   // will then apply the column mapping to the combined result.
   repeated int32 column_mapping = 4;
+  // The fragment id of upstream arrangement
+  // TODO: record arrangements in catalog and use table_id
+  uint32 arrange_fragment_id = 5;
+  // Temporarily used when generating fragments on meta node. When generating lookup
+  // fragments, the global fragment id of upstream arrange won't be available. Therefore,
+  // we record local id here, and rewrite it into global id when sealing fragments.
+  uint32 arrange_local_fragment_id = 6;
+  // The operator id of upstream arrangement
+  uint64 arrange_operator_id = 7;
 }
 
 // Special node for shared state. Merge and align barrier from upstreams.

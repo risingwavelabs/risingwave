@@ -81,6 +81,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
 }
 
 /// Message from the `arrange_join_stream`.
+#[derive(Debug)]
 pub enum ArrangeMessage {
     /// Arrangement sides' update in this epoch. There will be only one arrange batch message
     /// within epoch. Once the executor receives an arrange batch message, it can start doing

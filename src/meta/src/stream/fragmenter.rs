@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -352,7 +353,7 @@ where
             self.hash_mapping.iter().unique().count() as u32
         };
 
-        let node = current_fragment.get_node();
+        let node = Arc::new(current_fragment.get_node().clone());
         let actor_ids = self
             .gen_actor_ids(parallel_degree)
             .into_iter()
