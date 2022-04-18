@@ -511,6 +511,14 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_shard() {
+        let cache = Arc::new(LRUCache::<(u64, u64), Block>::new(2, 256, 16));
+        assert_eq!(cache.shard(0), 0);
+        assert_eq!(cache.shard(1), 0);
+        assert_eq!(cache.shard(10), 0);
+    }
+
+    #[test]
     fn test_cache_basic() {
         let cache = Arc::new(LRUCache::<(u64, u64), Block>::new(2, 256, 16));
         let seed = 10244021u64;
@@ -536,7 +544,9 @@ mod tests {
                     sst,
                 },
             );
+            total_usage += 1;
         }
+        assert_eq!(256, cache.get_memory_usage());
     }
 
     fn validate_lru_list(cache: &mut LRUCacheShard<String, String>, keys: Vec<&str>) {
