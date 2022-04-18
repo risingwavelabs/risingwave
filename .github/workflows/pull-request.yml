@@ -354,7 +354,7 @@ jobs:
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-kafka
+          ~/cargo-make/makers ci-start ci-kafka
           sqllogictest -p 4566 './e2e_test/v2/source/**/*.slt'
         env:
           BROKERS: localhost:29092
