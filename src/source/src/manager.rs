@@ -42,17 +42,8 @@ const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    async fn create_source(
-        &self,
-        source_id: &TableId,
-        format: SourceFormat,
-        parser: Arc<SourceParserImpl>,
-        config: &SourceConfig,
-        columns: Vec<SourceColumnDesc>,
-        row_id_index: Option<usize>,
-    ) -> Result<()>;
-    async fn create_source_v2(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
+    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
@@ -100,49 +91,7 @@ pub struct MemSourceManager {
 
 #[async_trait]
 impl SourceManager for MemSourceManager {
-    async fn create_source(
-        &self,
-        source_id: &TableId,
-        format: SourceFormat,
-        parser: Arc<SourceParserImpl>,
-        config: &SourceConfig,
-        columns: Vec<SourceColumnDesc>,
-        row_id_index: Option<usize>,
-    ) -> Result<()> {
-        let source = match config {
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(Properties::new(config.clone()), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
-            }
-        };
-
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            format,
-            columns,
-            row_id_index,
-        };
-        let mut tables = self.get_sources()?;
-        ensure!(
-            !tables.contains_key(source_id),
-            "Source id already exists: {:?}",
-            source_id
-        );
-        tables.insert(*source_id, desc);
-
-        Ok(())
-    }
-
-    async fn create_source_v2(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
+    async fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -226,7 +175,7 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -335,7 +284,7 @@ mod tests {
         let source_id = TableId::default();
 
         let mem_source_manager = MemSourceManager::new();
-        let source = mem_source_manager.create_source_v2(&source_id, info).await;
+        let source = mem_source_manager.create_source(&source_id, info).await;
 
         assert!(source.is_ok());
 
@@ -369,7 +318,7 @@ mod tests {
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source_v2(&table_id, table_columns);
+        let res = mem_source_manager.create_table_source(&table_id, table_columns);
         assert!(res.is_ok());
 
         // get source
