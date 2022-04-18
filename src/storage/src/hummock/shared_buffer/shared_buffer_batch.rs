@@ -25,7 +25,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 use crate::storage_value::VALUE_META_SIZE;
 
-pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
+pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug)]

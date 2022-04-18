@@ -140,6 +140,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 }
 
 pub fn gen_merge_iterator_interleave_test_sstable_iters(
+    key_count: usize,
     count: usize,
 ) -> Vec<BoxedForwardHummockIterator<'static>> {
     let sstable_store = mock_sstable_store();
@@ -150,7 +151,7 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 default_builder_opt_for_test(),
                 |x| x * count + i,
                 sstable_store.clone(),
-                TEST_KEYS_COUNT,
+                key_count,
             ));
             Box::new(SSTableIterator::new(Arc::new(table), sstable_store.clone()))
                 as BoxedForwardHummockIterator

@@ -107,6 +107,7 @@ trait MergeIteratorNext<'a> {
 pub type OrderedMergeIteratorInner<'a, D> = MergeIteratorInner<'a, D, usize>;
 
 impl<'a, D: HummockIteratorDirection> OrderedMergeIteratorInner<'a, D> {
+    #[allow(dead_code)]
     pub fn new(
         iterators: impl IntoIterator<Item = BoxedHummockIterator<'a, D>>,
         stats: Arc<StateStoreMetrics>,
