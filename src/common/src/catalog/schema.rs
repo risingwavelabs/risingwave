@@ -19,6 +19,7 @@ use risingwave_pb::plan::Field as ProstField;
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
+use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::types::DataType;
 
@@ -157,13 +158,14 @@ impl Field {
             .iter()
             .map(|f| f.to_column_desc(true))
             .collect_vec();
-        ColumnDesc::new_struct(
-            self.name.as_str(),
-            0,
-            self.type_name.as_str(),
+        ColumnDesc {
+            data_type: self.data_type.clone(),
+            column_id: ColumnId::new(0),
+            name: self.name.clone(),
             field_descs,
-            is_nested,
-        )
+            type_name: self.type_name.clone(),
+            is_nested
+        }
     }
 }
 

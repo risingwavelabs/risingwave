@@ -65,7 +65,7 @@ impl TableCatalog {
         }
     }
 
-    /// Extract `field_descs` and add in `catalog.columns`.
+    /// Flatten nested `column_desc`.
     pub fn flatten(mut self) -> Self {
         let mut catalogs = vec![];
         for col in &self.columns {
