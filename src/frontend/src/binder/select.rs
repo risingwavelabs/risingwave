@@ -171,17 +171,17 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
-    /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
-    /// We will extract ident from expr and concat it with `ids` to get `field_column_name`.
+    /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`,
+    /// will extract idents from expr and concat it with `ids` to get full `field_name`.
     /// Will return `table_name` and `field_name` or `field_name`.
-    pub fn extract_desc_and_name(
+    pub fn extract_table_and_field(
         &mut self,
         expr: Expr,
         ids: Vec<Ident>,
     ) -> Result<(Option<String>, String)> {
         match expr {
             // For CompoundIdentifier, we will use first ident as `table_name` and second ident as
-            // first part of `field_column_name` and then concat with ids.
+            // first part of `column_name` and then concat with `ids`.
             Expr::CompoundIdentifier(idents) => {
                 let (table_name, column): (&String, &String) = match &idents[..] {
                     [table, column] => (&table.value, &column.value),
@@ -198,10 +198,11 @@ impl Binder {
                     Self::concat_ident_names(column.clone(), &ids),
                 ))
             }
-            // For Identifier, we will first use the ident as first part of `field_column_name`
-            // and judge if this name is exist.
-            // If not we will use the ident as table name.
-            // The reason is that in pgsql, for table name v3 have a column name v3 which
+            // For Identifier, we will first use the ident as first part of `column_name`.
+            // If this `column_name` is exist and have only one index, return None
+            // and full field name.
+            // If not we will use the ident as table name and return concat `ids` as `field_name`.
+            // For example, if a table name v3 have a column name v3 which
             // have a field name v3. Select (v3).v3 from v3 will return the field value instead
             // of column value.
             Expr::Identifier(ident) => {
@@ -225,13 +226,15 @@ impl Binder {
         }
     }
 
-    /// Bind wildcard field column, e.g. `(table.v1).*`.
+    /// Bind wildcard field column, e.g. `(table.v1).*`,
+    /// will return vector of `InputRef` and full `field_name` as alias.
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
         idents: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (table, field_name) = self.extract_desc_and_name(expr, idents.to_vec())?;
+        // Extract `table_name` and `field_name` from expr and idents.
+        let (table, field_name) = self.extract_table_and_field(expr, idents.to_vec())?;
         let desc = self
             .context
             .get_column_binding(table.clone(), &field_name)?
@@ -248,13 +251,15 @@ impl Binder {
         Ok(Self::bind_columns_iter(bindings.into_iter()))
     }
 
-    /// Bind single field column, e.g. `(table.v1).v2`.
+    /// Bind single field column, e.g. `(table.v1).v2`,
+    /// will return `InputRef` and full `field_name` as alias.
     pub fn bind_single_field_column(
         &mut self,
         expr: Expr,
         idents: &[Ident],
     ) -> Result<(ExprImpl, Option<String>)> {
-        let (table, field_name) = self.extract_desc_and_name(expr, idents.to_vec())?;
+        // Extract `table_name` and `field_name` from expr and idents.
+        let (table, field_name) = self.extract_table_and_field(expr, idents.to_vec())?;
         let binding = self.context.get_column_binding(table, &field_name)?;
         Ok((
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
