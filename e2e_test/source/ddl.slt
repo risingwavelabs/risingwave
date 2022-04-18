@@ -27,9 +27,6 @@ show tables
 ----
 
 statement ok
-drop source s
-
-statement ok
 create source s with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic.1', 'kafka.brokers' = '127.0.0.1:29092' ) row format json;
 
 query T
