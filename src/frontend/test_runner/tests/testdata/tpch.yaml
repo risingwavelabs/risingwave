@@ -771,6 +771,20 @@
             LogicalJoin { type: Inner, on: always }
               LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
               LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+  batch_plan: |
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchProject { exprs: [$0, $1, $2], expr_alias: [l_shipmode, high_line_count, low_line_count] }
+          BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
+            BatchProject { exprs: [$3, Case((($1 = '1-URGENT':Varchar) OR ($1 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($1 <> '1-URGENT':Varchar) AND ($1 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)], expr_alias: [ ,  ,  ] }
+              BatchExchange { order: [], dist: HashShard([3]) }
+                BatchHashJoin { type: Inner, predicate: $0 = $2 }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: orders, columns: [o_orderkey, o_orderpriority] }
+                  BatchProject { exprs: [$0, $4], expr_alias: [ ,  ] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                        BatchScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode] }
 - id: tpch_q13
   before:
     - create_tables
@@ -1033,6 +1047,14 @@
         and l_shipmode in ('AIR', 'AIR REG')
         and l_shipinstruct = 'DELIVER IN PERSON'
       );
+  logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [revenue] }
+      LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+        LogicalProject { exprs: [($6 * (1:Int32 - $7))], expr_alias: [ ] }
+          LogicalFilter { predicate: (((((((((($18 = $2) AND ($21 = 'Brand#52':Varchar)) AND In($24, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($5 >= 1:Int32)) AND ($5 <= 11:Int32)) AND (($23 >= 1:Int32) AND ($23 <= 5:Int32))) AND In($15, 'AIR':Varchar, 'AIR REG':Varchar)) AND ($14 = 'DELIVER IN PERSON':Varchar)) OR (((((((($18 = $2) AND ($21 = 'Brand#24':Varchar)) AND In($24, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($5 >= 30:Int32)) AND ($5 <= 40:Int32)) AND (($23 >= 1:Int32) AND ($23 <= 10:Int32))) AND In($15, 'AIR':Varchar, 'AIR REG':Varchar)) AND ($14 = 'DELIVER IN PERSON':Varchar))) OR (((((((($18 = $2) AND ($21 = 'Brand#32':Varchar)) AND In($24, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($5 >= 10:Int32)) AND ($5 <= 20:Int32)) AND (($23 >= 1:Int32) AND ($23 <= 15:Int32))) AND In($15, 'AIR':Varchar, 'AIR REG':Varchar)) AND ($14 = 'DELIVER IN PERSON':Varchar))) }
+            LogicalJoin { type: Inner, on: always }
+              LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+              LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
 - id: tpch_q20
   before:
     - create_tables
