@@ -260,13 +260,13 @@ pub mod tests {
                 DataType::Varchar.to_protobuf(),
                 "country.city.address",
                 2,
-                false,
+                true,
             ),
             ProstColumnDesc::new_atomic(
                 DataType::Varchar.to_protobuf(),
                 "country.city.zipcode",
                 3,
-                false,
+                true,
             ),
         ];
         let country = vec![
@@ -274,11 +274,11 @@ pub mod tests {
                 DataType::Varchar.to_protobuf(),
                 "country.address",
                 1,
-                false,
+                true,
             ),
-            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city, false),
+            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city, true),
         ];
-        ProstColumnDesc::new_struct("country", 5, ".test.Country", country, true)
+        ProstColumnDesc::new_struct("country", 5, ".test.Country", country, false)
     }
 
     pub fn build_desc() -> ColumnDesc {
