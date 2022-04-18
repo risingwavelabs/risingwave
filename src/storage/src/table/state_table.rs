@@ -43,7 +43,7 @@ pub struct StateTable<S: StateStore> {
     /// Serializer to serialize keys from input rows
     key_serializer: OrderedRowSerializer,
 
-    /// buffer key/values
+    /// buffer RowOp
     mem_table: MemTable,
 
     /// Relation layer

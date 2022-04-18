@@ -13,7 +13,7 @@
 // limitations under the License.
 #![allow(dead_code)]
 #![allow(unused)]
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use risingwave_common::array::Row;
 
@@ -25,7 +25,7 @@ pub enum RowOp {
     Update((Row, Row)),
 }
 pub struct MemTable {
-    pub buffer: HashMap<Row, RowOp>,
+    pub buffer: BTreeMap<Row, RowOp>,
 }
 impl Default for MemTable {
     fn default() -> Self {
@@ -35,7 +35,7 @@ impl Default for MemTable {
 impl MemTable {
     pub fn new() -> Self {
         Self {
-            buffer: HashMap::new(),
+            buffer: BTreeMap::new(),
         }
     }
 
@@ -77,15 +77,10 @@ impl MemTable {
 }
 
 pub struct MemTableIter {
-    pk: Row,
-    op: RowOp,
+    mem_table: MemTable,
 }
 
 impl MemTableIter {
-    async fn new() -> StorageResult<Self> {
-        todo!()
-    }
-
     async fn next(&mut self) -> StorageResult<Option<RowOp>> {
         todo!()
     }
