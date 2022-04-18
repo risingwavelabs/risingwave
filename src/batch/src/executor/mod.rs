@@ -14,7 +14,6 @@
 
 use drop_stream::*;
 use drop_table::*;
-use filter::*;
 use generic_exchange::*;
 use hash_agg::*;
 use limit::*;
@@ -43,6 +42,8 @@ use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor::values::ValuesExecutor;
+use crate::executor2::executor_wrapper::ExecutorWrapper;
+use crate::executor2::{BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2};
 use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
@@ -50,7 +51,7 @@ mod create_table;
 mod delete;
 mod drop_stream;
 mod drop_table;
-mod filter;
+pub mod executor2_wrapper;
 mod fuse;
 mod generate_series;
 mod generic_exchange;
@@ -65,8 +66,7 @@ mod projection;
 mod row_seq_scan;
 mod sort_agg;
 mod stream_scan;
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod top_n;
 mod trace;
 mod values;
@@ -106,10 +106,16 @@ pub type BoxedExecutor = Box<dyn Executor>;
 /// proto and global environment
 pub trait BoxedExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor>;
+
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+        Ok(Box::new(ExecutorWrapper::from(Self::new_boxed_executor(
+            source,
+        )?)))
+    }
 }
 
 pub struct ExecutorBuilder<'a> {
-    plan_node: &'a PlanNode,
+    pub plan_node: &'a PlanNode,
     task_id: &'a TaskId,
     env: BatchEnvironment,
     epoch: u64,
@@ -121,6 +127,18 @@ macro_rules! build_executor {
             $(
                 $proto_type_name(..) => {
                     <$data_type>::new_boxed_executor($source)
+                },
+            )*
+        }
+    }
+}
+
+macro_rules! build_executor2 {
+    ($source: expr, $($proto_type_name:path => $data_type:ty),*) => {
+        match $source.plan_node().get_node_body().unwrap() {
+            $(
+                $proto_type_name(..) => {
+                    <$data_type>::new_boxed_executor2($source)
                 },
             )*
         }
@@ -153,6 +171,17 @@ impl<'a> ExecutorBuilder<'a> {
         })
     }
 
+    pub fn build2(&self) -> Result<BoxedExecutor2> {
+        self.try_build2().map_err(|e| {
+            InternalError(format!(
+                "[PlanNode: {:?}] Failed to build executor: {}",
+                self.plan_node.get_node_body(),
+                e,
+            ))
+            .into()
+        })
+    }
+
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
         ExecutorBuilder::new(plan_node, self.task_id, self.env.clone(), self.epoch)
@@ -166,7 +195,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Delete => DeleteExecutor,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
-            NodeBody::Filter => FilterExecutor,
+            NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectionExecutor,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
@@ -185,6 +214,35 @@ impl<'a> ExecutorBuilder<'a> {
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
+    }
+
+    fn try_build2(&self) -> Result<BoxedExecutor2> {
+        let real_executor = build_executor2! { self,
+            NodeBody::CreateTable => CreateTableExecutor,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::Insert => InsertExecutor,
+            NodeBody::Delete => DeleteExecutor,
+            NodeBody::DropTable => DropTableExecutor,
+            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Filter => FilterExecutor2,
+            NodeBody::Project => ProjectionExecutor,
+            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::CreateSource => CreateSourceExecutor,
+            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::TopN => TopNExecutor,
+            NodeBody::Limit => LimitExecutor,
+            NodeBody::Values => ValuesExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::HashJoin => HashJoinExecutorBuilder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::DropSource => DropStreamExecutor,
+            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
+        }?;
+        let input_desc = real_executor.identity().to_string();
+        Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))
     }
 
     pub fn plan_node(&self) -> &PlanNode {
