@@ -14,17 +14,26 @@
 
 use std::fmt::Debug;
 
+use async_trait::async_trait;
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
-use risingwave_storage::StateStore;
+use risingwave_storage::{Keyspace, StateStore};
+use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::Executor;
+use crate::executor::PkDataTypes;
+use crate::executor_v2::error::{
+    StreamExecutorError, StreamExecutorResult, TracedStreamExecutorError,
+};
+use crate::executor_v2::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef};
 
 /// States for [`crate::executor_v2::LocalSimpleAggExecutor`],
 /// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor_v2::HashAggExecutor`].
@@ -210,6 +219,88 @@ pub fn agg_input_array_refs<'a>(
         .collect()
 }
 
+/// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], providing
+/// an implementation of [`Executor::execute`] by [`AggExecutorWrapper::agg_executor_execute`].
+#[async_trait]
+pub trait AggExecutor: Send + 'static {
+    /// Apply the chunk to the dirty state.
+    async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()>;
+
+    /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
+    /// no dirty states to flush, return `Ok(None)`.
+    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>>;
+
+    /// See [`Executor::schema`].
+    fn schema(&self) -> &Schema;
+
+    /// See [`Executor::pk_indices`].
+    fn pk_indices(&self) -> PkIndicesRef;
+
+    /// See [`Executor::identity`].
+    fn identity(&self) -> &str;
+}
+
+/// The struct wraps a [`AggExecutor`]
+pub struct AggExecutorWrapper<E> {
+    pub(crate) input: BoxedExecutor,
+    pub(crate) inner: E,
+}
+
+impl<E> Executor for AggExecutorWrapper<E>
+where
+    E: AggExecutor,
+{
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.agg_executor_execute().boxed()
+    }
+
+    fn schema(&self) -> &Schema {
+        self.inner.schema()
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        self.inner.pk_indices()
+    }
+
+    fn identity(&self) -> &str {
+        self.inner.identity()
+    }
+}
+
+impl<E> AggExecutorWrapper<E>
+where
+    E: AggExecutor,
+{
+    /// An implementation of [`Executor::execute`] for [`AggExecutor`].
+    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    pub(crate) async fn agg_executor_execute(mut self: Box<Self>) {
+        let mut input = self.input.execute();
+        let first_msg = input.next().await.unwrap()?;
+        let barrier = first_msg
+            .as_barrier()
+            .expect("the first message received by agg executor must be a barrier");
+        let mut epoch = barrier.epoch.curr;
+        yield first_msg;
+
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Chunk(chunk) => self.inner.apply_chunk(chunk, epoch).await?,
+                Message::Barrier(barrier) => {
+                    let next_epoch = barrier.epoch.curr;
+                    if let Some(chunk) = self.inner.flush_data(epoch).await? {
+                        assert_eq!(epoch, barrier.epoch.prev);
+                        yield Message::Chunk(chunk);
+                    }
+                    yield Message::Barrier(barrier);
+                    epoch = next_epoch;
+                }
+            }
+        }
+    }
+}
+
 /// Generate [`crate::executor_v2::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor_v2::HashAggExecutor`], the group key indices should
 /// be provided.
@@ -233,4 +324,60 @@ pub fn generate_agg_schema(
     };
 
     Schema { fields }
+}
+
+/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor_v2::HashAggExecutor`], the
+/// group key should be provided.
+pub async fn generate_agg_state<S: StateStore>(
+    key: Option<&Row>,
+    agg_calls: &[AggCall],
+    keyspace: &Keyspace<S>,
+    pk_data_types: PkDataTypes,
+    epoch: u64,
+    key_hash_code: Option<HashCode>,
+) -> StreamExecutorResult<AggState<S>> {
+    let mut managed_states = vec![];
+
+    // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
+    const_assert_eq!(ROW_COUNT_COLUMN, 0);
+    let mut row_count = None;
+
+    for (idx, agg_call) in agg_calls.iter().enumerate() {
+        // TODO: in pure in-memory engine, we should not do this serialization.
+
+        // The prefix of the state is `agg_call_idx / [group_key]`
+        let keyspace = if let Some(key) = key {
+            let bytes = key.serialize().unwrap();
+            keyspace.append_u16(idx as u16).append(bytes)
+        } else {
+            keyspace.append_u16(idx as u16)
+        };
+
+        let mut managed_state = ManagedStateImpl::create_managed_state(
+            agg_call.clone(),
+            keyspace,
+            row_count,
+            pk_data_types.clone(),
+            idx == ROW_COUNT_COLUMN,
+            key_hash_code.clone(),
+        )
+        .await
+        .map_err(StreamExecutorError::agg_state_error)?;
+
+        if idx == ROW_COUNT_COLUMN {
+            // For the rowcount state, we should record the rowcount.
+            let output = managed_state
+                .get_output(epoch)
+                .await
+                .map_err(StreamExecutorError::agg_state_error)?;
+            row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
+        }
+
+        managed_states.push(managed_state);
+    }
+
+    Ok(AggState {
+        managed_states,
+        prev_states: None,
+    })
 }

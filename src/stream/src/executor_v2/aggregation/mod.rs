@@ -30,8 +30,7 @@ use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
 pub use row_count::*;
 
-pub use super::aggregation::StreamingRowCountAgg;
-use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
+use crate::executor_v2::aggregation::single_value::StreamingSingleValueAgg;
 
 mod agg_call;
 mod agg_executor;
