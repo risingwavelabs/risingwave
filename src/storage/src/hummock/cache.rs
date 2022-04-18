@@ -32,6 +32,22 @@ pub struct LRUHandle<K: PartialEq + Default, T> {
     flags: u8,
 }
 
+impl<K: PartialEq + Default, T> Default for LRUHandle<K, T> {
+    fn default() -> Self {
+        Self {
+            next_hash: null_mut(),
+            next: null_mut(),
+            prev: null_mut(),
+            key: K::default(),
+            hash: 0,
+            value: None,
+            charge: 0,
+            refs: 0,
+            flags: 0,
+        }
+    }
+}
+
 impl<K: PartialEq + Default, T> LRUHandle<K, T> {
     pub fn new(key: K, value: Option<T>) -> Self {
         Self {
@@ -177,20 +193,27 @@ pub struct LRUCacheShard<K: PartialEq + Default, T> {
     lru_usage: usize,
     usage: usize,
     capacity: usize,
+    strict_capacity_limit: bool,
 }
+
 unsafe impl<K: PartialEq + Default, T> Send for LRUCacheShard<K, T> {}
 unsafe impl<K: PartialEq + Default, T> Sync for LRUCacheShard<K, T> {}
 
 impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
-    fn new(capacity: usize, object_capacity: usize) -> Self {
+    fn new(capacity: usize, object_capacity: usize, strict_capacity_limit: bool) -> Self {
         let mut lru = Box::new(LRUHandle::new(K::default(), None));
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
+        let mut object_pool = Vec::with_capacity(object_capacity);
+        for _ in 0..object_capacity {
+            object_pool.push(Box::new(LRUHandle::default()));
+        }
         Self {
             capacity,
             lru_usage: 0,
             usage: 0,
-            object_pool: Vec::with_capacity(object_capacity),
+            object_pool,
+            strict_capacity_limit,
             lru,
             table: LRUHandleTable::new(),
         }
@@ -204,6 +227,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         self.lru_usage -= (*e).charge;
     }
 
+    // insert entry in the end of the linked-list
     unsafe fn lru_insert(&mut self, e: *mut LRUHandle<K, T>) {
         (*e).next = self.lru.as_mut();
         (*e).prev = self.lru.prev;
@@ -262,7 +286,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         handle.flags = 0;
         handle.set_in_cache(true);
         self.evict_from_lru(charge, last_reference_list);
-        if self.usage + charge > self.capacity {
+        if self.usage + charge > self.capacity && self.strict_capacity_limit {
             handle.set_in_cache(false);
             let data = handle.value.take().unwrap();
             last_reference_list.push(data);
@@ -295,7 +319,6 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         let last_reference = (*e).unref();
         if last_reference && (*e).is_in_cache() {
             if self.usage > self.capacity {
-                println!("remove {}", (*e).hash);
                 self.table.remove((*e).hash, &(*e).key);
                 (*e).set_in_cache(false);
             } else {
@@ -324,6 +347,23 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         }
         e
     }
+
+    unsafe fn erase(&mut self, hash: u64, key: &K) -> Option<T> {
+        let h = self.table.remove(hash, key);
+        if !h.is_null() {
+            (*h).set_in_cache(false);
+            if !(*h).has_refs() {
+                self.lru_remove(h);
+                let mut node = Box::from_raw(h);
+                node.set_in_cache(false);
+                self.usage -= node.charge;
+                let data = node.value.take();
+                self.recyle_handle_object(node);
+                return data;
+            }
+        }
+        None
+    }
 }
 
 pub struct LRUCache<K: PartialEq + Default, T> {
@@ -338,7 +378,11 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
         let per_shard = capacity / num_shards;
         let per_shard_object = object_cache / num_shards;
         for _ in 0..num_shards {
-            shards.push(Mutex::new(LRUCacheShard::new(per_shard, per_shard_object)));
+            shards.push(Mutex::new(LRUCacheShard::new(
+                per_shard,
+                per_shard_object,
+                false,
+            )));
         }
         Self {
             num_shard_bits,
@@ -394,6 +438,18 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
         handle
     }
 
+    pub fn erase(&self, hash: u64, key: &K) {
+        let data = unsafe {
+            let mut shard = self.shards[self.shard(hash)].lock();
+            shard.erase(hash, key)
+        };
+        drop(data);
+    }
+
+    pub fn get_memory_usage(&self) -> usize {
+        self.shards.iter().map(|shard| shard.lock().usage).sum()
+    }
+
     fn shard(&self, hash: u64) -> usize {
         if self.num_shard_bits > 0 {
             (hash >> (64 - self.num_shard_bits)) as usize
@@ -437,10 +493,12 @@ mod tests {
     use super::*;
     use crate::hummock::cache::{LRUHandle, IN_CACHE};
     use crate::hummock::LRUCache;
+
     pub struct Block {
         pub offset: u64,
         pub sst: u64,
     }
+
     #[test]
     fn test_cache_handle_basic() {
         println!("not in cache: {}, in cache {}", REVERSE_IN_CACHE, IN_CACHE);
@@ -477,6 +535,120 @@ mod tests {
                     sst,
                 },
             );
+        }
+    }
+
+    fn validate_lru_list(cache: &mut LRUCacheShard<String, String>, keys: Vec<&str>) {
+        unsafe {
+            let mut lru: *mut LRUHandle<String, String> = cache.lru.as_mut();
+            for k in keys {
+                lru = (*lru).next;
+                assert!(
+                    (*lru).key.eq(k),
+                    "compare failed: {} vs {}, get value: {:?}",
+                    (*lru).key,
+                    k,
+                    (*lru).value
+                );
+            }
+        }
+    }
+
+    fn create_cache(capacity: usize) -> LRUCacheShard<String, String> {
+        LRUCacheShard::new(capacity, capacity, false)
+    }
+
+    fn lookup(cache: &mut LRUCacheShard<String, String>, key: &str) -> bool {
+        unsafe {
+            let h = cache.lookup(0, &key.to_string());
+            let exist = !h.is_null();
+            if exist {
+                assert!((*h).key.eq(key));
+                cache.release(h);
+            }
+            exist
+        }
+    }
+
+    fn insert(cache: &mut LRUCacheShard<String, String>, key: &str, value: &str) {
+        let mut free_list = vec![];
+        unsafe {
+            let handle = cache.insert(
+                key.to_string(),
+                0,
+                value.len(),
+                value.to_string(),
+                &mut free_list,
+            );
+            cache.release(handle);
+        }
+        free_list.clear();
+    }
+
+    #[test]
+    fn test_basic_lru() {
+        let mut cache = create_cache(5);
+        let keys = vec!["a", "b", "c", "d", "e"];
+        for &k in &keys {
+            insert(&mut cache, k, k);
+        }
+        validate_lru_list(&mut cache, keys);
+        for k in ["x", "y", "z"] {
+            insert(&mut cache, k, k);
+        }
+        validate_lru_list(&mut cache, vec!["d", "e", "x", "y", "z"]);
+        assert!(!lookup(&mut cache, "b"));
+        assert!(lookup(&mut cache, "e"));
+        validate_lru_list(&mut cache, vec!["d", "x", "y", "z", "e"]);
+        assert!(lookup(&mut cache, "z"));
+        validate_lru_list(&mut cache, vec!["d", "x", "y", "e", "z"]);
+        unsafe {
+            let h = cache.erase(0, &"x".to_string());
+            assert!(h.is_some());
+            validate_lru_list(&mut cache, vec!["d", "y", "e", "z"]);
+        }
+        assert!(lookup(&mut cache, "d"));
+        validate_lru_list(&mut cache, vec!["y", "e", "z", "d"]);
+        insert(&mut cache, "u", "u");
+        validate_lru_list(&mut cache, vec!["y", "e", "z", "d", "u"]);
+        insert(&mut cache, "v", "v");
+        validate_lru_list(&mut cache, vec!["e", "z", "d", "u", "v"]);
+    }
+
+    #[test]
+    fn test_refrence_and_usage() {
+        let mut cache = create_cache(5);
+        insert(&mut cache, "k1", "a");
+        assert_eq!(cache.usage, 1);
+        insert(&mut cache, "k0", "aa");
+        assert_eq!(cache.usage, 3);
+        insert(&mut cache, "k1", "aa");
+        assert_eq!(cache.usage, 4);
+        insert(&mut cache, "k2", "aa");
+        assert_eq!(cache.usage, 4);
+        let mut free_list = vec![];
+        validate_lru_list(&mut cache, vec!["k1", "k2"]);
+        unsafe {
+            let h1 = cache.lookup(0, &"k1".to_string());
+            assert!(!h1.is_null());
+            let h2 = cache.lookup(0, &"k2".to_string());
+            assert!(!h2.is_null());
+
+            let h3 = cache.insert("k3".to_string(), 0, 2, "bb".to_string(), &mut free_list);
+            assert_eq!(cache.usage, 6);
+            assert!(!h3.is_null());
+            let h4 = cache.lookup(0, &"k1".to_string());
+            assert!(!h4.is_null());
+
+            cache.release(h1);
+            assert_eq!(cache.usage, 6);
+            cache.release(h4);
+            assert_eq!(cache.usage, 4);
+
+            cache.release(h3);
+            cache.release(h2);
+
+            validate_lru_list(&mut cache, vec!["k3", "k2"]);
         }
     }
 }
