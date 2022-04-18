@@ -88,6 +88,11 @@ impl Binder {
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => self.bind_in_list(*expr, list, negated),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -116,6 +121,30 @@ impl Binder {
             },
         )?
         .into())
+    }
+
+    pub(super) fn bind_in_list(
+        &mut self,
+        expr: Expr,
+        list: Vec<Expr>,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let mut bound_expr_list = vec![self.bind_expr(expr)?];
+        for elem in list {
+            bound_expr_list.push(self.bind_expr(elem)?);
+        }
+        let in_expr =
+            FunctionCall::new_with_return_type(ExprType::In, bound_expr_list, DataType::Boolean);
+        if negated {
+            Ok(FunctionCall::new_with_return_type(
+                ExprType::Not,
+                vec![in_expr.into()],
+                DataType::Boolean,
+            )
+            .into())
+        } else {
+            Ok(in_expr.into())
+        }
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {

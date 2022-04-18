@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
@@ -115,7 +115,7 @@ impl StreamMaterialize {
             .iter()
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
-                column_desc: field.into(),
+                column_desc: ColumnDesc::from_field_without_column_id(field),
                 is_hidden: !user_cols.contains(i),
             })
             .collect_vec();
