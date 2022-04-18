@@ -30,7 +30,7 @@
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(let_else)]
 #![feature(trait_alias)]
-
+#![feature(drain_filter)]
 #[macro_use]
 pub mod catalog;
 pub mod binder;

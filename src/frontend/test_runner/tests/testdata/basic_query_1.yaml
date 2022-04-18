@@ -28,11 +28,11 @@
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
+      BatchFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
         BatchScan { table: t, columns: [] }
   stream_plan: |
     StreamMaterialize { columns: [_row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
+      StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
         StreamTableScan { table: t, columns: [_row_id#0], pk_indices: [0] }
 - sql: |
     create table t (v1 int);
@@ -145,3 +145,27 @@
     BatchSimpleAgg { aggs: [count] }
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [] }
+- sql: |
+    /* test boolean expression common factor extraction */
+    create table t (v1 Boolean, v2 Boolean, v3 Boolean);
+    select * from t where v1 AND v2 AND ((v1 AND v2) OR (v2 AND v3));
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: $0 AND $1 AND ($0 OR $2) }
+        BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* test boolean expression simplification */
+    create table t (v1 Boolean, v2 Boolean, v3 Boolean);
+    select * from t where v1 AND NOT(v1 OR v2 Or NOT(v1 AND v2 AND true));
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: $0 AND Not($0) AND Not($1) AND $1 }
+        BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* test boolean expression simplification */
+    create table t (v1 Boolean, v2 Boolean);
+    select * from t where (v1 AND v2) OR (v1 AND v2);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: $0 AND $1 }
+        BatchScan { table: t, columns: [v1, v2] }
