@@ -86,14 +86,7 @@ impl StreamChunkBuilder {
         row_update: &RowRef<'_>,
         row_matched: &Row,
     ) -> Result<Option<StreamChunk>> {
-        self.ops.push(op);
-        for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos]
-                .append_datum_ref(row_update.value_at(i))?;
-        }
-        for i in 0..row_matched.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
-        }
+        self.append_row(op, row_update, row_matched)?;
 
         // TODO: check `size == 0` when builder is dropped
         self.size += 1;
@@ -104,31 +97,31 @@ impl StreamChunkBuilder {
         }
     }
 
-    // TODO: refactor following methods with limit
+    // TODO(wzl): refactor following methods with limit
 
-    /// append a row with coming update value and matched value.
+    /// Append a row with coming update value and matched value.
     pub fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
         self.ops.push(op);
-        for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos]
-                .append_datum_ref(row_update.value_at(i))?;
+        for (i, d) in row_update.values().enumerate() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
         }
-        for i in 0..row_matched.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
+        for (i, d) in row_matched.values().enumerate() {
+            self.column_builders[i + self.matched_start_pos].append_datum(d)?;
         }
+
         Ok(())
     }
 
-    /// append a row with coming update value and fill the other side with null.
+    /// Append a row with coming update value and fill the other side with null.
     pub fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Result<()> {
         self.ops.push(op);
-        for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos]
-                .append_datum_ref(row_update.value_at(i))?;
+        for (i, d) in row_update.values().enumerate() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
         }
         for i in 0..self.column_builders.len() - row_update.size() {
             self.column_builders[i + self.matched_start_pos].append_datum(&None)?;
         }
+
         Ok(())
     }
 
