@@ -71,6 +71,7 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum RecordRef<'a> {
     Insert(RowRef<'a>),
     Delete(RowRef<'a>),

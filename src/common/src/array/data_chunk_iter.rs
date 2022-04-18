@@ -77,7 +77,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct RowRef<'a> {
     chunk: &'a DataChunk,
 
