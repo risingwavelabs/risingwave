@@ -178,7 +178,7 @@ impl NestedLoopJoinExecutor {
             .map(|data_type| data_type.create_array_builder(num_tuples))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
         for _i in 0..num_tuples {
-            for (builder, datum_ref) in output_array_builders.iter_mut().zip(datum_refs) {
+            for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
             }
         }
