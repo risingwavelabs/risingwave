@@ -544,7 +544,6 @@ mod tests {
                     sst,
                 },
             );
-            total_usage += 1;
         }
         assert_eq!(256, cache.get_memory_usage());
     }
