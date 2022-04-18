@@ -40,30 +40,53 @@ impl MemTable {
     }
 
     /// read methods
-    pub async fn get_row(&self, pk: &Row) -> StorageResult<Option<RowOp>> {
+    pub async fn get_row(&self, _pk: &Row) -> StorageResult<Option<RowOp>> {
         todo!();
     }
 
-    pub async fn get_row_by_scan(&self, pk: &Row) -> StorageResult<Option<RowOp>> {
+    pub async fn get_row_by_scan(&self, _pk: &Row) -> StorageResult<Option<RowOp>> {
         todo!();
     }
 
     /// write methods
-    pub async fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+    pub async fn insert(&mut self, _pk: Row, _value: Row) -> StorageResult<()> {
         Ok(())
     }
 
-    pub async fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+    pub async fn delete(&mut self, _pk: Row, _old_value: Row) -> StorageResult<()> {
         Ok(())
     }
 
-    pub async fn update(&mut self, pk: Row, old_value: Row, new_value: Row) -> StorageResult<()> {
+    pub async fn update(
+        &mut self,
+        _pk: Row,
+        _old_value: Row,
+        _new_value: Row,
+    ) -> StorageResult<()> {
         Ok(())
     }
 
-    pub async fn iter(&self, pk: Row) -> StorageResult<MemTableIter> {
+    pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter> {
         todo!();
+    }
+
+    pub async fn drain(&mut self) -> StorageResult<MemTableIter> {
+        /// clear the memtable and flush them into cell_based table
+        todo!()
     }
 }
 
-pub struct MemTableIter {}
+pub struct MemTableIter {
+    pk: Row,
+    op: RowOp,
+}
+
+impl MemTableIter {
+    async fn new() -> StorageResult<Self> {
+        todo!()
+    }
+
+    async fn next(&mut self) -> StorageResult<Option<RowOp>> {
+        todo!()
+    }
+}

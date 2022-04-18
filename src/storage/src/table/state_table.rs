@@ -21,8 +21,8 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
-use super::cell_based_table::CellBasedTable;
-use super::mem_table::MemTable;
+use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use super::mem_table::{MemTable, MemTableIter};
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::error::StorageResult;
 use crate::monitor::StateStoreMetrics;
@@ -72,56 +72,50 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// read methods
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+    pub async fn get_row(&self, _pk: &Row, _epoch: u64) -> StorageResult<Option<Row>> {
         todo!()
     }
 
-    pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+    pub async fn get_row_by_scan(&self, _pk: &Row, _epoch: u64) -> StorageResult<Option<Row>> {
         todo!()
     }
 
     /// write methods
-    pub async fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+    pub async fn insert(&mut self, _pk: Row, _value: Row) -> StorageResult<()> {
         todo!()
     }
 
-    pub async fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+    pub async fn delete(&mut self, _pk: Row, _old_value: Row) -> StorageResult<()> {
         todo!()
     }
 
-    pub async fn update(&mut self, pk: Row, old_value: Row, new_value: Row) -> StorageResult<()> {
+    pub async fn update(
+        &mut self,
+        _pk: Row,
+        _old_value: Row,
+        _new_value: Row,
+    ) -> StorageResult<()> {
         todo!()
     }
 
-    fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+    fn commit(&mut self, _new_epoch: u64) -> StorageResult<()> {
         todo!()
     }
 
-    pub async fn iter(&self, pk: Row) -> StorageResult<StateTableRowIter<S>> {
+    pub async fn iter(&self, _pk: Row) -> StorageResult<StateTableRowIter<S>> {
         todo!()
     }
 }
 pub struct StateTableRowIter<S: StateStore> {
-    keyspace: Keyspace<S>,
-    /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, Bytes)>,
-    /// The idx into `buf` for the next item
-    next_idx: usize,
-    /// A bool to indicate whether there are more data to fetch from state store
-    done: bool,
-    /// An epoch representing the read snapshot
-    epoch: u64,
-    /// Cell-based row deserializer
-    cell_based_row_deserializer: CellBasedRowDeserializer,
-    /// Statistics
-    _stats: Arc<StateStoreMetrics>,
+    cell_based_iter: CellBasedTableRowIter<S>,
+    mem_table_iter: MemTableIter,
 }
 
 impl<S: StateStore> StateTableRowIter<S> {
     async fn new(
-        keyspace: Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
-        epoch: u64,
+        _keyspace: Keyspace<S>,
+        _table_descs: Vec<ColumnDesc>,
+        _epoch: u64,
         _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
         todo!()
