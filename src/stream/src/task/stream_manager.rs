@@ -36,6 +36,7 @@ use tokio::task::JoinHandle;
 
 use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
+use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
