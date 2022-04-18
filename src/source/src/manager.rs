@@ -29,20 +29,14 @@ use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
-use crate::{
-    DebeziumJsonParser, HighLevelKafkaSource, JSONParser, ProtobufParser, SourceConfig,
-    SourceFormat, SourceImpl, SourceParser,
-};
+use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
-// the same key is defined in `src/batch/src/executor/create_source.rs`, remove in batch if
-// necessary
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
 
-const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
 const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
@@ -52,7 +46,7 @@ pub trait SourceManager: Debug + Sync + Send {
         &self,
         source_id: &TableId,
         format: SourceFormat,
-        parser: Arc<dyn SourceParser + Send + Sync>,
+        parser: Arc<SourceParserImpl>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
@@ -110,7 +104,7 @@ impl SourceManager for MemSourceManager {
         &self,
         source_id: &TableId,
         format: SourceFormat,
-        parser: Arc<dyn SourceParser + Send + Sync>,
+        parser: Arc<SourceParserImpl>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
@@ -168,7 +162,8 @@ impl SourceManager for MemSourceManager {
         }
 
         let properties = Properties::new(info.properties.clone());
-        let parser = build_source_parser(&format, &properties, info.row_schema_location.as_str())?;
+        let parser =
+            SourceParserImpl::create(&format, &properties, info.row_schema_location.as_str())?;
 
         let columns = info
             .columns
@@ -307,35 +302,6 @@ impl Default for MemSourceManager {
     }
 }
 
-fn build_source_parser(
-    format: &SourceFormat,
-    properties: &Properties,
-    schema_location: &str,
-) -> Result<Arc<dyn SourceParser + Send + Sync>> {
-    let parser: Arc<dyn SourceParser + Send + Sync> = match format {
-        SourceFormat::Json => {
-            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(JSONParser {});
-            Ok(parser)
-        }
-        SourceFormat::Protobuf => {
-            let message_name = properties.get(PROTOBUF_MESSAGE_KEY)?;
-            let parser: Arc<dyn SourceParser + Send + Sync> =
-                Arc::new(ProtobufParser::new(schema_location, &message_name)?);
-
-            Ok(parser)
-        }
-        SourceFormat::DebeziumJson => {
-            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(DebeziumJsonParser {});
-            Ok(parser)
-        }
-        _ => Err(RwError::from(InternalError(
-            "format not support".to_string(),
-        ))),
-    }?;
-
-    Ok(parser)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -359,7 +325,7 @@ mod tests {
         // init
         let table_id = TableId::default();
         let format = SourceFormat::Json;
-        let parser = Arc::new(JSONParser {});
+        let parser = Arc::new(SourceParserImpl::Json(JSONParser {}));
 
         let config = SourceConfig::Kafka(HighLevelKafkaSourceConfig {
             bootstrap_servers: KAFKA_BOOTSTRAP_SERVERS_KEY

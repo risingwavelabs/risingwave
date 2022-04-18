@@ -13,15 +13,18 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 pub use debezium::*;
 pub use json_parser::*;
 pub use protobuf_parser::*;
 use risingwave_common::array::Op;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_connector::Properties;
 
-use crate::SourceColumnDesc;
+use crate::{SourceColumnDesc, SourceFormat};
 
 mod common;
 mod debezium;
@@ -41,4 +44,44 @@ pub struct Event {
 pub trait SourceParser: Send + Sync + Debug + 'static {
     /// parse needs to be a member method because some format like Protobuf needs to be pre-compiled
     fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event>;
+}
+
+#[derive(Debug)]
+pub enum SourceParserImpl {
+    Json(JSONParser),
+    Protobuf(ProtobufParser),
+    DebeziumJson(DebeziumJsonParser),
+}
+
+impl SourceParserImpl {
+    pub fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+        match self {
+            Self::Json(parser) => parser.parse(payload, columns),
+            Self::Protobuf(parser) => parser.parse(payload, columns),
+            Self::DebeziumJson(parser) => parser.parse(payload, columns),
+        }
+    }
+
+    pub fn create(
+        format: &SourceFormat,
+        properties: &Properties,
+        schema_location: &str,
+    ) -> Result<Arc<Self>> {
+        const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+
+        let parser = match format {
+            SourceFormat::Json => SourceParserImpl::Json(JSONParser {}),
+            SourceFormat::Protobuf => {
+                let message_name = properties.get(PROTOBUF_MESSAGE_KEY)?;
+                SourceParserImpl::Protobuf(ProtobufParser::new(schema_location, &message_name)?)
+            }
+            SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser {}),
+            _ => {
+                return Err(RwError::from(InternalError(
+                    "format not support".to_string(),
+                )));
+            }
+        };
+        Ok(Arc::new(parser))
+    }
 }

@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 pub use actor::Actor;
 use async_trait::async_trait;
+pub use barrier_align::*;
 pub use batch_query::*;
 pub use chain::*;
 pub use debug::*;
@@ -56,7 +57,7 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
-use crate::executor_v2::LookupExecutorBuilder;
+use crate::executor_v2::{LookupExecutorBuilder, UnionExecutorBuilder};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
@@ -510,7 +511,8 @@ pub fn create_executor(
         Node::MaterializeNode => MaterializeExecutorBuilder,
         Node::FilterNode => FilterExecutorBuilder,
         Node::ArrangeNode => ArrangeExecutorBuilder,
-        Node::LookupNode => LookupExecutorBuilder
+        Node::LookupNode => LookupExecutorBuilder,
+        Node::UnionNode => UnionExecutorBuilder
     }?;
     Ok(real_executor)
 }

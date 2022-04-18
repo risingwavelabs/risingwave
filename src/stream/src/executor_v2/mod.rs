@@ -44,6 +44,7 @@ mod test_utils;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
+mod union;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
@@ -60,6 +61,7 @@ pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use union::{UnionExecutor, UnionExecutorBuilder};
 pub use v1_compat::{ExecutorV1AsV2, StreamExecutorV1};
 
 pub type BoxedExecutor = Box<dyn Executor>;
