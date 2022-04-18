@@ -29,7 +29,7 @@ use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
-use crate::{SourceConfig, SourceFormat, SourceImpl, SourceParserImpl};
+use crate::{SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
@@ -131,31 +131,28 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = Some(info.row_id_index as usize);
 
-        let config = match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
+        match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
             // TODO support more connector here
-            KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
-            KAFKA_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
-            other => Err(RwError::from(ProtocolError(format!(
-                "source type {} not supported",
-                other
-            )))),
-        }?;
-
-        let source = match config {
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(Properties::new(config.clone()), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
+            KINESIS_SOURCE | KAFKA_SOURCE => {}
+            other => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "source type {} not supported",
+                    other
+                ))));
             }
         };
+
+        let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
+            Arc::new(tokio::sync::Mutex::new(
+                new_connector(properties, None)
+                    .await
+                    .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+            ));
+        let source = SourceImpl::Connector(ConnectorSource {
+            parser: parser.clone(),
+            reader: split_reader,
+            column_descs: columns.clone(),
+        });
 
         let desc = SourceDesc {
             source: Arc::new(source),
