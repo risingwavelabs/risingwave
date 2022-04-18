@@ -231,17 +231,17 @@ impl Condition {
             .collect();
         let mut res: Vec<ExprImpl> = Vec::new();
         let mut visited: HashSet<ExprImpl> = HashSet::new();
-        for i in conjunctions {
-            if let Some(v) = try_get_bool_constant(&i) {
+        for expr in conjunctions {
+            if let Some(v) = try_get_bool_constant(&expr) {
                 if !v {
                     // if there is a `false` in conjunctions, the whole condition will be `false`
                     res.clear();
                     res.push(ExprImpl::literal_bool(false));
                     break;
                 }
-            } else if !i.has_subquery() {
+            } else if !expr.has_subquery() {
                 // extract_common_factor requires hash-able ExprImpl
-                let extracted_expr = extract_common_factor(i);
+                let extracted_expr = extract_common_factor(expr);
                 res.extend(
                     extracted_expr
                         .clone()
@@ -250,7 +250,7 @@ impl Condition {
                 );
                 visited.extend(extracted_expr);
             } else {
-                res.push(i);
+                res.push(expr);
             }
         }
         Self { conjunctions: res }

@@ -256,20 +256,24 @@ pub fn extract_common_factor(expr: ExprImpl) -> Vec<ExprImpl> {
         .into_iter()
         .map(|x| to_conjunctions(x).into_iter().collect())
         .collect();
-    let last = disjunctions.pop().unwrap();
-    let (greatest_common_divider, others): (Vec<_>, _) = last
-        .into_iter()
-        .partition(|x| disjunctions.iter().all(|y| y.contains(x)));
+    let mut last = disjunctions.pop().unwrap();
     // now greatest_common_factor == [C, D]
-    disjunctions.push(others);
-    for i in &mut disjunctions {
+    let greatest_common_divider: Vec<_> = last
+        .drain_filter(|factor| disjunctions.iter().all(|expr| expr.contains(factor)))
+        .collect();
+    disjunctions.push(last);
+    for disjunction in &mut disjunctions {
         // remove common factors
-        i.retain(|x| !greatest_common_divider.contains(x));
+        disjunction.retain(|factor| !greatest_common_divider.contains(factor));
     }
     // now disjunctions == [[A, B], [B], [E]]
     let remaining = merge_expr_by_binary(
-        disjunctions.into_iter().map(|x| {
-            merge_expr_by_binary(x.into_iter(), ExprType::And, ExprImpl::literal_bool(true))
+        disjunctions.into_iter().map(|conjunction| {
+            merge_expr_by_binary(
+                conjunction.into_iter(),
+                ExprType::And,
+                ExprImpl::literal_bool(true),
+            )
         }),
         ExprType::Or,
         ExprImpl::literal_bool(false),
