@@ -483,7 +483,7 @@ mod tests {
         assert_eq!(join.schema().fields().len(), 3);
         assert_eq!(join.schema().fields(), &fields[1..4]);
 
-        let expr = join.on.clone().to_expr();
+        let expr: ExprImpl = join.on.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         assert_eq_input_ref!(&call.inputs()[1], 2);
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(join.schema().fields()[0], fields[1]);
         assert_eq!(join.schema().fields()[1], fields[3]);
 
-        let expr = join.on.clone().to_expr();
+        let expr: ExprImpl = join.on.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         assert_eq_input_ref!(&call.inputs()[1], 1);
@@ -646,11 +646,17 @@ mod tests {
 
         // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
         let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(batch_filter.predicate().as_expr(), non_eq_cond);
+        assert_eq!(
+            ExprImpl::from(batch_filter.predicate().clone()),
+            non_eq_cond
+        );
 
         let input = batch_filter.input();
         let hash_join = input.as_batch_hash_join().unwrap();
-        assert_eq!(hash_join.eq_join_predicate().eq_cond().as_expr(), eq_cond);
+        assert_eq!(
+            ExprImpl::from(hash_join.eq_join_predicate().eq_cond()),
+            eq_cond
+        );
     }
 
     /// Convert

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use super::column::Column;
+use super::Row;
 use crate::array::{Op, StreamChunk};
-use crate::types::DatumRef;
+use crate::types::{DatumRef, ToOwnedDatum};
 
 impl StreamChunk {
     pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
@@ -98,6 +99,10 @@ impl<'a> RowRef<'a> {
             columns: self.chunk.columns().iter(),
             row_idx: self.idx,
         }
+    }
+
+    pub fn to_owned_row(&self) -> Row {
+        Row(self.values().map(ToOwnedDatum::to_owned_datum).collect())
     }
 }
 

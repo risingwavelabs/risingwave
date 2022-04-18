@@ -23,7 +23,7 @@ use rdkafka::{Offset, TopicPartitionList};
 use crate::base::SplitEnumerator;
 use crate::kafka::split::KafkaSplit;
 use crate::kafka::{
-    KAFKA_CONFIG_BROKER_KEY, KAFKA_CONFIG_SCAN_STARTUP_MODE, KAFKA_CONFIG_TIME_OFFSET,
+    KAFKA_CONFIG_BROKERS_KEY, KAFKA_CONFIG_SCAN_STARTUP_MODE, KAFKA_CONFIG_TIME_OFFSET,
     KAFKA_CONFIG_TOPIC_KEY, KAFKA_SYNC_CALL_TIMEOUT,
 };
 use crate::utils::AnyhowProperties;
@@ -49,7 +49,7 @@ pub struct KafkaSplitEnumerator {
 
 impl KafkaSplitEnumerator {
     pub fn new(properties: &AnyhowProperties) -> anyhow::Result<KafkaSplitEnumerator> {
-        let broker_address = properties.get_kafka(KAFKA_CONFIG_BROKER_KEY)?;
+        let broker_address = properties.get_kafka(KAFKA_CONFIG_BROKERS_KEY)?;
         let topic = properties.get_kafka(KAFKA_CONFIG_TOPIC_KEY)?;
 
         let mut scan_start_offset = match properties

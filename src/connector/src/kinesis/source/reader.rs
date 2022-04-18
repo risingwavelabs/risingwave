@@ -29,6 +29,7 @@ use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::Properties;
 
 pub struct KinesisSplitReader {
     client: kinesis_client,
@@ -110,10 +111,7 @@ impl SourceReader for KinesisSplitReader {
     }
 
     /// For Kinesis, state identifier is split_id, stream_name is never changed
-    async fn new(
-        config: std::collections::HashMap<String, String>,
-        state: Option<crate::ConnectorState>,
-    ) -> Result<Self>
+    async fn new(config: Properties, state: Option<crate::ConnectorState>) -> Result<Self>
     where
         Self: Sized,
     {

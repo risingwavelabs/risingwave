@@ -404,7 +404,7 @@ mod tests {
             64 << 20,
             64 << 20,
         ));
-        let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+        let vm = Arc::new(LocalVersionManager::new());
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(

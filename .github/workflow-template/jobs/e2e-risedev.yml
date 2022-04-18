@@ -98,7 +98,7 @@ jobs:
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
-          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
 
@@ -109,15 +109,6 @@ jobs:
         timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-
-      - name: e2e test streaming 3-node w/o cache
-        timeout-minutes: 4
-        run: |
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster

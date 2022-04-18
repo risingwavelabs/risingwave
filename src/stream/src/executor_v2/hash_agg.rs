@@ -24,15 +24,15 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::HashKey;
+use risingwave_common::hash::{HashCode, HashKey};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
-use crate::executor::{
-    agg_input_arrays, pk_input_arrays, AggCall, AggState, PkDataTypes, PkIndicesRef,
-};
-use crate::executor_v2::agg::{
-    generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
+use crate::executor::{pk_input_arrays, PkDataTypes, PkIndicesRef};
+use crate::executor_v2::aggregation::{
+    agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggExecutor,
+    AggExecutorWrapper, AggState,
 };
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::PkIndices;
@@ -124,19 +124,21 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
         })
     }
 
-    /// Get unique keys and visibility map of each key in a batch.
+    /// Get unique keys, hash codes and visibility map of each key in a batch.
     ///
     /// The returned order is the same as how we get distinct final columns from original columns.
     ///
     /// `keys` are Hash Keys of all the rows
+    /// `key_hash_codes` are hash codes of the deserialized `keys`
     /// `visibility`, leave invisible ones out of aggregation
-    /// `state_entries`, the current state to check whether a key has existed or not
     fn get_unique_keys(
         &self,
         keys: Vec<K>,
+        key_hash_codes: Vec<HashCode>,
         visibility: &Option<Bitmap>,
-    ) -> Result<Vec<(K, Bitmap)>> {
+    ) -> Result<Vec<(K, HashCode, Bitmap)>> {
         let total_num_rows = keys.len();
+        assert_eq!(key_hash_codes.len(), total_num_rows);
         // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
         // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the
         // `input` The visibility map of each hash key will be passed into
@@ -145,26 +147,27 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
 
         // Give all the unique keys an order and iterate them later,
         // the order is the same as how we get distinct final columns from original columns.
-        let mut unique_keys = Vec::new();
+        let mut unique_key_and_hash_codes = Vec::new();
 
-        for (row_idx, key) in keys.iter().enumerate() {
+        for (row_idx, (key, hash_code)) in keys.iter().zip_eq(key_hash_codes.iter()).enumerate() {
             // if the visibility map has already shadowed this row,
             // then we pass
             if let Some(vis_map) = visibility && !vis_map.is_set(row_idx).map_err(StreamExecutorError::eval_error)? {
                 continue;
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
-                unique_keys.push(key);
+                unique_key_and_hash_codes.push((key, hash_code));
                 vec![false; total_num_rows]
             });
             vis_map[row_idx] = true;
         }
 
-        let result = unique_keys
+        let result = unique_key_and_hash_codes
             .into_iter()
-            .map(|key| {
+            .map(|(key, hash_code)| {
                 (
                     key.clone(),
+                    hash_code.clone(),
                     key_to_vis_maps.remove(key).unwrap().try_into().unwrap(),
                 )
             })
@@ -184,14 +187,19 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
 impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()> {
         let (data_chunk, ops) = chunk.into_parts();
-        let keys =
-            K::build(&self.key_indices, &data_chunk).map_err(StreamExecutorError::eval_error)?;
+
+        // Compute hash code here before serializing keys to avoid duplicate hash code computation.
+        let hash_codes = data_chunk
+            .get_hash_values(&self.key_indices, CRC32FastBuilder)
+            .map_err(StreamExecutorError::eval_error)?;
+        let keys = K::build_from_hash_code(&self.key_indices, &data_chunk, hash_codes.clone())
+            .map_err(StreamExecutorError::eval_error)?;
         let (columns, visibility) = data_chunk.into_parts();
 
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
         let unique_keys = self
-            .get_unique_keys(keys, &visibility)
+            .get_unique_keys(keys, hash_codes, &visibility)
             .map_err(StreamExecutorError::eval_error)?;
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -216,7 +224,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
 
         let key_data_types = &self.schema.data_types()[..self.key_indices.len()];
         let mut futures = vec![];
-        for (key, vis_map) in unique_keys {
+        for (key, hash_code, vis_map) in unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = self.state_map.put(key.to_owned(), None);
 
@@ -242,6 +250,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
                                 &self.keyspace,
                                 input_pk_data_types.clone(),
                                 epoch,
+                                Some(hash_code),
                             )
                             .await?,
                         ),
@@ -385,7 +394,7 @@ mod tests {
     use risingwave_expr::expr::*;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::{AggArgs, AggCall};
+    use crate::executor_v2::aggregation::{AggArgs, AggCall};
     use crate::executor_v2::test_utils::*;
     use crate::executor_v2::{Executor, HashAggExecutor, Message, PkIndices};
     use crate::row_nonnull;

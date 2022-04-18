@@ -36,6 +36,7 @@ use tokio::task::JoinHandle;
 
 use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
+use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
@@ -391,68 +392,62 @@ impl LocalStreamManagerCore {
     fn create_dispatcher(
         &mut self,
         input: Box<dyn Executor>,
-        dispatcher: &stream_plan::Dispatcher,
+        dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
-        let outputs = dispatcher
-            .downstream_actor_id
-            .iter()
-            .map(|down_id| {
-                let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                new_output(&self.context, downstream_addr, actor_id, down_id)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut dispatcher_impls = vec![];
+        for dispatcher in dispatchers {
+            let outputs = dispatcher
+                .downstream_actor_id
+                .iter()
+                .map(|down_id| {
+                    let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
+                    new_output(&self.context, downstream_addr, actor_id, down_id)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            use stream_plan::DispatcherType::*;
+            let dispatcher_impl = match dispatcher.get_type()? {
+                Hash => {
+                    assert!(!outputs.is_empty());
+                    let column_indices = dispatcher
+                        .column_indices
+                        .iter()
+                        .map(|i| *i as usize)
+                        .collect();
+                    let hash_mapping = dispatcher
+                        .hash_mapping
+                        .clone()
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(
+                                "hash dispatcher doesn't have consistent hash mapping".to_string(),
+                            ))
+                        })?
+                        .hash_mapping;
 
-        use stream_plan::DispatcherType::*;
-        let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
-            Hash => {
-                assert!(!outputs.is_empty());
-                let column_indices = dispatcher
-                    .column_indices
-                    .iter()
-                    .map(|i| *i as usize)
-                    .collect();
-                let hash_mapping = dispatcher
-                    .hash_mapping
-                    .clone()
-                    .ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(
-                            "hash dispatcher doesn't have consistent hash mapping".to_string(),
-                        ))
-                    })?
-                    .hash_mapping;
-                Box::new(DispatchExecutor::new(
-                    input,
                     DispatcherImpl::Hash(HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),
                         outputs,
                         column_indices,
                         hash_mapping,
-                    )),
-                    actor_id,
-                    self.context.clone(),
-                ))
-            }
-            Broadcast => Box::new(DispatchExecutor::new(
-                input,
-                DispatcherImpl::Broadcast(BroadcastDispatcher::new(outputs)),
-                actor_id,
-                self.context.clone(),
-            )),
-            Simple | NoShuffle => {
-                assert_eq!(outputs.len(), 1);
-                let output = outputs.into_iter().next().unwrap();
-                Box::new(DispatchExecutor::new(
-                    input,
-                    DispatcherImpl::Simple(SimpleDispatcher::new(output)),
-                    actor_id,
-                    self.context.clone(),
-                ))
-            }
-            Invalid => unreachable!(),
-        };
-        Ok(dispatcher)
+                    ))
+                }
+                Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(outputs)),
+                Simple | NoShuffle => {
+                    assert_eq!(outputs.len(), 1);
+                    let output = outputs.into_iter().next().unwrap();
+                    DispatcherImpl::Simple(SimpleDispatcher::new(output))
+                }
+                Invalid => unreachable!(),
+            };
+            dispatcher_impls.push(dispatcher_impl);
+        }
+        Ok(Box::new(DispatchExecutor::new(
+            input,
+            dispatcher_impls,
+            actor_id,
+            self.context.clone(),
+        )))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -661,16 +656,7 @@ impl LocalStreamManagerCore {
             let executor =
                 self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
 
-            let dispatchers = actor.get_dispatcher();
-            assert_eq!(
-                dispatchers.len(),
-                1,
-                "compute node currently only supports single dispatcher"
-            );
-            let dispatcher = self.create_dispatcher(executor, &dispatchers[0], actor_id)?;
-
-            trace!("build actor: {:#?}", &dispatcher);
-
+            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());
             self.handles.insert(
                 actor_id,

@@ -23,6 +23,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -34,7 +35,7 @@ use super::{
     HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use crate::executor::AggCall;
+use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::executor_v2::top_n::TopNExecutor;
 use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;
@@ -286,6 +287,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         _op_info: String,
         key_indices: Vec<usize>,
+        parallel_info: BatchParallelInfo,
     ) -> Self {
         let schema = table.schema().clone();
         let info = ExecutorInfo {
@@ -294,7 +296,13 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             identity: "BatchQuery".to_owned(),
         };
 
-        Self::new(table, Self::DEFAULT_BATCH_SIZE, info, key_indices)
+        Self::new(
+            table,
+            Self::DEFAULT_BATCH_SIZE,
+            info,
+            key_indices,
+            parallel_info,
+        )
     }
 }
 

@@ -14,12 +14,12 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::plan::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
@@ -38,7 +38,7 @@ use crate::stream::graph::{
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
-    fragment_graph: StreamFragmentGraph,
+    pub(super) fragment_graph: StreamFragmentGraph,
 
     /// stream graph builder, to build streaming DAG.
     stream_graph: StreamGraphBuilder<S>,
@@ -61,6 +61,9 @@ pub struct StreamFragmenter<S> {
     /// when converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
+
+    // TODO: remove this when we deprecate Java frontend.
+    is_legacy_frontend: bool,
 }
 
 impl<S> StreamFragmenter<S>
@@ -71,6 +74,7 @@ where
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hash_mapping: Vec<ParallelUnitId>,
+        is_legacy_frontend: bool,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
@@ -81,6 +85,7 @@ where
             next_local_actor_id: 0,
             next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
+            is_legacy_frontend,
         }
     }
 
@@ -208,14 +213,18 @@ where
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(&mut self, stream_node: StreamNode) -> Result<()> {
         let stream_node = self.rewrite_stream_node(stream_node)?;
-        self.build_and_add_fragment(&stream_node)?;
+        self.build_and_add_fragment(stream_node)?;
         Ok(())
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    fn build_and_add_fragment(&mut self, stream_node: &StreamNode) -> Result<StreamFragment> {
-        let mut fragment = self.new_stream_fragment(stream_node.clone());
-        self.build_fragment(&mut fragment, stream_node)?;
+    pub(super) fn build_and_add_fragment(
+        &mut self,
+        stream_node: StreamNode,
+    ) -> Result<StreamFragment> {
+        let mut fragment = self.new_stream_fragment();
+        let node = self.build_fragment(&mut fragment, stream_node)?;
+        fragment.seal_node(node);
         self.fragment_graph.add_fragment(fragment.clone());
         Ok(fragment)
     }
@@ -226,8 +235,8 @@ where
     fn build_fragment(
         &mut self,
         current_fragment: &mut StreamFragment,
-        stream_node: &StreamNode,
-    ) -> Result<()> {
+        mut stream_node: StreamNode,
+    ) -> Result<StreamNode> {
         // Update current fragment based on the node we're visiting.
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
@@ -237,51 +246,79 @@ where
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
 
-            // TODO: Force Chain to be singleton as a workaround. Remove this if parallel Chain is
-            // supported
-            Node::ChainNode(_) => current_fragment.is_singleton = true,
+            // TODO: Remove this when we deprecate Java frontend.
+            Node::ChainNode(_) => current_fragment.is_singleton = self.is_legacy_frontend,
 
             _ => {}
         };
 
+        let inputs = std::mem::take(&mut stream_node.input);
+
         // Visit plan children.
-        for child_node in stream_node.get_input() {
-            match child_node.get_node()? {
-                // Exchange node indicates a new child fragment.
-                Node::ExchangeNode(exchange_node) => {
-                    let child_fragment = self.build_and_add_fragment(child_node)?;
-                    self.fragment_graph.add_edge(
-                        child_fragment.fragment_id,
-                        current_fragment.fragment_id,
-                        StreamFragmentEdge {
-                            dispatch_strategy: exchange_node.get_strategy()?.clone(),
-                            same_worker_node: false,
-                        },
-                    );
-
-                    let is_simple_dispatcher =
-                        exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
-                    if is_simple_dispatcher {
-                        current_fragment.is_singleton = true;
+        let inputs = inputs
+            .into_iter()
+            .map(|mut child_node| -> Result<StreamNode> {
+                match child_node.get_node()? {
+                    Node::ExchangeNode(_) if child_node.input.is_empty() => {
+                        // When exchange node is generated when doing rewrites, it could be having
+                        // zero input. In this case, we won't recursively
+                        // visit its children.
+                        Ok(child_node)
                     }
-                }
+                    // Exchange node indicates a new child fragment.
+                    Node::ExchangeNode(exchange_node) => {
+                        let exchange_node = exchange_node.clone();
 
-                // For other children, visit recursively.
-                _ => {
-                    self.build_fragment(current_fragment, child_node)?;
-                }
-            };
-        }
+                        assert_eq!(child_node.input.len(), 1);
+                        let child_fragment =
+                            self.build_and_add_fragment(child_node.input.remove(0))?;
+                        self.fragment_graph.add_edge(
+                            child_fragment.fragment_id,
+                            current_fragment.fragment_id,
+                            StreamFragmentEdge {
+                                dispatch_strategy: exchange_node.get_strategy()?.clone(),
+                                same_worker_node: false,
+                                link_id: child_node.operator_id,
+                            },
+                        );
 
-        Ok(())
+                        let is_simple_dispatcher =
+                            exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
+                        if is_simple_dispatcher {
+                            current_fragment.is_singleton = true;
+                        }
+
+                        Ok(child_node)
+                    }
+
+                    // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+                    // with only equal conditions
+                    Node::HashJoinNode(hash_join_node)
+                        if hash_join_node.get_join_type()? == JoinType::Inner
+                            && hash_join_node.condition.is_none() =>
+                    {
+                        const ENABLE_DELTA_JOIN: bool = false;
+                        if ENABLE_DELTA_JOIN {
+                            self.build_delta_join(current_fragment, child_node)
+                        } else {
+                            self.build_fragment(current_fragment, child_node)
+                        }
+                    }
+
+                    // For other children, visit recursively.
+                    _ => self.build_fragment(current_fragment, child_node),
+                }
+            })
+            .try_collect()?;
+
+        stream_node.input = inputs;
+
+        Ok(stream_node)
     }
 
     /// Create a new stream fragment with given node with generating a fragment id.
-    fn new_stream_fragment(&mut self, node: StreamNode) -> StreamFragment {
-        let fragment = StreamFragment::new(
-            LocalFragmentId::Local(self.next_local_fragment_id),
-            Arc::new(node),
-        );
+    fn new_stream_fragment(&mut self) -> StreamFragment {
+        let fragment = StreamFragment::new(LocalFragmentId::Local(self.next_local_fragment_id));
 
         self.next_local_fragment_id += 1;
 
@@ -297,7 +334,7 @@ where
     }
 
     /// Generate an operator id
-    fn gen_operator_id(&mut self) -> u32 {
+    pub(super) fn gen_operator_id(&mut self) -> u32 {
         self.next_operator_id -= 1;
         self.next_operator_id
     }
@@ -315,112 +352,93 @@ where
             self.hash_mapping.iter().unique().count() as u32
         };
 
-        let node = &current_fragment.node;
+        let node = current_fragment.get_node();
         let actor_ids = self
             .gen_actor_ids(parallel_degree)
             .into_iter()
             .map(LocalActorId::Local)
             .collect_vec();
 
-        // TODO: in the future, there might be multiple dispatchers and multiple set of downstream
-        // actors.
-        let downstream_fragments = self
-            .fragment_graph
-            .get_downstreams(fragment_id)
-            .iter()
-            .map(|(id, _)| *id)
-            .collect_vec();
-
-        let downstream_actors;
-        let exchange_node_id;
-        let dispatcher;
-
-        match downstream_fragments.as_slice() {
-            [] => {
-                downstream_actors = vec![];
-                exchange_node_id = None;
-                dispatcher = Dispatcher {
-                    r#type: DispatcherType::Broadcast as i32,
-                    ..Default::default()
-                };
-            }
-            [fragment] => {
-                downstream_actors = self
-                    .fragment_actors
-                    .get(fragment)
-                    .expect("downstream fragment not processed yet")
-                    .clone();
-
-                dispatcher = match node.get_node()? {
-                    Node::ExchangeNode(exchange_node) => {
-                        exchange_node_id = Some(node.operator_id);
-                        let strategy = exchange_node.get_strategy()?;
-                        Dispatcher {
-                            r#type: strategy.r#type,
-                            column_indices: strategy.column_indices.clone(),
-                            ..Default::default()
-                        }
-                    }
-                    _ => panic!("expect exchange node or sink node at the top of the plan"),
-                };
-            }
-            _ => todo!("there should not be multiple downstreams in plan"),
-        };
-
         for id in &actor_ids {
-            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
+            let actor_builder =
+                StreamActorBuilder::new(*id, fragment_id, node.clone(), parallel_degree);
             self.stream_graph.add_actor(actor_builder);
         }
 
-        let streaming_hash_mapping;
+        for (downstream_fragment_id, dispatch_edge) in
+            self.fragment_graph.get_downstreams(fragment_id).iter()
+        {
+            let downstream_actors = self
+                .fragment_actors
+                .get(downstream_fragment_id)
+                .expect("downstream fragment not processed yet")
+                .clone();
 
-        // Construct a consistent hash mapping of actors based on that of parallel units. Set
-        // the new mapping into hash dispatchers.
-        let dispatcher = if dispatcher.r#type == DispatcherType::Hash as i32 {
-            // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as the
-            // number of its downstream actors. However, since the frontend optimizer is still
-            // WIP, there exists some unoptimized situation where a hash dispatcher has ONLY
-            // ONE downstream actor, which makes it behave like a simple dispatcher. As an
-            // expedient, we specially compute the consistent hash mapping here. The `if`
-            // branch could be removed after the optimizer has been fully implemented.
+            match dispatch_edge.dispatch_strategy.get_type()? {
+                // Construct a consistent hash mapping of actors based on that of parallel units.
+                // Set the new mapping into hash dispatchers.
+                DispatcherType::Hash => {
+                    // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as
+                    // the number of its downstream actors. However, since the
+                    // frontend optimizer is still WIP, there exists some
+                    // unoptimized situation where a hash dispatcher has ONLY
+                    // ONE downstream actor, which makes it behave like a simple dispatcher. As an
+                    // expedient, we specially compute the consistent hash mapping here. The `if`
+                    // branch could be removed after the optimizer has been fully implemented.
 
-            streaming_hash_mapping = if downstream_actors.len() == 1 {
-                Some(vec![downstream_actors[0]; self.hash_mapping.len()])
-            } else {
-                let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
-                assert_eq!(downstream_actors.len(), hash_parallel_units.len());
-                let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
-                    .into_iter()
-                    .zip_eq(downstream_actors.iter().copied())
-                    .collect();
-                Some(
-                    self.hash_mapping
-                        .iter()
-                        .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
-                        .collect_vec(),
-                )
-            };
+                    let streaming_hash_mapping = if downstream_actors.len() == 1 {
+                        Some(vec![downstream_actors[0]; self.hash_mapping.len()])
+                    } else {
+                        let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
+                        assert_eq!(downstream_actors.len(), hash_parallel_units.len());
+                        let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
+                            .into_iter()
+                            .zip_eq(downstream_actors.iter().copied())
+                            .collect();
+                        Some(
+                            self.hash_mapping
+                                .iter()
+                                .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
+                                .collect_vec(),
+                        )
+                    };
 
-            Dispatcher {
-                r#type: DispatcherType::Hash.into(),
-                column_indices: dispatcher.column_indices,
-                hash_mapping: None,
-                downstream_actor_id: vec![],
+                    let dispatcher = Dispatcher {
+                        r#type: DispatcherType::Hash.into(),
+                        column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
+                        hash_mapping: None,
+                        downstream_actor_id: vec![],
+                    };
+
+                    self.stream_graph.add_link(
+                        &actor_ids,
+                        &downstream_actors,
+                        dispatch_edge.link_id,
+                        dispatcher,
+                        dispatch_edge.same_worker_node,
+                        streaming_hash_mapping,
+                    );
+                }
+
+                ty @ (DispatcherType::Simple
+                | DispatcherType::Broadcast
+                | DispatcherType::NoShuffle) => {
+                    self.stream_graph.add_link(
+                        &actor_ids,
+                        &downstream_actors,
+                        dispatch_edge.link_id,
+                        Dispatcher {
+                            r#type: ty.into(),
+                            column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
+                            hash_mapping: None,
+                            downstream_actor_id: vec![],
+                        },
+                        dispatch_edge.same_worker_node,
+                        None,
+                    );
+                }
+                DispatcherType::Invalid => unreachable!(),
             }
-        } else {
-            streaming_hash_mapping = None;
-
-            dispatcher
-        };
-
-        if !downstream_actors.is_empty() {
-            self.stream_graph.add_link(
-                &actor_ids,
-                &downstream_actors,
-                exchange_node_id.unwrap(),
-                dispatcher,
-                streaming_hash_mapping,
-            );
         }
 
         let ret = self.fragment_actors.insert(fragment_id, actor_ids);

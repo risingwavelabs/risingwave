@@ -19,13 +19,15 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 pub use value::*;
 
-use super::super::{AggCall, PkDataTypes};
+use super::super::PkDataTypes;
+use crate::executor_v2::aggregation::AggCall;
 
 mod extreme;
 mod extreme_serializer;
@@ -103,6 +105,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         row_count: Option<usize>,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
+        key_hash_code: Option<HashCode>,
     ) -> Result<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -118,6 +121,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
                         pk_data_types,
+                        key_hash_code,
                     )
                     .await?,
                 ))
