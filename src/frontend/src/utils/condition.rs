@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    extract_common_factor, fold_boolean_constant, push_down_not, to_conjunctions,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
@@ -240,15 +240,15 @@ impl Condition {
                     break;
                 }
             } else if !expr.has_subquery() {
-                // extract_common_factor requires hash-able ExprImpl
-                let extracted_expr = extract_common_factor(expr);
+                // factorization_expr requires hash-able ExprImpl
+                let results_of_factorization = factorization_expr(expr);
                 res.extend(
-                    extracted_expr
+                    results_of_factorization
                         .clone()
                         .into_iter()
                         .filter(|expr| !visited.contains(expr)),
                 );
-                visited.extend(extracted_expr);
+                visited.extend(results_of_factorization);
             } else {
                 res.push(expr);
             }

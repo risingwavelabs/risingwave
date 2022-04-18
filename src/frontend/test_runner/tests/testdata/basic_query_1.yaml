@@ -161,3 +161,11 @@
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: $0 AND Not($0) AND Not($1) AND $1 }
         BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    /* test boolean expression simplification */
+    create table t (v1 Boolean, v2 Boolean);
+    select * from t where (v1 AND v2) OR (v1 AND v2);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: $0 AND $1 AND (true:Boolean OR true:Boolean) }
+        BatchScan { table: t, columns: [v1, v2] }
