@@ -160,18 +160,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
 async fn build_stream_reader<S: StateStore>(
     source: Arc<SourceImpl>,
-    operator_id: u64,
+    _operator_id: u64,
     column_ids: Vec<ColumnId>,
     keyspace: Keyspace<S>,
 ) -> Result<Box<dyn StreamSourceReader>> {
     let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-        SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
-            HighLevelKafkaSourceReaderContext {
-                query_id: Some(format!("source-operator-{}", operator_id)),
-                bound_timestamp_ms: None,
-            },
-            column_ids,
-        )?),
         SourceImpl::TableV2(s) => Box::new(s.stream_reader(TableV2ReaderContext, column_ids)?),
         SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
             source_reader: s.clone(),
