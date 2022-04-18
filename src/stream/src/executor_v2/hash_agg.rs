@@ -29,7 +29,7 @@ use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{Executor, ExecutorInfo, StreamExecutorResult};
+use super::{Executor, StreamExecutorResult};
 use crate::executor::{pk_input_arrays, PkDataTypes, PkIndicesRef};
 use crate::executor_v2::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggState,
@@ -49,7 +49,21 @@ use crate::executor_v2::{BoxedMessageStream, Message, PkIndices};
 ///   through `modified_keys`, and produce a stream chunk based on the state changes.
 pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     input: Box<dyn Executor>,
-    info: ExecutorInfo,
+
+    extra: HashAggExecutorExtra<S>,
+
+    _phantom: PhantomData<K>,
+}
+
+struct HashAggExecutorExtra<S: StateStore> {
+    /// See [`Executor::schema`].
+    schema: Schema,
+
+    /// See [`Executor::pk_indices`].
+    pk_indices: PkIndices,
+
+    /// See [`Executor::identity`].
+    identity: String,
 
     /// Pk indices from input
     input_pk_indices: Vec<usize>,
@@ -66,8 +80,6 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
-
-    _phantom: PhantomData<K>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -76,15 +88,15 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.info.schema
+        &self.extra.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
-        &self.info.pk_indices
+        &self.extra.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.info.identity
+        &self.extra.identity
     }
 }
 
@@ -102,16 +114,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         Ok(Self {
             input,
-            info: ExecutorInfo {
+            extra: HashAggExecutorExtra {
                 schema,
                 pk_indices,
                 identity: format!("HashAggExecutor-{:X}", executor_id),
+                input_pk_indices: input_info.pk_indices,
+                input_schema: input_info.schema,
+                keyspace,
+                agg_calls,
+                key_indices,
             },
-            input_pk_indices: input_info.pk_indices,
-            input_schema: input_info.schema,
-            keyspace,
-            agg_calls,
-            key_indices,
             _phantom: PhantomData,
         })
     }
@@ -167,15 +179,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(result)
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn apply_chunk(
-        key_indices: &[usize],
-        agg_calls: &[AggCall],
-        input_pk_indices: &[usize],
-        input_schema: &Schema,
-        schema: &Schema,
+        &HashAggExecutorExtra::<S> {
+            ref key_indices,
+            ref agg_calls,
+            ref input_pk_indices,
+            ref input_schema,
+            ref keyspace,
+            ref schema,
+            ..
+        }: &HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
-        keyspace: &Keyspace<S>,
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
@@ -279,9 +293,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn flush_data(
-        key_indices: &[usize],
-        keyspace: &Keyspace<S>,
-        schema: &Schema,
+        &HashAggExecutorExtra::<S> {
+            ref key_indices,
+            ref keyspace,
+            ref schema,
+            ..
+        }: &HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         epoch: u64,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
@@ -364,16 +381,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
-        let HashAggExecutor {
-            input,
-            info,
-            input_pk_indices,
-            input_schema,
-            keyspace,
-            agg_calls,
-            key_indices,
-            ..
-        } = self;
+        let HashAggExecutor { input, extra, .. } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
         let mut state_map = EvictableHashMap::new(1 << 16);
@@ -391,30 +399,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(
-                        &key_indices,
-                        &agg_calls,
-                        &input_pk_indices,
-                        &input_schema,
-                        &info.schema,
-                        &mut state_map,
-                        &keyspace,
-                        chunk,
-                        epoch,
-                    )
-                    .await?;
+                    Self::apply_chunk(&extra, &mut state_map, chunk, epoch).await?;
                 }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;
-                    if let Some(chunk) = Self::flush_data(
-                        &key_indices,
-                        &keyspace,
-                        &info.schema,
-                        &mut state_map,
-                        epoch,
-                    )
-                    .await?
-                    {
+                    if let Some(chunk) = Self::flush_data(&extra, &mut state_map, epoch).await? {
                         assert_eq!(epoch, barrier.epoch.prev);
                         yield Message::Chunk(chunk);
                     }
