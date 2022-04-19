@@ -85,6 +85,10 @@ impl FilterExecutor2 {
                 return Err(InternalError("Filter can only receive bool array".to_string()).into());
             }
         }
+
+        if let Some(chunk) = data_chunk_builder.consume_all()? {
+            yield chunk;
+        }
     }
 }
 
@@ -162,17 +166,9 @@ mod tests {
             let col1 = res.column_at(0);
             let array = col1.array();
             let col1 = array.as_int32();
-            assert_eq!(col1.len(), 1);
+            assert_eq!(col1.len(), 2);
             assert_eq!(col1.value_at(0), Some(2));
-        }
-        let res = stream.next().await.unwrap();
-        assert_matches!(res, Ok(_));
-        if let Ok(res) = res {
-            let col1 = res.column_at(0);
-            let array = col1.array();
-            let col1 = array.as_int32();
-            assert_eq!(col1.len(), 1);
-            assert_eq!(col1.value_at(0), Some(3));
+            assert_eq!(col1.value_at(1), Some(3));
         }
         let res = stream.next().await;
         assert_matches!(res, None);
