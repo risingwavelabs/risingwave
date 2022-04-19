@@ -44,22 +44,22 @@ impl HummockSnapshotManager {
                 .await?;
             core_guard.is_outdated = false;
             core_guard.last_pinned = epoch;
-            core_guard.quote_number.insert(epoch, 1);
+            core_guard.reference_number.insert(epoch, 1);
         } else {
             let last_pinned = core_guard.last_pinned;
-            *core_guard.quote_number.get_mut(&last_pinned).unwrap() += 1;
+            *core_guard.reference_number.get_mut(&last_pinned).unwrap() += 1;
         }
         Ok(core_guard.last_pinned)
     }
 
     pub async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
         let mut core_guard = self.core.lock().await;
-        let quote_number = core_guard.quote_number.get_mut(&epoch);
-        if let Some(quote_number) = quote_number {
-            *quote_number -= 1;
-            if *quote_number == 0 {
+        let reference_number = core_guard.reference_number.get_mut(&epoch);
+        if let Some(reference_number) = reference_number {
+            *reference_number -= 1;
+            if *reference_number == 0 {
                 self.meta_client.unpin_snapshot(epoch).await?;
-                core_guard.quote_number.remove(&epoch);
+                core_guard.reference_number.remove(&epoch);
                 core_guard.is_outdated = epoch == core_guard.last_pinned;
             }
         }
@@ -79,12 +79,15 @@ impl HummockSnapshotManager {
 struct HummockSnapshotManagerCore {
     is_outdated: bool,
     last_pinned: u64,
-    quote_number: HashMap<u64, u32>,
+    /// Record the number of references of snapshot. Send an `unpin_snapshot` RPC when the number
+    /// drops to 0.
+    reference_number: HashMap<u64, u32>,
 }
 
 impl HummockSnapshotManagerCore {
     fn new() -> Self {
         Self {
+            // Initialize by setting `is_outdated` to `true`.
             is_outdated: true,
             ..Default::default()
         }
