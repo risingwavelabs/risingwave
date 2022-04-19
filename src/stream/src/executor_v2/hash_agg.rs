@@ -293,7 +293,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
-    #[try_stream(ok = Option<StreamChunk>, error = TracedStreamExecutorError)]
+    #[try_stream(ok = StreamChunk, error = TracedStreamExecutorError)]
     async fn flush_data<'a>(
         &HashAggExecutorExtra::<S> {
             ref key_indices,
@@ -327,7 +327,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if dirty_cnt == 0 {
             // Nothing to flush.
             assert!(write_batch.is_empty());
-            yield None;
+            return Ok(());
         } else {
             write_batch
                 .ingest(epoch)
@@ -370,7 +370,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let chunk = StreamChunk::new(new_ops, columns, None);
 
                 trace!("output_chunk: {:?}", &chunk);
-                yield Some(chunk);
+                yield chunk;
             }
 
             // evict cache to target capacity
@@ -411,11 +411,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     assert_eq!(epoch, barrier.epoch.prev);
 
                     #[for_await]
-                    for input in Self::flush_data(&extra, &mut state_map, epoch) {
-                        match input? {
-                            None => break,
-                            Some(chunk) => yield Message::Chunk(chunk),
-                        }
+                    for chunk in Self::flush_data(&extra, &mut state_map, epoch) {
+                        yield Message::Chunk(chunk?);
                     }
 
                     yield Message::Barrier(barrier);
