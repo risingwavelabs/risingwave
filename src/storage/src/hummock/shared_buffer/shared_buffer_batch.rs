@@ -25,6 +25,7 @@ use crate::storage_value::VALUE_META_SIZE;
 
 pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
+// TODO: Remove `pub(super)`.
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug)]
 pub struct SharedBufferBatch {
