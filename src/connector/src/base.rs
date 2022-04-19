@@ -38,25 +38,23 @@ const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
 const PULSAR_SOURCE: &str = "pulsar";
 
-pub trait SourceMessage {
-    fn payload(&self) -> Result<Option<&[u8]>>;
-    fn offset(&self) -> Result<Option<SourceOffset>>;
-    fn serialize(&self) -> Result<String>;
-}
-
+/// The message pumped from the external source service.
+/// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct InnerMessage {
+pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
     pub split_id: String,
 }
 
+/// The metadata of a split.
 pub trait SourceSplit: Sized {
     fn id(&self) -> String;
     fn to_string(&self) -> Result<String>;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
+/// The persistent state of the connector.
 #[derive(Debug, Clone)]
 pub struct ConnectorState {
     pub identifier: Bytes,
@@ -65,20 +63,23 @@ pub struct ConnectorState {
 }
 
 #[async_trait]
-pub trait SourceReader {
-    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
+pub trait SplitReader {
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+
+    /// `state` is used to recover from the formerly persisted state.
+    /// If the reader is newly created via CREATE SOURCE, the state will be none.
     async fn new(properties: Properties, state: Option<ConnectorState>) -> Result<Self>
     where
         Self: Sized;
 }
 
-pub enum SourceReaderImpl {
+pub enum SplitReaderImpl {
     Kafka(KafkaSplitReader),
     Kinesis(KinesisSplitReader),
 }
 
-impl SourceReaderImpl {
-    pub async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
+impl SplitReaderImpl {
+    pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         match self {
             Self::Kafka(r) => r.next().await,
             Self::Kinesis(r) => r.next().await,
@@ -98,6 +99,8 @@ impl SourceReaderImpl {
     }
 }
 
+/// `SplitEnumerator` fetches the split metadata from the external source service.
+/// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator {
     type Split: SourceSplit + Send + Sync;
