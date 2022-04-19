@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
@@ -50,14 +51,20 @@ impl MockConsumer {
     }
 }
 
-#[async_trait]
 impl StreamConsumer for MockConsumer {
-    async fn next(&mut self) -> Result<Option<Barrier>> {
-        match self.input.next().await? {
-            Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
-            Message::Barrier(barrier) => return Ok(Some(barrier)),
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+
+    fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        #[try_stream]
+        async move {
+            loop {
+                let msg = self.input.next().await?;
+                match msg {
+                    Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
+                    Message::Barrier(barrier) => yield barrier,
+                }
+            }
         }
-        Ok(None)
     }
 }
 
@@ -99,7 +106,7 @@ async fn test_merger_sum_aggr() {
         let consumer =
             SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
-        let actor = Actor::new(Box::new(consumer), 0, context);
+        let actor = Actor::new(consumer, 0, context);
         (actor, rx)
     };
 
@@ -136,7 +143,7 @@ async fn test_merger_sum_aggr() {
         ctx,
     );
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(Box::new(dispatcher), 0, context);
+    let actor = Actor::new(dispatcher, 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
@@ -182,7 +189,7 @@ async fn test_merger_sum_aggr() {
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(Box::new(consumer), 0, context);
+    let actor = Actor::new(consumer, 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     let mut epoch = 1;

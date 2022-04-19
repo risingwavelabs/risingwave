@@ -394,7 +394,7 @@ impl LocalStreamManagerCore {
         input: Box<dyn Executor>,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
-    ) -> Result<Box<dyn StreamConsumer>> {
+    ) -> Result<impl StreamConsumer> {
         // create downstream receivers
         let mut dispatcher_impls = vec![];
         for dispatcher in dispatchers {
@@ -442,12 +442,13 @@ impl LocalStreamManagerCore {
             };
             dispatcher_impls.push(dispatcher_impl);
         }
-        Ok(Box::new(DispatchExecutor::new(
+
+        Ok(DispatchExecutor::new(
             input,
             dispatcher_impls,
             actor_id,
             self.context.clone(),
-        )))
+        ))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.

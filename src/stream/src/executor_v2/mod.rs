@@ -123,7 +123,6 @@ pub trait Executor: Send + 'static {
     {
         let info = self.info();
         let stream = self.execute();
-        let stream = Box::pin(stream);
 
         StreamExecutorV1 {
             executor_v2: None,

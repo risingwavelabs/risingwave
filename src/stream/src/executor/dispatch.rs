@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
-use futures::SinkExt;
+use futures::{SinkExt, Stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
@@ -256,18 +257,23 @@ impl DispatchExecutor {
     }
 }
 
-#[async_trait]
 impl StreamConsumer for DispatchExecutor {
-    async fn next(&mut self) -> Result<Option<Barrier>> {
-        let msg = self.input.next().await?;
-        let barrier = if let Message::Barrier(ref barrier) = msg {
-            Some(barrier.clone())
-        } else {
-            None
-        };
-        self.dispatch(msg).await?;
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
 
-        Ok(barrier)
+    fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        #[try_stream]
+        async move {
+            loop {
+                let msg = self.input.next().await?;
+                let barrier = msg.as_barrier().cloned();
+
+                self.dispatch(msg).await?;
+
+                if let Some(barrier) = barrier {
+                    yield barrier;
+                }
+            }
+        }
     }
 }
 
@@ -341,6 +347,7 @@ pub trait DispatchFuture<'a> = Future<Output = Result<()>> + Send;
 pub trait Dispatcher: Debug + 'static {
     type DataFuture<'a>: DispatchFuture<'a>;
     type BarrierFuture<'a>: DispatchFuture<'a>;
+
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
 
@@ -710,17 +717,23 @@ mod sender_consumer {
         }
     }
 
-    #[async_trait]
     impl StreamConsumer for SenderConsumer {
-        async fn next(&mut self) -> Result<Option<Barrier>> {
-            let message = self.input.next().await?;
-            let barrier = if let Message::Barrier(ref barrier) = message {
-                Some(barrier.clone())
-            } else {
-                None
-            };
-            self.channel.send(message).await?;
-            Ok(barrier)
+        type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+
+        fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+            #[try_stream]
+            async move {
+                loop {
+                    let msg = self.input.next().await?;
+                    let barrier = msg.as_barrier().cloned();
+
+                    self.channel.send(msg).await?;
+
+                    if let Some(barrier) = barrier {
+                        yield barrier;
+                    }
+                }
+            }
         }
     }
 }
@@ -735,6 +748,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use futures::channel::mpsc::channel;
+    use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
@@ -917,12 +931,15 @@ mod tests {
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
-        let mut executor = Box::new(DispatchExecutor::new(
+        let executor = Box::new(DispatchExecutor::new(
             Box::new(input),
             vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
             actor_id,
             ctx.clone(),
-        ));
+        ))
+        .execute();
+        pin_mut!(executor);
+
         let mut updates1: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
 
         updates1.insert(
@@ -938,7 +955,7 @@ mod tests {
 
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
-        executor.next().await.unwrap();
+        executor.next().await.unwrap().unwrap();
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 3);
@@ -950,7 +967,7 @@ mod tests {
         let b2 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates2));
 
         tx.send(Message::Barrier(b2)).await.unwrap();
-        executor.next().await.unwrap();
+        executor.next().await.unwrap().unwrap();
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 1);
@@ -970,7 +987,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        executor.next().await.unwrap();
+        executor.next().await.unwrap().unwrap();
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 3);
