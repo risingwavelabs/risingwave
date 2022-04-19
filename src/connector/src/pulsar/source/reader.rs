@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use pulsar::{Consumer, Pulsar, TokioExecutor};
 
-use crate::base::{InnerMessage, SourceReader};
+use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::{PulsarOffset, PulsarSplit};
 use crate::Properties;
 
@@ -32,8 +32,8 @@ pub struct PulsarSplitReader {
 const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
 
 #[async_trait]
-impl SourceReader for PulsarSplitReader {
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<InnerMessage>>> {
+impl SplitReader for PulsarSplitReader {
+    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
         let mut stream = self
             .consumer
             .borrow_mut()
@@ -68,7 +68,7 @@ impl SourceReader for PulsarSplitReader {
                 break;
             }
 
-            ret.push(InnerMessage::from(msg));
+            ret.push(SourceMessage::from(msg));
         }
 
         Ok(Some(ret))

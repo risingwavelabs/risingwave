@@ -34,7 +34,7 @@ use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::{CollectResult, ComputeClientPool};
+use super::{unique_executor_id, unique_operator_id, CollectResult, ComputeClientPool};
 use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
@@ -487,10 +487,8 @@ impl LocalStreamManagerCore {
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
-
-        assert!(node.get_operator_id() <= u32::MAX as u64);
-        let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
-        let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
+        let executor_id = unique_executor_id(actor_id, node.operator_id);
+        let operator_id = unique_operator_id(fragment_id, node.operator_id);
 
         let executor_params = ExecutorParams {
             env: env.clone(),
@@ -502,9 +500,10 @@ impl LocalStreamManagerCore {
             actor_id,
             executor_stats: self.streaming_metrics.clone(),
         };
-        let executor = create_executor(executor_params, self, node, store);
+
+        let executor = create_executor(executor_params, self, node, store)?;
         let executor = Self::wrap_executor_for_debug(
-            executor?,
+            executor,
             actor_id,
             input_pos,
             self.streaming_metrics.clone(),

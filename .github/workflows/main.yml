@@ -205,16 +205,26 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt, clippy
       - name: Set up JDK 11
         uses: actions/setup-java@v2
         with:
           java-version: "11"
           distribution: "adopt"
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          profile: minimal
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
@@ -255,8 +265,8 @@ jobs:
           mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
-          ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
+          ~/cargo-make/makers link-all-in-one-binaries
       - name: e2e test, streaming, Rust frontend, 3 node
         timeout-minutes: 2
         run: |
@@ -311,16 +321,26 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt, clippy
       - name: Set up JDK 11
         uses: actions/setup-java@v2
         with:
           java-version: "11"
           distribution: "adopt"
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          profile: minimal
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
@@ -361,8 +381,8 @@ jobs:
           mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
-          ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
+          ~/cargo-make/makers link-all-in-one-binaries
       - name: e2e test, streaming, Rust frontend, 3 node
         timeout-minutes: 2
         run: |
@@ -435,6 +455,21 @@ jobs:
         run: |
           sudo apt-get update -yy -o Acquire::Retries=3
           sudo apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          profile: minimal
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
       - name: Download sqllogictest
         run: |
           wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
@@ -481,8 +516,8 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
         run: |
-          ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
+          ~/cargo-make/makers link-all-in-one-binaries
       - name: regress test batch 3-node
         timeout-minutes: 1
         run: |
@@ -499,6 +534,12 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
+      - name: e2e test w/ Rust frontend ci-3node, source with kafka
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-start ci-kafka
+          sqllogictest -p 4566 './e2e_test/source/**/*.slt'
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs

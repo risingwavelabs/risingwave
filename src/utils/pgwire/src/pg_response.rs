@@ -35,7 +35,7 @@ pub enum StatementType {
     DESCRIBE_TABLE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
-    DROP_STREAM,
+    DROP_SOURCE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
     ORDER_BY,
@@ -54,6 +54,7 @@ impl std::fmt::Display for StatementType {
     }
 }
 
+#[derive(Debug)]
 pub struct PgResponse {
     stmt_type: StatementType,
     row_cnt: i32,
