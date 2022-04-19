@@ -55,7 +55,6 @@ pub trait SourceSplit: Sized {
     fn id(&self) -> String;
     fn to_string(&self) -> Result<String>;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
-    fn get_type(&self) -> String;
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +117,11 @@ pub enum SplitImpl {
     Kinesis(kinesis::split::KinesisSplit),
 }
 
+const PULSAR_SPLIT_TYPE: &str = "pulsar";
+const S3_SPLIT_TYPE: &str = "s3";
+const KINESIS_SPLIT_TYPE: &str = "kinesis";
+const KAFKA_SPLIT_TYPE: &str = "kafka";
+
 impl SplitImpl {
     pub fn id(&self) -> String {
         match self {
@@ -137,21 +141,18 @@ impl SplitImpl {
 
     pub fn get_type(&self) -> String {
         match self {
-            SplitImpl::Kafka(k) => k.get_type(),
-            SplitImpl::Pulsar(p) => p.get_type(),
-            SplitImpl::Kinesis(k) => k.get_type(),
+            SplitImpl::Kafka(_) => KAFKA_SPLIT_TYPE,
+            SplitImpl::Pulsar(_) => PULSAR_SPLIT_TYPE,
+            SplitImpl::Kinesis(_) => PULSAR_SPLIT_TYPE,
         }
+        .to_string()
     }
 
     pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
         match split_type.as_str() {
-            kafka::KAFKA_SPLIT_TYPE => KafkaSplit::restore_from_bytes(bytes).map(SplitImpl::Kafka),
-            pulsar::PULSAR_SPLIT_TYPE => {
-                PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar)
-            }
-            kinesis::split::KINESIS_SPLIT_TYPE => {
-                KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis)
-            }
+            KAFKA_SPLIT_TYPE => KafkaSplit::restore_from_bytes(bytes).map(SplitImpl::Kafka),
+            PULSAR_SPLIT_TYPE => PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar),
+            KINESIS_SPLIT_TYPE => KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis),
             other => Err(anyhow!("split type {} not supported", other)),
         }
     }

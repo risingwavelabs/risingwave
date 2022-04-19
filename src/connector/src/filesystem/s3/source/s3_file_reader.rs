@@ -69,8 +69,6 @@ impl Default for S3File {
     }
 }
 
-const S3_SPLIT_TYPE: &str = "s3";
-
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct S3FileSplit {
     bucket: String,
@@ -132,10 +130,6 @@ impl SourceSplit for S3FileSplit {
 
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
         serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
-    }
-
-    fn get_type(&self) -> String {
-        S3_SPLIT_TYPE.to_string()
     }
 }
 
