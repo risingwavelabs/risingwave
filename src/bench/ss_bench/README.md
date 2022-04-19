@@ -81,9 +81,9 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
   - Size (MB) of shared buffer
   - Default: 256
 
-- `--shared-buffer-sync-parallelism`
+- `--shared-buffers-sync-parallelism`
   
-  - Sync Parallelism of shared buffer
+  - Sync Parallelism of shared buffers
   - Default: 2
 
 - `--bloom-false-positive`
