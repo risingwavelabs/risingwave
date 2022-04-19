@@ -80,6 +80,21 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
     - `crc32c`: default
     - `xxhash`
 
+- `--compact_level_after_write`
+  
+  - 0 represent do nothing because all files will be synced to L0
+  - Default: 0
+
+- `--meta_cache_capacity`
+  
+  - Capacity of meta cache
+  - Default: 64
+
+- `--block_cache_capacity_mb`
+  
+  - Capacity of block cache
+  - Default: 256
+  
 ## Operations
 
 ### Concurrency Number (`--concurrency-num`)
