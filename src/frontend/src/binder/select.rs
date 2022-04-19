@@ -102,20 +102,15 @@ impl Binder {
             .iter()
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
-                let mut field = match s.get_index() {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                match s.get_index() {
                     Some(index) => {
-                        let field: Field = (&self.context.columns[index].desc).into();
+                        let mut field: Field = (&self.context.columns[index].desc).into();
+                        field.name = name;
                         field
                     }
-                    None => Field {
-                        data_type: s.return_type(),
-                        name: "".to_string(),
-                        sub_fields: vec![],
-                        type_name: "".to_string(),
-                    },
-                };
-                field.name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                field
+                    None => Field::with_name(s.return_type(), name),
+                }
             })
             .collect_vec();
 
@@ -267,7 +262,6 @@ impl Binder {
             0,
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
         );
-
         Ok((
             column_desc
                 .field_descs
