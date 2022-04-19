@@ -202,8 +202,20 @@ impl PlanRoot {
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
             _ => panic!(),
         };
-        let stream_plan = Distribution::HashShard(stream_plan.pk_indices().to_vec())
-            .enforce_if_not_satisfies(stream_plan, Order::any());
+
+        let dist_satisfy_pk = match stream_plan.distribution() {
+            Distribution::Single => true,
+            Distribution::HashShard(dist_keys) => stream_plan
+                .pk_indices()
+                .iter()
+                .all(|x| dist_keys.contains(x)),
+            _ => false,
+        };
+        let stream_plan = match dist_satisfy_pk {
+            false => Distribution::HashShard(stream_plan.pk_indices().to_vec())
+                .enforce(stream_plan, Order::any()),
+            true => stream_plan,
+        };
         // Ignore the required_dist and required_order, as they are provided by user now.
         // TODO: need more thinking and refactor.
 
