@@ -32,9 +32,6 @@ pub use compute_client_pool::*;
 pub use env::*;
 pub use stream_manager::*;
 
-#[cfg(test)]
-mod tests;
-
 /// Default capacity of channel if two actors are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
@@ -179,4 +176,16 @@ impl SharedContext {
     pub fn get_channel_pair_number(&self) -> u32 {
         self.lock_channel_map().len() as u32
     }
+}
+
+/// Generate a globally unique executor id. Useful when constructing per-actor keyspace
+pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((actor_id as u64) << 32) + operator_id
+}
+
+/// Generate a globally unique operator id. Useful when constructing per-fragment keyspace.
+pub fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((fragment_id as u64) << 32) + operator_id
 }

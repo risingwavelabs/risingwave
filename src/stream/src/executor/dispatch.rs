@@ -22,7 +22,7 @@ use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::hash::VIRTUAL_KEY_COUNT;
+use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
@@ -117,7 +117,7 @@ impl Output for RemoteOutput {
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
     input: Box<dyn Executor>,
-    inner: DispatcherImpl,
+    inner: Vec<DispatcherImpl>,
     actor_id: u32,
     context: Arc<SharedContext>,
 }
@@ -150,7 +150,7 @@ impl std::fmt::Debug for DispatchExecutor {
 impl DispatchExecutor {
     pub fn new(
         input: Box<dyn Executor>,
-        inner: DispatcherImpl,
+        inner: Vec<DispatcherImpl>,
         actor_id: u32,
         context: Arc<SharedContext>,
     ) -> Self {
@@ -162,15 +162,33 @@ impl DispatchExecutor {
         }
     }
 
+    fn single_inner_mut(&mut self) -> &mut DispatcherImpl {
+        assert_eq!(
+            self.inner.len(),
+            1,
+            "only support mutation on one-dispatcher actors"
+        );
+        &mut self.inner[0]
+    }
+
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
-                self.inner.dispatch_data(chunk).await?;
+                if self.inner.len() == 1 {
+                    // special clone optimization when there is only one downstream dispatcher
+                    self.single_inner_mut().dispatch_data(chunk).await?;
+                } else {
+                    for dispatcher in &mut self.inner {
+                        dispatcher.dispatch_data(chunk.clone()).await?;
+                    }
+                }
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
-                self.inner.dispatch_barrier(barrier).await?;
+                for dispatcher in &mut self.inner {
+                    dispatcher.dispatch_barrier(barrier.clone()).await?;
+                }
                 self.post_mutate_outputs(&mutation).await?;
             }
         };
@@ -200,7 +218,7 @@ impl DispatchExecutor {
                             &down_id,
                         )?);
                     }
-                    self.inner.set_outputs(new_outputs)
+                    self.single_inner_mut().set_outputs(new_outputs)
                 }
             }
             Some(Mutation::AddOutput(adds)) => {
@@ -216,7 +234,7 @@ impl DispatchExecutor {
                             &down_id,
                         )?);
                     }
-                    self.inner.add_outputs(outputs_to_add);
+                    self.single_inner_mut().add_outputs(outputs_to_add);
                 }
             }
             _ => {}
@@ -227,15 +245,11 @@ impl DispatchExecutor {
 
     /// For `Stop`, update the outputs after we dispatch the barrier.
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
-        #[allow(clippy::single_match)]
-        match mutation.as_deref() {
-            Some(Mutation::Stop(stops)) => {
-                // Remove outputs only if this actor itself is not to be stopped.
-                if !stops.contains(&self.actor_id) {
-                    self.inner.remove_outputs(stops);
-                }
+        if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
+            // Remove outputs only if this actor itself is not to be stopped.
+            if !stops.contains(&self.actor_id) {
+                self.single_inner_mut().remove_outputs(stops);
             }
-            _ => {}
         }
 
         Ok(())
@@ -396,7 +410,7 @@ pub struct HashDataDispatcher {
     fragment_ids: Vec<u32>,
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
-    /// Mapping from virtual key to actor id, used for hash data dispatcher to dispatch tasks to
+    /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
     hash_mapping: Vec<ActorId>,
 }
@@ -460,7 +474,7 @@ impl Dispatcher for HashDataDispatcher {
                 .get_hash_values(&self.keys, hash_builder)
                 .unwrap()
                 .iter()
-                .map(|hash| *hash as usize % VIRTUAL_KEY_COUNT)
+                .map(|hash| *hash as usize % VIRTUAL_NODE_COUNT)
                 .collect::<Vec<_>>();
 
             let (ops, columns, visibility) = chunk.into_inner();
@@ -727,7 +741,7 @@ mod tests {
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::Schema;
     use risingwave_common::column_nonnull;
-    use risingwave_common::hash::VIRTUAL_KEY_COUNT;
+    use risingwave_common::hash::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
@@ -778,9 +792,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
+        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
@@ -905,7 +919,7 @@ mod tests {
 
         let mut executor = Box::new(DispatchExecutor::new(
             Box::new(input),
-            DispatcherImpl::Simple(SimpleDispatcher::new(output)),
+            vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
             actor_id,
             ctx.clone(),
         ));
@@ -980,9 +994,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
+        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
@@ -1015,7 +1029,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VIRTUAL_KEY_COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VIRTUAL_NODE_COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val)).unwrap();
             }

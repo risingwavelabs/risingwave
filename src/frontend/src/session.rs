@@ -27,7 +27,6 @@ use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
@@ -43,7 +42,7 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::QueryManager;
+use crate::scheduler::{HummockSnapshotManager, QueryManager};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -126,7 +125,7 @@ pub struct FrontendEnv {
     meta_client: Arc<dyn FrontendMetaClient>,
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
-    worker_node_manager: Arc<WorkerNodeManager>,
+    worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
 }
 
@@ -145,12 +144,15 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let query_manager = QueryManager::new(worker_node_manager.clone(), false);
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let query_manager =
+            QueryManager::new(worker_node_manager.clone(), hummock_snapshot_manager);
         Self {
+            meta_client,
             catalog_writer,
             catalog_reader,
             worker_node_manager,
-            meta_client: Arc::new(MockFrontendMetaClient {}),
             query_manager,
         }
     }
@@ -187,9 +189,14 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-        // TODO(renjie): Remove this after set is supported.
-        let dist_query = env_var_is_true("RW_DIST_QUERY");
-        let query_manager = QueryManager::new(worker_node_manager.clone(), dist_query);
+
+        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
+        let hummock_snapshot_manager =
+            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+        let query_manager = QueryManager::new(
+            worker_node_manager.clone(),
+            hummock_snapshot_manager.clone(),
+        );
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
@@ -197,6 +204,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
+            hummock_snapshot_manager,
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
@@ -208,7 +216,7 @@ impl FrontendEnv {
                 catalog_reader,
                 catalog_writer,
                 worker_node_manager,
-                meta_client: Arc::new(FrontendMetaClientImpl(meta_client)),
+                meta_client: frontend_meta_client,
                 query_manager,
             },
             observer_join_handle,

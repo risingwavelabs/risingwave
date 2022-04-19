@@ -23,17 +23,19 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
+use super::project::SimpleProjectExecutor;
 use super::{
     BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
-    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor,
+    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use crate::executor::AggCall;
+use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::executor_v2::top_n::TopNExecutor;
 use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;
@@ -154,6 +156,27 @@ impl FilterExecutor {
     }
 }
 
+impl ProjectExecutor {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        pk_indices: PkIndices,
+        exprs: Vec<BoxedExpression>,
+        executor_id: u64,
+        _op_info: String,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema: input.schema().to_owned(),
+            pk_indices,
+            identity: "Project".to_owned(),
+        };
+        let input = Box::new(ExecutorV1AsV2(input));
+        super::SimpleExecutorWrapper {
+            input,
+            inner: SimpleProjectExecutor::new(info, exprs, executor_id),
+        }
+    }
+}
+
 impl ChainExecutor {
     pub fn new_from_v1(
         snapshot: Box<dyn ExecutorV1>,
@@ -190,7 +213,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         _op_info: String,
-        key_indices: Vec<usize>,
     ) -> Self {
         Self::new(
             Box::new(ExecutorV1AsV2(input)),
@@ -198,7 +220,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
             keys,
             column_ids,
             executor_id,
-            key_indices,
         )
     }
 }
@@ -266,6 +287,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         _op_info: String,
         key_indices: Vec<usize>,
+        parallel_info: BatchParallelInfo,
     ) -> Self {
         let schema = table.schema().clone();
         let info = ExecutorInfo {
@@ -274,7 +296,13 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             identity: "BatchQuery".to_owned(),
         };
 
-        Self::new(table, Self::DEFAULT_BATCH_SIZE, info, key_indices)
+        Self::new(
+            table,
+            Self::DEFAULT_BATCH_SIZE,
+            info,
+            key_indices,
+            parallel_info,
+        )
     }
 }
 

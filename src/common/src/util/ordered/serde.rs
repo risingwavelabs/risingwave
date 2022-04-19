@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Reverse;
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::mem;
 
 use itertools::Itertools;
 use memcomparable::from_slice;
@@ -24,9 +22,9 @@ use super::OrderedRow;
 use crate::array::{ArrayImpl, Row, RowRef};
 use crate::catalog::ColumnId;
 use crate::error::Result;
-use crate::hash::VIRTUAL_KEY_COUNT;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
+    DatumRef,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
@@ -78,7 +76,19 @@ impl OrderedRowSerializer {
     }
 
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
-        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
+        self.serialize_datums(row.values(), append_to)
+    }
+
+    pub fn serialize_ref(&self, row_ref: RowRef<'_>, append_to: &mut Vec<u8>) {
+        self.serialize_datum_refs(row_ref.values(), append_to)
+    }
+
+    pub fn serialize_datums<'a>(
+        &self,
+        datums: impl Iterator<Item = &'a Datum>,
+        append_to: &mut Vec<u8>,
+    ) {
+        for (datum, order_type) in datums.zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
@@ -86,11 +96,15 @@ impl OrderedRowSerializer {
         }
     }
 
-    pub fn serialize_row_ref(&self, row: &RowRef<'_>, append_to: &mut Vec<u8>) {
-        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
+    pub fn serialize_datum_refs<'a>(
+        &self,
+        datum_refs: impl Iterator<Item = DatumRef<'a>>,
+        append_to: &mut Vec<u8>,
+    ) {
+        for (datum, order_type) in datum_refs.zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
-            serialize_datum_ref_into(datum, &mut serializer).unwrap();
+            serialize_datum_ref_into(&datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
     }
@@ -130,7 +144,6 @@ impl OrderedRowDeserializer {
 
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
-type ValueMetaBytes = Vec<u8>;
 
 /// Serialize a row of data using cell-based serialization, and return corresponding vector of key
 /// and value. If all data of this row are null, there will be one cell of column id `-1` to
@@ -190,26 +203,6 @@ pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     let buf = serializer.into_inner();
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
-}
-
-/// Currently, value meta only contains virtual key (based on consistent hash), which is computed on
-/// distribution key columns.
-pub fn serialize_value_meta<H: BuildHasher>(
-    dist_key_indices: &[usize],
-    row: &Row,
-    hash_builder: H,
-) -> Result<ValueMetaBytes> {
-    if let Some(max_idx) = dist_key_indices.iter().max() {
-        assert!(*max_idx < row.size());
-        let mut hasher = hash_builder.build_hasher();
-        for datum in &row.0 {
-            datum.hash(&mut hasher);
-        }
-        let hash_value = (hasher.finish() % VIRTUAL_KEY_COUNT as u64) as u32;
-        Ok(hash_value.to_be_bytes().to_vec())
-    } else {
-        Ok(vec![0; mem::size_of::<u32>()])
-    }
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {

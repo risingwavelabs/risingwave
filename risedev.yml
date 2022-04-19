@@ -33,6 +33,7 @@ risedev:
     # - use: frontend-legacy
 
     # If you want to create source from Kafka, uncomment the following lines
+    # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
     # - use: zookeeper
     #   persist-data: true
     # - use: kafka
@@ -70,6 +71,19 @@ risedev:
     - use: compute-node
     - use: frontend
       user-managed: true
+  
+  full:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+    - use: prometheus
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
 
   #################################
   ### Configurations used on CI ###
@@ -126,6 +140,19 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend-legacy
+
+  ci-kafka:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -346,7 +373,7 @@ template:
     address: "127.0.0.1"
 
     # Listen port of Kafka
-    port: 39092
+    port: 29092
 
     # ZooKeeper used by this Kafka instance
     provide-zookeeper: "zookeeper*"
@@ -366,7 +393,7 @@ template:
     address: "127.0.0.1"
 
     # Listen port of ZooKeeper
-    port: 32888
+    port: 2181
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true

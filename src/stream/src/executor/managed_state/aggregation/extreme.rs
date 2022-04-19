@@ -20,16 +20,18 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::{HashCode, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::storage_value::{StorageValue, ValueMeta};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::{AggArgs, AggCall, PkDataTypes};
+use crate::executor::PkDataTypes;
+use crate::executor_v2::aggregation::{AggArgs, AggCall};
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
@@ -81,6 +83,10 @@ where
 
     /// The sort key serializer
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
+
+    /// Computed via consistent hash. The value is to be set in value meta and used for grouping
+    /// the kv together in storage. Each state will have the same value of virtual node.
+    vnode: VirtualNode,
 }
 
 /// A trait over all table-structured states.
@@ -123,6 +129,7 @@ where
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
+        group_key_hash_code: u64,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
@@ -133,6 +140,7 @@ where
             top_n_count,
             data_type: data_type.clone(),
             serializer: ExtremeSerializer::new(data_type, pk_data_types),
+            vnode: (group_key_hash_code % (VIRTUAL_NODE_COUNT as u64)) as VirtualNode,
         })
     }
 
@@ -330,17 +338,16 @@ where
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = self.serializer.serialize(key, &pks)?;
-
+            let value_meta = ValueMeta::new_with_vnode(self.vnode);
             match v.into_option() {
                 Some(v) => {
-                    // TODO(Yuanxin): Implement value meta
                     local.put(
                         key_encoded,
-                        StorageValue::new_default_put(serialize_cell(&v)?),
+                        StorageValue::new_put(value_meta, serialize_cell(&v)?),
                     );
                 }
                 None => {
-                    local.delete(key_encoded);
+                    local.delete_with_value_meta(key_encoded, value_meta);
                 }
             }
         }
@@ -416,6 +423,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     row_count: usize,
     top_n_count: Option<usize>,
     pk_data_types: PkDataTypes,
+    key_hash_code: Option<HashCode>,
 ) -> Result<Box<dyn ManagedTableState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -437,10 +445,24 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
             match (agg_call.kind, agg_call.return_type.clone()) {
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types).await?,
+                        ManagedMaxState::<_, $array>::new(
+                            keyspace,
+                            agg_call.return_type.clone(),
+                            top_n_count,
+                            row_count,
+                            pk_data_types,
+                            key_hash_code.unwrap_or_default().hash_code()
+                        ).await?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types).await?,
+                        ManagedMinState::<_, $array>::new(
+                            keyspace,
+                            agg_call.return_type.clone(),
+                            top_n_count,
+                            row_count,
+                            pk_data_types,
+                            key_hash_code.unwrap_or_default().hash_code()
+                        ).await?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -484,6 +506,7 @@ mod tests {
             Some(5),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -626,6 +649,7 @@ mod tests {
             Some(5),
             row_count,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -667,6 +691,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
+            567,
         )
         .await
         .unwrap();
@@ -752,6 +777,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
+            567,
         )
         .await
         .unwrap();
@@ -853,6 +879,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -932,6 +959,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -1029,6 +1057,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();

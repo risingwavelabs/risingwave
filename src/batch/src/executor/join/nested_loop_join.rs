@@ -15,13 +15,14 @@
 use std::option::Option::Some;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -165,25 +166,20 @@ impl Executor for NestedLoopJoinExecutor {
 }
 
 impl NestedLoopJoinExecutor {
-    /// Create constant data chunk (one tuple repeat `capacity` times).
-    fn convert_row_to_chunk(
+    /// Create constant data chunk (one tuple repeat `num_tuples` times).
+    fn convert_datum_refs_to_chunk(
         &self,
-        row_ref: &RowRef<'_>,
+        datum_refs: &[DatumRef<'_>],
         num_tuples: usize,
         data_types: &[DataType],
     ) -> Result<DataChunk> {
-        let num_columns = data_types.len();
         let mut output_array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
         for _i in 0..num_tuples {
-            for (col_idx, builder) in output_array_builders
-                .iter_mut()
-                .enumerate()
-                .take(num_columns)
-            {
-                builder.append_datum_ref(row_ref.value_at(col_idx))?;
+            for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
+                builder.append_datum_ref(*datum_ref)?;
             }
         }
 
@@ -194,6 +190,17 @@ impl NestedLoopJoinExecutor {
             .collect::<Result<Vec<Column>>>()?;
 
         Ok(DataChunk::builder().columns(result_columns).build())
+    }
+
+    /// Create constant data chunk (one tuple repeat `num_tuples` times).
+    fn convert_row_to_chunk(
+        &self,
+        row_ref: &RowRef<'_>,
+        num_tuples: usize,
+        data_types: &[DataType],
+    ) -> Result<DataChunk> {
+        let datum_refs = row_ref.values().collect_vec();
+        self.convert_datum_refs_to_chunk(&datum_refs, num_tuples, data_types)
     }
 }
 
@@ -392,12 +399,17 @@ impl NestedLoopJoinExecutor {
         // find any match.
         if ret.cur_row_finished && !self.probe_side_source.get_cur_row_matched() {
             assert!(ret.chunk.is_none());
-            let mut probe_row = self.probe_side_source.get_current_row_ref().unwrap();
+            let mut probe_datum_refs = self
+                .probe_side_source
+                .get_current_row_ref()
+                .unwrap()
+                .values()
+                .collect_vec();
             for _ in 0..self.build_table.get_schema().fields.len() {
-                probe_row.0.push(None);
+                probe_datum_refs.push(None);
             }
             let one_row_chunk =
-                self.convert_row_to_chunk(&probe_row, 1, &self.schema.data_types())?;
+                self.convert_datum_refs_to_chunk(&probe_datum_refs, 1, &self.schema.data_types())?;
             return Ok(ProbeResult {
                 cur_row_finished: true,
                 chunk: Some(one_row_chunk),
@@ -470,7 +482,7 @@ impl NestedLoopJoinExecutor {
                     if !self.build_table.is_build_matched(row_id)?
                         && self.join_type == JoinType::RightSemi
                     {
-                        rows_ref.push(row_ref.row_by_slice(
+                        rows_ref.push(row_ref.row_by_indices(
                             &(self.probe_side_schema.len()..row_ref.size()).collect::<Vec<usize>>(),
                         ));
                     }
@@ -509,13 +521,12 @@ impl NestedLoopJoinExecutor {
                 .build_table
                 .is_build_matched(self.build_table.get_current_row_id())?
             {
-                let mut cur_row_vec = cur_row.0;
-                for _ in 0..self.probe_side_source.get_schema().fields.len() {
-                    cur_row_vec.insert(0, None);
-                }
+                let datum_refs = std::iter::repeat(None)
+                    .take(self.probe_side_source.get_schema().len())
+                    .chain(cur_row.values());
                 if let Some(ret_chunk) = self
                     .chunk_builder
-                    .append_one_row_ref(RowRef::new(cur_row_vec))?
+                    .append_one_row_from_datum_refs(datum_refs)?
                 {
                     return Ok(Some(ret_chunk));
                 }
@@ -635,7 +646,7 @@ mod tests {
     /// Test the function of convert row into constant row chunk (one row repeat multiple times).
     #[test]
     fn test_convert_row_to_chunk() {
-        let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
+        let row = vec![Some(ScalarRefImpl::Int32(3))];
         let probe_side_schema = Schema {
             fields: vec![Field::unnamed(DataType::Int32)],
         };
@@ -658,7 +669,7 @@ mod tests {
             identity: "NestedLoopJoinExecutor".to_string(),
         };
         let const_row_chunk = source
-            .convert_row_to_chunk(&row, 5, &probe_side_schema.data_types())
+            .convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types())
             .unwrap();
         assert_eq!(const_row_chunk.capacity(), 5);
         assert_eq!(

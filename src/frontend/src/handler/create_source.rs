@@ -79,7 +79,7 @@ fn handle_source_with_properties(options: Vec<SqlOption>) -> Result<HashMap<Stri
         .collect()
 }
 
-pub(super) async fn handle_create_source(
+pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
     stmt: CreateSourceStatement,
@@ -128,50 +128,16 @@ pub(super) async fn handle_create_source(
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
-    use std::io::Write;
 
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
-    use tempfile::NamedTempFile;
 
     use crate::catalog::gen_row_id_column_name;
-    use crate::test_utils::LocalFrontend;
-
-    /// Returns the file.
-    /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
-    pub fn create_proto_file() -> NamedTempFile {
-        static PROTO_FILE_DATA: &str = r#"
-    syntax = "proto3";
-    package test;
-    message TestRecord {
-      int32 id = 1;
-      Country country = 3;
-      int64 zipcode = 4;
-      float rate = 5;
-    }
-    message Country {
-      string address = 1;
-      City city = 2;
-      string zipcode = 3;
-    }
-    message City {
-      string address = 1;
-      string zipcode = 2;
-    }"#;
-        let temp_file = tempfile::Builder::new()
-            .prefix("temp")
-            .suffix(".proto")
-            .rand_bytes(5)
-            .tempfile()
-            .unwrap();
-        let mut file = temp_file.as_file();
-        file.write_all(PROTO_FILE_DATA.as_ref()).unwrap();
-        temp_file
-    }
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
     async fn test_create_source_handler() {
-        let proto_file = create_proto_file();
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')

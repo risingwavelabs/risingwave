@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -32,7 +30,8 @@ pub enum SourceOffset {
 use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
 use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
-use crate::{kafka, kinesis, pulsar};
+use crate::utils::AnyhowProperties;
+use crate::{kafka, kinesis, pulsar, Properties};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
@@ -69,9 +68,35 @@ pub struct ConnectorState {
 #[async_trait]
 pub trait SourceReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
-    async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
+    async fn new(properties: Properties, state: Option<ConnectorState>) -> Result<Self>
     where
         Self: Sized;
+}
+
+pub enum SourceReaderImpl {
+    Kafka(KafkaSplitReader),
+    Kinesis(KinesisSplitReader),
+}
+
+impl SourceReaderImpl {
+    pub async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
+        match self {
+            Self::Kafka(r) => r.next().await,
+            Self::Kinesis(r) => r.next().await,
+        }
+    }
+
+    pub async fn create(config: Properties, state: Option<ConnectorState>) -> Result<Self> {
+        let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
+        let connector = match upstream_type.as_str() {
+            KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
+            KINESIS_SOURCE => Self::Kinesis(KinesisSplitReader::new(config, state).await?),
+            _other => {
+                todo!()
+            }
+        };
+        Ok(connector)
+    }
 }
 
 #[async_trait]
@@ -149,35 +174,16 @@ impl SplitEnumeratorImpl {
                 .map(|ss| ss.into_iter().map(SplitImpl::Kinesis).collect_vec()),
         }
     }
-}
 
-pub fn extract_split_enumerator(
-    properties: &HashMap<String, String>,
-) -> Result<SplitEnumeratorImpl> {
-    let source_type = match properties.get(UPSTREAM_SOURCE_KEY) {
-        None => return Err(anyhow!("{} not found", UPSTREAM_SOURCE_KEY)),
-        Some(value) => value,
-    };
-
-    match source_type.as_str() {
-        KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
-        PULSAR_SOURCE => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
-        KINESIS_SOURCE => todo!(),
-        _ => Err(anyhow!("unsupported source type: {}", source_type)),
-    }
-}
-
-pub async fn new_connector(
-    config: HashMap<String, String>,
-    state: Option<ConnectorState>,
-) -> Result<Box<dyn SourceReader + Send + Sync>> {
-    let upstream_type = config.get(UPSTREAM_SOURCE_KEY).unwrap();
-    let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
-        KAFKA_SOURCE => Box::new(KafkaSplitReader::new(config, state).await?),
-        KINESIS_SOURCE => Box::new(KinesisSplitReader::new(config, state).await?),
-        _other => {
-            todo!()
+    pub fn create(properties: &AnyhowProperties) -> Result<SplitEnumeratorImpl> {
+        let source_type = properties.get(UPSTREAM_SOURCE_KEY)?;
+        match source_type.as_str() {
+            KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
+            PULSAR_SOURCE => {
+                PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
+            }
+            KINESIS_SOURCE => todo!(),
+            _ => Err(anyhow!("unsupported source type: {}", source_type)),
         }
-    };
-    Ok(connector)
+    }
 }

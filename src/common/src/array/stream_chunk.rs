@@ -21,7 +21,6 @@ use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use crate::array::column::Column;
-use crate::array::stream_chunk_iter::{RowRef, StreamChunkRefIter};
 use crate::array::{DataChunk, Row};
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
@@ -75,9 +74,8 @@ pub type Ops<'a> = &'a [Op];
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
-    columns: Vec<Column>,
-    visibility: Option<Bitmap>,
-    cardinality: usize,
+
+    pub(super) data: DataChunk,
 }
 
 impl StreamChunk {
@@ -85,17 +83,9 @@ impl StreamChunk {
         for col in &columns {
             assert_eq!(col.array_ref().len(), ops.len());
         }
-        let cardinality = if let Some(bitmap) = &visibility {
-            bitmap.iter().map(|visible| visible as usize).sum()
-        } else {
-            ops.len()
-        };
-        StreamChunk {
-            ops,
-            columns,
-            visibility,
-            cardinality,
-        }
+
+        let data = DataChunk::new(columns, visibility);
+        StreamChunk { ops, data }
     }
 
     /// Build a `StreamChunk` from rows.
@@ -128,61 +118,54 @@ impl StreamChunk {
 
     /// `cardinality` return the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        self.cardinality
+        self.data.cardinality()
     }
 
     /// `capacity` return physical length of internals ops & columns
     pub fn capacity(&self) -> usize {
-        self.ops.len()
+        self.data.capacity()
     }
 
     pub fn columns(&self) -> &[Column] {
-        &self.columns
+        self.data.columns()
     }
 
     pub fn column_at(&self, index: usize) -> &Column {
-        &self.columns[index]
+        self.data.column_at(index)
     }
 
     /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Result<Self> {
-        match &self.visibility {
-            None => Ok(self),
-            Some(visibility) => {
-                let cardinality = visibility
-                    .iter()
-                    .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
-                let columns = self
-                    .columns
-                    .into_iter()
-                    .map(|col| {
-                        let array = col.array();
-                        array
-                            .compact(visibility, cardinality)
-                            .map(|array| Column::new(Arc::new(array)))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                let mut ops = Vec::with_capacity(cardinality);
-                for (op, visible) in self.ops.into_iter().zip_eq(visibility.iter()) {
-                    if visible {
-                        ops.push(op);
-                    }
-                }
-                Ok(StreamChunk::new(ops, columns, None))
+        if self.visibility().is_none() {
+            return Ok(self);
+        }
+
+        let (ops, columns, visibility) = self.into_inner();
+        let visibility = visibility.unwrap();
+
+        let cardinality = visibility
+            .iter()
+            .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
+        let columns = columns
+            .into_iter()
+            .map(|col| {
+                let array = col.array();
+                array
+                    .compact(&visibility, cardinality)
+                    .map(|array| Column::new(Arc::new(array)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut new_ops = Vec::with_capacity(cardinality);
+        for (op, visible) in ops.into_iter().zip_eq(visibility.iter()) {
+            if visible {
+                new_ops.push(op);
             }
         }
+        Ok(StreamChunk::new(new_ops, columns, None))
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
-        let (ops, columns, visibility) = self.into_inner();
-
-        let builder = DataChunk::builder().columns(columns);
-        let data_chunk = if let Some(vis) = visibility {
-            builder.visibility(vis).build()
-        } else {
-            builder.build()
-        };
-        (data_chunk, ops)
+        (self.data, self.ops)
     }
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
@@ -191,21 +174,15 @@ impl StreamChunk {
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-            cardinality: _,
-        } = self;
-
-        (ops, columns, visibility)
+        let (columns, visibility) = self.data.into_parts();
+        (self.ops, columns, visibility)
     }
 
     pub fn to_protobuf(&self) -> ProstStreamChunk {
         ProstStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
-            columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+            columns: self.columns().iter().map(|col| col.to_protobuf()).collect(),
         }
     }
 
@@ -227,7 +204,7 @@ impl StreamChunk {
     }
 
     pub fn visibility(&self) -> &Option<Bitmap> {
-        &self.visibility
+        self.data.visibility()
     }
 
     pub fn get_hash_values<H: BuildHasher>(
@@ -238,42 +215,10 @@ impl StreamChunk {
         let mut states = vec![];
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for key in keys {
-            let array = self.columns[*key].array();
+            let array = self.columns()[*key].array();
             array.hash_vec(&mut states[..]);
         }
         Ok(finalize_hashers(&mut states[..]))
-    }
-
-    /// Random access a tuple in a stream chunk. Return in a row format.
-    ///
-    /// # Arguments
-    /// * `pos` - Index of look up tuple
-    /// * `RowRef` - Reference of data tuple
-    /// * bool - whether this tuple is visible
-    pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
-        let row = self.row_at_unchecked_vis(pos);
-        let vis = match self.visibility.as_ref() {
-            Some(bitmap) => bitmap.is_set(pos)?,
-            None => true,
-        };
-        Ok((row, vis))
-    }
-
-    /// Random access a tuple in a data chunk. Return in a row format.
-    /// Note that this function do not return whether the row is visible.
-    /// # Arguments
-    /// * `pos` - Index of look up tuple
-    pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
-        let mut row = Vec::with_capacity(self.columns.len());
-        for column in &self.columns {
-            row.push(column.array_ref().value_at(pos));
-        }
-        RowRef::new(self.ops[pos], row)
-    }
-
-    /// Get an iterator for visible rows.
-    pub fn rows(&self) -> StreamChunkRefIter<'_> {
-        StreamChunkRefIter::new(self)
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
@@ -282,10 +227,10 @@ impl StreamChunk {
 
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
-        for row in self.rows() {
-            let mut cells = Vec::with_capacity(row.size() + 1);
+        for (op, row_ref) in self.rows() {
+            let mut cells = Vec::with_capacity(row_ref.size() + 1);
             cells.push(
-                Cell::new(match row.op() {
+                Cell::new(match op {
                     Op::Insert => "+",
                     Op::Delete => "-",
                     Op::UpdateDelete => "U-",
@@ -293,7 +238,7 @@ impl StreamChunk {
                 })
                 .set_alignment(CellAlignment::Right),
             );
-            for datum in &row.values {
+            for datum in row_ref.values() {
                 let str = match datum {
                     None => "".to_owned(), // NULL
                     Some(scalar) => scalar.to_string(),

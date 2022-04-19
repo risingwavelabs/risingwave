@@ -99,8 +99,9 @@ pub async fn compute_node_serve(
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
+    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
@@ -117,7 +118,6 @@ pub async fn compute_node_serve(
     if let Some(hummock) = state_store.as_hummock_state_store() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().options().clone(),
-            hummock.inner().local_version_manager().clone(),
             hummock.inner().hummock_meta_client().clone(),
             hummock.inner().sstable_store(),
             state_store_metrics,

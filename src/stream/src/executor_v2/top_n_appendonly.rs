@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -28,7 +25,7 @@ use crate::executor::managed_state::top_n::variants::TOP_N_MAX;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor_v2::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -181,33 +178,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for InnerAppendOnlyTopNExecutor<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper");
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache();
-        self.managed_higher_state.clear_cache();
-        self.first_execution = true;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     async fn apply_chunk(
         &mut self,
@@ -226,37 +196,17 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             self.first_execution = false;
         }
 
-        // Ops is useless as we have assumed the input is append-only.
-        let (_ops, columns, visibility) = chunk.into_inner();
-
-        let mut data_chunk: DataChunk = DataChunk::builder().columns(columns.to_vec()).build();
-        if let Some(vis_map) = &visibility {
-            data_chunk = data_chunk
-                .with_visibility(vis_map.clone())
-                .compact()
-                .map_err(StreamExecutorError::eval_error)?;
-        }
-        let data_chunk = Arc::new(data_chunk);
-        // As we have already compacted the data chunk with visibility map,
-        // we don't check visibility anymore.
-        // We also don't compact ops as they are always "Insert"s.
-
         let num_need_to_keep = self.limit.unwrap_or(usize::MAX);
         let mut new_ops = vec![];
         let mut new_rows = vec![];
 
-        for row_idx in 0..data_chunk.capacity() {
-            let row_ref = data_chunk
-                .row_at(row_idx)
-                .map_err(StreamExecutorError::eval_error)?
-                .0;
-            let pk_row = Row(self
-                .pk_indices
-                .iter()
-                .map(|idx| row_ref.0[*idx].to_owned_datum())
-                .collect::<Vec<_>>());
+        for (op, row_ref) in chunk.rows() {
+            assert_eq!(op, Op::Insert);
+
+            let pk_row = row_ref.row_by_indices(&self.pk_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
-            let row = row_ref.into();
+            let row = row_ref.to_owned_row();
+
             if self.managed_lower_state.total_count() < self.offset {
                 // `elem` is in the range of `[0, offset)`,
                 // we ignored it for now as it is not in the result set.
@@ -331,6 +281,18 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.flush_inner(epoch).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
     }
 }
 

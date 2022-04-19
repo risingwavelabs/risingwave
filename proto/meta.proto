@@ -8,10 +8,11 @@ option optimize_for = SPEED;
 
 import "catalog.proto";
 import "common.proto";
+import "hummock.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
-// Hash mapping for meta. Stores mapping from virtual key to parallel unit id.
+// Hash mapping for meta. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
   repeated uint32 hash_mapping = 1;
 }
@@ -296,6 +297,7 @@ message SubscribeResponse {
     catalog.Table table_v2 = 10;
     catalog.Source source = 11;
     MetaSnapshot fe_snapshot = 12;
+    hummock.HummockSnapshot hummock_snapshot = 13;
   }
 }
 

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use fail::fail_point;
 use moka::future::Cache;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
@@ -80,6 +81,7 @@ impl SstableStore {
             .await
             .map_err(HummockError::object_io_error)?;
 
+        fail_point!("metadata_upload_err");
         let meta_path = self.get_sst_meta_path(sst.id);
         if let Err(e) = self.store.upload(&meta_path, meta).await {
             self.store
@@ -181,6 +183,14 @@ impl SstableStore {
 
     pub fn store(&self) -> ObjectStoreRef {
         self.store.clone()
+    }
+
+    pub async fn sstables(&self, sst_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
+        let mut ssts = Vec::with_capacity(sst_ids.len());
+        for sst_id in sst_ids {
+            ssts.push(self.sstable(*sst_id).await?);
+        }
+        Ok(ssts)
     }
 }
 

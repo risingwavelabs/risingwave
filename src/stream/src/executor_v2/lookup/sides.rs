@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
+use futures::stream::PollNext;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor_v2::barrier_align::{AlignedMessage, BarrierAligner};
-use crate::executor_v2::{Barrier, Executor};
+use crate::executor::Message;
+use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::{Barrier, Executor, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
@@ -78,17 +81,100 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
 }
 
 /// Message from the `arrange_join_stream`.
+#[derive(Debug)]
 pub enum ArrangeMessage {
     /// Arrangement sides' update in this epoch. There will be only one arrange batch message
-    /// within epoch. Once the executor receives an arrange batch message, it will replicate batch
-    /// using the previous epoch.
-    Arrange(Vec<StreamChunk>),
+    /// within epoch. Once the executor receives an arrange batch message, it can start doing
+    /// joins.
+    ArrangeReady,
 
     /// There's a message from stream side.
     Stream(StreamChunk),
 
     /// Barrier (once every epoch).
     Barrier(Barrier),
+}
+
+pub type BarrierAlignedMessage = Either<Message, Message>;
+
+#[try_stream(ok = Message, error = TracedStreamExecutorError)]
+pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Barrier) {
+    #[for_await]
+    for item in stream {
+        match item? {
+            c @ Message::Chunk(_) => yield c,
+            Message::Barrier(b) => {
+                if b.epoch != expected_barrier.epoch {
+                    return Err(StreamExecutorError::align_barrier(expected_barrier, b));
+                } else {
+                    yield Message::Barrier(b);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn prefer_right(_: &mut ()) -> PollNext {
+    PollNext::Right
+}
+
+/// A biased barrier aligner which prefers message from the right side. Barrier message will be
+/// available for both left and right side, instead of being combined.
+#[try_stream(ok = BarrierAlignedMessage, error = TracedStreamExecutorError)]
+pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) {
+    let mut left = Box::pin(left);
+    let mut right = Box::pin(right);
+
+    enum SideStatus {
+        LeftBarrier,
+        RightBarrier,
+    }
+
+    'outer: loop {
+        let mut combined_stream = futures::stream::select_with_strategy(
+            left.by_ref().map(Either::Left),
+            right.by_ref().map(Either::Right),
+            prefer_right,
+        );
+
+        let (side_status, side_barrier) = 'inner: loop {
+            match combined_stream.next().await {
+                Some(Either::Left(Ok(c @ Message::Chunk(_)))) => {
+                    yield Either::Left(c);
+                }
+                Some(Either::Left(Ok(Message::Barrier(b)))) => {
+                    yield Either::Left(Message::Barrier(b.clone()));
+                    break 'inner (SideStatus::LeftBarrier, b);
+                }
+                Some(Either::Right(Ok(c @ Message::Chunk(_)))) => {
+                    yield Either::Right(c);
+                }
+                Some(Either::Right(Ok(Message::Barrier(b)))) => {
+                    yield Either::Right(Message::Barrier(b.clone()));
+                    break 'inner (SideStatus::RightBarrier, b);
+                }
+                Some(Either::Left(Err(e))) | Some(Either::Right(Err(e))) => return Err(e),
+                None => {
+                    break 'outer;
+                }
+            }
+        };
+        match side_status {
+            SideStatus::LeftBarrier => {
+                #[for_await]
+                for item in poll_until_barrier(right.by_ref(), side_barrier) {
+                    yield Either::Right(item?);
+                }
+            }
+            SideStatus::RightBarrier => {
+                #[for_await]
+                for item in poll_until_barrier(left.by_ref(), side_barrier) {
+                    yield Either::Left(item?);
+                }
+            }
+        }
+    }
 }
 
 /// Join the stream with the previous stable snapshot of the arrangement.
@@ -102,28 +188,28 @@ pub enum ArrangeMessage {
 /// * `[Msg`] Arrangement (batch)
 /// * `[Do`] replicate batch with epoch `[2`]
 /// * Barrier (prev = `[2`], current = `[3`])
-#[try_stream(ok = ArrangeMessage, error = RwError)]
+#[try_stream(ok = ArrangeMessage, error = TracedStreamExecutorError)]
 pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
 ) {
-    let mut input = BarrierAligner::new(stream, arrangement);
-    let mut arrange_updates = vec![];
+    let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
 
-    loop {
-        match input.next().await {
-            AlignedMessage::Left(msg) => {
+    while let Some(item) = input.next().await {
+        match item? {
+            Either::Left(Message::Chunk(msg)) => {
                 // As prev epoch is already available, we can directly forward messages from the
                 // stream side.
-                yield ArrangeMessage::Stream(msg?);
+                yield ArrangeMessage::Stream(msg);
             }
-            AlignedMessage::Right(msg) => {
-                // For message from the arrangement side, we always send in batch.
-                arrange_updates.push(msg?);
+            Either::Right(Message::Chunk(_)) => {
+                // For message from the arrangement side, just ignore it.
             }
-            AlignedMessage::Barrier(barrier) => {
-                yield ArrangeMessage::Arrange(std::mem::take(&mut arrange_updates));
+            Either::Left(Message::Barrier(barrier)) => {
                 yield ArrangeMessage::Barrier(barrier);
+            }
+            Either::Right(Message::Barrier(_)) => {
+                yield ArrangeMessage::ArrangeReady;
             }
         }
     }
@@ -140,32 +226,82 @@ pub async fn stream_lookup_arrange_prev_epoch(
 /// * `[Msg`] Stream (key = a)
 /// * `[Do`] lookup `a` in arrangement of epoch `[2`] (current epoch)
 /// * Barrier (prev = `[2`], current = `[3`])
-#[try_stream(ok = ArrangeMessage, error = RwError)]
+#[try_stream(ok = ArrangeMessage, error = TracedStreamExecutorError)]
 pub async fn stream_lookup_arrange_this_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
 ) {
-    let mut input = BarrierAligner::new(stream, arrangement);
+    let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
     let mut stream_buf = vec![];
-    let mut arrange_updates = vec![];
+
+    enum Status {
+        ArrangeReady,
+        StreamReady(Barrier),
+    }
 
     loop {
-        match input.next().await {
-            AlignedMessage::Left(msg) => {
-                // Should wait until arrangement from this epoch is available.
-                stream_buf.push(msg?);
-            }
-            AlignedMessage::Right(msg) => {
-                // For message from the arrangement side, we always send in batch.
-                arrange_updates.push(msg?);
-            }
-            AlignedMessage::Barrier(barrier) => {
-                yield ArrangeMessage::Arrange(std::mem::take(&mut arrange_updates));
-                for msg in std::mem::take(&mut stream_buf) {
-                    yield ArrangeMessage::Stream(msg);
+        let status = 'inner: loop {
+            match input
+                .next()
+                .await
+                .expect("unexpected close of barrier aligner")?
+            {
+                Either::Left(Message::Chunk(msg)) => {
+                    // Should wait until arrangement from this epoch is available.
+                    stream_buf.push(msg);
                 }
-                yield ArrangeMessage::Barrier(barrier);
+                Either::Right(Message::Chunk(_)) => {
+                    // For message from the arrangement side, just ignore it.
+                }
+                Either::Left(Message::Barrier(barrier)) => {
+                    break 'inner Status::StreamReady(barrier);
+                }
+                Either::Right(Message::Barrier(_)) => {
+                    yield ArrangeMessage::ArrangeReady;
+                    for msg in std::mem::take(&mut stream_buf) {
+                        yield ArrangeMessage::Stream(msg);
+                    }
+                    break 'inner Status::ArrangeReady;
+                }
             }
+        };
+        match status {
+            // Arrangement is ready, but still stream message in this epoch -- we directly forward
+            // message from the stream side.
+            Status::ArrangeReady => loop {
+                match input
+                    .next()
+                    .await
+                    .expect("unexpected close of barrier aligner")?
+                {
+                    Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
+                    Either::Left(Message::Barrier(b)) => {
+                        yield ArrangeMessage::Barrier(b);
+                        break;
+                    }
+                    Either::Right(_) => unreachable!(),
+                }
+            },
+            // Stream is done in this epoch, but arrangement is not ready -- we wait for the
+            // arrangement ready and pipe out all buffered stream messages.
+            Status::StreamReady(stream_barrier) => loop {
+                match input
+                    .next()
+                    .await
+                    .expect("unexpected close of barrier aligner")?
+                {
+                    Either::Left(_) => unreachable!(),
+                    Either::Right(Message::Chunk(_)) => {}
+                    Either::Right(Message::Barrier(_)) => {
+                        yield ArrangeMessage::ArrangeReady;
+                        for msg in std::mem::take(&mut stream_buf) {
+                            yield ArrangeMessage::Stream(msg);
+                        }
+                        yield ArrangeMessage::Barrier(stream_barrier);
+                        break;
+                    }
+                }
+            },
         }
     }
 }

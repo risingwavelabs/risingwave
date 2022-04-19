@@ -203,6 +203,7 @@ mod test {
                         nodes: None,
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
+                        same_worker_node_as_upstream: false,
                     }],
                 };
                 actor_id += 1;
@@ -219,6 +220,7 @@ mod test {
                         nodes: None,
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
+                        same_worker_node_as_upstream: false,
                     })
                     .collect_vec();
                 actor_id += node_count * 7;

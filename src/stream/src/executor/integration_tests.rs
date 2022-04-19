@@ -24,9 +24,11 @@ use risingwave_expr::expr::*;
 
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
+use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{
-    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, SimpleAggExecutor,
+    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor,
+    SimpleAggExecutor,
 };
 use crate::task::SharedContext;
 
@@ -127,7 +129,9 @@ async fn test_merger_sum_aggr() {
     let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
-        DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),
+        vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
+            inputs,
+        ))],
         0,
         ctx,
     );
@@ -164,7 +168,7 @@ async fn test_merger_sum_aggr() {
     )
     .v1();
 
-    let projection = ProjectExecutor::new(
+    let projection = Box::new(ProjectExecutor::new_from_v1(
         Box::new(aggregator),
         vec![],
         vec![
@@ -173,7 +177,8 @@ async fn test_merger_sum_aggr() {
         ],
         3,
         "ProjectExecutor".to_string(),
-    );
+    ))
+    .v1();
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
     let context = SharedContext::for_test().into();

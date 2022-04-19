@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
@@ -25,7 +24,7 @@ use risingwave_pb::plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource};
 use uuid::Uuid;
 
-use crate::meta_client::FrontendMetaClient;
+use super::HummockSnapshotManagerRef;
 use crate::scheduler::execution::QueryExecution;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
@@ -36,7 +35,7 @@ pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
     epoch: u64,
-    meta_client: Arc<dyn FrontendMetaClient>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 
     task_output_id: TaskOutputId,
     task_host: HostAddress,
@@ -46,35 +45,29 @@ pub struct QueryResultFetcher {
 #[derive(Clone)]
 pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
-    /// Option to specify how to execute query, in single or distributed mode.
-    ///
-    /// This should be a session variable, but currently we don't support `set` statement, so we
-    /// pass in startup environment.
-    ///
-    /// TODO: Remove this after we support `set` statement.
-    dist_query: bool,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl QueryManager {
-    pub fn new(worker_node_manager: WorkerNodeManagerRef, dist_query: bool) -> Self {
+    pub fn new(
+        worker_node_manager: WorkerNodeManagerRef,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
+    ) -> Self {
         Self {
             worker_node_manager,
-            dist_query,
+            hummock_snapshot_manager,
         }
     }
 
-    pub fn dist_query(&self) -> bool {
-        self.dist_query
-    }
-
     /// Schedule query to single node.
+    ///
+    /// This is kept for dml only.
     pub async fn schedule_single(
         &self,
-        context: ExecutionContextRef,
+        _context: ExecutionContextRef,
         plan: BatchPlanProst,
     ) -> Result<impl Stream<Item = Result<DataChunk>>> {
-        let session = context.session();
-        let worker_node_addr = self.worker_node_manager.next_random().host.unwrap();
+        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
         let compute_client: ComputeClient = ComputeClient::new((&worker_node_addr).into()).await?;
 
         // Build task id and task sink id
@@ -88,51 +81,35 @@ impl QueryManager {
             output_id: 0,
         };
 
-        let meta_client = session.env().meta_client_ref();
-
-        // Pin snapshot in meta.
-        // TODO: Hummock snapshot should maintain as cache instead of RPC each query.
-        // TODO: Use u64::MAX for `last_pinned` so it always return the greatest current epoch. Use
-        // correct `last_pinned` when retrying this RPC.
-        let last_pinned = u64::MAX;
-        let epoch = meta_client.pin_snapshot(last_pinned).await?;
+        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
 
         compute_client
             .create_task(task_id.clone(), plan, epoch)
             .await?;
 
-        let query_result_fetcher = QueryResultFetcher {
+        let query_result_fetcher = QueryResultFetcher::new(
             epoch,
-            meta_client,
+            self.hummock_snapshot_manager.clone(),
             task_output_id,
-            task_host: worker_node_addr,
-        };
+            worker_node_addr,
+        );
 
         Ok(query_result_fetcher.run())
     }
 
     pub async fn schedule(
         &self,
-        context: ExecutionContextRef,
+        _context: ExecutionContextRef,
         query: Query,
     ) -> Result<impl DataChunkStream> {
         // Cheat compiler to resolve type
-        let session = context.session();
-
-        let meta_client = session.env().meta_client_ref();
-
-        // Pin snapshot in meta.
-        // TODO: Hummock snapshot should maintain as cache instead of RPC each query.
-        // TODO: Use u64::MAX for `last_pinned` so it always return the greatest current epoch. Use
-        // correct `last_pinned` when retrying this RPC.
-        let last_pinned = u64::MAX;
-        let epoch = meta_client.pin_snapshot(last_pinned).await?;
+        let epoch = self.hummock_snapshot_manager.get_epoch().await?;
 
         let query_execution = QueryExecution::new(
             query,
             epoch,
-            meta_client,
-            session.env().worker_node_manager_ref(),
+            self.worker_node_manager.clone(),
+            self.hummock_snapshot_manager.clone(),
         );
 
         let query_result_fetcher = query_execution.start().await?;
@@ -144,13 +121,13 @@ impl QueryManager {
 impl QueryResultFetcher {
     pub fn new(
         epoch: u64,
-        meta_client: Arc<dyn FrontendMetaClient>,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
         task_output_id: TaskOutputId,
         task_host: HostAddress,
     ) -> Self {
         Self {
             epoch,
-            meta_client,
+            hummock_snapshot_manager,
             task_output_id,
             task_host,
         }
@@ -171,7 +148,7 @@ impl QueryResultFetcher {
 
         let epoch = self.epoch;
         // Unpin corresponding snapshot.
-        self.meta_client.unpin_snapshot(epoch).await?;
+        self.hummock_snapshot_manager.unpin_snapshot(epoch).await?;
     }
 }
 

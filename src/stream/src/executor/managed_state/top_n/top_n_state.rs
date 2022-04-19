@@ -146,7 +146,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn insert(&mut self, key: OrderedRow, value: Row, epoch: u64) -> Result<()> {
+    pub async fn insert(&mut self, key: OrderedRow, value: Row, _epoch: u64) -> Result<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
@@ -163,13 +163,9 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // we cannot insert `key` into cache. Instead, we have to flush it onto the storage.
         // This is because other keys may be more qualified to stay in cache.
         // TODO: This needs to be changed when transaction on Hummock is implemented.
-        if need_to_flush {
-            let flush_status = FlushStatus::Insert(value);
-            let iter = vec![(key, flush_status)].into_iter();
-            self.flush_inner(iter, epoch).await?;
-        } else {
-            self.top_n.insert(key.clone(), value.clone());
-            FlushStatus::do_insert(self.flush_buffer.entry(key), value);
+        FlushStatus::do_insert(self.flush_buffer.entry(key.clone()), value.clone());
+        if !need_to_flush {
+            self.top_n.insert(key, value);
         }
         self.total_count += 1;
         Ok(())
@@ -203,33 +199,25 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                     if let Some(top_n_count) = self.top_n_count && inserted >= top_n_count {
                         break;
                     }
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
-                        && **key_from_buffer < key_from_storage
+                    let mut encounter_same_key = false;
+                    while let Some((key_from_buffer, value_from_buffer)) = flush_buffer_iter.peek()
+                        && **key_from_buffer <= key_from_storage
                     {
-                        flush_buffer_iter.next();
-                    }
-                    if flush_buffer_iter.peek().is_none() {
-                        self.top_n.insert(key_from_storage, row_from_storage);
-                        inserted += 1;
-                        continue;
-                    }
-                    let (key_from_buffer, value_from_buffer) = flush_buffer_iter.peek().unwrap();
-                    match key_from_storage.cmp(key_from_buffer) {
-                        std::cmp::Ordering::Equal => {
-                            match value_from_buffer {
-                                FlushStatus::Delete => {
-                                    // do not put it into cache
-                                }
-                                FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
-                                    self.top_n.insert(key_from_storage, row.clone());
-                                    inserted += 1;
-                                }
+                        match value_from_buffer {
+                            FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
+                                self.top_n.insert((*key_from_buffer).clone(), row.clone());
+                                inserted += 1;
+                            }
+                            FlushStatus::Delete => {
+                                //do nothing
                             }
                         }
-                        std::cmp::Ordering::Greater => {
-                            flush_buffer_iter.next();
-                        }
-                        _ => unreachable!(),
+                        encounter_same_key = (**key_from_buffer) == key_from_storage;
+                        flush_buffer_iter.next();
+                    }
+                    if !encounter_same_key {
+                        self.top_n.insert(key_from_storage, row_from_storage);
+                        inserted += 1;
                     }
                 }
             }
@@ -241,31 +229,25 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                             break;
                         }
                     }
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
-                        && **key_from_buffer > key_from_storage
+                    let mut encounter_same_key = false;
+                    while let Some((key_from_buffer, value_from_buffer)) = flush_buffer_iter.peek()
+                        && **key_from_buffer >= key_from_storage
                     {
-                        flush_buffer_iter.next();
-                    }
-                    if flush_buffer_iter.peek().is_none() {
-                        self.top_n.insert(key_from_storage, row_from_storage);
-                        continue;
-                    }
-                    let (key_from_buffer, value_from_buffer) = flush_buffer_iter.peek().unwrap();
-                    match key_from_storage.cmp(key_from_buffer) {
-                        std::cmp::Ordering::Equal => {
-                            match value_from_buffer {
-                                FlushStatus::Delete => {
-                                    // do not put it into cache
-                                }
-                                FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
-                                    self.top_n.insert(key_from_storage, row.clone());
-                                }
+                        match value_from_buffer {
+                            FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
+                                self.top_n.insert((*key_from_buffer).clone(), row.clone());
+                                inserted += 1;
+                            }
+                            FlushStatus::Delete => {
+                                //do nothing
                             }
                         }
-                        std::cmp::Ordering::Less => {
-                            flush_buffer_iter.next();
-                        }
-                        _ => unreachable!(),
+                        encounter_same_key = (**key_from_buffer) == key_from_storage;
+                        flush_buffer_iter.next();
+                    }
+                    if !encounter_same_key {
+                        self.top_n.insert(key_from_storage, row_from_storage);
+                        inserted += 1;
                     }
                 }
             }
@@ -376,14 +358,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
         self.retain_top_n();
         Ok(())
-    }
-
-    pub fn clear_cache(&mut self) {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while top n state is dirty"
-        );
-        self.top_n.clear();
     }
 }
 

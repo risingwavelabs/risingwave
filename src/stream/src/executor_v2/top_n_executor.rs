@@ -39,6 +39,15 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()>;
+
+    /// See [`Executor::schema`].
+    fn schema(&self) -> &Schema;
+
+    /// See [`Executor::pk_indices`].
+    fn pk_indices(&self) -> PkIndicesRef;
+
+    /// See [`Executor::identity`].
+    fn identity(&self) -> &str;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -49,7 +58,7 @@ pub struct TopNExecutorWrapper<E> {
 
 impl<E> Executor for TopNExecutorWrapper<E>
 where
-    E: TopNExecutorBase + Executor,
+    E: TopNExecutorBase,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.top_n_executor_execute().boxed()
@@ -65,24 +74,6 @@ where
 
     fn identity(&self) -> &str {
         self.inner.identity()
-    }
-}
-
-#[async_trait]
-impl<E> TopNExecutorBase for TopNExecutorWrapper<E>
-where
-    E: TopNExecutorBase,
-{
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
-        self.inner.apply_chunk(chunk, epoch).await
-    }
-
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.inner.flush_data(epoch).await
     }
 }
 
@@ -129,7 +120,7 @@ pub(crate) fn generate_output(
         let mut data_chunk_builder = DataChunkBuilder::new_with_default_size(schema.data_types());
         for row in &new_rows {
             data_chunk_builder
-                .append_one_row_ref(row.into())
+                .append_one_row_from_datums(row.0.iter())
                 .map_err(StreamExecutorError::eval_error)?;
         }
         // since `new_rows` is not empty, we unwrap directly

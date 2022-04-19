@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -208,15 +207,6 @@ impl<S: StateStore> Executor for InnerTopNExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lowest_state.clear_cache();
-        self.managed_middle_state.clear_cache();
-        self.managed_highest_state.clear_cache();
-        self.first_execution = true;
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -242,28 +232,16 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
             self.first_execution = false;
         }
 
-        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
-
-        let (ops, columns, _visibility) = chunk.into_inner();
-
-        let data_chunk = DataChunk::builder().columns(columns).build();
         let num_limit = self.limit.unwrap_or(usize::MAX);
         let mut new_ops = vec![];
         let mut new_rows = vec![];
 
-        for (row_idx, op) in ops.iter().enumerate().take(data_chunk.capacity()) {
-            let row_ref = data_chunk
-                .row_at(row_idx)
-                .map_err(StreamExecutorError::eval_error)?
-                .0;
-            let pk_row = Row(self
-                .pk_indices
-                .iter()
-                .map(|idx| row_ref.0[*idx].to_owned_datum())
-                .collect::<Vec<_>>());
+        for (op, row_ref) in chunk.rows() {
+            let pk_row = row_ref.row_by_indices(&self.pk_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
-            let row = row_ref.into();
-            match *op {
+            let row = row_ref.to_owned_row();
+
+            match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.managed_lowest_state.total_count() < self.offset {
                         // `elem` is in the range of `[0, offset)`,
@@ -442,6 +420,18 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.flush_inner(epoch).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
     }
 }
 

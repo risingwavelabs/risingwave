@@ -16,7 +16,10 @@ use super::HashKey;
 use crate::hash;
 use crate::types::{DataSize, DataType};
 
-pub const VIRTUAL_KEY_COUNT: usize = 2048;
+/// `VirtualNode` is the logical key for consistent hash. Virtual nodes stand for the intermediate
+/// layer between data and physical nodes.
+pub type VirtualNode = u16;
+pub const VIRTUAL_NODE_COUNT: usize = 2048;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

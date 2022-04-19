@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Row, RowRef, StreamChunk};
+use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
@@ -27,7 +28,7 @@ use crate::common::StreamChunkBuilder;
 use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
-use crate::executor_v2::{Barrier, Executor, Message, PkIndices};
+use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -170,17 +171,8 @@ impl<S: StateStore> LookupExecutor<S> {
             schema,
             pk_indices,
             last_barrier: None,
-            input: if use_current_epoch {
-                Some(Box::pin(stream_lookup_arrange_this_epoch(
-                    stream,
-                    arrangement,
-                )))
-            } else {
-                Some(Box::pin(stream_lookup_arrange_prev_epoch(
-                    stream,
-                    arrangement,
-                )))
-            },
+            stream_executor: Some(stream),
+            arrangement_executor: Some(arrangement),
             stream: StreamJoinSide {
                 key_indices: stream_join_key_indices,
                 pk_indices: stream_pk_indices,
@@ -207,9 +199,22 @@ impl<S: StateStore> LookupExecutor<S> {
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
-        let input = std::mem::take(&mut self.input);
+        let input = if self.arrangement.use_current_epoch {
+            stream_lookup_arrange_this_epoch(
+                self.stream_executor.take().unwrap(),
+                self.arrangement_executor.take().unwrap(),
+            )
+            .boxed()
+        } else {
+            stream_lookup_arrange_prev_epoch(
+                self.stream_executor.take().unwrap(),
+                self.arrangement_executor.take().unwrap(),
+            )
+            .boxed()
+        };
+
         #[for_await]
-        for msg in input.unwrap() {
+        for msg in input {
             let msg = msg.map_err(StreamExecutorError::input_error)?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
@@ -218,20 +223,50 @@ impl<S: StateStore> LookupExecutor<S> {
                         .map_err(StreamExecutorError::eval_error)?;
                     yield Message::Barrier(barrier)
                 }
-                ArrangeMessage::Arrange(_) => {
-                    // TODO: replicate batch
-                    //
-                    // As we assume currently all lookups are on the same worker node of
-                    // arrangements, the data would always be available in the
-                    // local shared buffer. Therefore, there's no need to
-                    // replicate batch.
+                ArrangeMessage::ArrangeReady => {
+                    // The arrangement is ready, and we will receive a bunch of stream messages for
+                    // the next poll.
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    yield Message::Chunk(
-                        self.lookup(chunk)
-                            .await
-                            .map_err(StreamExecutorError::eval_error)?,
+                    let last_barrier = self
+                        .last_barrier
+                        .as_ref()
+                        .expect("data received before a barrier");
+                    let lookup_epoch = if self.arrangement.use_current_epoch {
+                        last_barrier.epoch.curr
+                    } else {
+                        last_barrier.epoch.prev
+                    };
+                    let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+                    let (chunk, ops) = chunk.into_parts();
+
+                    let mut builder = StreamChunkBuilder::new(
+                        PROCESSING_WINDOW_SIZE,
+                        &self.output_data_types,
+                        0,
+                        self.stream.col_types.len(),
                     )
+                    .map_err(StreamExecutorError::eval_error)?;
+
+                    for (op, row) in ops.iter().zip_eq(chunk.rows()) {
+                        for matched_row in self
+                            .lookup_one_row(&row, lookup_epoch)
+                            .await
+                            .map_err(StreamExecutorError::eval_error)?
+                        {
+                            if let Some(chunk) = builder
+                                .append_row_with_limit(*op, &row, &matched_row)
+                                .map_err(StreamExecutorError::eval_error)?
+                            {
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                        // TODO: support outer join (return null if no rows are matched)
+                    }
+
+                    if let Some(chunk) = builder.take().map_err(StreamExecutorError::eval_error)? {
+                        yield Message::Chunk(chunk);
+                    }
                 }
             }
         }
@@ -243,55 +278,19 @@ impl<S: StateStore> LookupExecutor<S> {
         Ok(())
     }
 
-    /// Lookup the data in the shared buffer.
-    async fn lookup(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let last_barrier = self
-            .last_barrier
-            .as_ref()
-            .expect("data received before a barrier");
-        let lookup_epoch = if self.arrangement.use_current_epoch {
-            last_barrier.epoch.curr
-        } else {
-            last_barrier.epoch.prev
-        };
-        let chunk = chunk.compact()?;
-        let (chunk, ops) = chunk.into_parts();
-
-        let mut builder = StreamChunkBuilder::new(
-            chunk.capacity(),
-            &self.output_data_types,
-            0,
-            self.stream.col_types.len(),
-        )?;
-
-        for (op, row) in ops.iter().zip_eq(chunk.rows()) {
-            for matched_row in self.lookup_one_row(&row, lookup_epoch).await? {
-                builder.append_row(*op, &row, &matched_row)?;
-            }
-            // TODO: support outer join (return null if no rows are matched)
-        }
-
-        builder.finish()
-    }
-
     /// Lookup all rows corresponding to a join key in shared buffer.
     async fn lookup_one_row(&mut self, row: &RowRef<'_>, lookup_epoch: u64) -> Result<Vec<Row>> {
         // TODO: add a cache for arrangement in an upstream executor
 
         // Serialize join key to a state store key.
         let key_prefix = {
-            let row = RowRef(
-                self.arrangement
-                    .join_key_indices
-                    .iter()
-                    .map(|x| row.0[*x])
-                    .collect_vec(),
-            );
-            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", row);
+            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", row.row_by_indices(&self.arrangement.join_key_indices));
+
+            let row = row.datum_refs_by_indices(&self.arrangement.join_key_indices);
             let mut key_prefix = vec![];
             self.arrangement
                 .serializer
-                .serialize_row_ref(&row, &mut key_prefix);
+                .serialize_datum_refs(row, &mut key_prefix);
             key_prefix
         };
 
