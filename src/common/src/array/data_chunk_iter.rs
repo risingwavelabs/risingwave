@@ -77,6 +77,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct RowRef<'a> {
     chunk: &'a DataChunk,
 
@@ -140,6 +141,12 @@ impl<'a> RowRef<'a> {
         'b: 'c,
     {
         indices.iter().map(|&idx| self.value_at(idx))
+    }
+
+    /// Get the index of this row in the data chunk.
+    #[must_use]
+    pub(super) fn index(&self) -> usize {
+        self.idx
     }
 }
 
