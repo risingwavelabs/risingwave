@@ -41,6 +41,9 @@ pub struct UnnestAggForLOJ {}
 impl Rule for UnnestAggForLOJ {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
+        if apply.join_type() != JoinType::LeftOuter {
+            return None;
+        }
         let apply_left_len = apply.left().schema().fields().len();
 
         let right = apply.right();
@@ -51,17 +54,13 @@ impl Rule for UnnestAggForLOJ {
 
         let input = agg.input();
         let input_project = input.as_logical_project()?;
-        let (mut exprs, mut expr_aliases, input) = input_project.clone().decompose();
-
-        if !matches!(apply.join_type(), JoinType::LeftOuter) {
-            return None;
-        }
+        let (mut exprs, mut expr_alias, input) = input_project.clone().decompose();
 
         // Add a constant column at the end of `input_project`.
         exprs.push(ExprImpl::literal_int(1));
-        expr_aliases.push(Some("1".into()));
+        expr_alias.push(Some("1".into()));
         let idx_of_constant = exprs.len() - 1;
-        let new_project = LogicalProject::new(input, exprs, expr_aliases);
+        let new_project = LogicalProject::new(input, exprs, expr_alias);
 
         let new_apply = apply.clone_with_left_right(apply.left(), new_project.into());
 

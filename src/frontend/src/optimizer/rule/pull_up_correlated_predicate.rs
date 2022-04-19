@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::{Either, Itertools};
+use risingwave_pb::plan::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -28,15 +29,21 @@ pub struct PullUpCorrelatedPredicate {}
 impl Rule for PullUpCorrelatedPredicate {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
+        if !matches!(apply.join_type(), JoinType::LeftOuter | JoinType::LeftSemi) {
+            return None;
+        }
 
         let right = apply.right();
         let project = right.as_logical_project()?;
-        let (mut exprs, mut expr_alias, _) = project.clone().decompose();
-        let begin = exprs.len();
+        let (mut proj_exprs, mut proj_expr_alias, _) = project.clone().decompose();
 
         let input = project.input();
         let filter = input.as_logical_filter()?;
 
+        let mut rewriter = Rewriter {
+            input_refs: vec![],
+            index: proj_exprs.len() + apply.left().schema().fields().len(),
+        };
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
         let (cor_exprs, uncor_exprs) =
@@ -45,26 +52,21 @@ impl Rule for PullUpCorrelatedPredicate {
                 .clone()
                 .into_iter()
                 .partition_map(|expr| {
-                    let mut rewriter = Rewriter {
-                        has_correlated_input_ref: false,
-                        input_refs: vec![],
-                        index: exprs.len() + apply.left().schema().fields().len(),
-                    };
-                    let rewritten_expr = rewriter.rewrite_expr(expr.clone());
-                    if rewriter.has_correlated_input_ref {
-                        // Append input_refs in expression which contains correlated_input_ref to
-                        // `exprs` used to construct new LogicalProject.
-                        exprs.extend(
-                            rewriter
-                                .input_refs
-                                .drain(..)
-                                .map(|input_ref| input_ref.into()),
-                        );
-                        Either::Left(rewritten_expr)
+                    if expr.has_correlated_input_ref() {
+                        Either::Left(rewriter.rewrite_expr(expr))
                     } else {
                         Either::Right(expr)
                     }
                 });
+        // Append `InputRef`s in the predicate expression to be pulled to the project, so that they
+        // are accessible by the expression after it is pulled.
+        proj_expr_alias.extend(vec![None; rewriter.input_refs.len()].into_iter());
+        proj_exprs.extend(
+            rewriter
+                .input_refs
+                .drain(..)
+                .map(|input_ref| input_ref.into()),
+        );
 
         // TODO: remove LogicalFilter with always true condition.
         let filter = LogicalFilter::new(
@@ -74,11 +76,7 @@ impl Rule for PullUpCorrelatedPredicate {
             },
         );
 
-        // Add columns involved in expressions removed from LogicalFilter to LogicalProject.
-        let end = exprs.len();
-        expr_alias.extend(vec![None; end - begin].into_iter());
-
-        let project = LogicalProject::new(filter.into(), exprs, expr_alias);
+        let project = LogicalProject::new(filter.into(), proj_exprs, proj_expr_alias);
 
         // Merge these expressions with LogicalApply into LogicalJoin.
         let on = Condition {
@@ -88,13 +86,16 @@ impl Rule for PullUpCorrelatedPredicate {
     }
 }
 
-/// Rewritter is responsible for rewriting `correlated_input_ref` to `input_ref` and shifting
-/// `input_ref`.
+/// Rewrites a pulled predicate expression. It is pulled from the right of the apply to the `on`
+/// clause.
+///
+/// Rewrites `correlated_input_ref` (referencing left side) to `input_ref` and shifting `input_ref`
+/// (referencing right side).
+///
+/// Also collects all `InputRef`s, which will be added to the project, so that they are accessible
+/// by the expression after it is pulled.
 struct Rewriter {
-    // This flag is used to indicate whether the expression has correlated_input_ref.
-    has_correlated_input_ref: bool,
-
-    // All uncorrelated input_refs in the expression.
+    // All uncorrelated `InputRef`s in the expression.
     pub input_refs: Vec<InputRef>,
 
     pub index: usize,
@@ -105,8 +106,6 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        self.has_correlated_input_ref = true;
-
         // Convert correlated_input_ref to input_ref.
         // TODO: use LiftCorrelatedInputRef here.
         InputRef::new(
