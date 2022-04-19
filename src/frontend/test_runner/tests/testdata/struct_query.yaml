@@ -112,4 +112,4 @@
   logical_plan: |
     LogicalProject { exprs: [Field($0, 1:Struct { fields: [Varchar, Varchar] }, 1:Varchar)], expr_alias: [zipcode] }
       LogicalProject { exprs: [Field($1)], expr_alias: [c] }
-         LogicalScan { table: v, columns: [id, country, zipcode, rate, _row_id#0] }
+        LogicalScan { table: v, columns: [id, country, zipcode, rate, _row_id#0] }
