@@ -101,6 +101,11 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
   - Disable async chekcpoint
   - Default: false
 
+- `--write-conflict-detection-enabled`
+  
+  - Enable write conflict detection
+  - Default: false
+
 ## Operations
 
 ### Concurrency Number (`--concurrency-num`)
