@@ -31,7 +31,9 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator};
+use super::iterator::{
+    BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
+};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
@@ -135,7 +137,7 @@ impl Compactor {
             let iter = {
                 let iters = buffers
                     .iter()
-                    .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
+                    .map(|m| Box::new(m.iter()) as BoxedForwardHummockIterator);
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
@@ -342,7 +344,7 @@ impl Compactor {
 
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(&self) -> HummockResult<MergeIterator<'_>> {
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+        let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         for LevelEntry {
             level_idx: _,
             level: opt_level,
@@ -373,7 +375,7 @@ impl Compactor {
                     )));
                 }
                 LevelType::Overlapping => {
-                    table_iters.extend(tables.iter().map(|table| -> Box<dyn HummockIterator> {
+                    table_iters.extend(tables.iter().map(|table| -> BoxedForwardHummockIterator {
                         Box::new(SSTableIterator::new(
                             table.clone(),
                             self.context.sstable_store.clone(),
