@@ -25,7 +25,7 @@ pub struct BoundSubquery {
 
 impl Binder {
     /// Binds a subquery using [`bind_query`](Self::bind_query), which will use a new empty
-    /// [`BindContext`](super::BindContext) for it.
+    /// [`BindContext`](crate::binder::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.
     pub(super) fn bind_subquery_relation(
