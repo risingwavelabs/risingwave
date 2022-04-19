@@ -274,7 +274,7 @@ impl Compactor {
     async fn compact_key_range(
         &self,
         split_index: usize,
-        iter: MergeIterator<'_>,
+        iter: MergeIterator,
     ) -> HummockResult<(usize, Vec<Sstable>)> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -343,7 +343,7 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<MergeIterator<'_>> {
+    async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         for LevelEntry {
             level_idx: _,
@@ -509,7 +509,7 @@ impl Compactor {
     async fn compact_and_build_sst<B, F>(
         sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
-        mut iter: MergeIterator<'_>,
+        mut iter: MergeIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
     ) -> HummockResult<()>

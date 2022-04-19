@@ -17,9 +17,9 @@ use crate::hummock::iterator::merge_inner::{
 };
 use crate::hummock::iterator::Forward;
 
-pub type MergeIterator<'a> = UnorderedMergeIteratorInner<'a, Forward>;
+pub type MergeIterator = UnorderedMergeIteratorInner<Forward>;
 #[allow(dead_code)]
-pub type OrderedAwareMergeIterator<'a> = OrderedMergeIteratorInner<'a, Forward>;
+pub type OrderedAwareMergeIterator = OrderedMergeIteratorInner<Forward>;
 
 #[cfg(test)]
 mod test {

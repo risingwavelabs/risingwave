@@ -23,12 +23,12 @@ use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
-pub enum DirectedUserIterator<'a> {
-    Forward(UserIterator<'a>),
-    Backward(ReverseUserIterator<'a>),
+pub enum DirectedUserIterator {
+    Forward(UserIterator),
+    Backward(ReverseUserIterator),
 }
 
-impl DirectedUserIterator<'_> {
+impl DirectedUserIterator {
     pub async fn next(&mut self) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.next().await,
@@ -77,9 +77,9 @@ impl DirectedUserIterator<'_> {
 }
 
 /// [`UserIterator`] can be used by user directly.
-pub struct UserIterator<'a> {
+pub struct UserIterator {
     /// Inner table iterator.
-    iterator: MergeIterator<'a>,
+    iterator: MergeIterator,
 
     /// Last user key
     last_key: Vec<u8>,
@@ -101,11 +101,11 @@ pub struct UserIterator<'a> {
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
-impl<'a> UserIterator<'a> {
+impl UserIterator {
     /// Create [`UserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn for_test(
-        iterator: MergeIterator<'a>,
+        iterator: MergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::new(iterator, key_range, Epoch::MAX, None)
@@ -113,7 +113,7 @@ impl<'a> UserIterator<'a> {
 
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new(
-        iterator: MergeIterator<'a>,
+        iterator: MergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         version: Option<Arc<ScopedLocalVersion>>,

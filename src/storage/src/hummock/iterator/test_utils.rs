@@ -142,7 +142,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 pub fn gen_merge_iterator_interleave_test_sstable_iters(
     key_count: usize,
     count: usize,
-) -> Vec<BoxedForwardHummockIterator<'static>> {
+) -> Vec<BoxedForwardHummockIterator> {
     let sstable_store = mock_sstable_store();
     (0..count)
         .map(|i: usize| {

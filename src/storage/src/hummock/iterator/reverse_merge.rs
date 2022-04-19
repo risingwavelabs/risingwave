@@ -15,7 +15,7 @@
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::Backward;
 
-pub type ReverseMergeIterator<'a> = UnorderedMergeIteratorInner<'a, Backward>;
+pub type ReverseMergeIterator = UnorderedMergeIteratorInner<Backward>;
 
 #[cfg(test)]
 mod test {

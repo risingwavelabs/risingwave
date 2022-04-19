@@ -23,9 +23,9 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
 /// [`ReverseUserIterator`] can be used by user directly.
-pub struct ReverseUserIterator<'a> {
+pub struct ReverseUserIterator {
     /// Inner table iterator.
-    iterator: ReverseMergeIterator<'a>,
+    iterator: ReverseMergeIterator,
 
     /// We just met a new key
     just_met_new_key: bool,
@@ -52,11 +52,11 @@ pub struct ReverseUserIterator<'a> {
     _version: Option<Arc<ScopedLocalVersion>>,
 }
 
-impl<'a> ReverseUserIterator<'a> {
+impl ReverseUserIterator {
     /// Creates [`ReverseUserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn new(
-        iterator: ReverseMergeIterator<'a>,
+        iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::new_with_epoch(iterator, key_range, Epoch::MAX, None)
@@ -64,7 +64,7 @@ impl<'a> ReverseUserIterator<'a> {
 
     /// Creates [`ReverseUserIterator`] with given `read_epoch`.
     pub(crate) fn new_with_epoch(
-        iterator: ReverseMergeIterator<'a>,
+        iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         version: Option<Arc<ScopedLocalVersion>>,
