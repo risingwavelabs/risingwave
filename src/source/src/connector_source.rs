@@ -20,7 +20,7 @@ use lazy_static::__Deref;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::{state, SourceReaderImpl};
+use risingwave_connector::{state, SplitReaderImpl};
 use risingwave_storage::StateStore;
 use tokio::sync::Mutex;
 
@@ -28,12 +28,12 @@ use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
-/// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReaderImpl`]
+/// processing. [`ConnectorSource`] introduces schema at this level while [`SplitReaderImpl`]
 /// simply loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub parser: Arc<SourceParserImpl>,
-    pub reader: Arc<Mutex<SourceReaderImpl>>,
+    pub reader: Arc<Mutex<SplitReaderImpl>>,
     pub column_descs: Vec<SourceColumnDesc>,
 }
 
@@ -48,7 +48,7 @@ impl Debug for ConnectorSource {
 impl ConnectorSource {
     pub fn new(
         parser: Arc<SourceParserImpl>,
-        reader: Arc<Mutex<SourceReaderImpl>>,
+        reader: Arc<Mutex<SplitReaderImpl>>,
         column_descs: Vec<SourceColumnDesc>,
     ) -> Self {
         Self {
