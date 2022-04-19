@@ -31,12 +31,14 @@
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
+#![feature(generators)]
+#![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
 pub mod execution;
 pub mod executor;
+pub mod executor2;
 pub mod rpc;
 pub mod task;
-
 #[macro_use]
 extern crate log;
 #[macro_use]

@@ -91,7 +91,7 @@ where
                     schema,
                     source,
                     table,
-                    ..Default::default()
+                    view: Default::default(),
                 };
                 tx.send(Ok(SubscribeResponse {
                     status: None,

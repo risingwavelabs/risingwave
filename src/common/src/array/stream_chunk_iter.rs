@@ -12,140 +12,177 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::column::Column;
-use super::Row;
+use std::iter::once;
+
+use auto_enums::auto_enum;
+
+use super::RowRef;
 use crate::array::{Op, StreamChunk};
-use crate::types::{DatumRef, ToOwnedDatum};
 
 impl StreamChunk {
-    pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
+    /// Return an iterator on stream records of this stream chunk.
+    pub fn records(&self) -> impl Iterator<Item = RecordRef<'_>> {
         StreamChunkRefIter {
             chunk: self,
-            idx: 0,
+            inner: self.data.rows(),
         }
     }
+
+    /// Return an iterator on rows of this stream chunk.
+    ///
+    /// Should consider using [`StreamChunk::records`] if possible.
+    pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
+        self.data.rows().map(|row| {
+            (
+                // SAFETY: index is checked since we are in the iterator.
+                unsafe { *self.ops().get_unchecked(row.index()) },
+                row,
+            )
+        })
+    }
 }
+
+type RowRefIter<'a> = impl Iterator<Item = RowRef<'a>>;
 
 struct StreamChunkRefIter<'a> {
     chunk: &'a StreamChunk,
-    idx: usize,
+
+    inner: RowRefIter<'a>,
 }
 
 impl<'a> Iterator for StreamChunkRefIter<'a> {
-    type Item = RowRef<'a>;
+    type Item = RecordRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.chunk.visibility() {
-            Some(bitmap) => {
-                loop {
-                    let idx = self.idx;
-                    if idx >= self.chunk.capacity() {
-                        return None;
-                    }
-                    // SAFETY: idx is checked.
-                    let vis = unsafe { bitmap.is_set_unchecked(idx) };
-                    self.idx += 1;
-                    if vis {
-                        return Some(RowRef {
-                            chunk: self.chunk,
-                            idx,
-                        });
-                    }
-                }
-            }
-            None => {
-                let idx = self.idx;
-                if idx >= self.chunk.capacity() {
-                    return None;
-                }
-                self.idx += 1;
-                Some(RowRef {
-                    chunk: self.chunk,
-                    idx,
+        let row = self.inner.next()?;
+        // SAFETY: index is checked since `row` is `Some`.
+        let op = unsafe { self.chunk.ops().get_unchecked(row.index()) };
+
+        match op {
+            Op::Insert => Some(RecordRef::Insert(row)),
+            Op::Delete => Some(RecordRef::Delete(row)),
+            Op::UpdateDelete => {
+                let insert_row = self.inner.next().expect("expect a row after U-");
+                // SAFETY: index is checked since `insert_row` is `Some`.
+                let op = unsafe { *self.chunk.ops().get_unchecked(insert_row.index()) };
+                debug_assert_eq!(op, Op::UpdateInsert, "expect a U+ after U-");
+
+                Some(RecordRef::Update {
+                    delete: row,
+                    insert: insert_row,
                 })
             }
+            Op::UpdateInsert => panic!("expect a U- before U+"),
         }
     }
 }
 
-pub struct RowRef<'a> {
-    pub(super) chunk: &'a StreamChunk,
-    pub(super) idx: usize,
+#[derive(Debug, Clone)]
+pub enum RecordRef<'a> {
+    Insert(RowRef<'a>),
+    Delete(RowRef<'a>),
+    Update {
+        delete: RowRef<'a>,
+        insert: RowRef<'a>,
+    },
 }
 
-impl<'a> RowRef<'a> {
-    pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // TODO: It's safe to use value_at_unchecked here.
-        self.chunk.columns()[pos].array_ref().value_at(self.idx)
-    }
-
-    pub fn op(&self) -> Op {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // SAFETY: idx is checked while creating `RowRefV2`.
-        unsafe { *self.chunk.ops().get_unchecked(self.idx) }
-    }
-
-    pub fn size(&self) -> usize {
-        self.chunk.columns().len()
-    }
-
-    pub fn values<'b>(&'b self) -> RowRefIter<'a>
-    where
-        'a: 'b,
-    {
-        debug_assert!(self.idx < self.chunk.capacity());
-        RowRefIter::<'a> {
-            columns: self.chunk.columns().iter(),
-            row_idx: self.idx,
+impl<'a> RecordRef<'a> {
+    /// Convert this stream record to one or two rows with corresponding ops.
+    #[auto_enum(Iterator)]
+    pub fn into_row_refs(self) -> impl Iterator<Item = (Op, RowRef<'a>)> {
+        match self {
+            RecordRef::Insert(row_ref) => once((Op::Insert, row_ref)),
+            RecordRef::Delete(row_ref) => once((Op::Delete, row_ref)),
+            RecordRef::Update { delete, insert } => {
+                [(Op::UpdateDelete, delete), (Op::UpdateInsert, insert)].into_iter()
+            }
         }
-    }
-
-    pub fn to_owned_row(&self) -> Row {
-        Row(self.values().map(ToOwnedDatum::to_owned_datum).collect())
-    }
-}
-
-#[derive(Clone)]
-pub struct RowRefIter<'a> {
-    columns: std::slice::Iter<'a, Column>,
-    row_idx: usize,
-}
-
-impl<'a> Iterator for RowRefIter<'a> {
-    type Item = DatumRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // TODO: It's safe to use value_at_unchecked here.
-        self.columns
-            .next()
-            .map(|col| col.array_ref().value_at(self.row_idx))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RowRef;
-    use crate::array::Row;
-    use crate::test_utils::test_stream_chunk::{TestStreamChunk, WhatEverStreamChunk};
-    use crate::types::ToOwnedDatum;
+    extern crate test;
+    use itertools::Itertools;
+    use test::Bencher;
+
+    use super::RecordRef;
+    use crate::test_utils::test_stream_chunk::{
+        BigStreamChunk, TestStreamChunk, WhatEverStreamChunk,
+    };
 
     #[test]
     fn test_chunk_rows() {
-        let chunk = WhatEverStreamChunk::stream_chunk();
-        let row_to_owned = |row: RowRef| {
-            (
-                row.op(),
-                Row(row
-                    .values()
-                    .map(ToOwnedDatum::to_owned_datum)
-                    .collect::<Vec<_>>()),
-            )
-        };
-        let mut rows = chunk.rows().map(row_to_owned);
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(0)), rows.next());
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(1)), rows.next());
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(2)), rows.next());
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(3)), rows.next());
+        let test = WhatEverStreamChunk;
+        let chunk = test.stream_chunk();
+        let mut rows = chunk.rows().map(|(op, row)| (op, row.to_owned_row()));
+        assert_eq!(Some(test.row_with_op_at(0)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(1)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(2)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(3)), rows.next());
+    }
+
+    #[test]
+    fn test_chunk_records() {
+        let test = WhatEverStreamChunk;
+        let chunk = test.stream_chunk();
+        let mut rows = chunk
+            .records()
+            .flat_map(RecordRef::into_row_refs)
+            .map(|(op, row)| (op, row.to_owned_row()));
+        assert_eq!(Some(test.row_with_op_at(0)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(1)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(2)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(3)), rows.next());
+    }
+
+    #[bench]
+    fn bench_rows_iterator_from_records(b: &mut Bencher) {
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
+        b.iter(|| {
+            for (_op, row) in chunk.records().flat_map(RecordRef::into_row_refs) {
+                test::black_box(row.values().count());
+            }
+        })
+    }
+
+    #[bench]
+    fn bench_rows_iterator(b: &mut Bencher) {
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
+        b.iter(|| {
+            for (_op, row) in chunk.rows() {
+                test::black_box(row.values().count());
+            }
+        })
+    }
+
+    #[bench]
+    fn bench_rows_iterator_vec_of_datum_refs(b: &mut Bencher) {
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
+        b.iter(|| {
+            for (_op, row) in chunk.rows() {
+                // Mimic the old `RowRef(Vec<DatumRef>)`
+                let row = row.values().collect_vec();
+                test::black_box(row);
+            }
+        })
+    }
+
+    #[bench]
+    fn bench_record_iterator(b: &mut Bencher) {
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
+        b.iter(|| {
+            for record in chunk.records() {
+                match record {
+                    RecordRef::Insert(row) => test::black_box(row.values().count()),
+                    RecordRef::Delete(row) => test::black_box(row.values().count()),
+                    RecordRef::Update { delete, insert } => {
+                        test::black_box(delete.values().count());
+                        test::black_box(insert.values().count())
+                    }
+                };
+            }
+        })
     }
 }

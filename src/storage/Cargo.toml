@@ -7,12 +7,12 @@ edition = "2021"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.9", default-features = false }
-aws-sdk-s3 = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.39"
-aws-smithy-types = "0.39"
-aws-types = { version = "0.9", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.10", default-features = false }
+aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.40"
+aws-smithy-types = "0.40"
+aws-types = { version = "0.10", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -87,3 +87,7 @@ name = "bench_block_iter"
 harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
+
+[[bench]]
+name = "bench_merge_iter"
+harness = false

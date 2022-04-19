@@ -412,7 +412,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -563,7 +563,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
