@@ -118,11 +118,13 @@ impl Distribution {
         matches!(self, Distribution::Any)
     }
 
-    /// Get distribution column indices.
+    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
+    /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
+            Distribution::Single => Default::default(),
             Distribution::HashShard(dists) => dists,
-            _ => &[],
+            _ => unreachable!(),
         }
     }
 }
