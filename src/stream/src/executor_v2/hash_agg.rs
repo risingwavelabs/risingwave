@@ -293,6 +293,97 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
+    #[try_stream(ok = Option<StreamChunk>, error = TracedStreamExecutorError)]
+    async fn flush_data<'a>(
+        &HashAggExecutorExtra::<S> {
+            ref key_indices,
+            ref keyspace,
+            ref schema,
+            ..
+        }: &'a HashAggExecutorExtra<S>,
+        state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
+        epoch: u64,
+    ) {
+        // --- Flush states to the state store ---
+        // Some state will have the correct output only after their internal states have been fully
+        // flushed.
+        let (write_batch, dirty_cnt) = {
+            let mut write_batch = keyspace.state_store().start_write_batch();
+            let mut dirty_cnt = 0;
+
+            for states in state_map.values_mut() {
+                if states.as_ref().unwrap().is_dirty() {
+                    dirty_cnt += 1;
+                    for state in &mut states.as_mut().unwrap().managed_states {
+                        state
+                            .flush(&mut write_batch)
+                            .map_err(StreamExecutorError::agg_state_error)?;
+                    }
+                }
+            }
+            (write_batch, dirty_cnt)
+        };
+
+        if dirty_cnt == 0 {
+            // Nothing to flush.
+            assert!(write_batch.is_empty());
+            yield None;
+        } else {
+            write_batch
+                .ingest(epoch)
+                .await
+                .map_err(StreamExecutorError::agg_state_error)?;
+
+            // --- Produce the stream chunk ---
+            let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
+            while let Some(batch) = batches.next() {
+                // --- Create array builders ---
+                // As the datatype is retrieved from schema, it contains both group key and
+                // aggregation state outputs.
+                let mut builders = schema
+                    .create_array_builders(dirty_cnt * 2)
+                    .map_err(StreamExecutorError::eval_error)?;
+                let mut new_ops = Vec::with_capacity(dirty_cnt);
+
+                // --- Retrieve modified states and put the changes into the builders ---
+                for (key, states) in batch {
+                    let appended = states
+                        .as_mut()
+                        .unwrap()
+                        .build_changes(&mut builders[key_indices.len()..], &mut new_ops, epoch)
+                        .await
+                        .map_err(StreamExecutorError::agg_state_error)?;
+
+                    for _ in 0..appended {
+                        key.clone()
+                            .deserialize_to_builders(&mut builders[..key_indices.len()])
+                            .map_err(StreamExecutorError::eval_error)?;
+                    }
+                }
+
+                let columns: Vec<Column> = builders
+                    .into_iter()
+                    .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
+                    .try_collect()
+                    .map_err(StreamExecutorError::eval_error)?;
+
+                let chunk = StreamChunk::new(new_ops, columns, None);
+
+                trace!("output_chunk: {:?}", &chunk);
+                yield Some(chunk);
+            }
+
+            // evict cache to target capacity
+            // In current implementation, we need to fetch the RowCount from the state store
+            // once a key is deleted and added again. We should find a way to
+            // eliminate this extra fetch.
+            assert!(!state_map
+                .values()
+                .any(|state| state.as_ref().unwrap().is_dirty()));
+            state_map.evict_to_target_cap();
+        }
+    }
+
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
         let HashAggExecutor { input, extra, .. } = self;
@@ -316,104 +407,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Self::apply_chunk(&extra, &mut state_map, chunk, epoch).await?;
                 }
                 Message::Barrier(barrier) => {
-                    let &HashAggExecutorExtra::<S> {
-                        ref schema,
-                        ref keyspace,
-                        ref key_indices,
-                        ..
-                    } = &extra;
                     let next_epoch = barrier.epoch.curr;
                     assert_eq!(epoch, barrier.epoch.prev);
 
-                    // --- Flush states to the state store ---
-                    // Some state will have the correct output only after their internal states
-                    // have been fully flushed.
-                    let (write_batch, dirty_cnt) = {
-                        let mut write_batch = keyspace.state_store().start_write_batch();
-                        let mut dirty_cnt = 0;
-
-                        for states in state_map.values_mut() {
-                            if states.as_ref().unwrap().is_dirty() {
-                                dirty_cnt += 1;
-                                for state in &mut states.as_mut().unwrap().managed_states {
-                                    state
-                                        .flush(&mut write_batch)
-                                        .map_err(StreamExecutorError::agg_state_error)?;
-                                }
-                            }
+                    #[for_await]
+                    for input in Self::flush_data(&extra, &mut state_map, epoch) {
+                        match input? {
+                            None => break,
+                            Some(chunk) => yield Message::Chunk(chunk),
                         }
-                        (write_batch, dirty_cnt)
-                    };
-
-                    if dirty_cnt == 0 {
-                        // Nothing to flush.
-                        assert!(write_batch.is_empty());
-                        yield Message::Barrier(barrier);
-                        epoch = next_epoch;
-                        continue;
                     }
-
-                    write_batch
-                        .ingest(epoch)
-                        .await
-                        .map_err(StreamExecutorError::agg_state_error)?;
-
-                    // --- Produce the stream chunk ---
-                    let mut batches =
-                        IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
-                    while let Some(batch) = batches.next() {
-                        // --- Create array builders ---
-                        // As the datatype is retrieved from schema, it contains both group key
-                        // and aggregation state outputs.
-                        let mut builders = schema
-                            .create_array_builders(dirty_cnt * 2)
-                            .map_err(StreamExecutorError::eval_error)?;
-                        let mut new_ops = Vec::with_capacity(dirty_cnt);
-
-                        // --- Retrieve modified states and put the changes into the builders
-                        // ---
-                        for (key, states) in batch {
-                            let appended = states
-                                .as_mut()
-                                .unwrap()
-                                .build_changes(
-                                    &mut builders[key_indices.len()..],
-                                    &mut new_ops,
-                                    epoch,
-                                )
-                                .await
-                                .map_err(StreamExecutorError::agg_state_error)?;
-
-                            for _ in 0..appended {
-                                key.clone()
-                                    .deserialize_to_builders(&mut builders[..key_indices.len()])
-                                    .map_err(StreamExecutorError::eval_error)?;
-                            }
-                        }
-
-                        let columns: Vec<Column> = builders
-                            .into_iter()
-                            .map(|builder| -> Result<_> {
-                                Ok(Column::new(Arc::new(builder.finish()?)))
-                            })
-                            .try_collect()
-                            .map_err(StreamExecutorError::eval_error)?;
-
-                        let chunk = StreamChunk::new(new_ops, columns, None);
-
-                        trace!("output_chunk: {:?}", &chunk);
-                        yield Message::Chunk(chunk);
-                    }
-
-                    // evict cache to target capacity
-                    // In current implementation, we need to fetch the RowCount from the
-                    // state store once a key is deleted and
-                    // added again. We should find a way to
-                    // eliminate this extra fetch.
-                    assert!(!state_map
-                        .values()
-                        .any(|state| state.as_ref().unwrap().is_dirty()));
-                    state_map.evict_to_target_cap();
 
                     yield Message::Barrier(barrier);
                     epoch = next_epoch;
