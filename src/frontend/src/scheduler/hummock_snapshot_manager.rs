@@ -30,7 +30,7 @@ pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 impl HummockSnapshotManager {
     pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
         Self {
-            core: Mutex::new(HummockSnapshotManagerCore::default()),
+            core: Mutex::new(HummockSnapshotManagerCore::new()),
             meta_client,
         }
     }
@@ -80,4 +80,13 @@ struct HummockSnapshotManagerCore {
     is_outdated: bool,
     last_pinned: u64,
     quote_number: HashMap<u64, u32>,
+}
+
+impl HummockSnapshotManagerCore {
+    fn new() -> Self {
+        Self {
+            is_outdated: true,
+            ..Default::default()
+        }
+    }
 }
