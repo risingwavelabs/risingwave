@@ -74,11 +74,12 @@ pub struct ConnectorReaderContext {
     pub(crate) splits: Vec<SplitImpl>,
 }
 
+#[async_trait]
 impl Source for ConnectorSource {
     type ReaderContext = ConnectorReaderContext;
     type StreamReader = ConnectorStreamSource;
 
-    fn stream_reader(
+    async fn stream_reader(
         &self,
         context: ConnectorReaderContext,
         column_ids: Vec<ColumnId>,

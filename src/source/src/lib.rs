@@ -108,9 +108,11 @@ impl SourceImpl {
         match (self, context) {
             (SourceImpl::TableV2(x), SourceReaderContext::None(_)) => x
                 .stream_reader(TableV2ReaderContext {}, column_ids)
+                .await
                 .map(SourceStreamReaderImpl::TableV2),
             (SourceImpl::Connector(c), SourceReaderContext::ConnectorReaderContext(context)) => c
                 .stream_reader(ConnectorReaderContext { splits: context }, column_ids)
+                .await
                 .map(SourceStreamReaderImpl::Connector),
             _ => Err(RwError::from(InternalError(
                 "unmatched source and context".to_string(),
@@ -125,7 +127,7 @@ pub trait Source: Send + Sync + 'static {
     type StreamReader: StreamSourceReader;
 
     /// Create a stream reader
-    fn stream_reader(
+    async fn stream_reader(
         &self,
         context: Self::ReaderContext,
         column_ids: Vec<ColumnId>,
