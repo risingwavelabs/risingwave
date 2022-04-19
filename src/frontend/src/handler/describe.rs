@@ -30,7 +30,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
     for col in columns {
         rows.append(
             &mut col
-                .get_column_descs()
+                .flatten()
                 .into_iter()
                 .map(|c| {
                     let type_name = {

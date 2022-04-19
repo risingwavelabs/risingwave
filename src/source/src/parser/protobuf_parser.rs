@@ -128,7 +128,7 @@ impl ProtobufParser {
         let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index))
+            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, &mut index))
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 
@@ -136,7 +136,6 @@ impl ProtobufParser {
     pub fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
-        lastname: String,
         index: &mut i32,
     ) -> Result<ColumnDesc> {
         let field_type = field_descriptor.field_type(descriptors);
@@ -145,19 +144,12 @@ impl ProtobufParser {
             let column_vec = m
                 .fields()
                 .iter()
-                .map(|f| {
-                    Self::pb_field_to_col_desc(
-                        f,
-                        descriptors,
-                        lastname.clone() + field_descriptor.name() + ".",
-                        index,
-                    )
-                })
+                .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
                 .collect::<Result<Vec<_>>>()?;
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
-                name: lastname + field_descriptor.name(),
+                name: field_descriptor.name().to_string(),
                 column_type: Some(data_type.to_protobuf()),
                 field_descs: column_vec,
                 type_name: m.name().to_string(),
@@ -166,7 +158,7 @@ impl ProtobufParser {
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
-                name: lastname + field_descriptor.name(),
+                name: field_descriptor.name().to_string(),
                 column_type: Some(data_type.to_protobuf()),
                 ..Default::default()
             })

@@ -103,12 +103,23 @@ impl ColumnDesc {
         }
     }
 
-    /// Get all column descs under `field_descs`.
-    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+    /// Flatten a nested column to a list of columns (including itself).
+    /// If the type is atomic, it returns simply itself.
+    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
+    /// and returns every children node.
+    pub fn flatten(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
-        for desc in &self.field_descs {
-            descs.append(&mut desc.get_column_descs());
-        }
+        descs.append(
+            &mut self
+                .field_descs
+                .iter()
+                .flat_map(|d| {
+                    let mut desc = d.clone();
+                    desc.name = self.name.clone() + "." + &desc.name;
+                    desc.flatten()
+                })
+                .collect_vec(),
+        );
         descs
     }
 

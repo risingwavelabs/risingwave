@@ -28,3 +28,59 @@
           string address = 1;
           string zipcode = 2;
         }
+- sql: |
+    create materialized view v as select t.* from t;
+    select (v).country.city,(v.country).address,(country).city.address from v;
+  create_source:
+    row_format: protobuf
+    name: t
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        Country country = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+      message Country {
+        string address = 1;
+        City city = 2;
+        string zipcode = 3;
+      }
+      message City {
+        string address = 1;
+        string zipcode = 2;
+      }
+  logical_plan: |
+    LogicalProject { exprs: [Field($2, 1:Struct { fields: [Varchar, Varchar] }), Field($2, 0:Varchar), Field($2, 1:Struct { fields: [Varchar, Varchar] }, 0:Varchar)], expr_alias: [city, address, address] }
+      LogicalScan { table: v, columns: [_row_id#0, id, country, zipcode, rate] }
+- sql: |
+    create materialized view v as select * from t;
+    select (v).country1.city.*,(v.country2).*,(country3).city.* from v;
+  create_source:
+    row_format: protobuf
+    name: t
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        Country country1 = 3;
+        Country country2 = 3;
+        Country country3 = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+      message Country {
+        string address = 1;
+        City city = 2;
+        string zipcode = 3;
+      }
+      message City {
+        string address = 1;
+        string zipcode = 2;
+      }
+  logical_plan: |
+    LogicalProject { exprs: [Field($1, 1:Struct { fields: [Varchar, Varchar] }, 0:Varchar), Field($1, 1:Struct { fields: [Varchar, Varchar] }, 1:Varchar), Field($2, 0:Varchar), Field($2, 1:Struct { fields: [Varchar, Varchar] }), Field($2, 2:Varchar), Field($3, 1:Struct { fields: [Varchar, Varchar] }, 0:Varchar), Field($3, 1:Struct { fields: [Varchar, Varchar] }, 1:Varchar)], expr_alias: [address, zipcode, address, city, zipcode, address, zipcode] }
+      LogicalScan { table: v, columns: [id, country1, country2, country3, zipcode, rate, _row_id#0] }
