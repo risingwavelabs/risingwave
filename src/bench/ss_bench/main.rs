@@ -125,11 +125,12 @@ async fn main() {
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
-        shared_buffer_threshold_size: 268435456, // 256 MB
         bloom_false_positive: opts.bloom_false_positive,
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
         share_buffers_sync_parallelism: 2,
+        shared_buffer_threshold: 192 << 20,
+        shared_buffer_capacity: 256 << 20,
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: false,
