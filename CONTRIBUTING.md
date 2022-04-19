@@ -160,7 +160,7 @@ cargo run --bin risingwave --features all-in-one -- playground
 Then, connect to the playground instance via
 
 ```shell
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566
 ```
 
 ## Testing and Lint
