@@ -53,6 +53,9 @@ pub trait Expr: Into<ExprImpl> {
 
     /// Serialize the expression
     fn to_protobuf(&self) -> ExprNode;
+
+    /// Get the index of expr
+    fn get_index(&self) -> Option<usize>;
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
@@ -203,6 +206,17 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(e) => e.to_protobuf(),
             ExprImpl::Subquery(e) => e.to_protobuf(),
             ExprImpl::CorrelatedInputRef(e) => e.to_protobuf(),
+        }
+    }
+
+    fn get_index(&self) -> Option<usize> {
+        match self {
+            ExprImpl::InputRef(e) => e.get_index(),
+            ExprImpl::Literal(e) => e.get_index(),
+            ExprImpl::FunctionCall(e) => e.get_index(),
+            ExprImpl::AggCall(e) => e.get_index(),
+            ExprImpl::Subquery(e) => e.get_index(),
+            ExprImpl::CorrelatedInputRef(e) => e.get_index(),
         }
     }
 }

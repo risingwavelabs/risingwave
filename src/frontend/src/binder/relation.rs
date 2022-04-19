@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
@@ -382,24 +382,40 @@ impl Binder {
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
+        let columns = query
+            .body
+            .fields()
+            .iter()
+            .map(ColumnDesc::from_field_without_column_id)
+            .collect_vec();
+
         self.bind_context(
-            query
-                .names()
-                .into_iter()
-                .zip_eq(query.data_types().into_iter())
-                .map(|(x, y)| ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        data_type: y,
-                        column_id: ColumnId::new(0),
-                        name: x,
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                    },
-                    is_hidden: false,
-                }),
+            columns.iter().map(|f| ColumnCatalog {
+                column_desc: f.clone(),
+                is_hidden: false,
+            }),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;
+
+        // self.bind_context(
+        //     query
+        //         .names()
+        //         .into_iter()
+        //         .zip_eq(query.data_types().into_iter())
+        //         .map(|(x, y)| ColumnCatalog {
+        //             column_desc: ColumnDesc {
+        //                 data_type: y,
+        //                 column_id: ColumnId::new(0),
+        //                 name: x,
+        //                 field_descs: vec![],
+        //                 type_name: "".to_string(),
+        //             },
+        //             is_hidden: false,
+        //         }),
+        //     format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+        //     alias,
+        // )?;
         Ok(BoundSubquery { query })
     }
 }

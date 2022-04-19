@@ -186,4 +186,11 @@ impl Expr for FunctionCall {
             })),
         }
     }
+
+    fn get_index(&self) -> Option<usize> {
+        match self.inputs.get(0) {
+            Some(expr) => expr.get_index(),
+            None => None,
+        }
+    }
 }
