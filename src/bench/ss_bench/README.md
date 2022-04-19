@@ -95,7 +95,12 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
   
   - 0 represent do nothing because all files will be synced to L0
   - Default: 0
+
+- `--async-checkpoint-disabled`
   
+  - Disable async chekcpoint
+  - Default: false
+
 ## Operations
 
 ### Concurrency Number (`--concurrency-num`)
