@@ -203,20 +203,22 @@ impl SharedBufferUploader {
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
 
+        // TODO: Uncomment the following lines after flushed sstable can be accessed.
+        // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
         // Release shared buffer.
-        let mut removed_size = 0;
-        let mut guard = self.core.write();
-        let epoch_buffer = guard.buffer.get_mut(&epoch).unwrap();
-        for batch in batches {
-            if let Some(removed_batch) = epoch_buffer.remove(batch.end_user_key()) {
-                removed_size += removed_batch.size as usize;
-            }
-        }
-        guard.size -= removed_size;
-        drop(guard);
-        self.flush_notifier.notify_one();
+        // let mut removed_size = 0;
+        // let mut guard = self.core.write();
+        // let epoch_buffer = guard.buffer.get_mut(&epoch).unwrap();
+        // for batch in batches {
+        //     if let Some(removed_batch) = epoch_buffer.remove(batch.end_user_key()) {
+        //         removed_size += removed_batch.size as usize;
+        //     }
+        // }
+        // guard.size -= removed_size;
+        // drop(guard);
 
         self.size -= flush_size;
+        self.flush_notifier.notify_one();
 
         Ok(())
     }

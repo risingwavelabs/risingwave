@@ -102,14 +102,16 @@ impl SharedBufferManager {
         let batch = SharedBufferBatch::new(items, epoch);
         let batch_size = batch.size;
 
+        // TODO: Uncomment the following lines after flushed sstable can be accessed.
+        // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
         // Stall writes that attempting to exceeds capacity.
         // Actively trigger flush, suspend, and wait until some flush completed.
-        while self.size() + batch_size as usize > self.capacity {
-            self.uploader_tx
-                .send(UploadItem::Flush)
-                .map_err(HummockError::shared_buffer_error)?;
-            self.flush_notifier.notified().await;
-        }
+        // while self.size() + batch_size as usize > self.capacity {
+        //     self.uploader_tx
+        //         .send(UploadItem::Flush)
+        //         .map_err(HummockError::shared_buffer_error)?;
+        //     self.flush_notifier.notified().await;
+        // }
 
         let mut guard = self.core.write();
         guard
@@ -231,7 +233,8 @@ impl SharedBufferManager {
             .collect_vec()
     }
 
-    // TODO: REMOVE ME.
+    // TODO: Remove `delete_before` after flushed sstable can be accessed.
+    // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
     /// Deletes shared buffers before a given `epoch` exclusively.
     pub fn delete_before(&self, epoch: HummockEpoch) {
         let mut guard = self.core.write();
