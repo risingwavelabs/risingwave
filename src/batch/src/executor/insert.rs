@@ -240,7 +240,7 @@ mod tests {
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source_v2(&table_id, table_columns.to_vec())?;
+        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;

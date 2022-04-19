@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::marker::Send;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -21,8 +20,7 @@ use lazy_static::__Deref;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::base::SourceReader;
-use risingwave_connector::state;
+use risingwave_connector::{state, SourceReaderImpl};
 use risingwave_storage::StateStore;
 use tokio::sync::Mutex;
 
@@ -30,12 +28,12 @@ use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
-/// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReader`] simply
-/// loads raw content from message queue or file system.
+/// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReaderImpl`]
+/// simply loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub parser: Arc<SourceParserImpl>,
-    pub reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
+    pub reader: Arc<Mutex<SourceReaderImpl>>,
     pub column_descs: Vec<SourceColumnDesc>,
 }
 
@@ -50,7 +48,7 @@ impl Debug for ConnectorSource {
 impl ConnectorSource {
     pub fn new(
         parser: Arc<SourceParserImpl>,
-        reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
+        reader: Arc<Mutex<SourceReaderImpl>>,
         column_descs: Vec<SourceColumnDesc>,
     ) -> Self {
         Self {

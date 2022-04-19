@@ -23,13 +23,12 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::base::SourceReader;
-use risingwave_connector::{new_connector, Properties};
+use risingwave_connector::{Properties, SourceReaderImpl};
 use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
-use crate::{SourceConfig, SourceFormat, SourceImpl, SourceParserImpl};
+use crate::{SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
@@ -42,17 +41,8 @@ const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    async fn create_source(
-        &self,
-        source_id: &TableId,
-        format: SourceFormat,
-        parser: Arc<SourceParserImpl>,
-        config: &SourceConfig,
-        columns: Vec<SourceColumnDesc>,
-        row_id_index: Option<usize>,
-    ) -> Result<()>;
-    async fn create_source_v2(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
+    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
@@ -100,49 +90,7 @@ pub struct MemSourceManager {
 
 #[async_trait]
 impl SourceManager for MemSourceManager {
-    async fn create_source(
-        &self,
-        source_id: &TableId,
-        format: SourceFormat,
-        parser: Arc<SourceParserImpl>,
-        config: &SourceConfig,
-        columns: Vec<SourceColumnDesc>,
-        row_id_index: Option<usize>,
-    ) -> Result<()> {
-        let source = match config {
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(Properties::new(config.clone()), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
-            }
-        };
-
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            format,
-            columns,
-            row_id_index,
-        };
-        let mut tables = self.get_sources()?;
-        ensure!(
-            !tables.contains_key(source_id),
-            "Source id already exists: {:?}",
-            source_id
-        );
-        tables.insert(*source_id, desc);
-
-        Ok(())
-    }
-
-    async fn create_source_v2(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
+    async fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -182,31 +130,27 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = Some(info.row_id_index as usize);
 
-        let config = match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
+        match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
             // TODO support more connector here
-            KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
-            KAFKA_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
-            other => Err(RwError::from(ProtocolError(format!(
-                "source type {} not supported",
-                other
-            )))),
-        }?;
-
-        let source = match config {
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(Properties::new(config.clone()), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
+            KINESIS_SOURCE | KAFKA_SOURCE => {}
+            other => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "source type {} not supported",
+                    other
+                ))));
             }
         };
+
+        let split_reader = Arc::new(tokio::sync::Mutex::new(
+            SourceReaderImpl::create(properties, None)
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+        ));
+        let source = SourceImpl::Connector(ConnectorSource {
+            parser: parser.clone(),
+            reader: split_reader,
+            column_descs: columns.clone(),
+        });
 
         let desc = SourceDesc {
             source: Arc::new(source),
@@ -226,7 +170,7 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -335,7 +279,7 @@ mod tests {
         let source_id = TableId::default();
 
         let mem_source_manager = MemSourceManager::new();
-        let source = mem_source_manager.create_source_v2(&source_id, info).await;
+        let source = mem_source_manager.create_source(&source_id, info).await;
 
         assert!(source.is_ok());
 
@@ -369,7 +313,7 @@ mod tests {
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source_v2(&table_id, table_columns);
+        let res = mem_source_manager.create_table_source(&table_id, table_columns);
         assert!(res.is_ok());
 
         // get source

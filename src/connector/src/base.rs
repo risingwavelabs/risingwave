@@ -73,6 +73,32 @@ pub trait SourceReader {
         Self: Sized;
 }
 
+pub enum SourceReaderImpl {
+    Kafka(KafkaSplitReader),
+    Kinesis(KinesisSplitReader),
+}
+
+impl SourceReaderImpl {
+    pub async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
+        match self {
+            Self::Kafka(r) => r.next().await,
+            Self::Kinesis(r) => r.next().await,
+        }
+    }
+
+    pub async fn create(config: Properties, state: Option<ConnectorState>) -> Result<Self> {
+        let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
+        let connector = match upstream_type.as_str() {
+            KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
+            KINESIS_SOURCE => Self::Kinesis(KinesisSplitReader::new(config, state).await?),
+            _other => {
+                todo!()
+            }
+        };
+        Ok(connector)
+    }
+}
+
 #[async_trait]
 pub trait SplitEnumerator {
     type Split: SourceSplit + Send + Sync;
@@ -160,19 +186,4 @@ impl SplitEnumeratorImpl {
             _ => Err(anyhow!("unsupported source type: {}", source_type)),
         }
     }
-}
-
-pub async fn new_connector(
-    config: Properties,
-    state: Option<ConnectorState>,
-) -> Result<Box<dyn SourceReader + Send + Sync>> {
-    let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
-    let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
-        KAFKA_SOURCE => Box::new(KafkaSplitReader::new(config, state).await?),
-        KINESIS_SOURCE => Box::new(KinesisSplitReader::new(config, state).await?),
-        _other => {
-            todo!()
-        }
-    };
-    Ok(connector)
 }
