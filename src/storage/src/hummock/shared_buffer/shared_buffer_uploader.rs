@@ -21,7 +21,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
 use super::shared_buffer_batch::SharedBufferBatch;
@@ -57,7 +57,6 @@ pub struct SharedBufferUploader {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
     uploader_rx: mpsc::UnboundedReceiver<UploadItem>,
-    flush_notifier: Arc<Notify>,
 
     sstable_store: SstableStoreRef,
     local_version_manager: Arc<LocalVersionManager>,
@@ -75,7 +74,6 @@ impl SharedBufferUploader {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         core: Arc<RwLock<SharedBufferManagerCore>>,
         uploader_rx: mpsc::UnboundedReceiver<UploadItem>,
-        flush_notifier: Arc<Notify>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
         Self {
@@ -87,7 +85,6 @@ impl SharedBufferUploader {
             },
             core,
             uploader_rx,
-            flush_notifier,
             batches: BTreeMap::default(),
             size: 0,
             sstable_store,
@@ -218,7 +215,6 @@ impl SharedBufferUploader {
         // drop(guard);
 
         self.size -= flush_size;
-        self.flush_notifier.notify_one();
 
         Ok(())
     }

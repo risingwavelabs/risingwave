@@ -21,7 +21,7 @@ use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem};
@@ -49,8 +49,6 @@ pub struct SharedBufferManager {
 
     uploader_tx: mpsc::UnboundedSender<UploadItem>,
     uploader_handle: JoinHandle<HummockResult<()>>,
-
-    flush_notifier: Arc<Notify>,
 }
 
 impl SharedBufferManager {
@@ -63,7 +61,6 @@ impl SharedBufferManager {
     ) -> Self {
         let (uploader_tx, uploader_rx) = mpsc::unbounded_channel();
         let core = Arc::new(RwLock::new(SharedBufferManagerCore::default()));
-        let flush_notifier = Arc::new(Notify::new());
         let mut uploader = SharedBufferUploader::new(
             options.clone(),
             options.shared_buffer_threshold as usize,
@@ -72,7 +69,6 @@ impl SharedBufferManager {
             hummock_meta_client,
             core.clone(),
             uploader_rx,
-            flush_notifier.clone(),
             stats,
         );
         let uploader_handle = tokio::spawn(async move { uploader.run().await });
@@ -81,7 +77,6 @@ impl SharedBufferManager {
             core,
             uploader_tx,
             uploader_handle,
-            flush_notifier,
         }
     }
 
@@ -107,10 +102,7 @@ impl SharedBufferManager {
         // Stall writes that attempting to exceeds capacity.
         // Actively trigger flush, suspend, and wait until some flush completed.
         // while self.size() + batch_size as usize > self.capacity {
-        //     self.uploader_tx
-        //         .send(UploadItem::Flush)
-        //         .map_err(HummockError::shared_buffer_error)?;
-        //     self.flush_notifier.notified().await;
+        //     self.sync(None).await?;
         // }
 
         let mut guard = self.core.write();
