@@ -20,13 +20,13 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 
-use crate::executor::executor2_wrapper::WrapperState::{Closed, Created, Opened};
+use crate::executor::executor2_wrapper::WrapperState::{Closed, Created, Open};
 use crate::executor::Executor;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, ExecutorInfo};
 
 enum WrapperState {
     Created { executor: BoxedExecutor2 },
-    Opened { stream: BoxedDataChunkStream },
+    Open { stream: BoxedDataChunkStream },
     Closed,
 }
 
@@ -43,21 +43,18 @@ impl Executor for Executor2Wrapper {
         swap(&mut tmp, &mut self.state);
         match tmp {
             Created { executor } => {
-                self.state = Opened {
+                self.state = Open {
                     stream: executor.execute(),
                 };
                 Ok(())
             }
-            _ => Err(InternalError("Executor already opened!".to_string()).into()),
+            _ => Err(InternalError("Executor already open!".to_string()).into()),
         }
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         match &mut self.state {
-            Opened { ref mut stream } => match stream.next().await {
-                Some(r) => Ok(Some(r?)),
-                None => Ok(None),
-            },
+            Open { ref mut stream } => stream.next().await.transpose(),
             _ => Err(InternalError("Executor not in open state!".to_string()).into()),
         }
     }
