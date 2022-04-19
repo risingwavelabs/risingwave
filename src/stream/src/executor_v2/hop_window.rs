@@ -208,9 +208,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, Row};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{
-        DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl, ToOwnedDatum,
-    };
+    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl};
 
     use crate::executor::Message;
     use crate::executor_v2::test_utils::MockSource;
@@ -285,12 +283,7 @@ mod tests {
         };
         let rows = chunk
             .rows()
-            .map(|r| {
-                (
-                    r.op(),
-                    Row::new(r.values().map(ToOwnedDatum::to_owned_datum).collect_vec()),
-                )
-            })
+            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
             .collect_vec();
         assert_eq!(rows.len(), 8);
 
@@ -328,12 +321,7 @@ mod tests {
         };
         let rows = chunk
             .rows()
-            .map(|r| {
-                (
-                    r.op(),
-                    Row::new(r.values().map(ToOwnedDatum::to_owned_datum).collect_vec()),
-                )
-            })
+            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
             .collect_vec();
         assert_eq!(rows.len(), 8);
 

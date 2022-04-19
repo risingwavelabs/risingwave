@@ -9,7 +9,7 @@ option optimize_for = SPEED;
 import "expr.proto";
 import "plan.proto";
 
-// Hash mapping for compute node. Stores mapping from virtual key to actor id.
+// Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
   repeated uint32 hash_mapping = 1;
 }
@@ -107,6 +107,13 @@ message ChainNode {
   repeated int32 column_ids = 3;
 }
 
+// BatchParallelInfo is a temporary workaround for parallelized chain node.
+// This should be removed once we support ranged batch query.
+message BatchParallelInfo {
+  uint32 degree = 1;
+  uint32 index = 2;
+}
+
 // BatchPlanNode is used for mv on mv snapshot read.
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
@@ -114,6 +121,7 @@ message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
+  BatchParallelInfo parallel_info = 4;
 }
 
 // Special node for shared state. ArrangeNode will produce a special Materialize executor,
@@ -135,7 +143,19 @@ message LookupNode {
   // By default, lookup executor will produce `<arrangement side, stream side>`. We
   // will then apply the column mapping to the combined result.
   repeated int32 column_mapping = 4;
+  // The fragment id of upstream arrangement
+  // TODO: record arrangements in catalog and use table_id
+  uint32 arrange_fragment_id = 5;
+  // Temporarily used when generating fragments on meta node. When generating lookup
+  // fragments, the global fragment id of upstream arrange won't be available. Therefore,
+  // we record local id here, and rewrite it into global id when sealing fragments.
+  uint32 arrange_local_fragment_id = 6;
+  // The operator id of upstream arrangement
+  uint64 arrange_operator_id = 7;
 }
+
+// Special node for shared state. Merge and align barrier from upstreams.
+message UnionNode {}
 
 message StreamNode {
   oneof node {
@@ -155,6 +175,7 @@ message StreamNode {
     BatchPlanNode batch_plan_node = 17;
     LookupNode lookup_node = 20;
     ArrangeNode arrange_node = 21;
+    UnionNode union_node = 22;
   }
   // The id for the operator.
   uint64 operator_id = 1;

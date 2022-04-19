@@ -160,18 +160,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
 async fn build_stream_reader<S: StateStore>(
     source: Arc<SourceImpl>,
-    operator_id: u64,
+    _operator_id: u64,
     column_ids: Vec<ColumnId>,
     keyspace: Keyspace<S>,
 ) -> Result<Box<dyn StreamSourceReader>> {
     let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-        SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
-            HighLevelKafkaSourceReaderContext {
-                query_id: Some(format!("source-operator-{}", operator_id)),
-                bound_timestamp_ms: None,
-            },
-            column_ids,
-        )?),
         SourceImpl::TableV2(s) => Box::new(s.stream_reader(TableV2ReaderContext, column_ids)?),
         SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
             source_reader: s.clone(),
@@ -419,7 +412,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -570,7 +563,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 

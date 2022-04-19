@@ -15,13 +15,14 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
+
+pub type SourceId = u32;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -67,7 +68,12 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_some())
+            .filter(|(_, v)| {
+                // Internally, a table with an associated source can be
+                // MATERIALIZED SOURCE or TABLE.
+                v.associated_source_id.is_some()
+                    && self.get_source_by_name(v.name()).unwrap().source_type == SourceType::Table
+            })
             .map(|(_, v)| v)
     }
 

@@ -29,16 +29,14 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
 use connector_source::ConnectorSource;
 use enum_as_inner::EnumAsInner;
-pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 pub use table_v2::*;
@@ -46,19 +44,12 @@ pub use table_v2::*;
 pub mod parser;
 
 pub mod connector_source;
-mod high_level_kafka;
 mod manager;
 
 mod common;
 mod table_v2;
 
 extern crate maplit;
-
-#[derive(Clone, Debug)]
-pub enum SourceConfig {
-    Kafka(HighLevelKafkaSourceConfig),
-    Connector(HashMap<String, String>),
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -71,7 +62,6 @@ pub enum SourceFormat {
 
 #[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
-    HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
     Connector(ConnectorSource),
 }
@@ -79,15 +69,7 @@ pub enum SourceImpl {
 #[async_trait]
 pub trait Source: Send + Sync + 'static {
     type ReaderContext;
-    type BatchReader: BatchSourceReader;
     type StreamReader: StreamSourceReader;
-
-    /// Create a batch reader
-    fn batch_reader(
-        &self,
-        context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::BatchReader>;
 
     /// Create a stream reader
     fn stream_reader(
@@ -95,18 +77,6 @@ pub trait Source: Send + Sync + 'static {
         context: Self::ReaderContext,
         column_ids: Vec<ColumnId>,
     ) -> Result<Self::StreamReader>;
-}
-
-#[async_trait]
-pub trait BatchSourceReader: Send + Sync + 'static {
-    /// `open` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
-    /// `next` returns a row or `None` immediately if there is no more result
-    async fn next(&mut self) -> Result<Option<DataChunk>>;
-
-    /// `close` is called to stop the reader
-    async fn close(&mut self) -> Result<()>;
 }
 
 #[async_trait]

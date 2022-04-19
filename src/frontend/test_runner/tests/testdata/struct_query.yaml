@@ -1,30 +1,31 @@
 - sql: |
     create materialized view mv1 as select country from t;
     select * from mv1;
-  create_source:
-    row_format: protobuf
-    name: t
-    file: |
-      syntax = "proto3";
-      package test;
-      message TestRecord {
-        int32 id = 1;
-        Country country = 3;
-        int64 zipcode = 4;
-        float rate = 5;
-      }
-      message Country {
-        string address = 1;
-        City city = 2;
-        string zipcode = 3;
-      }
-      message City {
-        string address = 1;
-        string zipcode = 2;
-      }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchScan { table: mv1, columns: [country] }
   stream_plan: |
     StreamMaterialize { columns: [country, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamTableScan { table: mv1, columns: [country, _row_id#0], pk_indices: [1] }
+      StreamExchange { dist: HashShard([1]) }
+        StreamTableScan { table: mv1, columns: [country, _row_id#0], pk_indices: [1] }
+  create_source:
+    row_format: protobuf
+    name: t
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          string address = 1;
+          string zipcode = 2;
+        }

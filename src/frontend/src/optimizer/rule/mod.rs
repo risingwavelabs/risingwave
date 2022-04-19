@@ -37,3 +37,7 @@ mod project_elim;
 pub use project_elim::*;
 mod project_merge;
 pub use project_merge::*;
+mod unnest_agg_for_loj;
+pub use unnest_agg_for_loj::*;
+mod pull_up_correlated_predicate;
+pub use pull_up_correlated_predicate::*;

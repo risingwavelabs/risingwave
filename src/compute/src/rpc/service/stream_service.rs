@@ -216,7 +216,7 @@ impl StreamServiceImpl {
             Info::StreamSource(info) => {
                 self.env
                     .source_manager()
-                    .create_source_v2(&id, info.to_owned())
+                    .create_source(&id, info.to_owned())
                     .await?;
             }
             Info::TableSource(info) => {
@@ -229,7 +229,7 @@ impl StreamServiceImpl {
 
                 self.env
                     .source_manager()
-                    .create_table_source_v2(&id, columns)?;
+                    .create_table_source(&id, columns)?;
             }
         };
 

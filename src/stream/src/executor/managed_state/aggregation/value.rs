@@ -22,7 +22,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
+use crate::executor_v2::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
 
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
@@ -123,7 +123,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
-    use crate::executor::AggArgs;
+    use crate::executor_v2::aggregation::AggArgs;
 
     fn create_test_count_state() -> AggCall {
         AggCall {

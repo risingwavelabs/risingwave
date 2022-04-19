@@ -253,18 +253,6 @@ impl From<Condition> for ExprImpl {
     }
 }
 
-impl<'a> From<&'a Condition> for ExprImpl {
-    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
-    // rather than using `AND` to combine them.
-    fn from(c: &'a Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.iter().cloned(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
-    }
-}
-
 /// A custom Debug implementation that is more concise and suitable to use with
 /// [`std::fmt::Formatter::debug_list`] in plan nodes. If the verbose output is preferred, it is
 /// still available via `{:#?}`.

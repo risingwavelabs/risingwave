@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
-    ExprRewriter, ExprType, ExprVisitor, InputRef,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
@@ -77,7 +78,7 @@ impl Condition {
         if self.always_true() {
             None
         } else {
-            Some(self.into())
+            Some(self.clone().into())
         }
     }
 
@@ -228,18 +229,40 @@ impl Condition {
             .map(fold_boolean_constant)
             .flat_map(to_conjunctions)
             .collect();
-
         let mut res: Vec<ExprImpl> = Vec::new();
-        for i in conjunctions {
-            if let Some(v) = try_get_bool_constant(&i) {
+        let mut visited: HashSet<ExprImpl> = HashSet::new();
+        for expr in conjunctions {
+            // factorization_expr requires hash-able ExprImpl
+            if !expr.has_subquery() {
+                let results_of_factorization = factorization_expr(expr);
+                res.extend(
+                    results_of_factorization
+                        .clone()
+                        .into_iter()
+                        .filter(|expr| !visited.contains(expr)),
+                );
+                visited.extend(results_of_factorization);
+            } else {
+                // for subquery, simply give up factorization
+                res.push(expr);
+            }
+        }
+        // remove all constant boolean `true`
+        res.retain(|expr| {
+            if let Some(v) = try_get_bool_constant(expr) && v {
+                false
+            } else {
+                true
+            }
+        });
+        // if there is a `false` in conjunctions, the whole condition will be `false`
+        for expr in &mut res {
+            if let Some(v) = try_get_bool_constant(expr) {
                 if !v {
-                    // if there is a `false` in conjunctions, the whole condition will be `false`
                     res.clear();
                     res.push(ExprImpl::literal_bool(false));
                     break;
                 }
-            } else {
-                res.push(i);
             }
         }
         Self { conjunctions: res }
