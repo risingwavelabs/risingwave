@@ -20,6 +20,7 @@ use risingwave_common::array::Row;
 
 use crate::error::StorageResult;
 
+#[derive(Clone)]
 pub enum RowOp {
     Insert(Row),
     Delete(Row),
@@ -44,12 +45,8 @@ impl MemTable {
     }
 
     /// read methods
-    pub async fn get_row(&self, _pk: &Row) -> StorageResult<Option<RowOp>> {
-        todo!();
-    }
-
-    pub async fn get_row_by_scan(&self, _pk: &Row) -> StorageResult<Option<RowOp>> {
-        todo!();
+    pub async fn get_row(&self, pk: &Row) -> StorageResult<Option<RowOp>> {
+        todo!()
     }
 
     /// write methods
