@@ -65,7 +65,7 @@ impl Distribution {
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         match plan.convention() {
             Convention::Batch => {
                 BatchExchange::new(plan, required_order.clone(), self.clone()).into()
