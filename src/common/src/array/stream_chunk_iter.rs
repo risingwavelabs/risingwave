@@ -104,7 +104,6 @@ impl<'a> RecordRef<'a> {
 #[cfg(test)]
 mod tests {
     extern crate test;
-
     use itertools::Itertools;
     use test::Bencher;
 
@@ -126,45 +125,49 @@ mod tests {
 
     #[bench]
     fn bench_rows_iterator_from_records(b: &mut Bencher) {
-        let big = BigStreamChunk::new(10000);
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
-            let chunk = big.stream_chunk();
             for (_op, row) in chunk.records().flat_map(RecordRef::into_row_refs) {
-                test::black_box(row);
+                test::black_box(row.values().count());
             }
         })
     }
 
     #[bench]
     fn bench_rows_iterator(b: &mut Bencher) {
-        let big = BigStreamChunk::new(10000);
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
-            let chunk = big.stream_chunk();
             for (_op, row) in chunk.rows() {
-                test::black_box(row);
+                test::black_box(row.values().count());
             }
         })
     }
 
     #[bench]
     fn bench_rows_iterator_vec_of_datum_refs(b: &mut Bencher) {
-        let big = BigStreamChunk::new(10000);
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
-            let chunk = big.stream_chunk();
             for (_op, row) in chunk.rows() {
+                // Mimic the old `RowRef(Vec<DatumRef>)`
                 let row = row.values().collect_vec();
-                test::black_box(row);
+                test::black_box(row.into_iter().count());
             }
         })
     }
 
     #[bench]
     fn bench_record_iterator(b: &mut Bencher) {
-        let big = BigStreamChunk::new(10000);
+        let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
-            let chunk = big.stream_chunk();
             for record in chunk.records() {
-                test::black_box(record);
+                match record {
+                    RecordRef::Insert(row) => test::black_box(row.values().count()),
+                    RecordRef::Delete(row) => test::black_box(row.values().count()),
+                    RecordRef::Update { delete, insert } => {
+                        test::black_box(delete.values().count());
+                        test::black_box(insert.values().count())
+                    }
+                };
             }
         })
     }
