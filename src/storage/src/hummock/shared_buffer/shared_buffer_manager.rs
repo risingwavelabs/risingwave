@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 
 use super::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem};
 use super::shared_buffer_uploader::{SharedBufferUploader, UploadItem};
-use crate::hummock::iterator::variants::{BACKWARD, FORWARD};
+use crate::hummock::iterator::{Backward, Forward};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
@@ -171,7 +171,7 @@ impl SharedBufferManager {
         &self,
         key_range: &R,
         epoch_range: impl RangeBounds<u64>,
-    ) -> Vec<SharedBufferBatchIterator<FORWARD>>
+    ) -> Vec<SharedBufferBatchIterator<Forward>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -201,7 +201,7 @@ impl SharedBufferManager {
         &self,
         key_range: &R,
         epoch_range: impl RangeBounds<u64>,
-    ) -> Vec<SharedBufferBatchIterator<BACKWARD>>
+    ) -> Vec<SharedBufferBatchIterator<Backward>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -276,7 +276,8 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
     use crate::hummock::iterator::{
-        BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
+        BoxedBackwardHummockIterator, BoxedForwardHummockIterator, HummockIterator, MergeIterator,
+        ReverseMergeIterator,
     };
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
@@ -470,7 +471,7 @@ mod tests {
         let mut merge_iterator = MergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedForwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -494,7 +495,7 @@ mod tests {
         let mut merge_iterator = MergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedForwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -547,7 +548,7 @@ mod tests {
         let mut merge_iterator = MergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedForwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -607,7 +608,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -631,7 +632,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -686,7 +687,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();

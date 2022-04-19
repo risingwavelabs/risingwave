@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::variants::BACKWARD;
-use crate::hummock::iterator::merge_inner::MergeIteratorInner;
+use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
+use crate::hummock::iterator::Backward;
 
-pub type ReverseMergeIterator<'a> = MergeIteratorInner<'a, BACKWARD>;
+pub type ReverseMergeIterator<'a> = UnorderedMergeIteratorInner<'a, Backward>;
 
 #[cfg(test)]
 mod test {
@@ -26,7 +26,7 @@ mod test {
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
+    use crate::hummock::iterator::{BoxedBackwardHummockIterator, HummockIterator};
     use crate::hummock::ReverseSSTableIterator;
     use crate::monitor::StateStoreMetrics;
 
@@ -57,7 +57,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let iters: Vec<BoxedHummockIterator> = vec![
+        let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
                 Arc::new(table0),
                 sstable_store.clone(),
@@ -116,7 +116,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let iters: Vec<BoxedHummockIterator> = vec![
+        let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
                 Arc::new(table0),
                 sstable_store.clone(),
@@ -189,7 +189,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let iters: Vec<BoxedHummockIterator> = vec![
+        let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
                 Arc::new(table1),
                 sstable_store.clone(),
