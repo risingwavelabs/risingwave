@@ -150,7 +150,7 @@ mod tests {
             for (_op, row) in chunk.rows() {
                 // Mimic the old `RowRef(Vec<DatumRef>)`
                 let row = row.values().collect_vec();
-                test::black_box(row.into_iter().count());
+                test::black_box(row);
             }
         })
     }
