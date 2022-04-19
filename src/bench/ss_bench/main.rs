@@ -41,9 +41,6 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = 64)]
     block_size_kb: u32,
 
-    #[clap(long, default_value_t = 0.1)]
-    bloom_false_positive: f64,
-
     #[clap(long, default_value_t = 256)]
     block_cache_capacity_mb: u32,
 
@@ -55,6 +52,9 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 2)]
     share_buffers_sync_parallelism: u32,
+
+    #[clap(long, default_value_t = 0.1)]
+    bloom_false_positive: f64,
 
     #[clap(long, default_value_t = 0)]
     compact_level_after_write: u32,
