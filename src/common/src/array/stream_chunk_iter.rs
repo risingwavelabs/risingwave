@@ -123,6 +123,20 @@ mod tests {
         assert_eq!(Some(test.row_with_op_at(3)), rows.next());
     }
 
+    #[test]
+    fn test_chunk_records() {
+        let test = WhatEverStreamChunk;
+        let chunk = test.stream_chunk();
+        let mut rows = chunk
+            .records()
+            .flat_map(RecordRef::into_row_refs)
+            .map(|(op, row)| (op, row.to_owned_row()));
+        assert_eq!(Some(test.row_with_op_at(0)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(1)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(2)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(3)), rows.next());
+    }
+
     #[bench]
     fn bench_rows_iterator_from_records(b: &mut Bencher) {
         let chunk = BigStreamChunk::new(10000).stream_chunk();
