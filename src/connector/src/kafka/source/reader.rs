@@ -20,15 +20,15 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{DefaultConsumerContext, StreamConsumer};
-use rdkafka::ClientConfig;
+use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
+use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
 
-use crate::base::{SourceMessage, SplitReader};
+use crate::base::{SourceMessage, SourceReader};
 use crate::kafka::split::KafkaSplit;
 use crate::kafka::KAFKA_CONFIG_BROKERS_KEY;
-use crate::{ConnectorState, Properties};
+use crate::{ConnectorStateV2, Properties, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -38,7 +38,7 @@ pub struct KafkaSplitReader {
 }
 
 #[async_trait]
-impl SplitReader for KafkaSplitReader {
+impl SourceReader for KafkaSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         let mut stream = self
             .consumer
@@ -57,9 +57,9 @@ impl SplitReader for KafkaSplitReader {
             .map(Some)
     }
 
-    async fn new(properties: Properties, _state: Option<ConnectorState>) -> Result<Self>
-    where
-        Self: Sized,
+    async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
+        where
+            Self: Sized,
     {
         let bootstrap_servers = properties.get_kafka(KAFKA_CONFIG_BROKERS_KEY)?;
 
@@ -84,10 +84,32 @@ impl SplitReader for KafkaSplitReader {
             );
         }
 
-        let consumer = config
+        let consumer: StreamConsumer = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
             .map_err(|e| RwError::from(InternalError(format!("consumer creation failed {}", e))))?;
+
+        if let ConnectorStateV2::Splits(splits) = state {
+            log::debug!("Splits for kafka found! {:?}", splits);
+            let mut tpl = TopicPartitionList::with_capacity(splits.len());
+
+            for split in splits {
+                if let SplitImpl::Kafka(k) = split {
+                    if let Some(offset) = k.start_offset {
+                        tpl.add_partition_offset(
+                            k.topic.as_str(),
+                            k.partition,
+                            Offset::Offset(offset),
+                        )
+                            .map_err(|e| anyhow!(e.to_string()))?;
+                    } else {
+                        tpl.add_partition(k.topic.as_str(), k.partition);
+                    }
+                }
+            }
+
+            consumer.assign(&tpl).map_err(|e| anyhow!(e.to_string()))?;
+        }
 
         Ok(Self {
             consumer: Arc::new(consumer),
