@@ -30,7 +30,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Distribution, Order};
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -105,6 +105,13 @@ impl StreamMaterialize {
         user_order_by: Order,
         user_cols: FixedBitSet,
     ) -> Result<Self> {
+        // ensure the same pk will not shuffle to different node
+        let input = match input.distribution() {
+            Distribution::Single => input,
+            _ => Distribution::HashShard(input.pk_indices().to_vec())
+                .enforce_if_not_satisfies(input, Order::any()),
+        };
+
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;

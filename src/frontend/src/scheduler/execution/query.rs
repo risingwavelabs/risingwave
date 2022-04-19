@@ -25,14 +25,13 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use super::stage::StageEvent;
-use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::execution::query::QueryMessage::Stage;
 use crate::scheduler::execution::query::QueryState::{Failed, Pending};
 use crate::scheduler::execution::StageEvent::Scheduled;
 use crate::scheduler::execution::{StageExecution, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::plan_fragmenter::{Query, StageId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::QueryResultFetcher;
+use crate::scheduler::{HummockSnapshotManagerRef, QueryResultFetcher};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -90,15 +89,15 @@ struct QueryRunner {
     root_stage_sender: Option<oneshot::Sender<QueryResultFetcher>>,
 
     epoch: u64,
-    meta_client: Arc<dyn FrontendMetaClient>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl QueryExecution {
     pub fn new(
         query: Query,
         epoch: u64,
-        meta_client: Arc<dyn FrontendMetaClient>,
         worker_node_manager: WorkerNodeManagerRef,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -138,7 +137,7 @@ impl QueryExecution {
             scheduled_stages_count: 0,
 
             epoch,
-            meta_client: meta_client.clone(),
+            hummock_snapshot_manager,
         };
 
         let state = Pending {
@@ -291,7 +290,7 @@ impl QueryRunner {
 
         let root_stage_result = QueryResultFetcher::new(
             self.epoch,
-            self.meta_client.clone(),
+            self.hummock_snapshot_manager.clone(),
             root_task_output_id,
             root_task_status.task_host_unchecked(),
         );

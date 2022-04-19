@@ -283,7 +283,7 @@ mod tests {
         };
         let rows = chunk
             .rows()
-            .map(|r| (r.op(), r.to_owned_row()))
+            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
             .collect_vec();
         assert_eq!(rows.len(), 8);
 
@@ -321,7 +321,7 @@ mod tests {
         };
         let rows = chunk
             .rows()
-            .map(|r| (r.op(), r.to_owned_row()))
+            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
             .collect_vec();
         assert_eq!(rows.len(), 8);
 
