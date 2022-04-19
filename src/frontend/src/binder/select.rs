@@ -98,6 +98,9 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
+        // If `select_item` have index, get the column_desc from `context.columns` and form field
+        // to store `field_desc`.
+        // If not, use `alias` and `data_type` to form field.
         let fields = select_items
             .iter()
             .zip_eq(aliases.iter())
@@ -185,16 +188,16 @@ impl Binder {
     }
 
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
-    /// We will extract ident from expr and concat it with `ids` to get `field_column_name`.
-    /// Will return `table_name` and `field_column_name` or `field_column_name`.
+    /// We will extract ident from `expr` and get the `column_desc` from `column_binding`.
+    /// Will return `column_desc`, `table_name` and field `idents`.
     pub fn extract_column_desc_and_idents(
         &mut self,
         expr: Expr,
         ids: Vec<Ident>,
     ) -> Result<(ColumnDesc, Option<String>, Vec<Ident>)> {
         match expr {
-            // For CompoundIdentifier, we will use first ident as `table_name` and second ident as
-            // first part of `field_column_name` and then concat with ids.
+            // For CompoundIdentifier, we will use first ident as table name and second ident as
+            // column name to get `column_desc`.
             Expr::CompoundIdentifier(idents) => {
                 let (table_name, column): (&String, &String) = match &idents[..] {
                     [table, column] => (&table.value, &column.value),
@@ -212,9 +215,9 @@ impl Binder {
                 let desc = self.context.columns[index].desc.clone();
                 Ok((desc, Some(table_name.clone()), ids))
             }
-            // For Identifier, we will first use the ident as first part of `field_column_name`
-            // and judge if this name is exist.
-            // If not we will use the ident as table name.
+            // For Identifier, we will first use the ident as
+            // column name to get `column_desc`.
+            // If column name not exist, we will use the ident as table name.
             // The reason is that in pgsql, for table name v3 have a column name v3 which
             // have a field name v3. Select (v3).v3 from v3 will return the field value instead
             // of column value.
@@ -250,6 +253,8 @@ impl Binder {
     }
 
     /// Bind wildcard field column, e.g. `(table.v1).*`.
+    /// Will return vector of `FunctionCall` which the first is `input_ref` expr and other is
+    /// `literal` expr, and vector of alias.
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
@@ -286,6 +291,8 @@ impl Binder {
     }
 
     /// Bind single field column, e.g. `(table.v1).v2`.
+    /// Will return `FunctionCall` which the first args is `input_ref` expr and other is `literal`
+    /// expr, and alias.
     pub fn bind_single_field_column(
         &mut self,
         expr: Expr,
@@ -309,6 +316,8 @@ impl Binder {
         ))
     }
 
+    /// Bind field in recursive way, each field in the binding path will store as `input_ref` in
+    /// exprs and return.
     pub fn bind_field(idents: &[Ident], desc: ColumnDesc) -> Result<(ColumnDesc, Vec<ExprImpl>)> {
         match idents.get(0) {
             Some(ident) => {

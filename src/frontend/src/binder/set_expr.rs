@@ -36,6 +36,7 @@ impl BoundSetExpr {
         }
     }
 
+    /// The fields returned by this [`BoundSetExpr`].
     pub fn fields(&self) -> Vec<Field> {
         match self {
             BoundSetExpr::Select(s) => s.schema.fields.clone(),

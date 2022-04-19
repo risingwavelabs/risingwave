@@ -87,6 +87,20 @@ impl ColumnDesc {
         }
     }
 
+    pub fn with_named(
+        column_id: ColumnId,
+        data_type: DataType,
+        name: impl Into<String>,
+    ) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+        }
+    }
+
     /// Convert to proto
     pub fn to_protobuf(&self) -> ProstColumnDesc {
         ProstColumnDesc {

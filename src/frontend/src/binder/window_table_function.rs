@@ -111,43 +111,27 @@ impl Binder {
             .into());
         }
 
-        let columns = columns
-            .iter()
-            .map(|c| ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: c.column_desc.data_type.clone(),
-                    column_id: ColumnId::new(0),
-                    name: c.column_desc.name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
+        let columns = columns.iter().cloned().chain(
+            [
+                ColumnCatalog {
+                    column_desc: ColumnDesc::with_named(
+                        ColumnId::new(0),
+                        DataType::Timestamp,
+                        "window_start",
+                    ),
+                    is_hidden: false,
                 },
-                is_hidden: c.is_hidden,
-            })
-            .chain(
-                [
-                    ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Timestamp,
-                            column_id: ColumnId::new(0),
-                            name: "window_start".to_string(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        },
-                        is_hidden: false,
-                    },
-                    ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Timestamp,
-                            column_id: ColumnId::new(0),
-                            name: "window_end".to_string(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        },
-                        is_hidden: false,
-                    },
-                ]
-                .into_iter(),
-            );
+                ColumnCatalog {
+                    column_desc: ColumnDesc::with_named(
+                        ColumnId::new(0),
+                        DataType::Timestamp,
+                        "window_end",
+                    ),
+                    is_hidden: false,
+                },
+            ]
+            .into_iter(),
+        );
         // TODO: support alias.
         self.bind_context(columns, table_name.clone(), None)?;
 

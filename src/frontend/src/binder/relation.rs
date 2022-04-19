@@ -398,24 +398,6 @@ impl Binder {
             alias,
         )?;
 
-        // self.bind_context(
-        //     query
-        //         .names()
-        //         .into_iter()
-        //         .zip_eq(query.data_types().into_iter())
-        //         .map(|(x, y)| ColumnCatalog {
-        //             column_desc: ColumnDesc {
-        //                 data_type: y,
-        //                 column_id: ColumnId::new(0),
-        //                 name: x,
-        //                 field_descs: vec![],
-        //                 type_name: "".to_string(),
-        //             },
-        //             is_hidden: false,
-        //         }),
-        //     format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
-        //     alias,
-        // )?;
         Ok(BoundSubquery { query })
     }
 }

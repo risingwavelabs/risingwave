@@ -64,6 +64,7 @@ message ExprNode {
     IS_NOT_NULL = 306;
     // Unary operators
     NEG = 401;
+    // Nested selection operators
     FIELD = 501;
     // Search operator and Search ARGument
     SEARCH = 998;

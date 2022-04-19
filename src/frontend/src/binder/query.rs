@@ -38,7 +38,7 @@ impl BoundQuery {
         self.body.names()
     }
 
-    /// The names returned by this [`BoundQuery`].
+    /// The fields returned by this [`BoundQuery`].
     pub fn fields(&self) -> Vec<Field> {
         self.body.fields()
     }
