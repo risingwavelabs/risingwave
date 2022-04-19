@@ -773,8 +773,8 @@ async fn test_retryable_pin_version() {
 }
 
 #[tokio::test]
-async fn test_retryable_pin_snapshot() {
-    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+async fn test_pin_snapshot_response_lost() {
+    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
     let mut epoch: u64 = 1;
@@ -795,11 +795,16 @@ async fn test_retryable_pin_snapshot() {
 
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
-    let snapshot = hummock_manager
+    let mut epoch_recorded_in_frontend = hummock_manager
         .pin_snapshot(context_id, INVALID_EPOCH)
         .await
-        .unwrap();
-    assert_eq!(snapshot.epoch, epoch - 1);
+        .unwrap()
+        .epoch;
+    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    assert_eq!(
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+        1
+    );
 
     let test_tables = generate_test_tables(
         epoch,
@@ -816,54 +821,83 @@ async fn test_retryable_pin_snapshot() {
     hummock_manager.commit_epoch(epoch).await.unwrap();
     epoch += 1;
 
-    // Retry and results the same snapshot pinned.
-    // [ e0:pinned, e1 ] -> [ e0:pinned, e1 ]
-    let snapshot_retry = hummock_manager
+    // Assume the response of the previous rpc is lost.
+    // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
+    epoch_recorded_in_frontend = hummock_manager
         .pin_snapshot(context_id, INVALID_EPOCH)
         .await
-        .unwrap();
-    assert_eq!(snapshot_retry.epoch, snapshot.epoch);
+        .unwrap()
+        .epoch;
+    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    assert_eq!(
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+        1
+    );
 
-    // Use correct last_pin to pin newer snapshot.
-    // [ e0:pinned, e1 ] -> [ e0:pinned, e1:pinned ]
-    let snapshot_2 = hummock_manager
-        .pin_snapshot(context_id, snapshot.epoch)
+    // Assume the response of the previous rpc is lost.
+    // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
+    epoch_recorded_in_frontend = hummock_manager
+        .pin_snapshot(context_id, INVALID_EPOCH)
+        .await
+        .unwrap()
+        .epoch;
+    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+
+    let test_tables = generate_test_tables(
+        epoch,
+        vec![
+            hummock_manager.get_new_table_id().await.unwrap(),
+            hummock_manager.get_new_table_id().await.unwrap(),
+        ],
+    );
+    hummock_manager
+        .add_tables(context_id, test_tables.clone(), epoch)
         .await
         .unwrap();
-    assert_eq!(snapshot_2.epoch, snapshot.epoch + 1);
+    // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
+    hummock_manager.commit_epoch(epoch).await.unwrap();
+    epoch += 1;
 
-    for _ in 0..2 {
-        let test_tables = generate_test_tables(
-            epoch,
-            vec![
-                hummock_manager.get_new_table_id().await.unwrap(),
-                hummock_manager.get_new_table_id().await.unwrap(),
-            ],
-        );
-        hummock_manager
-            .add_tables(context_id, test_tables.clone(), epoch)
-            .await
-            .unwrap();
-        hummock_manager.commit_epoch(epoch).await.unwrap();
-        epoch += 1;
-    }
-    // [ e0:pinned, e1:pinned ] -> [ e0:pinned, e1:pinned, e2, e3 ]
+    // Use correct snapshot id.
+    // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
+    epoch_recorded_in_frontend = hummock_manager
+        .pin_snapshot(context_id, epoch_recorded_in_frontend)
+        .await
+        .unwrap()
+        .epoch;
+    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    assert_eq!(
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+        2
+    );
 
-    // Retry and results the same snapshot pinned.
-    // [ e0:pinned, e1:pinned, e2, e3 ] -> [ e0:pinned, e1:pinned, e2, e3 ]
-    let snapshot_2_retry = hummock_manager
-        .pin_snapshot(context_id, snapshot.epoch)
+    let test_tables = generate_test_tables(
+        epoch,
+        vec![
+            hummock_manager.get_new_table_id().await.unwrap(),
+            hummock_manager.get_new_table_id().await.unwrap(),
+        ],
+    );
+    hummock_manager
+        .add_tables(context_id, test_tables.clone(), epoch)
         .await
         .unwrap();
-    assert_eq!(snapshot_2.epoch, snapshot_2_retry.epoch);
+    // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
+    hummock_manager.commit_epoch(epoch).await.unwrap();
+    epoch += 1;
 
-    // Use u64::MAX as last_pin to pin greatest snapshot
-    // [ e0:pinned, e1:pinned, e2, e3 ] -> [ e0:pinned, e1:pinned, e2, e3:pinned ]
-    let snapshot_3 = hummock_manager
+    // Use u64::MAX as epoch to pin greatest snapshot
+    // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
+    epoch_recorded_in_frontend = hummock_manager
         .pin_snapshot(context_id, u64::MAX)
         .await
-        .unwrap();
-    assert_eq!(snapshot_3.epoch, snapshot_2.epoch + 2);
+        .unwrap()
+        .epoch;
+    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    assert_eq!(
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+        3
+    );
 }
 
 #[tokio::test]
