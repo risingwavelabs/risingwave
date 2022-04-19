@@ -103,6 +103,11 @@ impl InputRef {
         self.index
     }
 
+    // Shift the input ref's index with offset.
+    pub fn shift_with_offset(&mut self, offset: isize) {
+        self.index = (self.index as isize + offset) as usize;
+    }
+
     /// Convert [`InputRef`] to an arg of agg call.
     pub fn to_agg_arg_protobuf(&self) -> ProstAggCallArg {
         ProstAggCallArg {

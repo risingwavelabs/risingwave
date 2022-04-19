@@ -444,6 +444,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
         (agg, out_col_change)
     }
 }
+
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {

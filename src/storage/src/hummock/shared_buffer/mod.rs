@@ -13,5 +13,7 @@
 // limitations under the License.
 
 pub mod shared_buffer_batch;
+#[allow(dead_code)]
 pub mod shared_buffer_manager;
+#[allow(dead_code)]
 pub mod shared_buffer_uploader;
