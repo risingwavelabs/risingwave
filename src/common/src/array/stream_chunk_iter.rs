@@ -24,7 +24,7 @@ impl StreamChunk {
     pub fn records(&self) -> impl Iterator<Item = RecordRef<'_>> {
         StreamChunkRefIter {
             chunk: self,
-            inner: self.data_chunk.rows(),
+            inner: self.data.rows(),
         }
     }
 
@@ -32,7 +32,7 @@ impl StreamChunk {
     ///
     /// Should consider using [`StreamChunk::records`] if possible.
     pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
-        self.data_chunk.rows().map(|row| {
+        self.data.rows().map(|row| {
             (
                 // SAFETY: index is checked since we are in the iterator.
                 unsafe { *self.ops().get_unchecked(row.index()) },

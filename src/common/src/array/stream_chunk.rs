@@ -75,7 +75,7 @@ pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
 
-    pub(super) data_chunk: DataChunk,
+    pub(super) data: DataChunk,
 }
 
 impl StreamChunk {
@@ -84,8 +84,8 @@ impl StreamChunk {
             assert_eq!(col.array_ref().len(), ops.len());
         }
 
-        let data_chunk = DataChunk::new(columns, visibility);
-        StreamChunk { ops, data_chunk }
+        let data = DataChunk::new(columns, visibility);
+        StreamChunk { ops, data }
     }
 
     /// Build a `StreamChunk` from rows.
@@ -118,20 +118,20 @@ impl StreamChunk {
 
     /// `cardinality` return the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        self.data_chunk.cardinality()
+        self.data.cardinality()
     }
 
     /// `capacity` return physical length of internals ops & columns
     pub fn capacity(&self) -> usize {
-        self.data_chunk.capacity()
+        self.data.capacity()
     }
 
     pub fn columns(&self) -> &[Column] {
-        self.data_chunk.columns()
+        self.data.columns()
     }
 
     pub fn column_at(&self, index: usize) -> &Column {
-        self.data_chunk.column_at(index)
+        self.data.column_at(index)
     }
 
     /// compact the `StreamChunk` with its visibility map
@@ -165,7 +165,7 @@ impl StreamChunk {
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
-        (self.data_chunk, self.ops)
+        (self.data, self.ops)
     }
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
@@ -174,7 +174,7 @@ impl StreamChunk {
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
-        let (columns, visibility) = self.data_chunk.into_parts();
+        let (columns, visibility) = self.data.into_parts();
         (self.ops, columns, visibility)
     }
 
@@ -204,7 +204,7 @@ impl StreamChunk {
     }
 
     pub fn visibility(&self) -> &Option<Bitmap> {
-        self.data_chunk.visibility()
+        self.data.visibility()
     }
 
     pub fn get_hash_values<H: BuildHasher>(
