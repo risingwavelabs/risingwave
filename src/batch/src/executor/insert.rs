@@ -245,8 +245,9 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
-        let mut reader =
-            source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
+        let mut reader = source
+            .stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])
+            .await?;
 
         // Insert
         let mut insert_executor = InsertExecutor::new(

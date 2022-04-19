@@ -161,7 +161,7 @@ impl Source for TableSourceV2 {
     type ReaderContext = TableV2ReaderContext;
     type StreamReader = TableV2StreamReader;
 
-    fn stream_reader(
+    async fn stream_reader(
         &self,
         _context: Self::ReaderContext,
         column_ids: Vec<ColumnId>,
@@ -211,7 +211,9 @@ mod tests {
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
         let source = Arc::new(new_source());
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
+        let mut reader = source
+            .stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])
+            .await?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{

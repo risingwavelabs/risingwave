@@ -74,7 +74,6 @@ pub struct SourceExecutor {
 
     // fixme
     barrier_receiver: Option<UnboundedReceiver<Message>>,
-    stream_reader: Option<Box<dyn StreamSourceReader>>,
 
     /// The reader object. When `next` is called for the first time on `SourceExecutor`, the
     /// `reader` will be turned into `reader_stream`, and this field will become `None`.
@@ -160,27 +159,21 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     }
 }
 
-async fn build_stream_reader<S: StateStore>(
-    source: Arc<SourceImpl>,
-    _operator_id: u64,
-    column_ids: Vec<ColumnId>,
-    _keyspace: Keyspace<S>,
-) -> Result<Box<dyn StreamSourceReader>> {
-    let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-        SourceImpl::TableV2(s) => Box::new(s.stream_reader(TableV2ReaderContext, column_ids)?),
-        SourceImpl::Connector(_s) => unimplemented!(),
-        //  Box::new(ConnectorStreamSource {
-        // //            source_reader: s.clone(),
-        //             //state_store: state::SourceStateHandler::new(keyspace),
-        //
-        //             reader: (),
-        //             parser: Arc::new(()),
-        //             column_descs: vec![]
-        //         }),
-    };
-
-    Ok(stream_reader)
-}
+// async fn _build_stream_reader<S: StateStore>(
+//     source: Arc<SourceImpl>,
+//     _operator_id: u64,
+//     column_ids: Vec<ColumnId>,
+//     _keyspace: Keyspace<S>,
+// ) -> Result<Box<dyn StreamSourceReader>> {
+//     let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
+//         SourceImpl::TableV2(s) => {
+//             Box::new(s.stream_reader(TableV2ReaderContext, column_ids).await?)
+//         }
+//         SourceImpl::Connector(_s) => unimplemented!(),
+//     };
+//
+//     Ok(stream_reader)
+// }
 
 impl SourceExecutor {
     #[allow(clippy::too_many_arguments)]
@@ -208,7 +201,6 @@ impl SourceExecutor {
             schema,
             pk_indices,
             barrier_receiver: Some(barrier_receiver),
-            stream_reader: None,
             // fixme(chen): may conflict
             next_row_id: AtomicU64::from(
                 SystemTime::now()
