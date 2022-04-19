@@ -56,31 +56,31 @@ fn run_iter<I: HummockIterator<Direction = Forward>>(iter_ref: &RefCell<I>, tota
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut merge_iter = RefCell::new(MergeIterator::new(
+    let merge_iter = RefCell::new(MergeIterator::new(
         gen_interleave_shared_buffer_batch_iter(10000, 100),
         Arc::new(StateStoreMetrics::unused()),
     ));
     c.bench_with_input(
         BenchmarkId::new("bench merge iter", "unordered"),
-        &mut merge_iter,
+        &merge_iter,
         |b, iter_ref| {
             b.iter(|| {
-                run_iter(iter_ref.clone(), 100 * 10000);
+                run_iter(iter_ref, 100 * 10000);
             });
         },
     );
 
-    let mut ordered_merge_iter = RefCell::new(OrderedAwareMergeIterator::new(
+    let ordered_merge_iter = RefCell::new(OrderedAwareMergeIterator::new(
         gen_interleave_shared_buffer_batch_iter(10000, 100),
         Arc::new(StateStoreMetrics::unused()),
     ));
 
     c.bench_with_input(
         BenchmarkId::new("bench merge iter", "ordered"),
-        &mut ordered_merge_iter,
+        &ordered_merge_iter,
         |b, iter_ref| {
             b.iter(|| {
-                run_iter(iter_ref.clone(), 100 * 10000);
+                run_iter(iter_ref, 100 * 10000);
             });
         },
     );

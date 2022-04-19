@@ -99,7 +99,7 @@ impl<'a, D: HummockIteratorDirection, NE: Send + Sync + Ord> MergeIteratorInner<
 /// The behaviour of `next` of order aware merge iterator is different from the normal one, so we
 /// extract this trait.
 trait MergeIteratorNext<'a> {
-    async fn next(&mut self) -> HummockResult<()>;
+    async fn next_inner(&mut self) -> HummockResult<()>;
 }
 
 /// An order aware merge iterator. `usize` as the `extra_info` is used to define the order of
@@ -129,7 +129,7 @@ impl<'a, D: HummockIteratorDirection> OrderedMergeIteratorInner<'a, D> {
 
 #[async_trait]
 impl<'a, D: HummockIteratorDirection> MergeIteratorNext<'a> for OrderedMergeIteratorInner<'a, D> {
-    async fn next(&mut self) -> HummockResult<()> {
+    async fn next_inner(&mut self) -> HummockResult<()> {
         let top_node = self.heap.pop().expect("no inner iter");
         let mut popped_nodes = vec![];
 
@@ -198,7 +198,7 @@ impl<'a, D: HummockIteratorDirection> UnorderedMergeIteratorInner<'a, D> {
 
 #[async_trait]
 impl<'a, D: HummockIteratorDirection> MergeIteratorNext<'a> for UnorderedMergeIteratorInner<'a, D> {
-    async fn next(&mut self) -> HummockResult<()> {
+    async fn next_inner(&mut self) -> HummockResult<()> {
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
         // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
@@ -238,9 +238,7 @@ where
     type Direction = D;
 
     async fn next(&mut self) -> HummockResult<()> {
-        (self as &mut (dyn MergeIteratorNext<'a> + Send + Sync))
-            .next()
-            .await
+        self.next_inner().await
     }
 
     fn key(&self) -> &[u8] {
