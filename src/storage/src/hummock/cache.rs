@@ -137,12 +137,13 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
         let idx = (hash as usize) & (self.list.len() - 1);
         let (mut prev, ptr) = self.find_pointer(idx, &(*h).key);
         if prev.is_null() {
-            let idx = (hash as usize) & (self.list.len() - 1);
             self.list[idx] = h;
         } else {
             (*prev).next_hash = h;
         }
-        if !ptr.is_null() && (*ptr).key.eq(&(*h).key) {
+
+        // ptr.key must equal h.key
+        if !ptr.is_null() {
             (*h).next_hash = (*ptr).next_hash;
             return ptr;
         } else {
@@ -292,15 +293,8 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
             let ptr = Box::into_raw(handle);
             let old = self.table.insert(hash, ptr);
             if !old.is_null() {
-                (*old).set_in_cache(false);
-                if !(*old).has_refs() {
-                    self.lru_remove(old);
-                    let mut node = Box::from_raw(old);
-                    self.usage -= node.charge;
-                    let data = node.value.take().unwrap();
-                    last_reference_list.push(data);
-                    self.recyle_handle_object(node);
-                }
+                let data = self.remove_cache_handle(old).unwrap();
+                last_reference_list.push(data);
             }
             self.usage += charge;
             (*ptr).add_ref();
@@ -347,16 +341,22 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
     unsafe fn erase(&mut self, hash: u64, key: &K) -> Option<T> {
         let h = self.table.remove(hash, key);
         if !h.is_null() {
-            (*h).set_in_cache(false);
-            if !(*h).has_refs() {
-                self.lru_remove(h);
-                let mut node = Box::from_raw(h);
-                node.set_in_cache(false);
-                self.usage -= node.charge;
-                let data = node.value.take();
-                self.recyle_handle_object(node);
-                return data;
-            }
+            self.remove_cache_handle(h)
+        } else {
+            None
+        }
+    }
+
+    unsafe fn remove_cache_handle(&mut self, h: *mut LruHandle<K, T>) -> Option<T> {
+        (*h).set_in_cache(false);
+        if !(*h).has_refs() {
+            self.lru_remove(h);
+            let mut node = Box::from_raw(h);
+            node.set_in_cache(false);
+            self.usage -= node.charge;
+            let data = node.value.take();
+            self.recyle_handle_object(node);
+            return data;
         }
         None
     }
