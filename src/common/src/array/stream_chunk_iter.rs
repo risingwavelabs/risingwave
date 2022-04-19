@@ -105,6 +105,7 @@ impl<'a> RecordRef<'a> {
 mod tests {
     extern crate test;
 
+    use itertools::Itertools;
     use test::Bencher;
 
     use super::RecordRef;
@@ -124,7 +125,7 @@ mod tests {
     }
 
     #[bench]
-    fn bench_row_iterator_from_records(b: &mut Bencher) {
+    fn bench_rows_iterator_from_records(b: &mut Bencher) {
         let big = BigStreamChunk::new(10000);
         b.iter(|| {
             let chunk = big.stream_chunk();
@@ -140,6 +141,18 @@ mod tests {
         b.iter(|| {
             let chunk = big.stream_chunk();
             for (_op, row) in chunk.rows() {
+                test::black_box(row);
+            }
+        })
+    }
+
+    #[bench]
+    fn bench_rows_iterator_vec_of_datum_refs(b: &mut Bencher) {
+        let big = BigStreamChunk::new(10000);
+        b.iter(|| {
+            let chunk = big.stream_chunk();
+            for (_op, row) in chunk.rows() {
+                let row = row.values().collect_vec();
                 test::black_box(row);
             }
         })
