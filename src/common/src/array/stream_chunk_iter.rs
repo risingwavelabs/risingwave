@@ -32,7 +32,13 @@ impl StreamChunk {
     ///
     /// Should consider using [`StreamChunk::records`] if possible.
     pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
-        self.records().flat_map(|r| r.into_row_refs())
+        self.data_chunk.rows().map(|row| {
+            (
+                // SAFETY: index is checked since we are in the iterator.
+                unsafe { *self.ops().get_unchecked(row.index()) },
+                row,
+            )
+        })
     }
 }
 
@@ -58,8 +64,8 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
             Op::UpdateDelete => {
                 let insert_row = self.inner.next().expect("expect a row after U-");
                 // SAFETY: index is checked since `insert_row` is `Some`.
-                let op = unsafe { self.chunk.ops().get_unchecked(insert_row.index()) };
-                assert_eq!(*op, Op::UpdateInsert, "expect a U+ after U-");
+                let op = unsafe { *self.chunk.ops().get_unchecked(insert_row.index()) };
+                debug_assert_eq!(op, Op::UpdateInsert, "expect a U+ after U-");
 
                 Some(RecordRef::Update {
                     delete: row,
@@ -97,15 +103,56 @@ impl<'a> RecordRef<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::test_stream_chunk::{TestStreamChunk, WhatEverStreamChunk};
+    extern crate test;
+
+    use test::Bencher;
+
+    use super::RecordRef;
+    use crate::test_utils::test_stream_chunk::{
+        BigStreamChunk, TestStreamChunk, WhatEverStreamChunk,
+    };
 
     #[test]
     fn test_chunk_rows() {
-        let chunk = WhatEverStreamChunk::stream_chunk();
+        let test = WhatEverStreamChunk;
+        let chunk = test.stream_chunk();
         let mut rows = chunk.rows().map(|(op, row)| (op, row.to_owned_row()));
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(0)), rows.next());
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(1)), rows.next());
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(2)), rows.next());
-        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(3)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(0)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(1)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(2)), rows.next());
+        assert_eq!(Some(test.row_with_op_at(3)), rows.next());
+    }
+
+    #[bench]
+    fn bench_row_iterator_from_records(b: &mut Bencher) {
+        let big = BigStreamChunk::new(10000);
+        b.iter(|| {
+            let chunk = big.stream_chunk();
+            for (_op, row) in chunk.records().flat_map(RecordRef::into_row_refs) {
+                test::black_box(row);
+            }
+        })
+    }
+
+    #[bench]
+    fn bench_rows_iterator(b: &mut Bencher) {
+        let big = BigStreamChunk::new(10000);
+        b.iter(|| {
+            let chunk = big.stream_chunk();
+            for (_op, row) in chunk.rows() {
+                test::black_box(row);
+            }
+        })
+    }
+
+    #[bench]
+    fn bench_record_iterator(b: &mut Bencher) {
+        let big = BigStreamChunk::new(10000);
+        b.iter(|| {
+            let chunk = big.stream_chunk();
+            for record in chunk.records() {
+                test::black_box(record);
+            }
+        })
     }
 }
