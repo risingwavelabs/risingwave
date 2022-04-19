@@ -40,7 +40,7 @@ impl HummockStorage {
         key_range: R,
         epoch: u64,
         reversed: bool,
-    ) -> StorageResult<HummockStateStoreIter<'_>>
+    ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -181,7 +181,7 @@ impl HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Iter<'a> = HummockStateStoreIter<'a>;
+    type Iter<'a> = HummockStateStoreIter;
 
     define_state_store_associated_type!();
 
@@ -391,12 +391,12 @@ impl StateStore for HummockStorage {
     }
 }
 
-pub struct HummockStateStoreIter<'a> {
-    inner: DirectedUserIterator<'a>,
+pub struct HummockStateStoreIter {
+    inner: DirectedUserIterator,
 }
 
-impl<'a> HummockStateStoreIter<'a> {
-    fn new(inner: DirectedUserIterator<'a>) -> Self {
+impl HummockStateStoreIter {
+    fn new(inner: DirectedUserIterator) -> Self {
         Self { inner }
     }
 
@@ -414,11 +414,11 @@ impl<'a> HummockStateStoreIter<'a> {
     }
 }
 
-impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
+impl StateStoreIter for HummockStateStoreIter {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'b> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self:'b;
+    type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self:'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
