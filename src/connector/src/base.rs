@@ -62,23 +62,27 @@ pub struct ConnectorState {
     pub end_offset: String,
 }
 
-#[async_trait]
-pub trait SplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+#[derive(Debug, Clone)]
+pub enum ConnectorStateV2 {
+    State(ConnectorState),
+    Splits(Vec<SplitImpl>),
+    None,
+}
 
-    /// `state` is used to recover from the formerly persisted state.
-    /// If the reader is newly created via CREATE SOURCE, the state will be none.
-    async fn new(properties: Properties, state: Option<ConnectorState>) -> Result<Self>
+#[async_trait]
+pub trait SourceReader {
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized;
 }
 
-pub enum SplitReaderImpl {
+pub enum SourceReaderImpl {
     Kafka(KafkaSplitReader),
     Kinesis(KinesisSplitReader),
 }
 
-impl SplitReaderImpl {
+impl SourceReaderImpl {
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         match self {
             Self::Kafka(r) => r.next().await,
@@ -86,7 +90,8 @@ impl SplitReaderImpl {
         }
     }
 
-    pub async fn create(config: Properties, state: Option<ConnectorState>) -> Result<Self> {
+    pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
+        // pub async fn create(config: Properties, state: Option<ConnectorState>) -> Result<Self> {
         let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
         let connector = match upstream_type.as_str() {
             KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
