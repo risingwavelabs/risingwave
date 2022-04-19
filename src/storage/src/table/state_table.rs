@@ -22,7 +22,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
-use super::mem_table::{MemTable, MemTableIter};
+use super::mem_table::MemTable;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::error::StorageResult;
 use crate::monitor::StateStoreMetrics;
@@ -43,7 +43,7 @@ pub struct StateTable<S: StateStore> {
     /// Serializer to serialize keys from input rows
     key_serializer: OrderedRowSerializer,
 
-    /// buffer RowOp
+    /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
@@ -106,9 +106,10 @@ impl<S: StateStore> StateTable<S> {
         todo!()
     }
 }
+
 pub struct StateTableRowIter<S: StateStore> {
     cell_based_iter: CellBasedTableRowIter<S>,
-    mem_table_iter: MemTableIter,
+    mem_table: MemTable,
 }
 
 impl<S: StateStore> StateTableRowIter<S> {

@@ -13,8 +13,9 @@
 // limitations under the License.
 #![allow(dead_code)]
 #![allow(unused)]
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 
+use futures::Future;
 use risingwave_common::array::Row;
 
 use crate::error::StorageResult;
@@ -27,11 +28,14 @@ pub enum RowOp {
 pub struct MemTable {
     pub buffer: BTreeMap<Row, RowOp>,
 }
+type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
+
 impl Default for MemTable {
     fn default() -> Self {
         Self::new()
     }
 }
+
 impl MemTable {
     pub fn new() -> Self {
         Self {
@@ -66,17 +70,7 @@ impl MemTable {
         Ok(())
     }
 
-    pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter> {
+    pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter<'_>> {
         todo!();
-    }
-}
-
-pub struct MemTableIter {
-    mem_table: MemTable,
-}
-
-impl MemTableIter {
-    async fn next(&mut self) -> StorageResult<Option<RowOp>> {
-        todo!()
     }
 }
