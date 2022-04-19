@@ -60,7 +60,9 @@ impl HummockSnapshotManager {
             if *reference_number == 0 {
                 self.meta_client.unpin_snapshot(epoch).await?;
                 core_guard.reference_number.remove(&epoch);
-                core_guard.is_outdated = epoch == core_guard.last_pinned;
+                if epoch == core_guard.last_pinned {
+                    core_guard.is_outdated = true;
+                }
             }
         }
         Ok(())
