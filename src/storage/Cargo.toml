@@ -48,8 +48,8 @@ risingwave_rpc_client = { path = "../rpc_client" }
 #     "static_libcpp",
 # ], optional = true }
 serde = { version = "1", features = ["derive"] }
-spin = "0.5.2"
 smallvec = "1"
+spin = "0.5.2"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
