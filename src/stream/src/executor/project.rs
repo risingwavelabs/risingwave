@@ -19,9 +19,8 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use super::Executor;
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{Executor as ExecutorV2, ProjectExecutor as ProjectExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor, ProjectExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct ProjectExecutorBuilder;
@@ -32,22 +31,21 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ProjectNode)?;
         let project_exprs = node
             .get_select_list()
             .iter()
             .map(build_from_prost)
             .collect::<Result<Vec<_>>>()?;
-        Ok(Box::new(
-            Box::new(ProjectExecutorV2::new_from_v1(
-                params.input.remove(0),
-                params.pk_indices,
-                project_exprs,
-                params.executor_id,
-                params.op_info,
-            ))
-            .v1(),
-        ))
+
+        Ok(ProjectExecutor::new_from_v1(
+            params.input.remove(0),
+            params.pk_indices,
+            project_exprs,
+            params.executor_id,
+            params.op_info,
+        )
+        .boxed())
     }
 }

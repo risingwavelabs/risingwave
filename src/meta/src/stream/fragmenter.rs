@@ -28,7 +28,6 @@ use risingwave_pb::stream_plan::{
 
 use super::graph::StreamFragmentEdge;
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
-use crate::cluster::ParallelUnitId;
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{FragmentId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
@@ -47,9 +46,6 @@ pub struct StreamFragmenter<S> {
     /// id generator, used to generate actor id.
     id_gen_manager: IdGeneratorManagerRef<S>,
 
-    /// hash mapping, used for hash dispatcher
-    hash_mapping: Vec<ParallelUnitId>,
-
     /// local fragment id
     next_local_fragment_id: u32,
 
@@ -63,6 +59,9 @@ pub struct StreamFragmenter<S> {
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
 
+    /// degree of parallelism
+    parallel_degree: u32,
+
     // TODO: remove this when we deprecate Java frontend.
     is_legacy_frontend: bool,
 }
@@ -74,18 +73,18 @@ where
     pub fn new(
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        hash_mapping: Vec<ParallelUnitId>,
+        parallel_degree: u32,
         is_legacy_frontend: bool,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
             stream_graph: StreamGraphBuilder::new(fragment_manager),
             id_gen_manager,
-            hash_mapping,
             next_local_fragment_id: 0,
             next_local_actor_id: 0,
             next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
+            parallel_degree,
             is_legacy_frontend,
         }
     }
@@ -253,6 +252,22 @@ where
             _ => {}
         };
 
+        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+        // with only equal conditions
+        if let Node::HashJoinNode(hash_join_node) = stream_node.get_node()? {
+            if hash_join_node.is_delta_join {
+                if hash_join_node.get_join_type()? == JoinType::Inner
+                    && hash_join_node.condition.is_none()
+                {
+                    return self.build_delta_join(current_fragment, stream_node);
+                } else {
+                    panic!(
+                        "only inner join without non-equal condition is supported for delta joins"
+                    );
+                }
+            }
+        }
+
         let inputs = std::mem::take(&mut stream_node.input);
 
         // Visit plan children.
@@ -290,20 +305,6 @@ where
                         }
 
                         Ok(child_node)
-                    }
-
-                    // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-                    // with only equal conditions
-                    Node::HashJoinNode(hash_join_node)
-                        if hash_join_node.get_join_type()? == JoinType::Inner
-                            && hash_join_node.condition.is_none() =>
-                    {
-                        const ENABLE_DELTA_JOIN: bool = false;
-                        if ENABLE_DELTA_JOIN {
-                            self.build_delta_join(current_fragment, child_node)
-                        } else {
-                            self.build_fragment(current_fragment, child_node)
-                        }
                     }
 
                     // For other children, visit recursively.
@@ -350,7 +351,7 @@ where
         let parallel_degree = if current_fragment.is_singleton {
             1
         } else {
-            self.hash_mapping.iter().unique().count() as u32
+            self.parallel_degree
         };
 
         let node = Arc::new(current_fragment.get_node().clone());
@@ -376,52 +377,8 @@ where
                 .clone();
 
             match dispatch_edge.dispatch_strategy.get_type()? {
-                // Construct a consistent hash mapping of actors based on that of parallel units.
-                // Set the new mapping into hash dispatchers.
-                DispatcherType::Hash => {
-                    // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as
-                    // the number of its downstream actors. However, since the
-                    // frontend optimizer is still WIP, there exists some
-                    // unoptimized situation where a hash dispatcher has ONLY
-                    // ONE downstream actor, which makes it behave like a simple dispatcher. As an
-                    // expedient, we specially compute the consistent hash mapping here. The `if`
-                    // branch could be removed after the optimizer has been fully implemented.
-
-                    let streaming_hash_mapping = if downstream_actors.len() == 1 {
-                        Some(vec![downstream_actors[0]; self.hash_mapping.len()])
-                    } else {
-                        let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
-                        assert_eq!(downstream_actors.len(), hash_parallel_units.len());
-                        let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
-                            .into_iter()
-                            .zip_eq(downstream_actors.iter().copied())
-                            .collect();
-                        Some(
-                            self.hash_mapping
-                                .iter()
-                                .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
-                                .collect_vec(),
-                        )
-                    };
-
-                    let dispatcher = Dispatcher {
-                        r#type: DispatcherType::Hash.into(),
-                        column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
-                        hash_mapping: None,
-                        downstream_actor_id: vec![],
-                    };
-
-                    self.stream_graph.add_link(
-                        &actor_ids,
-                        &downstream_actors,
-                        dispatch_edge.link_id,
-                        dispatcher,
-                        dispatch_edge.same_worker_node,
-                        streaming_hash_mapping,
-                    );
-                }
-
-                ty @ (DispatcherType::Simple
+                ty @ (DispatcherType::Hash
+                | DispatcherType::Simple
                 | DispatcherType::Broadcast
                 | DispatcherType::NoShuffle) => {
                     self.stream_graph.add_link(
@@ -435,7 +392,6 @@ where
                             downstream_actor_id: vec![],
                         },
                         dispatch_edge.same_worker_node,
-                        None,
                     );
                 }
                 DispatcherType::Invalid => unreachable!(),
@@ -460,7 +416,7 @@ where
         let mut actionable_fragment_id = VecDeque::new();
         let mut downstream_cnts = HashMap::new();
 
-        // Iterator all fragments
+        // Iterate all fragments
         for (fragment_id, _) in self.fragment_graph.fragments().iter() {
             // Count how many downstreams we have for a given fragment
             let downstream_cnt = self.fragment_graph.get_downstreams(*fragment_id).len();

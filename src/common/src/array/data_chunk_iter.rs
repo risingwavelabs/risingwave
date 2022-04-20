@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::Hash;
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops;
 
 use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
+use crate::hash::HashCode;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
@@ -268,6 +269,18 @@ impl Row {
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
     }
+
+    /// Hash row data all in one
+    pub fn hash_row<H>(&self, hash_builder: &H) -> HashCode
+    where
+        H: BuildHasher,
+    {
+        let mut hasher = hash_builder.build_hasher();
+        for datum in &self.0 {
+            datum.hash(&mut hasher);
+        }
+        HashCode(hasher.finish())
+    }
 }
 
 /// Deserializer of the `Row`.
@@ -326,6 +339,7 @@ impl RowDeserializer {
 mod tests {
     use super::*;
     use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
+    use crate::util::hash_util::CRC32FastBuilder;
 
     #[test]
     fn row_memcomparable_encode_decode_not_null() {
@@ -387,5 +401,37 @@ mod tests {
         ]);
         let row1 = de.deserialize(&bytes).unwrap();
         assert_eq!(row, row1);
+    }
+
+    #[test]
+    fn test_hash_row() {
+        let hash_builder = CRC32FastBuilder {};
+
+        let row1 = Row(vec![
+            Some(ScalarImpl::Utf8("string".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+        ]);
+        let row2 = Row(vec![
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+            Some(ScalarImpl::Utf8("string".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+        ]);
+        assert_ne!(row1.hash_row(&hash_builder), row2.hash_row(&hash_builder));
+
+        let row_default = Row::default();
+        assert_eq!(row_default.hash_row(&hash_builder).0, 0);
     }
 }

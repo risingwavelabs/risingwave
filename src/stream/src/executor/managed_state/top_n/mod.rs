@@ -20,6 +20,7 @@ use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::StateStoreIter;
 pub use top_n_bottom_n_state::ManagedTopNBottomNState;
 pub use top_n_state::ManagedTopNState;
 
@@ -40,30 +41,39 @@ fn deserialize_pk<const TOP_N_TYPE: usize>(
     Ok(pk)
 }
 
-fn deserialize_bytes_to_pk_and_row<const TOP_N_TYPE: usize>(
-    pk_row_bytes: Vec<(Bytes, Bytes)>,
+// The function moves `pk_row_bytes_iter` as it is possible that we would take one extra cell from
+// it than the returned result. Allowing it to be reused after this function via borrowing may cause
+// confusion and bugs.
+async fn deserialize_bytes_to_pk_and_row<
+    const TOP_N_TYPE: usize,
+    I: StateStoreIter<Item = (Bytes, Bytes)>,
+>(
+    mut pk_row_bytes_iter: I,
     ordered_row_deserializer: &mut OrderedRowDeserializer,
     cell_based_row_deserializer: &mut CellBasedRowDeserializer,
+    num_rows: Option<usize>,
 ) -> Result<Vec<(OrderedRow, Row)>> {
-    if pk_row_bytes.is_empty() {
-        return Ok(vec![]);
-    }
     let mut result = vec![];
-    // We initialize the `pk_buf` to be the first element so that we don't need to put a check
-    // inside the loop to specially check the first corner case.
-    for (key, value) in pk_row_bytes {
+    while let Some((key, value)) = pk_row_bytes_iter.next().await? {
         let pk_buf_and_row = cell_based_row_deserializer.deserialize(&key, &value)?;
         match pk_buf_and_row {
             Some((mut pk_buf, row)) => {
                 let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf, ordered_row_deserializer)?;
                 result.push((pk, row));
+                if let Some(num_rows) = num_rows && result.len() == num_rows {
+                    return Ok(result);
+                }
             }
             None => {}
         }
     }
-    // Take out the final row.
-    let mut pk_buf_and_row = cell_based_row_deserializer.take().unwrap();
-    let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf_and_row.0, ordered_row_deserializer)?;
-    result.push((pk, pk_buf_and_row.1));
+    // Reaching here implies that all the key value pairs have been drained from
+    // `pk_row_bytes_iter`. Try to take out the final row.
+    // It is possible that `iter` is empty, so we may read nothing and there is no such final row.
+    let pk_buf_and_row = cell_based_row_deserializer.take();
+    if let Some(mut pk_buf_and_row) = pk_buf_and_row {
+        let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf_and_row.0, ordered_row_deserializer)?;
+        result.push((pk, pk_buf_and_row.1));
+    }
     Ok(result)
 }

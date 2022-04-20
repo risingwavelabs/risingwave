@@ -25,7 +25,6 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -39,7 +38,7 @@ use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
+use crate::executor_v2::{BoxedExecutor, DebugExecutor, Executor, MergeExecutor};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -104,24 +103,24 @@ pub struct ExecutorParams {
     pub op_info: String,
 
     /// The input executor.
-    pub input: Vec<Box<dyn Executor>>,
+    pub input: Vec<BoxedExecutor>,
 
     /// Id of the actor.
     pub actor_id: ActorId,
+
     pub executor_stats: Arc<StreamingMetrics>,
 }
 
 impl Debug for ExecutorParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecutorParams")
-            .field("env", &"...")
             .field("pk_indices", &self.pk_indices)
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
-            .field("input", &self.input)
+            .field("input", &self.input.len())
             .field("actor_id", &self.actor_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -391,21 +390,23 @@ impl LocalStreamManagerCore {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
-        input: Box<dyn Executor>,
+        input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
-    ) -> Result<Box<dyn StreamConsumer>> {
+    ) -> Result<impl StreamConsumer> {
         // create downstream receivers
-        let mut dispatcher_impls = vec![];
+        let mut dispatcher_impls = Vec::with_capacity(dispatchers.len());
+
         for dispatcher in dispatchers {
             let outputs = dispatcher
                 .downstream_actor_id
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, down_id)
+                    new_output(&self.context, downstream_addr, actor_id, *down_id)
                 })
                 .collect::<Result<Vec<_>>>()?;
+
             use stream_plan::DispatcherType::*;
             let dispatcher_impl = match dispatcher.get_type()? {
                 Hash => {
@@ -442,12 +443,13 @@ impl LocalStreamManagerCore {
             };
             dispatcher_impls.push(dispatcher_impl);
         }
-        Ok(Box::new(DispatchExecutor::new(
+
+        Ok(DispatchExecutor::new(
             input,
             dispatcher_impls,
             actor_id,
             self.context.clone(),
-        )))
+        ))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -459,11 +461,11 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
-        let input: Vec<Box<dyn Executor>> = node
+        let input: Vec<_> = node
             .input
             .iter()
             .enumerate()
@@ -507,7 +509,7 @@ impl LocalStreamManagerCore {
             actor_id,
             input_pos,
             self.streaming_metrics.clone(),
-        )?;
+        );
         Ok(executor)
     }
 
@@ -518,74 +520,39 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
         })
     }
 
     fn wrap_executor_for_debug(
-        mut executor: Box<dyn Executor>,
+        executor: BoxedExecutor,
         actor_id: ActorId,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
-    ) -> Result<Box<dyn Executor>> {
-        if !cfg!(debug_assertions) {
-            return Ok(executor);
+    ) -> BoxedExecutor {
+        if cfg!(debug_assertions) {
+            DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
+        } else {
+            executor
         }
-        let identity = executor.identity().to_string();
-
-        // Trace
-        executor = Box::new(TraceExecutor::new(
-            executor,
-            identity,
-            input_pos,
-            actor_id,
-            streaming_metrics,
-        ));
-        // Schema check
-        executor = Box::new(SchemaCheckExecutor::new(executor));
-        // Epoch check
-        executor = Box::new(EpochCheckExecutor::new(executor));
-        // Cache clear
-        if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
-            executor = Box::new(CacheClearExecutor::new(executor));
-        }
-        // Update check
-        executor = Box::new(UpdateCheckExecutor::new(executor));
-
-        Ok(executor)
     }
 
     pub fn create_merge_node(
         &mut self,
         params: ExecutorParams,
         node: &stream_plan::MergeNode,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let upstreams = node.get_upstream_actor_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
         let mut rxs = self.get_receive_message(params.actor_id, upstreams)?;
 
         if upstreams.len() == 1 {
-            Ok(Box::new(
-                Box::new(ReceiverExecutor::new(
-                    schema,
-                    params.pk_indices,
-                    rxs.remove(0),
-                ))
-                .v1(),
-            ))
+            Ok(ReceiverExecutor::new(schema, params.pk_indices, rxs.remove(0)).boxed())
         } else {
-            Ok(Box::new(
-                Box::new(MergeExecutorV2::new(
-                    schema,
-                    params.pk_indices,
-                    params.actor_id,
-                    rxs,
-                ))
-                .v1(),
-            ))
+            Ok(MergeExecutor::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
         }
     }
 

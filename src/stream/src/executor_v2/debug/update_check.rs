@@ -12,33 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
 use std::iter::once;
+use std::sync::Arc;
 
-use async_trait::async_trait;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::error::Result;
 
-use crate::executor::{Executor, Message};
+use crate::executor::Message;
+use crate::executor_v2::error::TracedStreamExecutorError;
+use crate::executor_v2::{ExecutorInfo, MessageStream};
 
-/// [`UpdateCheckExecutor`] checks whether the two rows of updates are next to each other.
-#[derive(Debug)]
-pub struct UpdateCheckExecutor {
-    /// The input of the current executor.
-    input: Box<dyn Executor>,
-}
-
-impl UpdateCheckExecutor {
-    pub fn new(input: Box<dyn Executor>) -> Self {
-        Self { input }
-    }
-}
-
-#[async_trait]
-impl super::DebugExecutor for UpdateCheckExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        let message = self.input.next().await?;
+/// Streams wrapped by `update_check` will check whether the two rows of updates are next to each
+/// other.
+#[try_stream(ok = Message, error = TracedStreamExecutorError)]
+pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
+    #[for_await]
+    for message in input {
+        let message = message?;
 
         if let Message::Chunk(chunk) = &message {
             for ((op1, row1), (op2, row2)) in once(None)
@@ -52,7 +43,7 @@ impl super::DebugExecutor for UpdateCheckExecutor {
                 {
                     panic!(
                         "update check failed on `{}`: expect U+ after  U-:\n first row: {:?}\nsecond row: {:?}",
-                        self.input.logical_operator_info(),
+                        info.identity,
                         row1,
                         row2,
                     )
@@ -60,15 +51,7 @@ impl super::DebugExecutor for UpdateCheckExecutor {
             }
         }
 
-        Ok(message)
-    }
-
-    fn input(&self) -> &dyn Executor {
-        self.input.as_ref()
-    }
-
-    fn input_mut(&mut self) -> &mut dyn Executor {
-        self.input.as_mut()
+        yield message;
     }
 }
 
@@ -76,11 +59,13 @@ impl super::DebugExecutor for UpdateCheckExecutor {
 mod tests {
     use std::iter::once;
 
+    use futures::{pin_mut, StreamExt};
     use risingwave_common::array::{I64Array, StreamChunk};
     use risingwave_common::column_nonnull;
 
     use super::*;
-    use crate::executor::test_utils::MockSource;
+    use crate::executor_v2::test_utils::MockSource;
+    use crate::executor_v2::Executor;
 
     #[should_panic]
     #[tokio::test]
@@ -99,8 +84,10 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let mut checked = UpdateCheckExecutor::new(Box::new(source));
-        checked.next().await.unwrap(); // should panic
+        let checked = update_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+
+        checked.next().await.unwrap().unwrap(); // should panic
     }
 
     #[should_panic]
@@ -115,8 +102,10 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let mut checked = UpdateCheckExecutor::new(Box::new(source));
-        checked.next().await.unwrap(); // should panic
+        let checked = update_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+
+        checked.next().await.unwrap().unwrap(); // should panic
     }
 
     #[should_panic]
@@ -131,8 +120,10 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let mut checked = UpdateCheckExecutor::new(Box::new(source));
-        checked.next().await.unwrap(); // should panic
+        let checked = update_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+
+        checked.next().await.unwrap().unwrap(); // should panic
     }
 
     #[tokio::test]
@@ -142,7 +133,9 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let mut checked = UpdateCheckExecutor::new(Box::new(source));
-        checked.next().await.unwrap();
+        let checked = update_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+
+        checked.next().await.unwrap().unwrap();
     }
 }

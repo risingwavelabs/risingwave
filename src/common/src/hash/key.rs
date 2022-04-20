@@ -21,6 +21,7 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
+use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
@@ -41,7 +42,7 @@ use crate::util::hash_util::CRC32FastBuilder;
 /// encoded in certain format of ("abc", 1).
 
 /// A wrapper for u64 hash result.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct HashCode(pub u64);
 
 impl From<u64> for HashCode {
@@ -53,6 +54,10 @@ impl From<u64> for HashCode {
 impl HashCode {
     pub fn hash_code(&self) -> u64 {
         self.0
+    }
+
+    pub fn to_vnode(self) -> VirtualNode {
+        (self.0 % VIRTUAL_NODE_COUNT as u64) as u16
     }
 }
 
