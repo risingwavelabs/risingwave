@@ -18,30 +18,26 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use console::style;
-use isahc::prelude::*;
-use isahc::{Body, Request};
 
-pub fn wait_tcp(
-    server: impl AsRef<str>,
+pub fn wait(
+    mut wait_func: impl FnMut() -> Result<()>,
     f: &mut impl std::io::Write,
     p: impl AsRef<Path>,
     id: &str,
     timeout: Option<std::time::Duration>,
     detect_failure: bool,
 ) -> anyhow::Result<()> {
-    let server = server.as_ref();
     let p = p.as_ref();
-    let addr = server.parse()?;
     let start_time = std::time::Instant::now();
 
-    writeln!(f, "Waiting for online: {}", server)?;
+    writeln!(f, "Waiting for online")?;
 
     let mut last_error;
 
     loop {
-        match TcpStream::connect_timeout(&addr, Duration::from_secs(1)) {
+        match wait_func() {
             Ok(_) => {
                 return Ok(());
             }
@@ -69,79 +65,6 @@ pub fn wait_tcp(
 
         sleep(Duration::from_millis(30));
     }
-}
-
-pub fn wait_http_with_cb(
-    server: impl AsRef<str>,
-    f: &mut impl std::io::Write,
-    p: impl AsRef<Path>,
-    id: &str,
-    timeout: Option<std::time::Duration>,
-    detect_failure: bool,
-    resp_cb: impl Fn(Body) -> bool,
-) -> anyhow::Result<()> {
-    let server = server.as_ref();
-    let p = p.as_ref();
-    let start_time = std::time::Instant::now();
-
-    writeln!(f, "Waiting for online: {}", server)?;
-
-    let mut last_error;
-
-    loop {
-        match Request::get(server)
-            .connect_timeout(Duration::from_secs(1))
-            .timeout(Duration::from_secs(1))
-            .body("")
-            .unwrap()
-            .send()
-        {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    let body = resp.into_body();
-                    if resp_cb(body) {
-                        return Ok(());
-                    }
-                    last_error = Some(anyhow!("health check callback failed."))
-                } else {
-                    last_error = Some(anyhow!("http failed with status: {}", resp.status()));
-                }
-            }
-            Err(err) => {
-                last_error = Some(err.into());
-            }
-        }
-
-        if let Some(ref timeout) = timeout {
-            if std::time::Instant::now() - start_time >= *timeout {
-                return Err(anyhow!("failed to connect, last error: {:?}", last_error));
-            }
-        }
-
-        if detect_failure && p.exists() {
-            let mut buf = String::new();
-            std::fs::File::open(p)?.read_to_string(&mut buf)?;
-            return Err(anyhow!(
-                "{} exited while waiting for connection: {}",
-                id,
-                buf
-            ));
-        }
-
-        sleep(Duration::from_millis(30));
-    }
-}
-
-// TODO: unify this function with `wait_tcp`.
-pub fn wait_http(
-    server: impl AsRef<str>,
-    f: &mut impl std::io::Write,
-    p: impl AsRef<Path>,
-    id: &str,
-    timeout: Option<std::time::Duration>,
-    detect_failure: bool,
-) -> anyhow::Result<()> {
-    wait_http_with_cb(server, f, p, id, timeout, detect_failure, |_| true)
 }
 
 pub fn wait_tcp_available(

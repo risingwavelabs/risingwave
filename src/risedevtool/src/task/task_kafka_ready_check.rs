@@ -12,41 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
-use serde::Deserialize;
+use anyhow::{anyhow, Result};
+use kafka::client::KafkaClient;
 
-use crate::{EtcdConfig, ExecuteContext, Task};
+use crate::{ExecuteContext, KafkaConfig, Task};
 
-#[derive(Deserialize)]
-struct HealthResponse {
-    health: String,
-    #[allow(dead_code)]
-    reason: String,
+pub struct KafkaReadyCheckTask {
+    config: KafkaConfig,
 }
 
-pub struct EtcdReadyCheckTask {
-    config: EtcdConfig,
-}
-
-impl EtcdReadyCheckTask {
-    pub fn new(config: EtcdConfig) -> Result<Self> {
+impl KafkaReadyCheckTask {
+    pub fn new(config: KafkaConfig) -> Result<Self> {
         Ok(Self { config })
     }
 }
 
-impl Task for EtcdReadyCheckTask {
+impl Task for KafkaReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.pb.set_message("waiting for online...");
-        let health_check_addr =
-            format!("http://{}:{}/health", self.config.address, self.config.port);
-        let online_cb = |body: &str| -> bool {
-            let response: HealthResponse = serde_json::from_str(body).unwrap();
-            response.health == "true"
-        };
 
-        ctx.wait_http_with_cb(health_check_addr, online_cb)?;
-        ctx.pb
-            .set_message(format!("api {}:{}", self.config.address, self.config.port));
+        let mut client = KafkaClient::new(vec![format!(
+            "{}:{}",
+            self.config.address, self.config.port
+        )]);
+
+        ctx.wait(|| {
+            client.load_metadata_all().map_err(|e| anyhow!("{}", e))?;
+            Ok(())
+        })?;
+
         ctx.complete_spin();
 
         Ok(())
