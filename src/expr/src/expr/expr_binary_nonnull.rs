@@ -189,15 +189,7 @@ macro_rules! gen_binary_expr_atm {
         $ret:expr,
         $general_f:ident,
         {
-            $((Timestamp, Timestamp) => $timestamp_timestamp_f:ident,)?
-            $((Timestamp, Interval) => $timestamp_interval_f:ident,)?
-            $((Interval, Timestamp) => $interval_timestamp_f:ident,)?
-            $((Date, Date) => $date_date_f:ident,)?
-            $((Interval, Date) => $interval_date_f:ident,)?
-            $((Date, Interval) => $date_interval_f:ident,)?
-            $((Interval, Interval) => $interval_interval_f:ident,)?
-            $((Interval, Int) => $interval_int_f:ident,)?
-            $((Int, Interval) => $int_interval_f:ident,)?
+            $( { $i1:ident, $i2:ident, $cast:ident, $func:ident }, )*
         } $(,)?
     ) => {
         $macro! {
@@ -238,18 +230,9 @@ macro_rules! gen_binary_expr_atm {
             { decimal, decimal, decimal, $general_f },
             { float32, decimal, float64, $general_f },
             { float64, decimal, float64, $general_f },
-            $({ timestamp, timestamp, interval, $timestamp_timestamp_f },)?
-            $({ timestamp, interval, timestamp, $timestamp_interval_f },)?
-            $({ interval, timestamp, timestamp, $interval_timestamp_f },)?
-            $({ date, date, int32, $date_date_f },)?
-            $({ date, interval, timestamp, $date_interval_f },)?
-            $({ interval, date, timestamp, $interval_date_f },)?
-            $({ interval, int16, interval, $interval_int_f },)?
-            $({ interval, int32, interval, $interval_int_f },)?
-            $({ interval, int64, interval, $interval_int_f },)?
-            $({ int16, interval, interval, $int_interval_f },)?
-            $({ int32, interval, interval, $int_interval_f },)?
-            $({ int64, interval, interval, $int_interval_f },)?
+            $(
+                { $i1, $i2, $cast, $func },
+            )*
         }
     };
 }
@@ -309,11 +292,11 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
-                    (Timestamp, Interval) => timestamp_interval_add,
-                    (Interval, Timestamp) => interval_timestamp_add,
-                    (Interval, Date) => interval_date_add,
-                    (Date, Interval) => date_interval_add,
-                    (Interval, Interval) => general_add,
+                    {timestamp, interval, timestamp, timestamp_interval_add},
+                    {interval, timestamp, timestamp, interval_timestamp_add},
+                    {interval, date, timestamp, interval_date_add},
+                    {date, interval, timestamp,  date_interval_add},
+                    {interval, interval, interval,  general_add},
                 },
             }
         }
@@ -323,11 +306,11 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
-                    (Timestamp, Timestamp) => timestamp_timestamp_sub,
-                    (Timestamp, Interval) => timestamp_interval_sub,
-                    (Date, Date) => date_date_sub,
-                    (Date, Interval) => date_interval_sub,
-                    (Interval, Interval) => general_sub,
+                    {timestamp, timestamp, interval, timestamp_timestamp_sub},
+                    {timestamp, interval, timestamp, timestamp_interval_sub},
+                    {date, date, int32, date_date_sub},
+                    {date, interval, timestamp,  date_interval_sub},
+                    {interval, interval, interval,  general_sub},
                 },
             }
         }
@@ -337,8 +320,12 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_mul,
                 {
-                    (Interval, Int) => interval_int_mul,
-                    (Int, Interval) => int_interval_mul,
+                    {interval, int16, interval,  interval_int_mul},
+                    {interval, int32, interval,  interval_int_mul},
+                    {interval, int64, interval,  interval_int_mul},
+                    {int16, interval, interval,  int_interval_mul},
+                    {int32, interval, interval,  int_interval_mul},
+                    {int64, interval, interval,  int_interval_mul},
                 },
             }
         }
