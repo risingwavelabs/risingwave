@@ -76,9 +76,14 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
   - Capacity of meta cache
   - Default: 64
 
-- `--shared-buffer-threshold-size-mb`
+- `--shared-buffer-threshold-mb`
   
-  - Size (MB) of shared buffer
+  - Threshold (MB) of shared buffer
+  - Default: 192
+
+- `--shared-buffer-capacity-mb`
+  
+  - Capacity (MB) of shared buffer
   - Default: 256
 
 - `--shared-buffers-sync-parallelism`

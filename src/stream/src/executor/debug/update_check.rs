@@ -41,10 +41,10 @@ impl super::DebugExecutor for UpdateCheckExecutor {
         let message = self.input.next().await?;
 
         if let Message::Chunk(chunk) = &message {
-            for ((op1, values1), (op2, values2)) in once(None)
+            for ((op1, row1), (op2, row2)) in once(None)
                 .chain(chunk.rows().map(Some))
                 .chain(once(None))
-                .map(|r| (r.map(|r| (r.op(), r.values())).unzip()))
+                .map(|r| (r.unzip()))
                 .tuple_windows()
             {
                 if (op1 == None && op2 == Some(Op::UpdateInsert)) // the first row is U+
@@ -53,8 +53,8 @@ impl super::DebugExecutor for UpdateCheckExecutor {
                     panic!(
                         "update check failed on `{}`: expect U+ after  U-:\n first row: {:?}\nsecond row: {:?}",
                         self.input.logical_operator_info(),
-                        values1.map(Itertools::collect_vec),
-                        values2.map(Itertools::collect_vec),
+                        row1,
+                        row2,
                     )
                 }
             }

@@ -12,69 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
-use risingwave_common::util::chunk_coalesce::{
-    DataChunkBuilder, SlicedDataChunk, DEFAULT_CHUNK_BUFFER_SIZE,
-};
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
-use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::executor::{Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-pub(super) struct FilterExecutor {
+pub struct FilterExecutor2 {
     expr: BoxedExpression,
-    child: BoxedExecutor,
-    chunk_builder: DataChunkBuilder,
-    last_input: Option<SlicedDataChunk>,
+    child: BoxedExecutor2,
     identity: String,
-    // FIXME: This is a quick fix as later we would use generator to limit chunk size.
-    child_can_be_nexted: bool,
 }
 
-#[async_trait::async_trait]
-impl Executor for FilterExecutor {
-    async fn open(&mut self) -> Result<()> {
-        self.child.open().await
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        loop {
-            let tmp_last_input = self.last_input.take();
-
-            // We have something left from last poll of child
-            if let Some(existing_data_chunk) = tmp_last_input {
-                let (left_data_chunk, return_data_chunk) =
-                    self.chunk_builder.append_chunk(existing_data_chunk)?;
-                self.last_input = left_data_chunk;
-
-                if let Some(data_chunk) = return_data_chunk {
-                    return Ok(Some(data_chunk));
-                }
-            } else {
-                let child_input = self.fetch_one_chunk().await?;
-                if let Some(data_chunk) = child_input {
-                    self.last_input = Some(SlicedDataChunk::new_checked(data_chunk)?);
-                } else {
-                    // We should return here since nothing come from child.
-                    return if let Some(left) = self.chunk_builder.consume_all()? {
-                        Ok(Some(left))
-                    } else {
-                        Ok(None)
-                    };
-                }
-            }
-        }
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.child.close().await
-    }
-
+impl Executor2 for FilterExecutor2 {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
@@ -82,34 +39,61 @@ impl Executor for FilterExecutor {
     fn identity(&self) -> &str {
         &self.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
 }
 
-impl FilterExecutor {
-    /// Fetch one chunk from child.
-    async fn fetch_one_chunk(&mut self) -> Result<Option<DataChunk>> {
-        if self.child_can_be_nexted {
-            if let Some(data_chunk) = self.child.next().await? {
-                let data_chunk = data_chunk.compact()?;
-                let vis_array = self.expr.eval(&data_chunk)?;
-                return if let Bool(vis) = vis_array.as_ref() {
-                    let vis = vis.try_into()?;
-                    let data_chunk = data_chunk.with_visibility(vis);
-                    Ok(Some(data_chunk))
-                } else {
-                    Err(InternalError("Filter can only receive bool array".to_string()).into())
-                };
+impl FilterExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        let mut data_chunk_builder =
+            DataChunkBuilder::new_with_default_size(self.child.schema().data_types());
+
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?.compact()?;
+            let vis_array = self.expr.eval(&data_chunk)?;
+
+            if let Bool(vis) = vis_array.as_ref() {
+                let mut sliced_data_chunk =
+                    SlicedDataChunk::new_checked(data_chunk.with_visibility(vis.try_into()?))?;
+
+                loop {
+                    let (left_data, output) = data_chunk_builder.append_chunk(sliced_data_chunk)?;
+                    match (left_data, output) {
+                        (Some(left_data), Some(output)) => {
+                            sliced_data_chunk = left_data;
+                            yield output;
+                        }
+                        (None, Some(output)) => {
+                            yield output;
+                            break;
+                        }
+                        (None, None) => {
+                            break;
+                        }
+                        _ => {
+                            return Err(
+                                InternalError("Data chunk builder error".to_string()).into()
+                            );
+                        }
+                    }
+                }
             } else {
-                self.child_can_be_nexted = false;
-                Ok(None)
+                return Err(InternalError("Filter can only receive bool array".to_string()).into());
             }
-        } else {
-            Ok(None)
+        }
+
+        if let Some(chunk) = data_chunk_builder.consume_all()? {
+            yield chunk;
         }
     }
 }
 
-impl BoxedExecutorBuilder for FilterExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for FilterExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let filter_node = try_match_expand!(
@@ -120,22 +104,14 @@ impl BoxedExecutorBuilder for FilterExecutor {
         let expr_node = filter_node.get_search_condition()?;
         let expr = build_from_prost(expr_node)?;
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
+            let child = source.clone_for_plan(child_plan).build2()?;
             debug!("Child schema: {:?}", child.schema());
-            let chunk_builder =
-                DataChunkBuilder::new(child.schema().data_types(), DEFAULT_CHUNK_BUFFER_SIZE);
 
-            return Ok(Box::new(
-                Self {
-                    expr,
-                    child,
-                    chunk_builder,
-                    last_input: None,
-                    identity: source.plan_node().get_identity().clone(),
-                    child_can_be_nexted: true,
-                }
-                .fuse(),
-            ));
+            return Ok(Box::new(Self {
+                expr,
+                child,
+                identity: source.plan_node().get_identity().clone(),
+            }));
         }
         Err(InternalError("Filter must have one children".to_string()).into())
     }
@@ -146,9 +122,11 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
+    use futures::stream::StreamExt;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
@@ -156,8 +134,8 @@ mod tests {
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
-    use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor2::{Executor2, FilterExecutor2};
 
     #[tokio::test]
     async fn test_filter_executor() {
@@ -173,40 +151,27 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
         let expr = make_expression(Type::Equal);
-        let chunk_builder = DataChunkBuilder::new(mock_executor.schema().data_types(), 1);
-        let mut filter_executor = FilterExecutor {
+        let filter_executor = Box::new(FilterExecutor2 {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
-            chunk_builder,
-            last_input: None,
-            identity: "FilterExecutor".to_string(),
-            child_can_be_nexted: true,
-        };
+            identity: "FilterExecutor2".to_string(),
+        });
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
         assert_eq!(fields[1].data_type, DataType::Int32);
-        filter_executor.open().await.unwrap();
-        let res = filter_executor.next().await.unwrap();
-        assert_matches!(res, Some(_));
-        if let Some(res) = res {
+        let mut stream = filter_executor.execute();
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+        if let Ok(res) = res {
             let col1 = res.column_at(0);
             let array = col1.array();
             let col1 = array.as_int32();
-            assert_eq!(col1.len(), 1);
+            assert_eq!(col1.len(), 2);
             assert_eq!(col1.value_at(0), Some(2));
+            assert_eq!(col1.value_at(1), Some(3));
         }
-        let res = filter_executor.next().await.unwrap();
-        assert_matches!(res, Some(_));
-        if let Some(res) = res {
-            let col1 = res.column_at(0);
-            let array = col1.array();
-            let col1 = array.as_int32();
-            assert_eq!(col1.len(), 1);
-            assert_eq!(col1.value_at(0), Some(3));
-        }
-        let res = filter_executor.next().await.unwrap();
+        let res = stream.next().await;
         assert_matches!(res, None);
-        filter_executor.close().await.unwrap();
     }
 
     fn make_expression(kind: Type) -> ExprNode {

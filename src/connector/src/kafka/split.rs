@@ -25,8 +25,6 @@ pub struct KafkaSplit {
     pub(crate) stop_offset: Option<i64>,
 }
 
-pub const KAFKA_SPLIT_TYPE: &str = "kafka";
-
 impl SourceSplit for KafkaSplit {
     fn id(&self) -> String {
         format!("{}", self.partition)
@@ -38,10 +36,6 @@ impl SourceSplit for KafkaSplit {
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
-    }
-
-    fn get_type(&self) -> String {
-        KAFKA_SPLIT_TYPE.to_string()
     }
 }
 

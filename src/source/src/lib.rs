@@ -29,7 +29,6 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -51,11 +50,6 @@ mod common;
 mod table_v2;
 
 extern crate maplit;
-
-#[derive(Clone, Debug)]
-pub enum SourceConfig {
-    Connector(HashMap<String, String>),
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {

@@ -47,8 +47,11 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = 64)]
     meta_cache_capacity_mb: u32,
 
+    #[clap(long, default_value_t = 192)]
+    shared_buffer_threshold_mb: u32,
+
     #[clap(long, default_value_t = 256)]
-    shared_buffer_threshold_size_mb: u32,
+    shared_buffer_capacity_mb: u32,
 
     #[clap(long, default_value_t = 2)]
     share_buffers_sync_parallelism: u32,
@@ -143,7 +146,8 @@ async fn main() {
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
-        shared_buffer_threshold_size: opts.shared_buffer_threshold_size_mb * (1 << 20),
+        shared_buffer_threshold: opts.shared_buffer_threshold_mb * (1 << 20),
+        shared_buffer_capacity: opts.shared_buffer_capacity_mb * (1 << 20),
         bloom_false_positive: opts.bloom_false_positive,
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
