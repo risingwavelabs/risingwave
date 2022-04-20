@@ -58,8 +58,8 @@ impl SourceReader for KafkaSplitReader {
     }
 
     async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         let bootstrap_servers = properties.get_kafka(KAFKA_CONFIG_BROKERS_KEY)?;
 
@@ -101,7 +101,7 @@ impl SourceReader for KafkaSplitReader {
                             k.partition,
                             Offset::Offset(offset),
                         )
-                            .map_err(|e| anyhow!(e.to_string()))?;
+                        .map_err(|e| anyhow!(e.to_string()))?;
                     } else {
                         tpl.add_partition(k.topic.as_str(), k.partition);
                     }

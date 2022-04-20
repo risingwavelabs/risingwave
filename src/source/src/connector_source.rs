@@ -18,17 +18,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
-
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_connector::{state};
-use risingwave_storage::StateStore;
-use tokio::sync::Mutex;
-
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_connector::{ConnectorStateV2, Properties, SourceReaderImpl, SplitImpl};
-
 
 use crate::common::SourceChunkBuilder;
 use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
@@ -39,7 +32,7 @@ use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub config: HashMap<String, String>,
-    pub column_descs: Vec<SourceColumnDesc>,
+    pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
 }
 
@@ -54,7 +47,7 @@ impl ConnectorSource {
         column_ids
             .iter()
             .map(|id| {
-                self.column_descs
+                self.columns
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
@@ -76,7 +69,7 @@ pub struct ConnectorReaderContext {
 #[async_trait]
 impl Source for ConnectorSource {
     type ReaderContext = ConnectorReaderContext;
-    type StreamReader = ConnectorStreamSource;
+    type StreamReader = ConnectorStreamReader;
 
     async fn stream_reader(
         &self,
@@ -98,24 +91,24 @@ impl Source for ConnectorSource {
 
         let columns = self.get_target_columns(column_ids)?;
 
-        Ok(ConnectorStreamSource {
+        Ok(ConnectorStreamReader {
             reader,
             parser: self.parser.clone(),
-            column_descs: columns,
+            columns,
         })
     }
 }
 
-pub struct ConnectorStreamSource {
+pub struct ConnectorStreamReader {
     pub reader: SourceReaderImpl,
     pub parser: Arc<SourceParserImpl>,
-    pub column_descs: Vec<SourceColumnDesc>,
+    pub columns: Vec<SourceColumnDesc>,
 }
 
-impl SourceChunkBuilder for ConnectorStreamSource {}
+impl SourceChunkBuilder for ConnectorStreamReader {}
 
 #[async_trait]
-impl StreamSourceReader for ConnectorStreamSource {
+impl StreamSourceReader for ConnectorStreamReader {
     async fn open(&mut self) -> Result<()> {
         Ok(())
     }
@@ -128,7 +121,7 @@ impl StreamSourceReader for ConnectorStreamSource {
 
                 for msg in batch {
                     if let Some(content) = msg.payload {
-                        events.push(self.parser.parse(content.as_ref(), &self.column_descs)?);
+                        events.push(self.parser.parse(content.as_ref(), &self.columns)?);
                     }
                 }
                 let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
@@ -140,7 +133,7 @@ impl StreamSourceReader for ConnectorStreamSource {
                 }
                 Ok(StreamChunk::new(
                     ops,
-                    Self::build_columns(&self.column_descs, rows.as_ref())?,
+                    Self::build_columns(&self.columns, rows.as_ref())?,
                     None,
                 ))
             }
