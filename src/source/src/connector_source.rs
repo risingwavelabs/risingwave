@@ -31,7 +31,7 @@ use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub config: Properties,
-    pub column_descs: Vec<SourceColumnDesc>,
+    pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
 }
 
@@ -46,7 +46,7 @@ impl ConnectorSource {
         column_ids
             .iter()
             .map(|id| {
-                self.column_descs
+                self.columns
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {

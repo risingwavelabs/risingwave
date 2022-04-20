@@ -38,7 +38,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::executor::{ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
@@ -93,12 +93,12 @@ pub struct SourceExecutor<S: StateStore> {
 pub struct SourceExecutorBuilder {}
 
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Box<dyn ExecutorV1>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
@@ -161,7 +161,7 @@ impl<S: StateStore> SourceExecutor<S> {
     pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
-        keyspace: Keyspace<S>,
+        _keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -172,9 +172,12 @@ impl<S: StateStore> SourceExecutor<S> {
         streaming_metrics: Arc<StreamingMetrics>,
         stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
-        // fixme(chen): sleep to avoid conflict
-        std::thread::sleep(Duration::from_millis(rand::random::<u64>() % 1000));
-
+        // todo(chen): dirty code to generate row_id start position
+        let row_id_start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let row_id_start = row_id_start << 32;
         Ok(Self {
             source_id,
             source_desc,
@@ -183,12 +186,7 @@ impl<S: StateStore> SourceExecutor<S> {
             pk_indices,
             barrier_receiver: Some(barrier_receiver),
             // fixme(chen): may conflict
-            next_row_id: AtomicU64::from(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64,
-            ),
+            next_row_id: AtomicU64::from(row_id_start),
             identity: format!("SourceExecutor {:X}", executor_id),
             op_info,
             reader_stream: None,
@@ -305,7 +303,7 @@ async fn filter_prev_states<S: StateStore>(
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for SourceExecutor<S> {
+impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
     async fn next(&mut self) -> Result<Message> {
         match self.reader_stream.as_mut() {
             None => {
@@ -318,6 +316,7 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
                     .unwrap();
 
                 // todo: use epoch from msg to restore state from state store
+                assert!(matches!(msg, Message::Barrier(_)));
                 let epoch_prev = match &msg {
                     Message::Barrier(barrier) => barrier.epoch.prev,
                     _ => {
@@ -349,7 +348,6 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
                     self.source_id,
                     states
                 );
-
                 let reader = self
                     .source_desc
                     .source

@@ -37,11 +37,9 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, Message, PkIndices, SourceExecutor, StreamingMetrics,
+    Barrier, ExecutorV1, Message, PkIndices, SourceExecutor, StreamingMetrics,
 };
-use risingwave_stream::executor_v2::{
-    Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2,
-};
+use risingwave_stream::executor_v2::{Executor, MaterializeExecutor};
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
@@ -166,14 +164,17 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
-    let mut materialize = Box::new(MaterializeExecutorV2::new_from_v1(
-        Box::new(stream_source),
+    let mut materialize = MaterializeExecutor::new_from_v1(
+        (Box::new(stream_source) as Box<dyn ExecutorV1>)
+            .v2()
+            .boxed(),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
         "MaterializeExecutor".to_string(),
-    ))
+    )
+    .boxed()
     .v1();
 
     // 1.

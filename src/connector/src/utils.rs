@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::base::UPSTREAM_SOURCE_KEY;
 
+use crate::base::UPSTREAM_SOURCE_KEY;
 #[derive(Clone, Debug)]
 pub struct Properties(pub HashMap<String, String>);
 

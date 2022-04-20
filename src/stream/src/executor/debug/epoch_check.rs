@@ -17,19 +17,19 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use risingwave_common::error::Result;
 
-use crate::executor::{Executor, Message};
+use crate::executor::{ExecutorV1, Message};
 
 #[derive(Debug)]
 pub struct EpochCheckExecutor {
     /// The input of the current executor.
-    input: Box<dyn Executor>,
+    input: Box<dyn ExecutorV1>,
 
     /// Epoch number recorded from last barrier message.
     last_epoch: Option<u64>,
 }
 
 impl EpochCheckExecutor {
-    pub fn new(input: Box<dyn Executor>) -> Self {
+    pub fn new(input: Box<dyn ExecutorV1>) -> Self {
         Self {
             input,
             last_epoch: None,
@@ -64,11 +64,11 @@ impl super::DebugExecutor for EpochCheckExecutor {
         Ok(message)
     }
 
-    fn input(&self) -> &dyn Executor {
+    fn input(&self) -> &dyn ExecutorV1 {
         self.input.as_ref()
     }
 
-    fn input_mut(&mut self) -> &mut dyn Executor {
+    fn input_mut(&mut self) -> &mut dyn ExecutorV1 {
         self.input.as_mut()
     }
 }
