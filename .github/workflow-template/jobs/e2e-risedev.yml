@@ -126,7 +126,7 @@ jobs:
         run: ~/cargo-make/makers ci-kill
 
       - name: e2e test batch 3-node
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
