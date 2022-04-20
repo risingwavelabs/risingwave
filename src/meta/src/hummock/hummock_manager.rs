@@ -21,9 +21,9 @@ use std::time::Duration;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
-    INVALID_EPOCH,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
