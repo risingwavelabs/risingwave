@@ -80,8 +80,8 @@ impl Rule for FilterJoinRule {
         );
         assert!(on.is_none(), "On-clause should not be pushed to on-clause.");
 
-        let left_predicate = left_from_filter.and_then(|c1| left_from_on.map(|c2| c1.and(c2)));
-        let right_predicate = right_from_filter.and_then(|c1| right_from_on.map(|c2| c1.and(c2)));
+        let left_predicate = FilterJoinRule::and(left_from_filter, left_from_on);
+        let right_predicate = FilterJoinRule::and(right_from_filter, right_from_on);
 
         let new_left: PlanRef = if let Some(predicate) = left_predicate {
             LogicalFilter::create(join.left(), predicate)
@@ -102,6 +102,15 @@ impl Rule for FilterJoinRule {
 impl FilterJoinRule {
     pub fn create() -> BoxedRule {
         Box::new(FilterJoinRule {})
+    }
+
+    fn and(left: Option<Condition>, right: Option<Condition>) -> Option<Condition> {
+        match (left, right) {
+            (Some(left), Some(right)) => Some(left.and(right)),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        }
     }
 
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.

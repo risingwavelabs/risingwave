@@ -131,8 +131,17 @@ impl PlanRoot {
             let rules = vec![
                 FilterJoinRule::create(),
                 FilterProjectRule::create(),
+                FilterMerge::create(),
                 FilterAggRule::create(),
             ];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        // The two steps above may produce LogicalFilters with always true condition, so we remove
+        // it here.
+        plan = {
+            let rules = vec![FilterRemove::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };

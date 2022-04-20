@@ -14,8 +14,8 @@
                   LogicalScan { table: t2, columns: [_row_id#0, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1], expr_alias: [x, y] }
-      LogicalFilter { predicate: ($0 > (1.5:Decimal * $2)) }
-        LogicalProject { exprs: [$1, $2, $3], expr_alias: [ ,  ,  ] }
+      LogicalFilter { predicate: ($0 > $2) }
+        LogicalProject { exprs: [$1, $2, (1.5:Decimal * $3)], expr_alias: [ ,  ,  ] }
           LogicalAgg { group_keys: [0, 1, 2], agg_calls: [min($3)] }
             LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
@@ -96,14 +96,13 @@
                   LogicalScan { table: t2, columns: [_row_id#0, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1], expr_alias: [x, y] }
-      LogicalFilter { predicate: ($0 > (1.5:Decimal * $2)) }
-        LogicalProject { exprs: [$1, $2, $3], expr_alias: [ ,  ,  ] }
+      LogicalFilter { predicate: ($0 > $2) }
+        LogicalProject { exprs: [$1, $2, (1.5:Decimal * $3)], expr_alias: [ ,  ,  ] }
           LogicalAgg { group_keys: [0, 1, 2], agg_calls: [min($3)] }
             LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
-                LogicalFilter { predicate: always }
-                  LogicalScan { table: t2, columns: [x, y] }
+                LogicalScan { table: t2, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -127,8 +126,7 @@
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
                 LogicalProject { exprs: [1:Int32, $0], expr_alias: [1,  ] }
-                  LogicalFilter { predicate: always }
-                    LogicalScan { table: t2, columns: [y] }
+                  LogicalScan { table: t2, columns: [y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -145,12 +143,11 @@
                   LogicalScan { table: t2, columns: [_row_id#0, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1], expr_alias: [x, y] }
-      LogicalFilter { predicate: ($0 > ($2 + $3)) }
-        LogicalProject { exprs: [$1, $2, $3, $4], expr_alias: [ ,  ,  ,  ] }
+      LogicalFilter { predicate: ($0 > $2) }
+        LogicalProject { exprs: [$1, $2, ($3 + $4)], expr_alias: [ ,  ,  ] }
           LogicalAgg { group_keys: [0, 1, 2], agg_calls: [count($3), count($3)] }
             LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
                 LogicalProject { exprs: [1:Int32, $0], expr_alias: [1,  ] }
-                  LogicalFilter { predicate: always }
-                    LogicalScan { table: t2, columns: [y] }
+                  LogicalScan { table: t2, columns: [y] }

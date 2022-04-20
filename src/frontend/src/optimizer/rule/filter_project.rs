@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::{Either, Itertools};
+
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-use crate::utils::Substitute;
+use crate::expr::{ExprImpl, ExprVisitor, InputRef};
+use crate::utils::{Condition, Substitute};
 
-/// Pushes a [`LogicalFilter`] past a [`LogicalProject`].
+/// Push what can be pused from [`LogicalFilter`] through [`LogicalProject`].
 pub struct FilterProjectRule {}
 impl Rule for FilterProjectRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -24,20 +27,59 @@ impl Rule for FilterProjectRule {
         let input = filter.input();
         let project = input.as_logical_project()?;
 
+        let mut visitor = Visitor {
+            can_be_pushed: true,
+            proj_exprs: project.exprs().clone(),
+        };
+        let (pushed_exprs, not_pushed_exprs) = filter
+            .predicate()
+            .clone()
+            .into_iter()
+            .partition_map(|expr| {
+                visitor.visit_expr(&expr);
+                if visitor.can_be_pushed {
+                    Either::Left(expr)
+                } else {
+                    visitor.can_be_pushed = true;
+                    Either::Right(expr)
+                }
+            });
+
+        let pushed_predicates = Condition {
+            conjunctions: pushed_exprs,
+        };
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
-            mapping: project.exprs().clone(),
+            mapping: visitor.proj_exprs,
         };
-        let predicate = filter.predicate().clone().rewrite_expr(&mut subst);
+        let pushed_predicates = pushed_predicates.rewrite_expr(&mut subst);
+        let input_filter = LogicalFilter::create(project.input(), pushed_predicates);
 
-        let input = project.input();
-        let pushed_filter = LogicalFilter::create(input, predicate);
-        Some(project.clone_with_input(pushed_filter).into())
+        let project = project.clone_with_input(input_filter);
+
+        let not_pushed_predicates = Condition {
+            conjunctions: not_pushed_exprs,
+        };
+        let filter = LogicalFilter::create(project.into(), not_pushed_predicates);
+
+        Some(filter)
     }
 }
 
 impl FilterProjectRule {
     pub fn create() -> BoxedRule {
         Box::new(FilterProjectRule {})
+    }
+}
+/// `Visitor` is used to check whether an expression can be pushed.
+struct Visitor {
+    pub can_be_pushed: bool,
+    pub proj_exprs: Vec<ExprImpl>,
+}
+impl ExprVisitor for Visitor {
+    fn visit_input_ref(&mut self, input_ref: &InputRef) {
+        if !matches!(self.proj_exprs[input_ref.index()], ExprImpl::InputRef(_)) {
+            self.can_be_pushed = false;
+        }
     }
 }

@@ -41,3 +41,7 @@ mod unnest_agg_for_loj;
 pub use unnest_agg_for_loj::*;
 mod pull_up_correlated_predicate;
 pub use pull_up_correlated_predicate::*;
+mod filter_remove;
+pub use filter_remove::*;
+mod filter_merge;
+pub use filter_merge::*;
