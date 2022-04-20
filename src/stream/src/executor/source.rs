@@ -161,7 +161,7 @@ impl<S: StateStore> SourceExecutor<S> {
     pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
-        _keyspace: Keyspace<S>,
+        keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
