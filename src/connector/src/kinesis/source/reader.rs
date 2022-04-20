@@ -24,7 +24,7 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use aws_smithy_types::DateTime;
 use http::Uri;
 
-use crate::base::{SourceMessage, SourceReader};
+use crate::base::{SourceMessage, SplitReader};
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
@@ -41,7 +41,7 @@ pub struct KinesisSplitReader {
 }
 
 #[async_trait]
-impl SourceReader for KinesisSplitReader {
+impl SplitReader for KinesisSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         if self.assigned_split.is_none() {
             return Err(anyhow::Error::msg(

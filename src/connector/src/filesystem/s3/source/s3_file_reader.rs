@@ -32,7 +32,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::base::{SourceMessage, SourceReader, SourceSplit};
+use crate::base::{SourceMessage, SourceSplit, SplitReader};
 use crate::filesystem::file_common::{EntryStat, StatusWatch};
 use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::filesystem::s3::s3_dir::{
@@ -316,7 +316,7 @@ impl S3FileReader {
 }
 
 #[async_trait]
-impl SourceReader for S3FileReader {
+impl SplitReader for S3FileReader {
     async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
         let mut read_chunk = self
             .s3_receive_stream
@@ -394,7 +394,7 @@ mod test {
     use bytes::Bytes;
     use maplit::hashmap;
 
-    use crate::base::SourceReader;
+    use crate::base::SplitReader;
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
     use crate::{ConnectorState, ConnectorStateV2, Properties};
 
