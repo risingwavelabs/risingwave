@@ -16,7 +16,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::{StreamClients, StreamClientsRef};
-#[cfg(any(test, feature = "test"))]
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
 };
