@@ -15,9 +15,12 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::IntervalUnit;
+use risingwave_common::catalog::Field;
+use risingwave_common::types::{DataType, IntervalUnit};
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream, StreamHopWindow};
+use super::{
+    ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch, ToStream,
+};
 use crate::expr::InputRef;
 use crate::utils::ColIndexMapping;
 
@@ -39,7 +42,15 @@ impl LogicalHopWindow {
         window_size: IntervalUnit,
     ) -> Self {
         let ctx = input.ctx();
-        let schema = input.schema().clone();
+        let schema = input
+            .schema()
+            .into_fields()
+            .into_iter()
+            .chain([
+                Field::with_name(DataType::Timestamp, "window_start"),
+                Field::with_name(DataType::Timestamp, "window_end"),
+            ])
+            .collect();
         let pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalHopWindow {
