@@ -72,12 +72,7 @@ pub struct SourceExecutor {
     /// Logical Operator Info
     op_info: String,
 
-    // fixme
     barrier_receiver: Option<UnboundedReceiver<Message>>,
-
-    /// The reader object. When `next` is called for the first time on `SourceExecutor`, the
-    /// `reader` will be turned into `reader_stream`, and this field will become `None`.
-    //    reader: Option<SourceReader>,
 
     /// Stream object for reader. When `next` is called for the first time on `SourceExecutor`, the
     /// `reader` will be turned into a `futures::Stream`.
@@ -158,22 +153,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         )?))
     }
 }
-
-// async fn _build_stream_reader<S: StateStore>(
-//     source: Arc<SourceImpl>,
-//     _operator_id: u64,
-//     column_ids: Vec<ColumnId>,
-//     _keyspace: Keyspace<S>,
-// ) -> Result<Box<dyn StreamSourceReader>> {
-//     let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-//         SourceImpl::TableV2(s) => {
-//             Box::new(s.stream_reader(TableV2ReaderContext, column_ids).await?)
-//         }
-//         SourceImpl::Connector(_s) => unimplemented!(),
-//     };
-//
-//     Ok(stream_reader)
-// }
 
 impl SourceExecutor {
     #[allow(clippy::too_many_arguments)]
