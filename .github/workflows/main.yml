@@ -283,7 +283,7 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node
-        timeout-minutes: 4
+        timeout-minutes: 10
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
@@ -399,7 +399,7 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node
-        timeout-minutes: 4
+        timeout-minutes: 10
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
