@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use either::Either;
@@ -36,6 +36,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use risingwave_connector::SourceSplit;
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef};
@@ -442,12 +443,43 @@ mod tests {
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_connector::kafka::split::KafkaSplit;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::executor::{Barrier, Epoch, Mutation, SourceExecutor};
+
+    #[tokio::test]
+    async fn test_filter_prev_states() -> anyhow::Result<()> {
+        let state_store =
+            SourceStateHandler::new(Keyspace::executor_root(MemoryStateStore::new(), 0x2333));
+        let source_split =
+            SplitImpl::Kafka(KafkaSplit::new(0, Some(1), None, "demo_topic".to_string()));
+        let stream_source_splits = vec![source_split.clone()];
+        let filtered_state =
+            filter_prev_states(&state_store, &stream_source_splits, 1, "kafka".to_string()).await?;
+        assert_eq!(filtered_state.len(), 1);
+        assert_eq!(filtered_state[0].to_string()?, source_split.to_string()?);
+
+        let state = KafkaSplit::new(0, Some(1), None, "demo_topic".to_string());
+        state_store.take_snapshot(vec![state.clone()], 1).await?;
+
+        let prev_state =
+            SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "demo_topic".to_string()));
+        let prev_state_vec = vec![prev_state];
+
+        let filtered_state =
+            filter_prev_states(&state_store, &prev_state_vec, 1, "kafka".to_string()).await?;
+
+        assert_eq!(
+            filtered_state[0].to_string().unwrap(),
+            state.to_string().unwrap()
+        );
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
