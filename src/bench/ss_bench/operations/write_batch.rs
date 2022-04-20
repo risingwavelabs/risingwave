@@ -110,7 +110,7 @@ impl Operations {
                         .pin_version(last_pinned.id())
                         .await
                         .unwrap();
-                    local_version_manager.try_set_version(version);
+                    local_version_manager.try_update_pinned_version(version);
                 }
             }
         }

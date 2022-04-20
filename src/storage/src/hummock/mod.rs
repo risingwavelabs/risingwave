@@ -71,9 +71,6 @@ pub struct HummockStorage {
 
     sstable_store: SstableStoreRef,
 
-    /// Manager for immutable shared buffers
-    shared_buffer_manager: Arc<SharedBufferManager>,
-
     /// Statistics
     stats: Arc<StateStoreMetrics>,
 }
@@ -106,18 +103,12 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        let shared_buffer_manager = Arc::new(SharedBufferManager::new(
+        LocalVersionManager::start_workers(
             options.clone(),
-            local_version_manager.clone(),
             sstable_store.clone(),
+            local_version_manager.clone(),
             stats.clone(),
             hummock_meta_client.clone(),
-        ));
-
-        LocalVersionManager::start_workers(
-            local_version_manager.clone(),
-            hummock_meta_client.clone(),
-            shared_buffer_manager.clone(),
         );
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
@@ -127,7 +118,6 @@ impl HummockStorage {
             local_version_manager,
             hummock_meta_client,
             sstable_store,
-            shared_buffer_manager,
             stats,
         };
         Ok(instance)
@@ -189,7 +179,7 @@ impl HummockStorage {
     }
 
     pub fn shared_buffer_manager(&self) -> &SharedBufferManager {
-        &self.shared_buffer_manager
+        self.local_version_manager.shared_buffer_manager()
     }
 }
 

@@ -122,7 +122,7 @@ impl StateStoreImpl {
                 let inner = HummockStorage::new(
                     config.clone(),
                     sstable_store.clone(),
-                    Arc::new(LocalVersionManager::new()),
+                    Arc::new(LocalVersionManager::new(config.clone())),
                     hummock_meta_client,
                     state_store_stats.clone(),
                 )

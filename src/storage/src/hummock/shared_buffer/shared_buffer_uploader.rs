@@ -177,42 +177,27 @@ impl SharedBufferUploader {
         )
         .await?;
 
+        let uploaded_sst_info: Vec<SstableInfo> = tables
+            .iter()
+            .map(|sst| SstableInfo {
+                id: sst.id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: sst.meta.smallest_key.clone(),
+                    right: sst.meta.largest_key.clone(),
+                    inf: false,
+                }),
+            })
+            .collect();
+
         // Add all tables at once.
-        let version = self
-            .hummock_meta_client
-            .add_tables(
-                epoch,
-                tables
-                    .iter()
-                    .map(|sst| SstableInfo {
-                        id: sst.id,
-                        key_range: Some(risingwave_pb::hummock::KeyRange {
-                            left: sst.meta.smallest_key.clone(),
-                            right: sst.meta.largest_key.clone(),
-                            inf: false,
-                        }),
-                    })
-                    .collect(),
-            )
+        self.hummock_meta_client
+            .add_tables(epoch, uploaded_sst_info.clone())
             .await
             .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
-        self.local_version_manager.try_set_version(version);
-
-        // TODO: Uncomment the following lines after flushed sstable can be accessed.
-        // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
-        // Release shared buffer.
-        // let mut removed_size = 0;
-        // let mut guard = self.core.write();
-        // let epoch_buffer = guard.buffer.get_mut(&epoch).unwrap();
-        // for batch in batches {
-        //     if let Some(removed_batch) = epoch_buffer.remove(batch.end_user_key()) {
-        //         removed_size += removed_batch.size as usize;
-        //     }
-        // }
-        // guard.size -= removed_size;
-        // drop(guard);
+        self.local_version_manager
+            .update_uncommitted_ssts(epoch, uploaded_sst_info, batches);
 
         self.size -= flush_size;
 

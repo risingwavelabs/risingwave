@@ -19,7 +19,7 @@ use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user
 
 use super::{ForwardHummockIterator, MergeIterator};
 use crate::hummock::iterator::ReverseUserIterator;
-use crate::hummock::local_version_manager::ScopedLocalVersion;
+use crate::hummock::local_version_manager::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -97,7 +97,7 @@ pub struct UserIterator {
     read_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<ScopedLocalVersion>>,
+    _version: Option<Arc<PinnedVersion>>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -116,7 +116,7 @@ impl UserIterator {
         iterator: MergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
-        version: Option<Arc<ScopedLocalVersion>>,
+        version: Option<Arc<PinnedVersion>>,
     ) -> Self {
         Self {
             iterator,

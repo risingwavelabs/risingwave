@@ -53,7 +53,7 @@ mod tests {
             block_cache_capacity,
             meta_cache_capacity,
         ));
-        let local_version_manager = Arc::new(LocalVersionManager::new());
+        let local_version_manager = Arc::new(LocalVersionManager::new(options.clone()));
         let storage = HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
@@ -158,7 +158,9 @@ mod tests {
         );
 
         // 5. storage get back the correct kv after compaction
-        storage.local_version_manager().try_set_version(version);
+        storage
+            .local_version_manager()
+            .try_update_pinned_version(version);
         let get_val = storage.get(&key, epoch).await.unwrap().unwrap();
         assert_eq!(get_val, val);
 

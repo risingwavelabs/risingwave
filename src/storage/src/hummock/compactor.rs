@@ -137,7 +137,7 @@ impl Compactor {
             let iter = {
                 let iters = buffers
                     .iter()
-                    .map(|m| Box::new(m.iter()) as BoxedForwardHummockIterator);
+                    .map(|m| Box::new(m.clone().forward_into_iter()) as BoxedForwardHummockIterator);
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
