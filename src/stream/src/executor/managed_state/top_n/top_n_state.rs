@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 
-use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -273,24 +272,16 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         number_rows: Option<usize>,
         epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        // We remark that since we uses a sentinel column by encoding a special none cell.
-        // `top_n_count * self.data_types.len()` over-calculates the number of kv-pairs that
-        // we need to read from storage. But it is fine.
-        let pk_row_bytes = self
-            .keyspace
-            .scan_strip_prefix(
-                number_rows.map(|top_n_count| top_n_count * (self.data_types.len() + 1)),
-                epoch,
-            )
-            .await?
-            .into_iter()
-            .map(|(k, v)| (k, v))
-            .collect_vec();
-        deserialize_bytes_to_pk_and_row::<TOP_N_TYPE>(
-            pk_row_bytes,
+        let iter = self.keyspace.iter_strip_prefix(epoch).await?;
+        let pk_and_rows = deserialize_bytes_to_pk_and_row::<TOP_N_TYPE, _>(
+            iter,
             &mut self.ordered_row_deserializer,
             &mut self.cell_based_row_deserializer,
+            number_rows,
         )
+        .await;
+        self.cell_based_row_deserializer.reset();
+        pk_and_rows
     }
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after

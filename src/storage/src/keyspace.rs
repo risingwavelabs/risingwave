@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
-use crate::StateStore;
+use crate::{StateStore, StateStoreIter};
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
 #[derive(Clone)]
@@ -166,8 +168,42 @@ impl<S: StateStore> Keyspace<S> {
         self.store.iter(range, epoch).await
     }
 
+    pub async fn iter_strip_prefix(
+        &'_ self,
+        epoch: u64,
+    ) -> StorageResult<impl StateStoreIter<Item = (Bytes, Bytes)> + '_> {
+        let iter = self.iter(epoch).await?;
+        let strip_prefix_iterator = StripPrefixIterator {
+            iter,
+            prefix_len: self.prefix.len(),
+        };
+        Ok(strip_prefix_iterator)
+    }
+
     /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
+    }
+}
+
+pub struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
+    iter: I,
+    prefix_len: usize,
+}
+
+impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for StripPrefixIterator<I> {
+    type Item = (Bytes, Bytes);
+
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            Ok(self
+                .iter
+                .next()
+                .await?
+                .map(|(key, value)| (key.slice(self.prefix_len..), value)))
+        }
     }
 }
