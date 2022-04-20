@@ -47,7 +47,7 @@ services:
     tty: true
 
   mysql:
-    image: debezium/example-mysql:1.8.0.Final
+    image: debezium/example-mysql:latest
     hostname: mysql
     container_name: mysql
     ports:
@@ -58,7 +58,7 @@ services:
      - MYSQL_PASSWORD=mysqlpw
 
   debezium:
-    image: debezium/connect:1.8.0.Final
+    image: debezium/connect:latest
     hostname: debezium
     container_name: debezium
     ports:
