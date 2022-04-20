@@ -231,6 +231,21 @@ async fn test_table_v2_materialize() -> Result<()> {
     scan.open().await?;
     assert!(scan.next().await?.is_none());
 
+    // Send a barrier to start materialized view
+    let curr_epoch = 1919;
+    barrier_tx
+        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch)))
+        .unwrap();
+
+    assert!(matches!(
+        materialize.next().await?,
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: None,
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
+
     // Poll `Materialize`, should output the same insertion stream chunk
     let message = materialize.next().await?;
     match message {

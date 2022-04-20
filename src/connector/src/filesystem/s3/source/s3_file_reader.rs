@@ -39,7 +39,7 @@ use crate::filesystem::s3::s3_dir::{
     new_s3_client, new_share_config, AwsCredential, AwsCustomConfig, S3SourceBasicConfig,
     S3SourceConfig, SqsReceiveMsgConfig,
 };
-use crate::{ConnectorState, Properties};
+use crate::{ConnectorState, ConnectorStateV2, Properties};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -350,7 +350,7 @@ impl SplitReader for S3FileReader {
     /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's access_key
     /// and secret. For now, only static credential is supported.
     /// 2. The identifier of the State is the Path of S3 - S3://bucket_name/object_key
-    async fn new(props: Properties, state: Option<crate::ConnectorState>) -> Result<Self>
+    async fn new(props: Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
@@ -373,7 +373,7 @@ impl SplitReader for S3FileReader {
                 sqs_config: SqsReceiveMsgConfig::default(),
             };
             let mut s3_file_reader = S3FileReader::build_from_config(s3_source_config);
-            if let Some(s3_state) = state {
+            if let ConnectorStateV2::State(s3_state) = state {
                 if let Err(err) = s3_file_reader.add_s3_split(s3_state) {
                     Err(err)
                 } else {
@@ -396,7 +396,7 @@ mod test {
 
     use crate::base::SplitReader;
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
-    use crate::{ConnectorState, Properties};
+    use crate::{ConnectorState, ConnectorStateV2, Properties};
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
@@ -429,8 +429,10 @@ mod test {
     }
 
     async fn new_s3_file_reader(file_name: String) -> S3FileReader {
-        let s3_file_reader =
-            S3FileReader::new(test_config_map(), Some(new_test_connect_state(file_name)));
+        let s3_file_reader = S3FileReader::new(
+            test_config_map(),
+            ConnectorStateV2::State(new_test_connect_state(file_name)),
+        );
         s3_file_reader.await.unwrap()
     }
 

@@ -21,7 +21,7 @@ use pulsar::{Consumer, Pulsar, TokioExecutor};
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::{PulsarOffset, PulsarSplit};
-use crate::Properties;
+use crate::{ConnectorStateV2, Properties};
 
 pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -74,7 +74,7 @@ impl SplitReader for PulsarSplitReader {
         Ok(Some(ret))
     }
 
-    async fn new(_props: Properties, _state: Option<crate::ConnectorState>) -> Result<Self>
+    async fn new(_props: Properties, _state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
