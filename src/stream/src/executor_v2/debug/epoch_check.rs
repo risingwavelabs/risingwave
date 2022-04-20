@@ -14,9 +14,7 @@
 
 use std::sync::Arc;
 
-use futures::pin_mut;
 use futures_async_stream::try_stream;
-use tokio_stream::StreamExt;
 
 use crate::executor::Message;
 use crate::executor_v2::error::TracedStreamExecutorError;
@@ -26,18 +24,8 @@ use crate::executor_v2::{ExecutorInfo, MessageStream};
 /// the epoch in the barriers are monotonically increasing.
 #[try_stream(ok = Message, error = TracedStreamExecutorError)]
 pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
-    pin_mut!(input);
-
-    let first_msg = input.next().await.unwrap()?;
-    let barrier = first_msg.as_barrier().unwrap_or_else(|| {
-        panic!(
-            "epoch check failed on {}: the first message must be a barrier",
-            info.identity
-        )
-    });
-
     // Epoch number recorded from last barrier message.
-    let mut last_epoch = barrier.epoch.curr;
+    let mut last_epoch = None;
 
     #[for_await]
     for message in input {
@@ -45,17 +33,25 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 
         if let Message::Barrier(b) = &message {
             let new_epoch = b.epoch.curr;
+            let stale = last_epoch
+                .map(|last_epoch| last_epoch > new_epoch)
+                .unwrap_or(false);
 
-            if last_epoch > new_epoch {
+            if stale {
                 panic!(
-                    "epoch check failed on {}: last epoch is {}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
+                    "epoch check failed on {}: last epoch is {:?}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
                     info.identity,
                     last_epoch,
                     new_epoch,
                     b
                 );
             }
-            last_epoch = new_epoch;
+            last_epoch = Some(new_epoch);
+        } else if last_epoch.is_none() && !info.identity.contains("BatchQuery") {
+            panic!(
+                "epoch check failed on {}: the first message must be a barrier",
+                info.identity
+            )
         }
 
         yield message;
@@ -84,6 +80,7 @@ mod tests {
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100);
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 114);
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 114);
@@ -103,6 +100,7 @@ mod tests {
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100);
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
@@ -121,5 +119,14 @@ mod tests {
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
+    }
+
+    #[tokio::test]
+    async fn test_empty() {
+        let source = MockSource::new(Default::default(), vec![]).stop_on_finish(false);
+        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+
+        assert!(checked.next().await.transpose().unwrap().is_none());
     }
 }
