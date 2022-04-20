@@ -3305,6 +3305,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_cmd_all"
+version = "0.1.5"
+dependencies = [
+ "clap 3.1.9",
+ "log 0.4.16",
+ "risingwave_compute",
+ "risingwave_ctl",
+ "risingwave_frontend",
+ "risingwave_logging",
+ "risingwave_meta",
+ "tikv-jemallocator",
+ "tokio",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_common"
 version = "0.1.5"
 dependencies = [
