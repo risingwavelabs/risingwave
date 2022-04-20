@@ -19,6 +19,7 @@ use bytes::Bytes;
 use log::error;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
+#[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
 use crate::SourceSplit;

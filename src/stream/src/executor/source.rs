@@ -30,13 +30,14 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
+#[allow(unused_imports)]
+use risingwave_connector::SourceSplit;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use risingwave_connector::SourceSplit;
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef};
