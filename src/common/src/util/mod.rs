@@ -30,6 +30,7 @@ pub mod prost;
 pub mod sort_util;
 #[macro_use]
 pub mod try_match;
+pub mod epoch;
 pub mod value_encoding;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
