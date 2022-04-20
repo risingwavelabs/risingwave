@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -21,17 +20,17 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{ConnectorStateV2, Properties, SourceReaderImpl, SplitImpl};
+use risingwave_connector::{ConnectorStateV2, Properties, SplitImpl, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
 use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
-/// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReaderImpl`]
+/// processing. [`ConnectorSource`] introduces schema at this level while [`SplitReaderImpl`]
 /// simply loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
-    pub config: HashMap<String, String>,
+    pub config: Properties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
 }
@@ -82,8 +81,8 @@ impl Source for ConnectorSource {
             context.splits
         );
 
-        let reader = SourceReaderImpl::create(
-            Properties::new(self.config.clone()),
+        let reader = SplitReaderImpl::create(
+            Properties::new(self.config.0.clone()),
             ConnectorStateV2::Splits(context.splits),
         )
         .await
@@ -100,7 +99,7 @@ impl Source for ConnectorSource {
 }
 
 pub struct ConnectorStreamReader {
-    pub reader: SourceReaderImpl,
+    pub reader: SplitReaderImpl,
     pub parser: Arc<SourceParserImpl>,
     pub columns: Vec<SourceColumnDesc>,
 }

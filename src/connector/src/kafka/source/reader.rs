@@ -25,7 +25,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
 
-use crate::base::{SourceMessage, SourceReader};
+use crate::base::{SourceMessage, SplitReader};
 use crate::kafka::split::KafkaSplit;
 use crate::kafka::KAFKA_CONFIG_BROKERS_KEY;
 use crate::{ConnectorStateV2, Properties, SplitImpl};
@@ -38,7 +38,7 @@ pub struct KafkaSplitReader {
 }
 
 #[async_trait]
-impl SourceReader for KafkaSplitReader {
+impl SplitReader for KafkaSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         let mut stream = self
             .consumer
