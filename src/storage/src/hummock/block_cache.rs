@@ -127,17 +127,21 @@ impl BlockCache {
                 return Ok(BlockHolder::from_cached_block(entry));
             }
             request_que.insert(key, vec![]);
-            drop(request_que);
-            let ret = f.await?;
-            let handle = self.inner.insert(key, h, ret.len(), ret).unwrap();
-            let mut request_que =
-                self.wait_request_queue[h as usize % (self.wait_request_queue.len())].lock();
-            let que = request_que.remove(&key).unwrap();
-            for sender in que {
-                let _ = sender.send(handle.clone());
-            }
-            Ok(BlockHolder::from_cached_block(handle))
         }
+
+        let ret = f.await;
+        let mut request_que =
+            self.wait_request_queue[h as usize % (self.wait_request_queue.len())].lock();
+        let que = request_que.remove(&key).unwrap();
+
+        // If this request failed, other request on the same block will get result of Cancel.
+        let block = ret?;
+        let handle = self.inner.insert(key, h, block.len(), block).unwrap();
+        drop(request_que);
+        for sender in que {
+            let _ = sender.send(handle.clone());
+        }
+        Ok(BlockHolder::from_cached_block(handle))
     }
 
     fn hash(sst_id: u64, block_idx: u64) -> u64 {

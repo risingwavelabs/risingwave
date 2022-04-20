@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
+use futures::channel::oneshot::{channel, Sender};
+use spin::Mutex;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
@@ -38,6 +41,7 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<u64, Box<Sstable>>>,
+    wait_request_queue: Mutex<HashMap<u64, Vec<Sender<TableHolder>>>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
@@ -62,6 +66,7 @@ impl SstableStore {
             block_cache: BlockCache::new(block_cache_capacity),
             meta_cache,
             stats,
+            wait_request_queue: Mutex::new(HashMap::new()),
         }
     }
 
@@ -159,18 +164,35 @@ impl SstableStore {
         if let Some(table) = self.meta_cache.lookup(sst_id, &sst_id) {
             return Ok(table);
         }
+        {
+            let mut request_que = self.wait_request_queue.lock();
+            if let Some(que) = request_que.get_mut(&sst_id) {
+                let (tx, rc) = channel();
+                que.push(tx);
+                drop(request_que);
+                return rc.await.map_err(HummockError::other);
+            }
+            request_que.insert(sst_id, vec![]);
+        }
+
         let path = self.get_sst_meta_path(sst_id);
-        let buf = self
+        let ret = self
             .store
             .read(&path, None)
             .await
-            .map_err(HummockError::object_io_error)?;
+            .map_err(HummockError::object_io_error);
+        let mut request_que = self.wait_request_queue.lock();
+        let que = request_que.remove(&sst_id).unwrap();
+        let buf = ret?;
         let meta = SstableMeta::decode(&mut &buf[..])?;
         let sst = Box::new(Sstable { id: sst_id, meta });
         let handle = self
             .meta_cache
             .insert(sst_id, sst_id, sst.encoded_size(), sst)
             .unwrap();
+        for sender in que {
+            let _ = sender.send(handle.clone());
+        }
         Ok(handle)
     }
 

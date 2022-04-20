@@ -153,9 +153,9 @@ mod tests {
         // assert that output table reaches the target size
         let target_table_size = storage.options().sstable_size;
         assert!(
-            table.meta.estimated_size > target_table_size,
+            table.value().meta.estimated_size > target_table_size,
             "table.meta.estimated_size {} <= target_table_size {}",
-            table.meta.estimated_size,
+            table.value().meta.estimated_size,
             target_table_size
         );
 

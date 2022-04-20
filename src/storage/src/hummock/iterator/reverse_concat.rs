@@ -22,8 +22,6 @@ pub type ReverseConcatIterator = ConcatIteratorInner<ReverseSSTableIterator>;
 /// Mirrors the tests used for `SSTableIterator`
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
@@ -58,9 +56,12 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-
         let mut iter = ReverseConcatIterator::new(
-            vec![Arc::new(table2), Arc::new(table1), Arc::new(table0)],
+            vec![
+                table2.get_sstable_info(),
+                table1.get_sstable_info(),
+                table0.get_sstable_info(),
+            ],
             sstable_store,
         );
         let mut i = TEST_KEYS_COUNT * 3;
@@ -121,7 +122,11 @@ mod tests {
         )
         .await;
         let mut iter = ReverseConcatIterator::new(
-            vec![Arc::new(table3), Arc::new(table2), Arc::new(table1)],
+            vec![
+                table3.get_sstable_info(),
+                table2.get_sstable_info(),
+                table1.get_sstable_info(),
+            ],
             sstable_store,
         );
 
@@ -203,7 +208,11 @@ mod tests {
         )
         .await;
         let mut iter = ReverseConcatIterator::new(
-            vec![Arc::new(table2), Arc::new(table1), Arc::new(table0)],
+            vec![
+                table2.get_sstable_info(),
+                table1.get_sstable_info(),
+                table0.get_sstable_info(),
+            ],
             sstable_store,
         );
 

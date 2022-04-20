@@ -162,9 +162,10 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
+        test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
+
     #[tokio::test]
     async fn test_table_iterator() {
         // Build remote table
@@ -176,7 +177,10 @@ mod tests {
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut sstable_iter = SSTableIterator::new(Arc::new(table), sstable_store);
+        let cache = create_small_table_cache();
+        let handle = cache.insert(0, 0, 1, Box::new(table)).unwrap();
+
+        let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -201,8 +205,10 @@ mod tests {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
-        let table = Arc::new(table);
-        let mut sstable_iter = SSTableIterator::new(table.clone(), sstable_store);
+        let cache = create_small_table_cache();
+        let handle = cache.insert(0, 0, 1, Box::new(table)).unwrap();
+
+        let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

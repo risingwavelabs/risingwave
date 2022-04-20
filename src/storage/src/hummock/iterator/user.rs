@@ -259,6 +259,7 @@ mod tests {
     };
     use crate::hummock::iterator::BoxedForwardHummockIterator;
     use crate::hummock::sstable::SSTableIterator;
+    use crate::hummock::test_utils::create_small_table_cache;
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
 
@@ -289,16 +290,26 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![
             Box::new(SSTableIterator::new(
-                Arc::new(table0),
+                cache
+                    .insert(table0.id, table0.id, 1, Box::new(table0))
+                    .unwrap(),
                 sstable_store.clone(),
             )),
             Box::new(SSTableIterator::new(
-                Arc::new(table1),
+                cache
+                    .insert(table1.id, table1.id, 1, Box::new(table1))
+                    .unwrap(),
                 sstable_store.clone(),
             )),
-            Box::new(SSTableIterator::new(Arc::new(table2), sstable_store)),
+            Box::new(SSTableIterator::new(
+                cache
+                    .insert(table2.id, table2.id, 1, Box::new(table2))
+                    .unwrap(),
+                sstable_store,
+            )),
         ];
 
         let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -348,16 +359,26 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![
             Box::new(SSTableIterator::new(
-                Arc::new(table0),
+                cache
+                    .insert(table0.id, table0.id, 1, Box::new(table0))
+                    .unwrap(),
                 sstable_store.clone(),
             )),
             Box::new(SSTableIterator::new(
-                Arc::new(table1),
+                cache
+                    .insert(table1.id, table1.id, 1, Box::new(table1))
+                    .unwrap(),
                 sstable_store.clone(),
             )),
-            Box::new(SSTableIterator::new(Arc::new(table2), sstable_store)),
+            Box::new(SSTableIterator::new(
+                cache
+                    .insert(table2.id, table2.id, 1, Box::new(table2))
+                    .unwrap(),
+                sstable_store,
+            )),
         ];
 
         let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -429,13 +450,18 @@ mod tests {
         let table1 =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
 
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![
             Box::new(SSTableIterator::new(
-                Arc::new(table0),
+                cache
+                    .insert(table0.id, table0.id, 1, Box::new(table0))
+                    .unwrap(),
                 sstable_store.clone(),
             )),
             Box::new(SSTableIterator::new(
-                Arc::new(table1),
+                cache
+                    .insert(table1.id, table1.id, 1, Box::new(table1))
+                    .unwrap(),
                 sstable_store.clone(),
             )),
         ];
@@ -477,8 +503,11 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SSTableIterator::new(
-            Arc::new(table),
+            cache
+                .insert(table.id, table.id, 1, Box::new(table))
+                .unwrap(),
             sstable_store,
         ))];
         let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -557,8 +586,11 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SSTableIterator::new(
-            Arc::new(table),
+            cache
+                .insert(table.id, table.id, 1, Box::new(table))
+                .unwrap(),
             sstable_store,
         ))];
         let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -638,8 +670,11 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SSTableIterator::new(
-            Arc::new(table),
+            cache
+                .insert(table.id, table.id, 1, Box::new(table))
+                .unwrap(),
             sstable_store,
         ))];
         let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -721,8 +756,11 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SSTableIterator::new(
-            Arc::new(table),
+            cache
+                .insert(table.id, table.id, 1, Box::new(table))
+                .unwrap(),
             sstable_store,
         ))];
         let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
