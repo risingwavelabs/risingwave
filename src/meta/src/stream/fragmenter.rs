@@ -413,7 +413,7 @@ where
         let mut actionable_fragment_id = VecDeque::new();
         let mut downstream_cnts = HashMap::new();
 
-        // Iterator all fragments
+        // Iterate all fragments
         for (fragment_id, _) in self.fragment_graph.fragments().iter() {
             // Count how many downstreams we have for a given fragment
             let downstream_cnt = self.fragment_graph.get_downstreams(*fragment_id).len();

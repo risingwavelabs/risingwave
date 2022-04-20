@@ -132,8 +132,11 @@ where
         let mut locations = ScheduledLocations::new();
         locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
+        let topological_order = table_fragments.generate_topological_order();
+
         // Schedule each fragment(actors) to nodes.
-        for fragment in table_fragments.fragments() {
+        for fragment_id in topological_order {
+            let fragment = table_fragments.fragments.get(&fragment_id).unwrap();
             self.scheduler
                 .schedule(fragment.clone(), &mut locations)
                 .await?;
