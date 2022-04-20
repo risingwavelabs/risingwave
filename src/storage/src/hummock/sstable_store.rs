@@ -19,7 +19,7 @@ use fail::fail_point;
 use moka::future::Cache;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::{BlockHolder, HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
@@ -98,10 +98,8 @@ impl SstableStore {
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;
-                let block = Arc::new(Block::decode(data.slice(offset..offset + len))?);
-                self.block_cache
-                    .insert(sst.id, block_idx as u64, block)
-                    .await
+                let block = Box::new(Block::decode(data.slice(offset..offset + len))?);
+                self.block_cache.insert(sst.id, block_idx as u64, block);
             }
         }
 
@@ -113,7 +111,7 @@ impl SstableStore {
         sst: &Sstable,
         block_index: u64,
         policy: CachePolicy,
-    ) -> HummockResult<Arc<Block>> {
+    ) -> HummockResult<BlockHolder> {
         self.stats.sst_store_block_request_counts.inc();
 
         let fetch_block = async move {
@@ -137,7 +135,7 @@ impl SstableStore {
             let block = Block::decode(block_data)?;
 
             timer.observe_duration();
-            Ok(Arc::new(block))
+            Ok(Box::new(block))
         };
 
         match policy {
@@ -148,9 +146,9 @@ impl SstableStore {
             }
             CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
                 Some(block) => Ok(block),
-                None => fetch_block.await,
+                None => fetch_block.await.map(BlockHolder::from_owned_block),
             },
-            CachePolicy::Disable => fetch_block.await,
+            CachePolicy::Disable => fetch_block.await.map(BlockHolder::from_owned_block),
         }
     }
 

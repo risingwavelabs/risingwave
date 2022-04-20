@@ -250,14 +250,11 @@ impl StateStore for HummockStorage {
                         table_counts += 1;
                         // Because we will keep multiple version of one in the same sst file, we
                         // do not find it in the next adjacent file.
-                        let tables = self
+                        let table = self
                             .sstable_store
-                            .sstables(&[level.table_infos[table_idx].id])
+                            .sstable(level.table_infos[table_idx].id)
                             .await?;
-                        if let Some(v) = self
-                            .get_from_table(tables.first().unwrap().clone(), &internal_key, key)
-                            .await?
-                        {
+                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
                             return Ok(Some(v));
                         }
                     }

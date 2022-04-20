@@ -403,7 +403,12 @@ pub struct LruCache<K: PartialEq + Default, T> {
 }
 
 impl<K: PartialEq + Default, T> LruCache<K, T> {
-    pub fn new(num_shard_bits: usize, capacity: usize, object_cache: usize) -> Self {
+    pub fn new(
+        num_shard_bits: usize,
+        capacity: usize,
+        object_cache: usize,
+        strict_capacity_limit: bool,
+    ) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
@@ -412,7 +417,7 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
             shards.push(Mutex::new(LruCacheShard::new(
                 per_shard,
                 per_shard_object,
-                false,
+                strict_capacity_limit,
             )));
         }
         Self {
@@ -443,6 +448,11 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
         };
         // do not deallocate data with holding mutex.
         drop(data);
+    }
+
+    unsafe fn add_ref(&self, handle: *mut LruHandle<K, T>) {
+        let _shard = self.shards[self.shard((*handle).hash)].lock();
+        (*handle).refs += 1;
     }
 
     pub fn insert(
@@ -504,6 +514,18 @@ impl<K: PartialEq + Default, T> CachableEntry<K, T> {
     }
 }
 
+impl<K: PartialEq + Default, T> Clone for CachableEntry<K, T> {
+    fn clone(&self) -> Self {
+        unsafe {
+            self.cache.add_ref(self.handle);
+            Self {
+                cache: self.cache.clone(),
+                handle: self.handle,
+            }
+        }
+    }
+}
+
 impl<K: PartialEq + Default, T> Drop for CachableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
@@ -547,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16, false));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 0);
         assert_eq!(cache.shard(10), 0);
@@ -555,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16, false));
         let seed = 10244021u64;
         let mut rng = SmallRng::seed_from_u64(seed);
         for _ in 0..100000 {

@@ -12,35 +12,94 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use futures::channel::oneshot::{channel, Sender};
 use futures::Future;
-use moka::future::Cache;
+use spin::Mutex;
 
-use super::{Block, HummockError, HummockResult, DEFAULT_ENTRY_SIZE};
+use super::cache::{CachableEntry, LruCache};
+use super::{Block, HummockError, HummockResult};
+pub type BlockCacheEntry = CachableEntry<(u64, u64), Box<Block>>;
+
+enum BlockEntry {
+    Cache(BlockCacheEntry),
+    Owned(Box<Block>),
+}
+
+pub struct BlockHolder {
+    _handle: BlockEntry,
+    block: *const Block,
+}
+
+impl BlockHolder {
+    pub fn from_owned_block(block: Box<Block>) -> Self {
+        let ptr = block.as_ref() as *const _;
+        Self {
+            _handle: BlockEntry::Owned(block),
+            block: ptr,
+        }
+    }
+
+    pub fn from_cached_block(entry: BlockCacheEntry) -> Self {
+        let ptr = entry.value().as_ref() as *const _;
+        Self {
+            _handle: BlockEntry::Cache(entry),
+            block: ptr,
+        }
+    }
+}
+
+impl AsRef<Block> for BlockHolder {
+    fn as_ref(&self) -> &Block {
+        unsafe { &(*self.block) }
+    }
+}
+
+unsafe impl Send for BlockHolder {}
+unsafe impl Sync for BlockHolder {}
+
+type RequestQueue = Vec<Sender<BlockCacheEntry>>;
+
+const CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
+const DEFAULT_OBJECT_POOL_SIZE: usize = 1024; // we only need a small object pool because when the cache reach the limit of capacity, it will
+                                              // always release some object after insert a new block.
 
 pub struct BlockCache {
-    inner: Cache<Bytes, Arc<Block>>,
+    inner: Arc<LruCache<(u64, u64), Box<Block>>>,
+    wait_request_queue: Vec<Mutex<HashMap<(u64, u64), RequestQueue>>>,
 }
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
-        let cache: Cache<Bytes, Arc<Block>> = Cache::builder()
-            .weigher(|_k, v: &Arc<Block>| v.len() as u32)
-            .initial_capacity(capacity / DEFAULT_ENTRY_SIZE)
-            .max_capacity(capacity as u64)
-            .build();
-        Self { inner: cache }
+        let cache = LruCache::new(CACHE_SHARD_BITS, capacity, DEFAULT_OBJECT_POOL_SIZE, false);
+        let mut wait_request_queue = vec![];
+        let wait_request_queue_size = 1 << CACHE_SHARD_BITS;
+        for _ in 0..wait_request_queue_size {
+            wait_request_queue.push(Mutex::new(HashMap::default()));
+        }
+        Self {
+            inner: Arc::new(cache),
+            wait_request_queue,
+        }
     }
 
-    // TODO: Optimize for concurrent get https://github.com/singularity-data/risingwave/pull/627#discussion_r817354730.
-    pub fn get(&self, sst_id: u64, block_idx: u64) -> Option<Arc<Block>> {
-        self.inner.get(&Self::key(sst_id, block_idx))
+    pub fn get(&self, sst_id: u64, block_idx: u64) -> Option<BlockHolder> {
+        self.inner
+            .lookup(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+            .map(BlockHolder::from_cached_block)
     }
 
-    pub async fn insert(&self, sst_id: u64, block_idx: u64, block: Arc<Block>) {
-        self.inner.insert(Self::key(sst_id, block_idx), block).await
+    pub fn insert(&self, sst_id: u64, block_idx: u64, block: Box<Block>) {
+        self.inner.insert(
+            (sst_id, block_idx),
+            Self::hash(sst_id, block_idx),
+            block.len(),
+            block,
+        );
     }
 
     pub async fn get_or_insert_with<F>(
@@ -48,20 +107,43 @@ impl BlockCache {
         sst_id: u64,
         block_idx: u64,
         f: F,
-    ) -> HummockResult<Arc<Block>>
+    ) -> HummockResult<BlockHolder>
     where
-        F: Future<Output = HummockResult<Arc<Block>>>,
+        F: Future<Output = HummockResult<Box<Block>>>,
     {
-        self.inner
-            .try_get_with(Self::key(sst_id, block_idx), f)
-            .await
-            .map_err(HummockError::other)
+        let h = Self::hash(sst_id, block_idx);
+        let key = (sst_id, block_idx);
+        if let Some(e) = self.inner.lookup(h, &key) {
+            return Ok(BlockHolder::from_cached_block(e));
+        }
+        {
+            let mut request_que =
+                self.wait_request_queue[h as usize % (self.wait_request_queue.len())].lock();
+            if let Some(que) = request_que.get_mut(&key) {
+                let (tx, rc) = channel();
+                que.push(tx);
+                drop(request_que);
+                let entry = rc.await.map_err(HummockError::other)?;
+                return Ok(BlockHolder::from_cached_block(entry));
+            }
+            request_que.insert(key, vec![]);
+            drop(request_que);
+            let ret = f.await?;
+            let handle = self.inner.insert(key, h, ret.len(), ret).unwrap();
+            let mut request_que =
+                self.wait_request_queue[h as usize % (self.wait_request_queue.len())].lock();
+            let que = request_que.remove(&key).unwrap();
+            for sender in que {
+                let _ = sender.send(handle.clone());
+            }
+            Ok(BlockHolder::from_cached_block(handle))
+        }
     }
 
-    fn key(sst_id: u64, block_idx: u64) -> Bytes {
-        let mut key = BytesMut::with_capacity(16);
-        key.put_u64_le(sst_id);
-        key.put_u64_le(block_idx);
-        key.freeze()
+    fn hash(sst_id: u64, block_idx: u64) -> u64 {
+        let mut hasher = DefaultHasher::default();
+        sst_id.hash(&mut hasher);
+        block_idx.hash(&mut hasher);
+        hasher.finish()
     }
 }
