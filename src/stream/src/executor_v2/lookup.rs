@@ -33,8 +33,6 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
-use super::ExecutorV1AsV2;
-
 #[cfg(test)]
 mod tests;
 
@@ -99,10 +97,8 @@ impl ExecutorBuilder for LookupExecutorBuilder {
     ) -> Result<Box<dyn ExecutorV1>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::LookupNode)?;
 
-        let stream = params.input.remove(1);
-        let stream = Box::new(ExecutorV1AsV2(stream));
-        let arrangement = params.input.remove(0);
-        let arrangement = Box::new(ExecutorV1AsV2(arrangement));
+        let stream = params.input.remove(1).v2();
+        let arrangement = params.input.remove(0).v2();
 
         let arrangement_col_descs = arrangement
             .schema()

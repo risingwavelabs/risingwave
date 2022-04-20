@@ -19,6 +19,7 @@ use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
+use self::v1_compat::StreamExecutorV1;
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
@@ -62,7 +63,6 @@ pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::{UnionExecutor, UnionExecutorBuilder};
-pub use v1_compat::{ExecutorV1AsV2, StreamExecutorV1};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;

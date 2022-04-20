@@ -97,7 +97,7 @@ impl ExecutorV1 for StreamExecutorV1 {
     }
 }
 
-pub struct ExecutorV1AsV2(pub Box<dyn ExecutorV1>);
+struct ExecutorV1AsV2(Box<dyn ExecutorV1>);
 
 impl Executor for ExecutorV1AsV2 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
@@ -136,6 +136,12 @@ impl ExecutorV1AsV2 {
     }
 }
 
+impl dyn ExecutorV1 {
+    pub fn v2(self: Box<Self>) -> BoxedExecutor {
+        Box::new(ExecutorV1AsV2(self))
+    }
+}
+
 impl FilterExecutor {
     pub fn new_from_v1(
         input: Box<dyn ExecutorV1>,
@@ -148,7 +154,7 @@ impl FilterExecutor {
             pk_indices: input.pk_indices().to_owned(),
             identity: "Filter".to_owned(),
         };
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         super::SimpleExecutorWrapper {
             input,
             inner: SimpleFilterExecutor::new(info, expr, executor_id),
@@ -169,7 +175,7 @@ impl ProjectExecutor {
             pk_indices,
             identity: "Project".to_owned(),
         };
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         super::SimpleExecutorWrapper {
             input,
             inner: SimpleProjectExecutor::new(info, exprs, executor_id),
@@ -195,8 +201,8 @@ impl ChainExecutor {
         let actor_id = notifier.actor_id;
 
         Self::new(
-            Box::new(ExecutorV1AsV2(snapshot)),
-            Box::new(ExecutorV1AsV2(mview)),
+            snapshot.v2(),
+            mview.v2(),
             column_idxs,
             notifier,
             actor_id,
@@ -214,13 +220,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         executor_id: u64,
         _op_info: String,
     ) -> Self {
-        Self::new(
-            Box::new(ExecutorV1AsV2(input)),
-            keyspace,
-            keys,
-            column_ids,
-            executor_id,
-        )
+        Self::new(input.v2(), keyspace, keys, column_ids, executor_id)
     }
 }
 
@@ -232,7 +232,7 @@ impl LocalSimpleAggExecutor {
         executor_id: u64,
         _op_info: String,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         Self::new(input, agg_calls, pk_indices, executor_id)
     }
 }
@@ -247,7 +247,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         Self::new(
             input,
             agg_calls,
@@ -269,7 +269,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         executor_id: u64,
         _op_info: String,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         Self::new(
             input,
             agg_calls,
@@ -320,7 +320,7 @@ impl<S: StateStore> TopNExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         Self::new(
             input,
             pk_order_types,
@@ -349,7 +349,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
+        let input = input.v2();
         Self::new(
             input,
             pk_order_types,
