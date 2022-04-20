@@ -163,11 +163,9 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 }
 
-pub trait StateStoreIter: Send {
+pub trait StateStoreIter: Send + 'static {
     type Item;
-    type NextFuture<'a>: Future<Output = StorageResult<Option<Self::Item>>>
-    where
-        Self: 'a;
+    type NextFuture<'a>: Future<Output = StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_>;
 }

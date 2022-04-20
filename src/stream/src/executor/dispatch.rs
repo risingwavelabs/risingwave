@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
-use futures::SinkExt;
+use futures::{SinkExt, Stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
@@ -27,7 +28,8 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
-use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
+use super::{Barrier, Message, Mutation, Result, StreamChunk, StreamConsumer};
+use crate::executor_v2::BoxedExecutor;
 use crate::task::{ActorId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
@@ -112,73 +114,53 @@ impl Output for RemoteOutput {
     }
 }
 
-/// `DispatchExecutor` consumes messages and send them into downstream actors. Usually,
+pub fn new_output(
+    context: &SharedContext,
+    addr: HostAddr,
+    actor_id: ActorId,
+    down_id: ActorId,
+) -> Result<Box<dyn Output>> {
+    let tx = context.take_sender(&(actor_id, down_id))?;
+    if is_local_address(&addr, &context.addr) {
+        // if this is a local downstream actor
+        Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
+    } else {
+        Ok(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
+    }
+}
+
+/// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
-    input: Box<dyn Executor>,
-    inner: Vec<DispatcherImpl>,
+    input: BoxedExecutor,
+    inner: DispatchExecutorInner,
+}
+
+struct DispatchExecutorInner {
+    dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
     context: Arc<SharedContext>,
 }
 
-pub fn new_output(
-    context: &SharedContext,
-    addr: HostAddr,
-    actor_id: u32,
-    down_id: &u32,
-) -> Result<Box<dyn Output>> {
-    let tx = context.take_sender(&(actor_id, *down_id))?;
-    if is_local_address(&addr, &context.addr) {
-        // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
-    } else {
-        Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
-    }
-}
-
-impl std::fmt::Debug for DispatchExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DispatchExecutor")
-            .field("input", &self.input)
-            .field("inner", &self.inner)
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
-}
-
-impl DispatchExecutor {
-    pub fn new(
-        input: Box<dyn Executor>,
-        inner: Vec<DispatcherImpl>,
-        actor_id: u32,
-        context: Arc<SharedContext>,
-    ) -> Self {
-        Self {
-            input,
-            inner,
-            actor_id,
-            context,
-        }
-    }
-
+impl DispatchExecutorInner {
     fn single_inner_mut(&mut self) -> &mut DispatcherImpl {
         assert_eq!(
-            self.inner.len(),
+            self.dispatchers.len(),
             1,
             "only support mutation on one-dispatcher actors"
         );
-        &mut self.inner[0]
+        &mut self.dispatchers[0]
     }
 
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
-                if self.inner.len() == 1 {
+                if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
                 } else {
-                    for dispatcher in &mut self.inner {
+                    for dispatcher in &mut self.dispatchers {
                         dispatcher.dispatch_data(chunk.clone()).await?;
                     }
                 }
@@ -186,7 +168,7 @@ impl DispatchExecutor {
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
-                for dispatcher in &mut self.inner {
+                for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
                 self.post_mutate_outputs(&mutation).await?;
@@ -197,8 +179,12 @@ impl DispatchExecutor {
 
     /// For `Add` and `Update`, update the outputs before we dispatch the barrier.
     async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
-        match mutation.as_deref() {
-            Some(Mutation::UpdateOutputs(updates)) => {
+        let Some(mutation) = mutation.as_deref() else {
+            return Ok(())
+        };
+
+        match mutation {
+            Mutation::UpdateOutputs(updates) => {
                 if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
 
@@ -214,14 +200,15 @@ impl DispatchExecutor {
                         new_outputs.push(new_output(
                             &self.context,
                             downstream_addr,
-                            actor_id,
-                            &down_id,
+                            self.actor_id,
+                            down_id,
                         )?);
                     }
                     self.single_inner_mut().set_outputs(new_outputs)
                 }
             }
-            Some(Mutation::AddOutput(adds)) => {
+
+            Mutation::AddOutput(adds) => {
                 if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
@@ -231,12 +218,13 @@ impl DispatchExecutor {
                             &self.context,
                             downstream_addr,
                             self.actor_id,
-                            &down_id,
+                            down_id,
                         )?);
                     }
                     self.single_inner_mut().add_outputs(outputs_to_add);
                 }
             }
+
             _ => {}
         };
 
@@ -256,18 +244,42 @@ impl DispatchExecutor {
     }
 }
 
-#[async_trait]
-impl StreamConsumer for DispatchExecutor {
-    async fn next(&mut self) -> Result<Option<Barrier>> {
-        let msg = self.input.next().await?;
-        let barrier = if let Message::Barrier(ref barrier) = msg {
-            Some(barrier.clone())
-        } else {
-            None
-        };
-        self.dispatch(msg).await?;
+impl DispatchExecutor {
+    pub fn new(
+        input: BoxedExecutor,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: u32,
+        context: Arc<SharedContext>,
+    ) -> Self {
+        Self {
+            input,
+            inner: DispatchExecutorInner {
+                dispatchers,
+                actor_id,
+                context,
+            },
+        }
+    }
+}
 
-        Ok(barrier)
+impl StreamConsumer for DispatchExecutor {
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+
+    fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        #[try_stream]
+        async move {
+            let input = self.input.execute();
+
+            #[for_await]
+            for msg in input {
+                let msg: Message = msg?;
+                let barrier = msg.as_barrier().cloned();
+                self.inner.dispatch(msg).await?;
+                if let Some(barrier) = barrier {
+                    yield barrier;
+                }
+            }
+        }
     }
 }
 
@@ -341,6 +353,7 @@ pub trait DispatchFuture<'a> = Future<Output = Result<()>> + Send;
 pub trait Dispatcher: Debug + 'static {
     type DataFuture<'a>: DispatchFuture<'a>;
     type BarrierFuture<'a>: DispatchFuture<'a>;
+
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
 
@@ -697,30 +710,37 @@ impl Dispatcher for SimpleDispatcher {
 #[cfg(test)]
 mod sender_consumer {
     use super::*;
+    use crate::executor::ExecutorV1;
+
     /// `SenderConsumer` consumes data from input executor and send it into a channel.
-    #[derive(Debug)]
     pub struct SenderConsumer {
-        input: Box<dyn Executor>,
+        input: Box<dyn ExecutorV1>,
         channel: BoxedOutput,
     }
 
     impl SenderConsumer {
-        pub fn new(input: Box<dyn Executor>, channel: BoxedOutput) -> Self {
+        pub fn new(input: Box<dyn ExecutorV1>, channel: BoxedOutput) -> Self {
             Self { input, channel }
         }
     }
 
-    #[async_trait]
     impl StreamConsumer for SenderConsumer {
-        async fn next(&mut self) -> Result<Option<Barrier>> {
-            let message = self.input.next().await?;
-            let barrier = if let Message::Barrier(ref barrier) = message {
-                Some(barrier.clone())
-            } else {
-                None
-            };
-            self.channel.send(message).await?;
-            Ok(barrier)
+        type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+
+        fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+            #[try_stream]
+            async move {
+                loop {
+                    let msg = self.input.next().await?;
+                    let barrier = msg.as_barrier().cloned();
+
+                    self.channel.send(msg).await?;
+
+                    if let Some(barrier) = barrier {
+                        yield barrier;
+                    }
+                }
+            }
         }
     }
 }
@@ -735,6 +755,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use futures::channel::mpsc::channel;
+    use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
@@ -746,7 +767,6 @@ mod tests {
 
     use super::*;
     use crate::executor_v2::receiver::ReceiverExecutor;
-    use crate::executor_v2::Executor;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -911,18 +931,21 @@ mod tests {
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
-        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
+        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
-        let mut executor = Box::new(DispatchExecutor::new(
-            Box::new(input),
+        let executor = Box::new(DispatchExecutor::new(
+            input,
             vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
             actor_id,
             ctx.clone(),
-        ));
+        ))
+        .execute();
+        pin_mut!(executor);
+
         let mut updates1: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
 
         updates1.insert(
@@ -938,7 +961,7 @@ mod tests {
 
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
-        executor.next().await.unwrap();
+        executor.next().await.unwrap().unwrap();
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 3);
@@ -950,7 +973,7 @@ mod tests {
         let b2 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates2));
 
         tx.send(Message::Barrier(b2)).await.unwrap();
-        executor.next().await.unwrap();
+        executor.next().await.unwrap().unwrap();
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 1);
@@ -970,7 +993,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        executor.next().await.unwrap();
+        executor.next().await.unwrap().unwrap();
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 3);

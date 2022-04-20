@@ -18,7 +18,7 @@ use std::sync::Once;
 use async_trait::async_trait;
 use risingwave_common::error::Result;
 
-use crate::executor::{Executor, Message};
+use crate::executor::{ExecutorV1, Message};
 
 pub const CACHE_CLEAR_ENABLED_ENV_VAR_KEY: &str = "RW_NO_CACHE";
 
@@ -26,11 +26,11 @@ pub const CACHE_CLEAR_ENABLED_ENV_VAR_KEY: &str = "RW_NO_CACHE";
 #[derive(Debug)]
 pub struct CacheClearExecutor {
     /// The input of the current executor.
-    input: Box<dyn Executor>,
+    input: Box<dyn ExecutorV1>,
 }
 
 impl CacheClearExecutor {
-    pub fn new(input: Box<dyn Executor>) -> Self {
+    pub fn new(input: Box<dyn ExecutorV1>) -> Self {
         static ONCE: Once = Once::new();
         ONCE.call_once(|| info!("CacheClearExecutor enabled."));
 
@@ -50,11 +50,11 @@ impl super::DebugExecutor for CacheClearExecutor {
         Ok(message)
     }
 
-    fn input(&self) -> &dyn Executor {
+    fn input(&self) -> &dyn ExecutorV1 {
         self.input.as_ref()
     }
 
-    fn input_mut(&mut self) -> &mut dyn Executor {
+    fn input_mut(&mut self) -> &mut dyn ExecutorV1 {
         self.input.as_mut()
     }
 }

@@ -15,25 +15,34 @@
 use std::any::Any;
 
 pub use agg_call::*;
-pub use agg_executor::*;
+pub use agg_state::*;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DecimalArray, F32Array, F64Array,
-    I16Array, I32Array, I64Array, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
+    F64Array, I16Array, I32Array, I64Array, Row, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
+use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
+use static_assertions::const_assert_eq;
 
+use crate::executor::managed_state::aggregation::ManagedStateImpl;
+use crate::executor::PkDataTypes;
 use crate::executor_v2::aggregation::single_value::StreamingSingleValueAgg;
+use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor_v2::Executor;
 
 mod agg_call;
-mod agg_executor;
+mod agg_state;
 mod foldable;
 mod row_count;
 mod single_value;
@@ -261,4 +270,116 @@ pub fn create_streaming_agg_state(
         _ => todo!(),
     };
     Ok(state)
+}
+
+/// Get clones of aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
+    agg_calls
+        .iter()
+        .map(|agg| {
+            agg.args
+                .val_indices()
+                .iter()
+                .map(|val_idx| columns[*val_idx].array())
+                .collect()
+        })
+        .collect()
+}
+
+/// Get references to aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_array_refs<'a>(
+    agg_calls: &[AggCall],
+    columns: &'a [Column],
+) -> Vec<Vec<&'a ArrayImpl>> {
+    agg_calls
+        .iter()
+        .map(|agg| {
+            agg.args
+                .val_indices()
+                .iter()
+                .map(|val_idx| columns[*val_idx].array_ref())
+                .collect()
+        })
+        .collect()
+}
+
+/// Generate [`crate::executor_v2::HashAggExecutor`]'s schema from `input`, `agg_calls` and
+/// `group_key_indices`. For [`crate::executor_v2::HashAggExecutor`], the group key indices should
+/// be provided.
+pub fn generate_agg_schema(
+    input: &dyn Executor,
+    agg_calls: &[AggCall],
+    group_key_indices: Option<&[usize]>,
+) -> Schema {
+    let aggs = agg_calls
+        .iter()
+        .map(|agg| Field::unnamed(agg.return_type.clone()));
+
+    let fields = if let Some(key_indices) = group_key_indices {
+        let keys = key_indices
+            .iter()
+            .map(|idx| input.schema().fields[*idx].clone());
+
+        keys.chain(aggs).collect()
+    } else {
+        aggs.collect()
+    };
+
+    Schema { fields }
+}
+
+/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor_v2::HashAggExecutor`], the
+/// group key should be provided.
+pub async fn generate_agg_state<S: StateStore>(
+    key: Option<&Row>,
+    agg_calls: &[AggCall],
+    keyspace: &Keyspace<S>,
+    pk_data_types: PkDataTypes,
+    epoch: u64,
+    key_hash_code: Option<HashCode>,
+) -> StreamExecutorResult<AggState<S>> {
+    let mut managed_states = vec![];
+
+    // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
+    const_assert_eq!(ROW_COUNT_COLUMN, 0);
+    let mut row_count = None;
+
+    for (idx, agg_call) in agg_calls.iter().enumerate() {
+        // TODO: in pure in-memory engine, we should not do this serialization.
+
+        // The prefix of the state is `agg_call_idx / [group_key]`
+        let keyspace = if let Some(key) = key {
+            let bytes = key.serialize().unwrap();
+            keyspace.append_u16(idx as u16).append(bytes)
+        } else {
+            keyspace.append_u16(idx as u16)
+        };
+
+        let mut managed_state = ManagedStateImpl::create_managed_state(
+            agg_call.clone(),
+            keyspace,
+            row_count,
+            pk_data_types.clone(),
+            idx == ROW_COUNT_COLUMN,
+            key_hash_code.clone(),
+        )
+        .await
+        .map_err(StreamExecutorError::agg_state_error)?;
+
+        if idx == ROW_COUNT_COLUMN {
+            // For the rowcount state, we should record the rowcount.
+            let output = managed_state
+                .get_output(epoch)
+                .await
+                .map_err(StreamExecutorError::agg_state_error)?;
+            row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
+        }
+
+        managed_states.push(managed_state);
+    }
+
+    Ok(AggState {
+        managed_states,
+        prev_states: None,
+    })
 }

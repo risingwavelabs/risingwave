@@ -71,6 +71,14 @@ pub struct SharedContext {
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 }
 
+impl std::fmt::Debug for SharedContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedContext")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
+    }
+}
+
 impl SharedContext {
     pub fn new(addr: HostAddr) -> Self {
         Self {
