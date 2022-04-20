@@ -36,6 +36,22 @@ pub struct ValuesExecutor2 {
     chunk_size: usize,
 }
 
+impl ValuesExecutor2 {
+    pub(crate) fn new(
+        rows: Vec<Vec<BoxedExpression>>,
+        schema: Schema,
+        identity: String,
+        chunk_size: usize,
+    ) -> Self {
+        Self {
+            rows: rows.into_iter(),
+            schema,
+            identity,
+            chunk_size,
+        }
+    }
+}
+
 impl Executor2 for ValuesExecutor2 {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -158,7 +174,7 @@ mod tests {
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
 
-        let mut values_executor = Box::new(ValuesExecutor2 {
+        let values_executor = Box::new(ValuesExecutor2 {
             rows: vec![exprs].into_iter(),
             schema: Schema { fields },
             identity: "ValuesExecutor2".to_string(),
@@ -230,7 +246,7 @@ mod tests {
     // Handle the possible case of ValuesNode([[]])
     #[tokio::test]
     async fn test_no_column_values_executor() {
-        let mut values_executor = Box::new(ValuesExecutor2 {
+        let values_executor = Box::new(ValuesExecutor2 {
             rows: vec![vec![]].into_iter(),
             schema: Schema::default(),
             identity: "ValuesExecutor2".to_string(),
