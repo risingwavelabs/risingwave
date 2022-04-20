@@ -56,6 +56,7 @@ impl Literal {
         &self.data
     }
 }
+
 impl Expr for Literal {
     fn return_type(&self) -> DataType {
         self.data_type.clone()

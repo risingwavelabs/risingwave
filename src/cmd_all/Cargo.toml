@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_cmd"
+name = "risingwave_cmd_all"
 version = "0.1.5"
 edition = "2021"
 
@@ -25,17 +25,5 @@ tracing = { version = "0.1", features = ["release_max_level_info"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [[bin]]
-name = "frontend-v2"
-path = "src/bin/frontend_node.rs"
-
-[[bin]]
-name = "meta-node"
-path = "src/bin/meta_node.rs"
-
-[[bin]]
-name = "compute-node"
-path = "src/bin/compute_node.rs"
-
-[[bin]]
-name = "risectl"
-path = "src/bin/ctl.rs"
+name = "risingwave"
+path = "src/bin/risingwave.rs"

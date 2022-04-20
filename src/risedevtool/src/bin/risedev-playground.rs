@@ -290,17 +290,17 @@ fn task_main(
                 let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("zookeeper http://{}:{}/", c.address, c.port));
+                    .set_message(format!("zookeeper {}:{}", c.address, c.port));
             }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = KafkaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task = risedev::KafkaReadyCheckTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("kafka http://{}:{}/", c.address, c.port));
+                    .set_message(format!("kafka {}:{}", c.address, c.port));
             }
         }
 
