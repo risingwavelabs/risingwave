@@ -88,8 +88,8 @@ impl<S: StateStore> ManagedMViewState<S> {
             let arrange_key_buf = serialize_pk(&arrange_keys, &self.key_serializer)?;
             let bytes = serialize_pk_and_row(&arrange_key_buf, &row, &self.column_ids)?;
 
-            // We compute vnode on pk in materialized view since materialized views are grouped by
-            // pk.
+            // We compute vnode on arrange keys in materialized view since materialized views are
+            // grouped by arrange keys.
             let vnode = arrange_keys.hash_row(&hash_builder).to_vnode();
             let value_meta = ValueMeta::new_with_vnode(vnode);
 
