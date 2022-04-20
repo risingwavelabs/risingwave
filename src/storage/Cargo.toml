@@ -92,3 +92,7 @@ harness = false
 [[bench]]
 name = "bench_lru_cache"
 harness = false
+
+[[bench]]
+name = "bench_merge_iter"
+harness = false
