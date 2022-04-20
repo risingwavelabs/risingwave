@@ -124,15 +124,15 @@ impl<S: StateStore> JoinSide<S> {
 pub struct HashJoinExecutorBuilder {}
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
-        let source_r = params.input.remove(1);
-        let source_l = params.input.remove(0);
+        let source_r = Box::new(params.input.remove(1).v1());
+        let source_l = Box::new(params.input.remove(0).v1());
         let params_l = JoinParams::new(
             node.get_left_key()
                 .iter()

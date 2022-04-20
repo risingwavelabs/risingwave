@@ -36,7 +36,7 @@ pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
-use crate::executor_v2::{LookupExecutorBuilder, UnionExecutorBuilder};
+use crate::executor_v2::{BoxedExecutor, LookupExecutorBuilder, UnionExecutorBuilder};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
@@ -459,12 +459,23 @@ pub fn pk_input_array_refs<'a>(
 }
 
 pub trait ExecutorBuilder {
+    fn new_boxed_executor_v1(
+        _executor_params: ExecutorParams,
+        _node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        unimplemented!("directly build a v2 executor instead")
+    }
+
     fn new_boxed_executor(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>>;
+    ) -> Result<BoxedExecutor> {
+        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2())
+    }
 }
 
 #[macro_export]
@@ -491,8 +502,8 @@ pub fn create_executor(
     stream: &mut LocalStreamManagerCore,
     node: &stream_plan::StreamNode,
     store: impl StateStore,
-) -> Result<Box<dyn Executor>> {
-    let real_executor = build_executor! {
+) -> Result<BoxedExecutor> {
+    build_executor! {
         executor_params,
         node,
         store,
@@ -513,8 +524,7 @@ pub fn create_executor(
         Node::ArrangeNode => ArrangeExecutorBuilder,
         Node::LookupNode => LookupExecutorBuilder,
         Node::UnionNode => UnionExecutorBuilder
-    }?;
-    Ok(real_executor)
+    }
 }
 
 /// `StreamConsumer` is the last step in an actor.

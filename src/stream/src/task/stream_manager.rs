@@ -104,7 +104,7 @@ pub struct ExecutorParams {
     pub op_info: String,
 
     /// The input executor.
-    pub input: Vec<Box<dyn Executor>>,
+    pub input: Vec<BoxedExecutor>,
 
     /// Id of the actor.
     pub actor_id: ActorId,
@@ -460,11 +460,11 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
-        let input: Vec<Box<dyn Executor>> = node
+        let input: Vec<_> = node
             .input
             .iter()
             .enumerate()
@@ -503,12 +503,12 @@ impl LocalStreamManagerCore {
         };
 
         let executor = create_executor(executor_params, self, node, store)?;
-        let executor = Self::wrap_executor_for_debug(
-            executor,
-            actor_id,
-            input_pos,
-            self.streaming_metrics.clone(),
-        )?;
+        // let executor = Self::wrap_executor_for_debug(
+        //     executor,
+        //     actor_id,
+        //     input_pos,
+        //     self.streaming_metrics.clone(),
+        // )?;
         Ok(executor)
     }
 
@@ -519,7 +519,7 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
         })
@@ -653,9 +653,8 @@ impl LocalStreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor = self
-                .create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?
-                .v2();
+            let executor =
+                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());

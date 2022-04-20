@@ -89,7 +89,7 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
 pub struct LookupExecutorBuilder {}
 
 impl ExecutorBuilder for LookupExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
@@ -97,8 +97,8 @@ impl ExecutorBuilder for LookupExecutorBuilder {
     ) -> Result<Box<dyn ExecutorV1>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::LookupNode)?;
 
-        let stream = params.input.remove(1).v2();
-        let arrangement = params.input.remove(0).v2();
+        let stream = params.input.remove(1);
+        let arrangement = params.input.remove(0);
 
         let arrangement_col_descs = arrangement
             .schema()

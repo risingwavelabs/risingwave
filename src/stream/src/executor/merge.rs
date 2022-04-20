@@ -24,7 +24,7 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 pub struct MergeExecutorBuilder {}
 
 impl ExecutorBuilder for MergeExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

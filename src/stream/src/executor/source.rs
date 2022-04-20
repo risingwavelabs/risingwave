@@ -95,7 +95,7 @@ pub struct SourceExecutor {
 pub struct SourceExecutorBuilder {}
 
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,

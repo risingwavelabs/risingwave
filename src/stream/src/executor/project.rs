@@ -27,7 +27,7 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 pub struct ProjectExecutorBuilder;
 
 impl ExecutorBuilder for ProjectExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

@@ -117,10 +117,7 @@ pub trait Executor: Send + 'static {
     }
 
     /// Return an executor which implements [`ExecutorV1`].
-    fn v1(self: Box<Self>) -> StreamExecutorV1
-    where
-        Self: Sized,
-    {
+    fn v1(self: Box<Self>) -> StreamExecutorV1 {
         let info = self.info();
         let stream = self.execute();
 

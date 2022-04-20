@@ -29,7 +29,7 @@ use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerC
 pub struct LocalSimpleAggExecutorBuilder {}
 
 impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
