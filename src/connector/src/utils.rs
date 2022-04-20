@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use crate::base::UPSTREAM_SOURCE_KEY;
+
 #[derive(Clone, Debug)]
 pub struct Properties(pub HashMap<String, String>);
 
@@ -50,6 +52,10 @@ impl Properties {
     /// It's an alternative of `get` but returns kinesis-specifc error hints.
     pub fn get_kinesis(&self, key: &str) -> Result<String> {
         self.get_inner(key, " when using Kinesis source")
+    }
+
+    pub fn get_connector_type(&self) -> Result<String> {
+        self.get_inner(UPSTREAM_SOURCE_KEY, "when get connector")
     }
 }
 

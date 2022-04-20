@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -31,7 +32,7 @@ use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub config: Properties,
-    pub columns: Vec<SourceColumnDesc>,
+    pub column_descs: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
 }
 
@@ -46,7 +47,7 @@ impl ConnectorSource {
         column_ids
             .iter()
             .map(|id| {
-                self.columns
+                self.column_descs
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {

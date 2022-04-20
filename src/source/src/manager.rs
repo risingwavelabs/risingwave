@@ -143,7 +143,7 @@ impl SourceManager for MemSourceManager {
 
         let source = SourceImpl::Connector(ConnectorSource {
             config: properties,
-            columns: columns.clone(),
+            column_descs: columns.clone(),
             parser,
         });
 

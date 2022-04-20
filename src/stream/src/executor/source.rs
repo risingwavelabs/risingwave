@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryFutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
@@ -29,6 +29,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
+use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -55,7 +56,7 @@ type ReaderStream =
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
-pub struct SourceExecutor {
+pub struct SourceExecutor<S: StateStore> {
     source_id: TableId,
     source_desc: SourceDesc,
 
@@ -86,6 +87,7 @@ pub struct SourceExecutor {
     stream_source_splits: Vec<SplitImpl>,
 
     source_identify: String,
+    state_store: SourceStateHandler<S>,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -154,12 +156,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     }
 }
 
-impl SourceExecutor {
+impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<S: StateStore>(
+    pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
-        _keyspace: Keyspace<S>,
+        keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -193,6 +195,7 @@ impl SourceExecutor {
             metrics: streaming_metrics,
             stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
+            state_store: SourceStateHandler::new(keyspace),
         })
     }
 
@@ -272,8 +275,37 @@ impl SourceReader {
     }
 }
 
+async fn filter_prev_states<S: StateStore>(
+    state_store: &SourceStateHandler<S>,
+    stream_source_splits: &Vec<SplitImpl>,
+    epoch: u64,
+    connector_type: String,
+) -> Result<Vec<SplitImpl>> {
+    let mut prev_states: Vec<SplitImpl> = Vec::new();
+
+    for split_impl in stream_source_splits {
+        let mut prev_state = state_store
+            .restore_states(split_impl.id())
+            .await
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?
+            .iter()
+            .filter(|(e, _)| e == &epoch)
+            .map(|(_, s)| {
+                SplitImpl::restore_from_bytes(connector_type.clone(), s)
+                    .map_err(|e| RwError::from(InternalError(e.to_string())))
+            })
+            .collect::<Result<Vec<SplitImpl>>>()?;
+        if prev_state.is_empty() {
+            prev_states.push(split_impl.clone());
+            continue;
+        }
+        prev_states.push(prev_state.pop().unwrap());
+    }
+    Ok(prev_states)
+}
+
 #[async_trait]
-impl Executor for SourceExecutor {
+impl<S: StateStore> Executor for SourceExecutor<S> {
     async fn next(&mut self) -> Result<Message> {
         match self.reader_stream.as_mut() {
             None => {
@@ -286,8 +318,37 @@ impl Executor for SourceExecutor {
                     .unwrap();
 
                 // todo: use epoch from msg to restore state from state store
+                let epoch_prev = match &msg {
+                    Message::Barrier(barrier) => barrier.epoch.prev,
+                    _ => {
+                        return Err(RwError::from(InternalError(
+                            "expected barrier when first calling next, got data chunk".to_string(),
+                        )))
+                    }
+                };
 
-                assert!(matches!(msg, Message::Barrier(_)));
+                let connector_type = match self.source_desc.source.as_ref() {
+                    SourceImpl::Connector(source) => source.config.get_connector_type()?,
+                    _ => {
+                        return Err(RwError::from(InternalError(
+                            "expected connector source for SourceExecutor, got table source"
+                                .to_string(),
+                        )));
+                    }
+                };
+
+                let states = filter_prev_states(
+                    &self.state_store,
+                    &self.stream_source_splits,
+                    epoch_prev,
+                    connector_type,
+                )
+                .await?;
+                trace!(
+                    "source executor {:?} assigned split {:?}",
+                    self.source_id,
+                    states
+                );
 
                 let reader = self
                     .source_desc
@@ -296,9 +357,7 @@ impl Executor for SourceExecutor {
                         match self.source_desc.source.as_ref() {
                             SourceImpl::TableV2(_) => SourceReaderContext::None(()),
                             SourceImpl::Connector(_c) => {
-                                SourceReaderContext::ConnectorReaderContext(
-                                    self.stream_source_splits.clone(),
-                                )
+                                SourceReaderContext::ConnectorReaderContext(states)
                             }
                         },
                         self.column_ids.clone(),
@@ -364,7 +423,7 @@ impl Executor for SourceExecutor {
     }
 }
 
-impl Debug for SourceExecutor {
+impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SourceExecutor")
             .field("source_id", &self.source_id)
