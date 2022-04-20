@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -38,7 +39,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv};
 use crate::model::BarrierManagerState;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -211,17 +212,17 @@ where
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = self.env.epoch_generator().generate().into_inner();
+            let new_epoch = Epoch::now().0;
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
             let (new_epoch, actors_to_finish, finished_create_mviews) =
                 self.recovery(state.prev_epoch, None).await;
-            unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+            unfinished.add(new_epoch.0, actors_to_finish, vec![]);
             for finished in finished_create_mviews {
                 unfinished.finish_actors(finished.epoch, once(finished.actor_id));
             }
-            state.prev_epoch = new_epoch.into_inner();
+            state.prev_epoch = new_epoch.0;
             state.update(self.env.meta_store()).await.unwrap();
         }
 
@@ -241,7 +242,7 @@ where
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
-            let new_epoch = self.env.epoch_generator().generate().into_inner();
+            let new_epoch = Epoch::now().0;
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
@@ -277,12 +278,12 @@ where
                         let (new_epoch, actors_to_finish, finished_create_mviews) =
                             self.recovery(state.prev_epoch, Some(command)).await;
                         unfinished = UnfinishedNotifiers::default();
-                        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+                        unfinished.add(new_epoch.0, actors_to_finish, vec![]);
                         for finished in finished_create_mviews {
                             unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                         }
 
-                        state.prev_epoch = new_epoch.into_inner();
+                        state.prev_epoch = new_epoch.0;
                     } else {
                         panic!("failed to execute barrier: {:?}", e);
                     }

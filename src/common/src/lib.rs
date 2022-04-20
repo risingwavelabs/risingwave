@@ -34,6 +34,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 
+extern crate core;
+
 #[macro_use]
 pub mod error;
 #[macro_use]

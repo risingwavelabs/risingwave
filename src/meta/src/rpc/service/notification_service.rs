@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::tonic_err;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -97,7 +98,7 @@ where
                     status: None,
                     operation: Operation::Snapshot as i32,
                     info: Some(Info::FeSnapshot(meta_snapshot)),
-                    version: self.env.epoch_generator().generate().into_inner(),
+                    version: Epoch::now().0,
                 }))
                 .unwrap();
                 self.env

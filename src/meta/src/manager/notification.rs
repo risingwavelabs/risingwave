@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
@@ -24,7 +25,6 @@ use tokio::sync::Mutex;
 use tokio::time;
 use tonic::Status;
 
-use super::{Epoch, EpochGeneratorRef};
 use crate::cluster::WorkerKey;
 
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
@@ -48,10 +48,10 @@ pub struct NotificationManager {
 pub type NotificationManagerRef = Arc<NotificationManager>;
 
 impl NotificationManager {
-    pub fn new(epoch_generator: EpochGeneratorRef) -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
-            core: Mutex::new(NotificationManagerCore::new(rx, epoch_generator)),
+            core: Mutex::new(NotificationManagerCore::new(rx)),
             tx,
         }
     }
@@ -115,6 +115,12 @@ impl NotificationManager {
     }
 }
 
+impl Default for NotificationManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 struct NotificationManagerCore {
     /// The notification sender to frontends.
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
@@ -125,23 +131,20 @@ struct NotificationManagerCore {
     /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
     /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
-    /// Use epoch as notification version.
-    epoch_generator: EpochGeneratorRef,
 }
 
 impl NotificationManagerCore {
-    fn new(rx: UnboundedReceiver<WorkerKey>, epoch_generator: EpochGeneratorRef) -> Self {
+    fn new(rx: UnboundedReceiver<WorkerKey>) -> Self {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             local_senders: vec![],
             rx,
-            epoch_generator,
         }
     }
 
     async fn notify_frontend(&mut self, operation: Operation, info: &Info) -> Epoch {
-        let epoch = self.epoch_generator.generate();
+        let epoch = Epoch::now();
         let mut keys = HashSet::new();
         for (worker_key, sender) in &self.frontend_senders {
             loop {
@@ -158,7 +161,7 @@ impl NotificationManagerCore {
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
-                    version: epoch.into_inner(),
+                    version: epoch.0,
                 }));
                 if result.is_ok() {
                     break;
@@ -172,7 +175,7 @@ impl NotificationManagerCore {
 
     /// Send a `SubscribeResponse` to backend.
     async fn notify_compute(&mut self, operation: Operation, info: &Info) -> Epoch {
-        let epoch = self.epoch_generator.generate();
+        let epoch = Epoch::now();
         let mut keys = HashSet::new();
         for (worker_key, sender) in &self.compute_senders {
             loop {
@@ -189,7 +192,7 @@ impl NotificationManagerCore {
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
-                    version: epoch.into_inner(),
+                    version: epoch.0,
                 }));
                 if result.is_ok() {
                     break;

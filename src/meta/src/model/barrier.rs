@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 
-use crate::manager::INVALID_EPOCH;
 use crate::storage;
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
