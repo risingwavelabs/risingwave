@@ -98,9 +98,9 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        // If `select_item` have index, get the column_desc from `context.columns` and get
-        // `field_desc` if this is a Field `FunctionCall` type.
-        // If not, use `alias` and `data_type` to form field.
+        // Get indexs from `select_item` have index and get the column_desc according to it to form
+        // field. If `select_item` not have indexs, use `alias` and `data_type` to form
+        // field.
         let fields = select_items
             .iter()
             .zip_eq(aliases.iter())
@@ -114,6 +114,7 @@ impl Binder {
                         )?;
                         let mut field: Field = (&desc).into();
                         field.name = name;
+                        field.data_type = s.return_type();
                         Ok(field)
                     }
                     None => Ok(Field::with_name(s.return_type(), name)),
@@ -356,8 +357,8 @@ impl Binder {
             .unzip()
     }
 
-    pub fn get_desc(indexs: &[usize], column_desc: ColumnDesc) -> Result<ColumnDesc> {
-        let mut column_desc = column_desc;
+    /// Get `field_desc` according to the indexs path.
+    pub fn get_desc(indexs: &[usize], mut column_desc: ColumnDesc) -> Result<ColumnDesc> {
         for i in indexs {
             match column_desc.field_descs.get(*i) {
                 None => {

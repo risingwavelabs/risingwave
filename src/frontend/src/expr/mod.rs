@@ -55,6 +55,9 @@ pub trait Expr: Into<ExprImpl> {
     fn to_protobuf(&self) -> ExprNode;
 
     /// Get the indexs of expr to find `column_desc`
+    /// For atomic `column_desc` will only return a single usize,
+    /// and for nested `column_desc` will return a list of usize.
+    /// Only `InputRef`, `FunctionCall` and `AggCall` have indexs.
     fn get_indexs(&self) -> Option<Vec<usize>>;
 }
 

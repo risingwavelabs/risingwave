@@ -187,6 +187,10 @@ impl Expr for FunctionCall {
         }
     }
 
+    /// If `func_type` is `Field` which means this is a nested column,
+    /// so concat the index of each inputs.
+    /// The first of inputs must be `InputRef` and following must be `Literal` which contains i32
+    /// value.
     fn get_indexs(&self) -> Option<Vec<usize>> {
         if ExprType::Field == self.func_type {
             if let ExprImpl::InputRef(input) = &self.inputs[0] {
