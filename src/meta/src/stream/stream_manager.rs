@@ -25,7 +25,7 @@ use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::StreamSourceState;
+use risingwave_pb::stream_plan::{ActorMapping, DispatcherType, StreamSourceState};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, WorkerId};
+use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
@@ -54,6 +54,8 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Memo for assigning upstream actors to parallelized chain node.
     pub chain_upstream_assignment: HashMap<FragmentId, Vec<ActorId>>,
+    /// Consistent hash mapping, used in hash dispatcher.
+    pub hash_mapping: Vec<ParallelUnitId>,
 
     /// TODO: remove this when we deprecate Java frontend.
     pub is_legacy_frontend: bool,
@@ -130,11 +132,66 @@ where
         let mut locations = ScheduledLocations::new();
         locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
-        for fragment in table_fragments.fragments() {
+        let topological_order = table_fragments.generate_topological_order();
+
+        // Schedule each fragment(actors) to nodes.
+        for fragment_id in topological_order {
+            let fragment = table_fragments.fragments.get(&fragment_id).unwrap();
             self.scheduler
                 .schedule(fragment.clone(), &mut locations)
                 .await?;
         }
+
+        // Fill hash dispatcher's mapping with scheduled locations.
+        table_fragments
+            .fragments
+            .iter_mut()
+            .for_each(|(_, fragment)| {
+                fragment.actors.iter_mut().for_each(|actor| {
+                    actor.dispatcher.iter_mut().for_each(|dispatcher| {
+                        if dispatcher.get_type().unwrap() == DispatcherType::Hash {
+                            let downstream_actors = &dispatcher.downstream_actor_id;
+
+                            // Theoretically, a hash dispatcher should have
+                            // `self.hash_parallel_count` as the number
+                            // of its downstream actors. However,
+                            // since the frontend optimizer is still WIP, there
+                            // exists some unoptimized situation where a hash
+                            // dispatcher has ONLY ONE downstream actor, which
+                            // makes it behave like a simple dispatcher. As an
+                            // expedient, we specially compute the consistent hash mapping here. The
+                            // `if` branch could be removed after the optimizer
+                            // has been fully implemented.
+                            let streaming_hash_mapping = if downstream_actors.len() == 1 {
+                                vec![downstream_actors[0]; ctx.hash_mapping.len()]
+                            } else {
+                                // extract "parallel unit -> downstream actor" mapping from
+                                // locations.
+                                let parallel_unit_actor_map = downstream_actors
+                                    .iter()
+                                    .map(|actor_id| {
+                                        (
+                                            locations.actor_locations.get(actor_id).unwrap().id,
+                                            *actor_id,
+                                        )
+                                    })
+                                    .collect::<HashMap<_, _>>();
+
+                                ctx.hash_mapping
+                                    .iter()
+                                    .map(|parallel_unit_id| {
+                                        parallel_unit_actor_map[parallel_unit_id]
+                                    })
+                                    .collect_vec()
+                            };
+
+                            dispatcher.hash_mapping = Some(ActorMapping {
+                                hash_mapping: streaming_hash_mapping,
+                            });
+                        }
+                    });
+                })
+            });
 
         let actor_info = locations
             .actor_locations

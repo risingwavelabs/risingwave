@@ -55,7 +55,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
 
       - name: Download sqllogictest
         run: |

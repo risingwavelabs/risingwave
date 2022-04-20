@@ -25,6 +25,7 @@ pub mod aggregation;
 mod batch_query;
 #[allow(dead_code)]
 mod chain;
+mod debug;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
@@ -46,6 +47,7 @@ mod union;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
+pub use debug::DebugExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
@@ -70,7 +72,7 @@ pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 const PROCESSING_WINDOW_SIZE: usize = 1024;
 
 /// Static information of an executor.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ExecutorInfo {
     /// See [`Executor::schema`].
     pub schema: Schema,

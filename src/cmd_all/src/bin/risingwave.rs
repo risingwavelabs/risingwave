@@ -20,20 +20,20 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[cfg(feature = "all-in-one")]
+use std::collections::HashMap;
+use std::env;
+use std::future::Future;
+use std::pin::Pin;
+
+use clap::StructOpt;
+use tokio::signal;
+
+type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Box<dyn Future<Output = ()>>>>;
+
 #[cfg_attr(coverage, no_coverage)]
 #[tokio::main]
 async fn main() {
-    use std::collections::HashMap;
-    use std::env;
-    use std::future::Future;
-    use std::pin::Pin;
-
-    use clap::StructOpt;
-    use tokio::signal;
-
-    let mut fns: HashMap<&str, Box<dyn Fn(Vec<String>) -> Box<dyn Future<Output = ()>>>> =
-        HashMap::new();
+    let mut fns: RwFns = HashMap::new();
 
     // compute node configuration
     for fn_name in ["compute", "compute-node", "compute_node"] {
@@ -57,7 +57,7 @@ async fn main() {
     // meta node configuration
     for fn_name in ["meta", "meta-node", "meta_node"] {
         fns.insert(
-            &fn_name,
+            fn_name,
             Box::new(|args: Vec<String>| {
                 Box::new(async move {
                     eprintln!("launching meta node");
@@ -82,7 +82,7 @@ async fn main() {
         "frontend",
     ] {
         fns.insert(
-            &fn_name,
+            fn_name,
             Box::new(|args: Vec<String>| {
                 Box::new(async move {
                     eprintln!("launching frontend node");
@@ -167,13 +167,13 @@ async fn main() {
 
         if let Ok(target) = env::var("RW_NODE") {
             // RW_NODE=meta ./risingwave <args>
-            return (target, env::args().collect());
+            (target, env::args().collect())
         } else {
             // ./meta-node <args>
-            let x = env::args().nth(0).expect("cannot find argv[0]").to_string();
-            let x = x.rsplit('/').nth(0).expect("cannot find binary name");
+            let x = env::args().next().expect("cannot find argv[0]");
+            let x = x.rsplit('/').next().expect("cannot find binary name");
             let target = x.to_string();
-            return (target, env::args().collect());
+            (target, env::args().collect())
         }
     }
 
@@ -188,10 +188,4 @@ async fn main() {
             panic!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
         }
     }
-}
-
-#[cfg(not(feature = "all-in-one"))]
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    panic!("please enable `all-in-one` flag when cargo build to use all-in-one binary");
 }

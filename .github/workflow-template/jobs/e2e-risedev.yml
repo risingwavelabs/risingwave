@@ -37,7 +37,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
 
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
@@ -102,6 +102,15 @@ jobs:
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
+      - name: e2e test, streaming, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill

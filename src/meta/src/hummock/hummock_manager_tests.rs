@@ -17,9 +17,10 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_EPOCH, INVALID_VERSION_ID,
+    HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::{
