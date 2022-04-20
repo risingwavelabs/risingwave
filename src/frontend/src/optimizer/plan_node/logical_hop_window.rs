@@ -44,6 +44,7 @@ impl LogicalHopWindow {
         let ctx = input.ctx();
         let schema = input
             .schema()
+            .clone()
             .into_fields()
             .into_iter()
             .chain([
@@ -79,7 +80,12 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.time_col, self.window_slide, self.window_size)
+        Self::new(
+            input,
+            self.time_col.clone(),
+            self.window_slide,
+            self.window_size,
+        )
     }
 
     #[must_use]
@@ -90,7 +96,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
     ) -> (Self, ColIndexMapping) {
         let mut time_col = self.time_col.clone();
         time_col.index = input_col_change.map(time_col.index);
-        let new_hop = Self::new(input, time_col, self.window_slide, self.window_size);
+        let new_hop = Self::new(input.clone(), time_col, self.window_slide, self.window_size);
 
         let (mut mapping, new_input_col_num) = input_col_change.into_parts();
         assert_eq!(new_input_col_num, input.schema().len());
