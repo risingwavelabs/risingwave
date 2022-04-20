@@ -457,7 +457,7 @@ impl LocalStreamManagerCore {
         fragment_id: u32,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
-        input_pos: usize,
+        _input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
     ) -> Result<BoxedExecutor> {
@@ -525,6 +525,7 @@ impl LocalStreamManagerCore {
         })
     }
 
+    #[allow(dead_code)]
     fn wrap_executor_for_debug(
         mut executor: Box<dyn Executor>,
         actor_id: ActorId,

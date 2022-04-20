@@ -23,9 +23,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message, PkIndicesRef, StreamExecutorResult};
-use crate::executor::{
-    AlignedMessage, BarrierAligner, Executor as ExecutorV1, ExecutorBuilder, PkIndices,
-};
+use crate::executor::{AlignedMessage, BarrierAligner, ExecutorBuilder, PkIndices};
 use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};

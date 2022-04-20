@@ -459,6 +459,7 @@ pub fn pk_input_array_refs<'a>(
 }
 
 pub trait ExecutorBuilder {
+    /// For compatibility.
     fn new_boxed_executor_v1(
         _executor_params: ExecutorParams,
         _node: &stream_plan::StreamNode,
@@ -468,6 +469,8 @@ pub trait ExecutorBuilder {
         unimplemented!()
     }
 
+    /// Create an executor. May directly override this function to create an executor v2, or it will
+    /// create an [`ExecutorV1`] and wrap it to v2.
     fn new_boxed_executor(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,

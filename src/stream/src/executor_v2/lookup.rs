@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{Executor as ExecutorV1, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
 use crate::task::{unique_operator_id, ExecutorParams, LocalStreamManagerCore};
 
