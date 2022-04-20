@@ -28,7 +28,8 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
-use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
+use super::{Barrier, Message, Mutation, Result, StreamChunk, StreamConsumer};
+use crate::executor_v2::BoxedExecutor;
 use crate::task::{ActorId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
@@ -113,56 +114,68 @@ impl Output for RemoteOutput {
     }
 }
 
+pub fn new_output(
+    context: &SharedContext,
+    addr: HostAddr,
+    actor_id: ActorId,
+    down_id: ActorId,
+) -> Result<Box<dyn Output>> {
+    let tx = context.take_sender(&(actor_id, down_id))?;
+    if is_local_address(&addr, &context.addr) {
+        // if this is a local downstream actor
+        Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
+    } else {
+        Ok(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
+    }
+}
+
 /// `DispatchExecutor` consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
-    input: Box<dyn Executor>,
-    inner: Vec<DispatcherImpl>,
-    actor_id: u32,
-    context: Arc<SharedContext>,
-}
+    // input: Box<dyn Executor>,
+    input: BoxedExecutor,
 
-pub fn new_output(
-    context: &SharedContext,
-    addr: HostAddr,
-    actor_id: u32,
-    down_id: &u32,
-) -> Result<Box<dyn Output>> {
-    let tx = context.take_sender(&(actor_id, *down_id))?;
-    if is_local_address(&addr, &context.addr) {
-        // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
-    } else {
-        Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
-    }
+    inner: DispatchExecutorInner,
 }
 
 impl std::fmt::Debug for DispatchExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DispatchExecutor")
-            .field("input", &self.input)
+            .field("input", &self.input.info())
             .field("inner", &self.inner)
-            .field("actor_id", &self.actor_id)
             .finish()
     }
 }
 
+#[derive(Debug)]
+struct DispatchExecutorInner {
+    inner: Vec<DispatcherImpl>,
+
+    actor_id: u32,
+
+    context: Arc<SharedContext>,
+}
+
 impl DispatchExecutor {
     pub fn new(
-        input: Box<dyn Executor>,
+        input: BoxedExecutor,
         inner: Vec<DispatcherImpl>,
         actor_id: u32,
         context: Arc<SharedContext>,
     ) -> Self {
         Self {
             input,
-            inner,
-            actor_id,
-            context,
+            inner: DispatchExecutorInner {
+                inner,
+                actor_id,
+                context,
+            },
         }
     }
+}
 
+impl DispatchExecutorInner {
     fn single_inner_mut(&mut self) -> &mut DispatcherImpl {
         assert_eq!(
             self.inner.len(),
@@ -215,8 +228,8 @@ impl DispatchExecutor {
                         new_outputs.push(new_output(
                             &self.context,
                             downstream_addr,
-                            actor_id,
-                            &down_id,
+                            self.actor_id,
+                            down_id,
                         )?);
                     }
                     self.single_inner_mut().set_outputs(new_outputs)
@@ -232,7 +245,7 @@ impl DispatchExecutor {
                             &self.context,
                             downstream_addr,
                             self.actor_id,
-                            &down_id,
+                            down_id,
                         )?);
                     }
                     self.single_inner_mut().add_outputs(outputs_to_add);
@@ -263,12 +276,13 @@ impl StreamConsumer for DispatchExecutor {
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         #[try_stream]
         async move {
-            loop {
-                let msg = self.input.next().await?;
+            let input = self.input.execute();
+
+            #[for_await]
+            for msg in input {
+                let msg: Message = msg?;
                 let barrier = msg.as_barrier().cloned();
-
-                self.dispatch(msg).await?;
-
+                self.inner.dispatch(msg).await?;
                 if let Some(barrier) = barrier {
                     yield barrier;
                 }
@@ -703,7 +717,10 @@ impl Dispatcher for SimpleDispatcher {
 
 #[cfg(test)]
 mod sender_consumer {
+    use crate::executor::Executor;
+
     use super::*;
+
     /// `SenderConsumer` consumes data from input executor and send it into a channel.
     #[derive(Debug)]
     pub struct SenderConsumer {
@@ -760,7 +777,6 @@ mod tests {
 
     use super::*;
     use crate::executor_v2::receiver::ReceiverExecutor;
-    use crate::executor_v2::Executor;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -925,14 +941,14 @@ mod tests {
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
-        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
+        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
         let executor = Box::new(DispatchExecutor::new(
-            Box::new(input),
+            input,
             vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
             actor_id,
             ctx.clone(),

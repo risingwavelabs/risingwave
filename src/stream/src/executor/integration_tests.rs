@@ -133,9 +133,9 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
+    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
     let dispatcher = DispatchExecutor::new(
-        Box::new(receiver_op),
+        receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
             inputs,
         ))],

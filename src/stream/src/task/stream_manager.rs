@@ -39,7 +39,7 @@ use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -108,20 +108,20 @@ pub struct ExecutorParams {
 
     /// Id of the actor.
     pub actor_id: ActorId,
+
     pub executor_stats: Arc<StreamingMetrics>,
 }
 
 impl Debug for ExecutorParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecutorParams")
-            .field("env", &"...")
             .field("pk_indices", &self.pk_indices)
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
-            .field("input", &self.input)
+            .field("input", &self.input.len())
             .field("actor_id", &self.actor_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -391,7 +391,7 @@ impl LocalStreamManagerCore {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
-        input: Box<dyn Executor>,
+        input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
     ) -> Result<impl StreamConsumer> {
@@ -403,7 +403,7 @@ impl LocalStreamManagerCore {
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, down_id)
+                    new_output(&self.context, downstream_addr, actor_id, *down_id)
                 })
                 .collect::<Result<Vec<_>>>()?;
             use stream_plan::DispatcherType::*;
@@ -653,8 +653,9 @@ impl LocalStreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor =
-                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
+            let executor = self
+                .create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?
+                .v2();
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());
