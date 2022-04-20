@@ -98,7 +98,7 @@ jobs:
       # if the degradation is reasonable or to be fixed soon.
 
       - name: e2e test, streaming, Rust frontend, 3 node
-        timeout-minutes: 5
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
@@ -107,7 +107,7 @@ jobs:
         run: ~/cargo-make/makers ci-kill
 
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
-        timeout-minutes: 5
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
@@ -117,7 +117,7 @@ jobs:
         run: ~/cargo-make/makers ci-kill
 
       - name: e2e test streaming 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
