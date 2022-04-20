@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::{DataChunk, Op, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::ordered::*;
@@ -67,13 +67,6 @@ impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
 
 fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
-}
-
-pub enum Op {
-    Insert,
-    Delete,
-    UpdateDelete,
-    UpdateInsert,
 }
 
 impl<S: StateStore> CellBasedTable<S> {
@@ -218,10 +211,9 @@ impl<S: StateStore> CellBasedTable<S> {
                         .serialize(&arrange_key_buf, cell_values, &self.column_ids)
                         .map_err(err)?;
                     for (key, value) in bytes {
-                        match value {
-                            Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                            None => local.delete(key),
-                        }
+                        if let Some(val) = value {
+                            local.put(key, StorageValue::new_default_put(val))
+                        };
                     }
                 }
                 _ => {}

@@ -74,17 +74,18 @@ impl MemTable {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(value));
             }
-            Entry::Occupied(mut e) => {
-                if e.get().is_delete() {
+            Entry::Occupied(mut e) => match e.get() {
+                RowOp::Delete(_) => {
                     e.insert(RowOp::Update(value));
-                } else {
+                }
+                _ => {
                     panic!(
                         "invalid flush status: double insert {:?} -> {:?}",
                         e.key(),
                         value
                     );
                 }
-            }
+            },
         }
         Ok(())
     }
@@ -99,7 +100,7 @@ impl MemTable {
                 if e.get().is_insert() {
                     e.remove();
                 } else if e.get().is_update() {
-                    e.insert(RowOp::Delete(old_value));
+                    e.insert(RowOp::Update(old_value));
                 } else {
                     panic!(
                         "invalid flush status: double delete {:?} -> {:?}",
@@ -114,10 +115,6 @@ impl MemTable {
 
     pub fn into_parts(self) -> BTreeMap<Row, RowOp> {
         self.buffer
-    }
-
-    pub fn update(&mut self, _pk: Row, _old_value: Row, _new_value: Row) -> StorageResult<()> {
-        Ok(())
     }
 
     pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter<'_>> {

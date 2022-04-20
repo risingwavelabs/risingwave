@@ -14,11 +14,11 @@
 #![allow(dead_code)]
 use std::sync::Arc;
 
-use risingwave_common::array::Row;
+use risingwave_common::array::{Op, Row};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::sort_util::OrderType;
 
-use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter, Op};
+use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::StorageResult;
 use crate::monitor::StateStoreMetrics;
@@ -82,7 +82,7 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mut rows = Vec::new();
-        let mem_table = self.mem_table.clone().into_parts();
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         for (pk, row_op) in mem_table {
             match row_op {
                 RowOp::Insert(row) => rows.push((pk, Some(row), Op::Insert)),
