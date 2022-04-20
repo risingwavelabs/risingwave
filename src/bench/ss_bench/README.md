@@ -66,19 +66,50 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
   - Size (KB) of a block in an SSTable
   - Default: 64
 
+- `--block-cache-capacity-mb`
+  
+  - Capacity of block cache
+  - Default: 256
+
+- `--meta-cache-capacity`
+  
+  - Capacity of meta cache
+  - Default: 64
+
+- `--shared-buffer-threshold-mb`
+  
+  - Threshold (MB) of shared buffer
+  - Default: 192
+
+- `--shared-buffer-capacity-mb`
+  
+  - Capacity (MB) of shared buffer
+  - Default: 256
+
+- `--shared-buffers-sync-parallelism`
+  
+  - Sync Parallelism of shared buffers
+  - Default: 2
+
 - `--bloom-false-positive`
   
   - Bloom Filter false positive rate
   - Default: 0.1
 
-- `--checksum-algo`
+- `--compact-level-after-write`
   
-  - Checksum algorithm
+  - 0 represent do nothing because all files will be synced to L0
+  - Default: 0
+
+- `--async-checkpoint-disabled`
   
-  - Options:
-    
-    - `crc32c`: default
-    - `xxhash`
+  - Disable async chekcpoint
+  - Default: false
+
+- `--write-conflict-detection-enabled`
+  
+  - Enable write conflict detection
+  - Default: false
 
 ## Operations
 
