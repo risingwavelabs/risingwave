@@ -717,9 +717,8 @@ impl Dispatcher for SimpleDispatcher {
 
 #[cfg(test)]
 mod sender_consumer {
-    use crate::executor::Executor;
-
     use super::*;
+    use crate::executor::Executor;
 
     /// `SenderConsumer` consumes data from input executor and send it into a channel.
     #[derive(Debug)]

@@ -25,18 +25,20 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::executor_v2::{BatchQueryExecutor as BatchQueryExecutorV2, Executor as ExecutorV2};
+use crate::executor_v2::{
+    BatchQueryExecutor as BatchQueryExecutorV2, BoxedExecutor, Executor as ExecutorV2,
+};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct BatchQueryExecutorBuilder;
 
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
-    fn new_boxed_executor_v1(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
         let table_id = TableId::from(&node.table_ref_id);
         let column_descs = node
@@ -58,14 +60,14 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         let parallel_info = node.get_parallel_info()?;
 
-        let v2 = Box::new(BatchQueryExecutorV2::new_from_v1(
+        let v2 = BatchQueryExecutorV2::new_from_v1(
             table,
             params.pk_indices,
             params.op_info,
             key_indices,
             parallel_info.clone(),
-        ));
+        );
 
-        Ok(Box::new(v2.v1_uninited()))
+        Ok(v2.boxed())
     }
 }

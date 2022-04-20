@@ -156,15 +156,13 @@ impl UnionExecutor {
 pub struct UnionExecutorBuilder {}
 
 impl ExecutorBuilder for UnionExecutorBuilder {
-    fn new_boxed_executor_v1(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<Box<dyn ExecutorV1>> {
+    ) -> risingwave_common::error::Result<BoxedExecutor> {
         try_match_expand!(node.get_node().unwrap(), Node::UnionNode)?;
-        Ok(Box::new(
-            Box::new(UnionExecutor::new(params.pk_indices, params.input)).v1(),
-        ))
+        Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
     }
 }

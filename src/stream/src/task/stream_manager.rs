@@ -562,31 +562,16 @@ impl LocalStreamManagerCore {
         &mut self,
         params: ExecutorParams,
         node: &stream_plan::MergeNode,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let upstreams = node.get_upstream_actor_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
         let mut rxs = self.get_receive_message(params.actor_id, upstreams)?;
 
         if upstreams.len() == 1 {
-            Ok(Box::new(
-                Box::new(ReceiverExecutor::new(
-                    schema,
-                    params.pk_indices,
-                    rxs.remove(0),
-                ))
-                .v1(),
-            ))
+            Ok(ReceiverExecutor::new(schema, params.pk_indices, rxs.remove(0)).boxed())
         } else {
-            Ok(Box::new(
-                Box::new(MergeExecutorV2::new(
-                    schema,
-                    params.pk_indices,
-                    params.actor_id,
-                    rxs,
-                ))
-                .v1(),
-            ))
+            Ok(MergeExecutorV2::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
         }
     }
 

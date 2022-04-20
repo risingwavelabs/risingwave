@@ -66,12 +66,12 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 pub struct ArrangeExecutorBuilder;
 
 impl ExecutorBuilder for ArrangeExecutorBuilder {
-    fn new_boxed_executor_v1(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
 
         let keyspace = Keyspace::shared_executor_root(store, params.operator_id);
@@ -96,15 +96,15 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|(idx, _)| ColumnId::from(idx as i32))
             .collect();
 
-        let v2 = Box::new(MaterializeExecutorV2::new_from_v1(
+        let v2 = MaterializeExecutorV2::new_from_v1(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
             params.op_info,
-        ));
+        );
 
-        Ok(Box::new(v2.v1()))
+        Ok(v2.boxed())
     }
 }

@@ -465,7 +465,7 @@ pub trait ExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
-        unimplemented!("directly build a v2 executor instead")
+        unimplemented!()
     }
 
     fn new_boxed_executor(

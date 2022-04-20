@@ -27,7 +27,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::Executor;
 use crate::executor::{ExecutorBuilder, PkIndices};
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{Executor as ExecutorV2, HashAggExecutor, BoxedExecutor};
+use crate::executor_v2::{BoxedExecutor, Executor as ExecutorV2, HashAggExecutor};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
@@ -44,33 +44,31 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
     type Input = HashAggExecutorDispatcherArgs<S>;
-    type Output = Result<Box<dyn Executor>>;
+    type Output = Result<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(Box::new(
-            Box::new(HashAggExecutor::<K, S>::new_from_v1(
-                args.input,
-                args.agg_calls,
-                args.key_indices,
-                args.keyspace,
-                args.pk_indices,
-                args.executor_id,
-                args.op_info,
-            )?)
-            .v1(),
-        ))
+        Ok(HashAggExecutor::<K, S>::new_from_v1(
+            args.input,
+            args.agg_calls,
+            args.key_indices,
+            args.keyspace,
+            args.pk_indices,
+            args.executor_id,
+            args.op_info,
+        )?
+        .boxed())
     }
 }
 
 pub struct HashAggExecutorBuilder;
 
 impl ExecutorBuilder for HashAggExecutorBuilder {
-    fn new_boxed_executor_v1(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
         let key_indices = node
             .get_distribution_keys()
