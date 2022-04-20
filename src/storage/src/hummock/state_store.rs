@@ -58,7 +58,7 @@ impl HummockStorage {
 
         // Filter out tables that overlap with given `key_range`
         for level in &levels {
-            let table_ids = level
+            let table_infos = level
                 .table_infos
                 .iter()
                 .filter(|info| {
@@ -67,16 +67,16 @@ impl HummockStorage {
                     let table_end = user_key(table_range.right.as_slice());
                     range_overlap(&key_range, table_start, table_end, reversed)
                 })
-                .map(|info| info.id)
+                .map(|info| info.clone())
                 .collect_vec();
-            if table_ids.is_empty() {
+            if table_infos.is_empty() {
                 continue;
             }
 
-            let tables = self.sstable_store.sstables(&table_ids).await?;
             match level.level_type() {
                 LevelType::Overlapping => {
-                    for table in tables.into_iter().rev() {
+                    for table in table_infos.into_iter().rev() {
+                        let table = self.sstable_store.sstable(table.id).await?;
                         if reversed {
                             overlapped_backward_sstable_iters.push(Box::new(
                                 ReverseSSTableIterator::new(table, self.sstable_store()),
@@ -95,13 +95,13 @@ impl HummockStorage {
                     if reversed {
                         overlapped_backward_sstable_iters.push(
                             Box::new(ReverseConcatIterator::new(
-                                tables.into_iter().rev().collect(),
+                                table_infos.into_iter().rev().collect(),
                                 self.sstable_store(),
                             )) as BoxedBackwardHummockIterator,
                         );
                     } else {
                         overlapped_forward_sstable_iters.push(Box::new(ConcatIterator::new(
-                            tables,
+                            table_infos,
                             self.sstable_store(),
                         ))
                             as BoxedForwardHummockIterator);

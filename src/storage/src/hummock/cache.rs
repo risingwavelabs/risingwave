@@ -398,7 +398,6 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
 }
 
 pub struct LruCache<K: PartialEq + Default, T> {
-    num_shard_bits: usize,
     shards: Vec<Mutex<LruCacheShard<K, T>>>,
 }
 
@@ -420,10 +419,7 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
                 strict_capacity_limit,
             )));
         }
-        Self {
-            num_shard_bits,
-            shards,
-        }
+        Self { shards }
     }
 
     pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CachableEntry<K, T>> {
@@ -492,11 +488,7 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
     }
 
     fn shard(&self, hash: u64) -> usize {
-        if self.num_shard_bits > 0 {
-            (hash >> (64 - self.num_shard_bits)) as usize
-        } else {
-            0
-        }
+        hash as usize % self.shards.len()
     }
 }
 
@@ -571,8 +563,8 @@ mod tests {
     fn test_cache_shard() {
         let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16, false));
         assert_eq!(cache.shard(0), 0);
-        assert_eq!(cache.shard(1), 0);
-        assert_eq!(cache.shard(10), 0);
+        assert_eq!(cache.shard(1), 1);
+        assert_eq!(cache.shard(10), 2);
     }
 
     #[test]

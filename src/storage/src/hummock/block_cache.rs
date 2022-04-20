@@ -25,6 +25,10 @@ use super::cache::{CachableEntry, LruCache};
 use super::{Block, HummockError, HummockResult};
 pub type BlockCacheEntry = CachableEntry<(u64, u64), Box<Block>>;
 
+const CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
+const DEFAULT_OBJECT_POOL_SIZE: usize = 1024; // we only need a small object pool because when the cache reach the limit of capacity, it will
+                                              // always release some object after insert a new block.
+
 enum BlockEntry {
     Cache(BlockCacheEntry),
     Owned(Box<Block>),
@@ -63,10 +67,6 @@ unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
 type RequestQueue = Vec<Sender<BlockCacheEntry>>;
-
-const CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const DEFAULT_OBJECT_POOL_SIZE: usize = 1024; // we only need a small object pool because when the cache reach the limit of capacity, it will
-                                              // always release some object after insert a new block.
 
 pub struct BlockCache {
     inner: Arc<LruCache<(u64, u64), Box<Block>>>,

@@ -34,6 +34,15 @@ impl From<&SstableInfo> for SSTableStat {
     }
 }
 
+impl Into<SstableInfo> for SSTableStat {
+    fn into(self) -> SstableInfo {
+        SstableInfo {
+            key_range: Some(self.key_range.into()),
+            id: self.table_id,
+        }
+    }
+}
+
 impl From<&SSTableStat> for risingwave_pb::hummock::SstableStat {
     fn from(stat: &SSTableStat) -> Self {
         risingwave_pb::hummock::SstableStat {

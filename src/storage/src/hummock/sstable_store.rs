@@ -16,14 +16,15 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use moka::future::Cache;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
-use crate::hummock::{BlockHolder, HummockError, HummockResult};
+use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
-const DEFAULT_META_CACHE_INIT_CAPACITY: usize = 1024;
+const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
+const DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY: usize = 16;
+pub type TableHolder = CachableEntry<u64, Box<Sstable>>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 pub enum CachePolicy {
@@ -36,7 +37,7 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    meta_cache: Cache<u64, Arc<Sstable>>,
+    meta_cache: Arc<LruCache<u64, Box<Sstable>>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
@@ -49,12 +50,12 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache: Cache<u64, Arc<Sstable>> = Cache::builder()
-            .weigher(|_k, v: &Arc<Sstable>| v.encoded_size() as u32)
-            .initial_capacity(DEFAULT_META_CACHE_INIT_CAPACITY)
-            .max_capacity(meta_cache_capacity as u64)
-            .build();
-
+        let meta_cache = Arc::new(LruCache::new(
+            DEFAULT_META_CACHE_SHARD_BITS,
+            meta_cache_capacity,
+            DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY,
+            false,
+        ));
         Self {
             path,
             store,
@@ -101,6 +102,8 @@ impl SstableStore {
                 let block = Box::new(Block::decode(data.slice(offset..offset + len))?);
                 self.block_cache.insert(sst.id, block_idx as u64, block);
             }
+            self.meta_cache
+                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst.clone()));
         }
 
         Ok(len)
@@ -152,23 +155,23 @@ impl SstableStore {
         }
     }
 
-    pub async fn sstable(&self, sst_id: u64) -> HummockResult<Arc<Sstable>> {
-        let fetch = async move {
-            let path = self.get_sst_meta_path(sst_id);
-            let buf = self
-                .store
-                .read(&path, None)
-                .await
-                .map_err(HummockError::object_io_error)?;
-            let meta = SstableMeta::decode(&mut &buf[..])?;
-            let sst = Arc::new(Sstable { id: sst_id, meta });
-            Ok::<_, HummockError>(sst)
-        };
-
-        self.meta_cache
-            .try_get_with(sst_id, fetch)
+    pub async fn sstable(&self, sst_id: u64) -> HummockResult<TableHolder> {
+        if let Some(table) = self.meta_cache.lookup(sst_id, &sst_id) {
+            return Ok(table);
+        }
+        let path = self.get_sst_meta_path(sst_id);
+        let buf = self
+            .store
+            .read(&path, None)
             .await
-            .map_err(HummockError::other)
+            .map_err(HummockError::object_io_error)?;
+        let meta = SstableMeta::decode(&mut &buf[..])?;
+        let sst = Box::new(Sstable { id: sst_id, meta });
+        let handle = self
+            .meta_cache
+            .insert(sst_id, sst_id, sst.encoded_size(), sst)
+            .unwrap();
+        Ok(handle)
     }
 
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
@@ -183,7 +186,7 @@ impl SstableStore {
         self.store.clone()
     }
 
-    pub async fn sstables(&self, sst_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
+    pub async fn sstables(&self, sst_ids: &[u64]) -> HummockResult<Vec<TableHolder>> {
         let mut ssts = Vec::with_capacity(sst_ids.len());
         for sst_id in sst_ids {
             ssts.push(self.sstable(*sst_id).await?);

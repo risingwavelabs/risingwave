@@ -105,7 +105,7 @@ impl CompactStatus {
         };
 
         enum SearchResult {
-            Found(Vec<u64>, Vec<u64>, Vec<KeyRange>),
+            Found(Vec<SstableInfo>, Vec<SstableInfo>, Vec<KeyRange>),
             NotFound,
         }
 
@@ -126,34 +126,20 @@ impl CompactStatus {
                     let mut sst_idx = 0;
                     while sst_idx < l_n_len {
                         let mut next_sst_idx = sst_idx + 1;
-                        let SSTableStat {
-                            key_range: sst_key_range,
-                            table_id,
-                            ..
-                        } = &l_n[sst_idx];
-                        let mut select_level_inputs = vec![*table_id];
-                        let key_range;
-                        let mut tier_key_range;
+                        let sst_key_range = l_n[sst_idx].key_range.clone();
+                        let mut select_level_inputs: Vec<SstableInfo> =
+                            vec![l_n[sst_idx].clone().into()];
                         // Must ensure that there exists no SSTs in `select_level` which have
                         // overlapping user key with `select_level_inputs`
-                        if !is_select_level_leveling {
-                            tier_key_range = sst_key_range.clone();
+                        let key_range = if !is_select_level_leveling {
+                            let mut tier_key_range = sst_key_range.clone();
 
                             next_sst_idx = sst_idx;
-                            for (
-                                delta_idx,
-                                SSTableStat {
-                                    key_range: other_key_range,
-                                    table_id: other_table_id,
-                                    ..
-                                },
-                            ) in l_n[sst_idx + 1..].iter().enumerate()
-                            {
-                                if user_key(&other_key_range.left)
-                                    <= user_key(&tier_key_range.right)
+                            for (delta_idx, stat) in l_n[sst_idx + 1..].iter().enumerate() {
+                                if user_key(&stat.key_range.left) <= user_key(&tier_key_range.right)
                                 {
-                                    select_level_inputs.push(*other_table_id);
-                                    tier_key_range.full_key_extend(other_key_range);
+                                    tier_key_range.full_key_extend(&stat.key_range);
+                                    select_level_inputs.push(stat.clone().into());
                                 } else {
                                     next_sst_idx = sst_idx + 1 + delta_idx;
                                     break;
@@ -163,15 +149,15 @@ impl CompactStatus {
                                 next_sst_idx = l_n_len;
                             }
 
-                            key_range = &tier_key_range;
+                            tier_key_range
                         } else {
-                            key_range = sst_key_range;
-                        }
+                            sst_key_range
+                        };
 
                         polysst_candidates.push((
                             (sst_idx, next_sst_idx),
                             select_level_inputs,
-                            key_range.clone(),
+                            key_range,
                         ));
 
                         sst_idx = next_sst_idx;
@@ -251,7 +237,7 @@ impl CompactStatus {
                                         let mut overlap_idx = overlap_begin;
                                         while overlap_idx < overlap_end {
                                             l_n_suc[overlap_idx].compact_task = Some(next_task_id);
-                                            suc_table_ids.push(l_n_suc[overlap_idx].table_id);
+                                            suc_table_ids.push(l_n_suc[overlap_idx].clone().into());
                                             if overlap_idx > overlap_begin {
                                                 // TODO: We do not need to add splits every time. We
                                                 // can add every K SSTs.
@@ -285,18 +271,18 @@ impl CompactStatus {
                     SearchResult::Found(select_ln_ids, _, _) => {
                         let mut select_ln_iter = select_ln_ids.iter();
                         if let Some(first_id) = select_ln_iter.next() {
-                            let mut current_id = first_id;
+                            let mut current_id = first_id.id;
                             for SSTableStat {
                                 table_id,
                                 compact_task,
                                 ..
                             } in l_n
                             {
-                                if table_id == current_id {
+                                if *table_id == current_id {
                                     *compact_task = Some(next_task_id);
                                     match select_ln_iter.next() {
                                         Some(next_id) => {
-                                            current_id = next_id;
+                                            current_id = next_id.id;
                                         }
                                         None => break,
                                     }
@@ -311,60 +297,26 @@ impl CompactStatus {
         match found {
             SearchResult::Found(select_ln_ids, select_lnsuc_ids, splits) => {
                 self.next_compact_task_id += 1;
+                let level_type = if is_select_level_leveling {
+                    LevelType::Nonoverlapping as i32
+                } else {
+                    LevelType::Overlapping as i32
+                };
                 let compact_task = CompactTask {
                     input_ssts: vec![
                         LevelEntry {
                             level_idx: select_level,
-                            level: if is_select_level_leveling {
-                                Some(Level {
-                                    level_type: LevelType::Nonoverlapping as i32,
-                                    table_infos: select_ln_ids
-                                        .into_iter()
-                                        .map(|id| SstableInfo {
-                                            id,
-                                            // compact node will never use key_range in SstableInfo.
-                                            key_range: None,
-                                        })
-                                        .collect_vec(),
-                                })
-                            } else {
-                                Some(Level {
-                                    level_type: LevelType::Overlapping as i32,
-                                    table_infos: select_ln_ids
-                                        .into_iter()
-                                        .map(|id| SstableInfo {
-                                            id,
-                                            key_range: None,
-                                        })
-                                        .collect_vec(),
-                                })
-                            },
+                            level: Some(Level {
+                                level_type,
+                                table_infos: select_ln_ids,
+                            }),
                         },
                         LevelEntry {
                             level_idx: target_level,
-                            level: if is_target_level_leveling {
-                                Some(Level {
-                                    level_type: LevelType::Nonoverlapping as i32,
-                                    table_infos: select_lnsuc_ids
-                                        .into_iter()
-                                        .map(|id| SstableInfo {
-                                            id,
-                                            key_range: None,
-                                        })
-                                        .collect_vec(),
-                                })
-                            } else {
-                                Some(Level {
-                                    level_type: LevelType::Overlapping as i32,
-                                    table_infos: select_lnsuc_ids
-                                        .into_iter()
-                                        .map(|id| SstableInfo {
-                                            id,
-                                            key_range: None,
-                                        })
-                                        .collect_vec(),
-                                })
-                            },
+                            level: Some(Level {
+                                level_type,
+                                table_infos: select_lnsuc_ids,
+                            }),
                         },
                     ],
                     splits: splits.iter().map(|v| v.clone().into()).collect_vec(),
