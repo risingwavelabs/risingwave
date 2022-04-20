@@ -191,6 +191,8 @@ impl dyn PlanNode {
             operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
             pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
+            // Internal table ids are allocated by meta.
+            table_ids: vec![],
         }
     }
 }
