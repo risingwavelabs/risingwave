@@ -18,8 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use super::variants::*;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
@@ -71,6 +70,8 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
 
 #[async_trait]
 impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+    type Direction = <TI::SSTableIterator as HummockIterator>::Direction;
+
     async fn next(&mut self) -> HummockResult<()> {
         let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
         sstable_iter.next().await?;
@@ -102,16 +103,15 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let table_idx = self
             .tables
-            .partition_point(|table| match TI::DIRECTION {
-                FORWARD => {
+            .partition_point(|table| match Self::Direction::direction() {
+                DirectionEnum::Forward => {
                     let ord = VersionedComparator::compare_key(&table.meta.smallest_key, key);
                     ord == Less || ord == Equal
                 }
-                BACKWARD => {
+                DirectionEnum::Backward => {
                     let ord = VersionedComparator::compare_key(&table.meta.largest_key, key);
                     ord == Greater || ord == Equal
                 }
-                _ => unreachable!(),
             })
             .saturating_sub(1); // considering the boundary of 0
 

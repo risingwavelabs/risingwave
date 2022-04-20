@@ -23,7 +23,7 @@ pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
-mod agg;
+pub mod aggregation;
 mod batch_query;
 #[allow(dead_code)]
 mod chain;
@@ -44,6 +44,7 @@ mod test_utils;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
+mod union;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
@@ -60,12 +61,16 @@ pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use union::{UnionExecutor, UnionExecutorBuilder};
 pub use v1_compat::{ExecutorV1AsV2, StreamExecutorV1};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
+
+/// The maximum chunk length produced by executor at a time.
+const PROCESSING_WINDOW_SIZE: usize = 1024;
 
 /// Static information of an executor.
 #[derive(Debug)]

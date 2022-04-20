@@ -15,21 +15,17 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
-use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::Executor;
 
 /// States for [`crate::executor_v2::LocalSimpleAggExecutor`],
 /// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor_v2::HashAggExecutor`].
 pub struct AggState<S: StateStore> {
-    /// Current managed states for all [`AggCall`]s.
+    /// Current managed states for all [`crate::executor_v2::aggregation::AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
@@ -177,60 +173,4 @@ impl<S: StateStore> AggState<S> {
 
         Ok(appended)
     }
-}
-
-/// Get clones of aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
-    agg_calls
-        .iter()
-        .map(|agg| {
-            agg.args
-                .val_indices()
-                .iter()
-                .map(|val_idx| columns[*val_idx].array())
-                .collect()
-        })
-        .collect()
-}
-
-/// Get references to aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_array_refs<'a>(
-    agg_calls: &[AggCall],
-    columns: &'a [Column],
-) -> Vec<Vec<&'a ArrayImpl>> {
-    agg_calls
-        .iter()
-        .map(|agg| {
-            agg.args
-                .val_indices()
-                .iter()
-                .map(|val_idx| columns[*val_idx].array_ref())
-                .collect()
-        })
-        .collect()
-}
-
-/// Generate [`crate::executor_v2::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor_v2::HashAggExecutor`], the group key indices should
-/// be provided.
-pub fn generate_agg_schema(
-    input: &dyn Executor,
-    agg_calls: &[AggCall],
-    group_key_indices: Option<&[usize]>,
-) -> Schema {
-    let aggs = agg_calls
-        .iter()
-        .map(|agg| Field::unnamed(agg.return_type.clone()));
-
-    let fields = if let Some(key_indices) = group_key_indices {
-        let keys = key_indices
-            .iter()
-            .map(|idx| input.schema().fields[*idx].clone());
-
-        keys.chain(aggs).collect()
-    } else {
-        aggs.collect()
-    };
-
-    Schema { fields }
 }

@@ -21,7 +21,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl};
 
-use crate::executor::StreamingAggStateImpl;
+use crate::executor_v2::aggregation::StreamingAggStateImpl;
 
 /// `StreamingSingleValueAgg` is a temporary workaround to deal with scalar subquery.
 /// Scalar subquery can at most return one row, otherwise runtime error should be emitted.

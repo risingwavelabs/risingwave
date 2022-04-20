@@ -117,7 +117,7 @@ impl Output for RemoteOutput {
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
     input: Box<dyn Executor>,
-    inner: DispatcherImpl,
+    inner: Vec<DispatcherImpl>,
     actor_id: u32,
     context: Arc<SharedContext>,
 }
@@ -150,7 +150,7 @@ impl std::fmt::Debug for DispatchExecutor {
 impl DispatchExecutor {
     pub fn new(
         input: Box<dyn Executor>,
-        inner: DispatcherImpl,
+        inner: Vec<DispatcherImpl>,
         actor_id: u32,
         context: Arc<SharedContext>,
     ) -> Self {
@@ -162,15 +162,33 @@ impl DispatchExecutor {
         }
     }
 
+    fn single_inner_mut(&mut self) -> &mut DispatcherImpl {
+        assert_eq!(
+            self.inner.len(),
+            1,
+            "only support mutation on one-dispatcher actors"
+        );
+        &mut self.inner[0]
+    }
+
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
-                self.inner.dispatch_data(chunk).await?;
+                if self.inner.len() == 1 {
+                    // special clone optimization when there is only one downstream dispatcher
+                    self.single_inner_mut().dispatch_data(chunk).await?;
+                } else {
+                    for dispatcher in &mut self.inner {
+                        dispatcher.dispatch_data(chunk.clone()).await?;
+                    }
+                }
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
-                self.inner.dispatch_barrier(barrier).await?;
+                for dispatcher in &mut self.inner {
+                    dispatcher.dispatch_barrier(barrier.clone()).await?;
+                }
                 self.post_mutate_outputs(&mutation).await?;
             }
         };
@@ -200,7 +218,7 @@ impl DispatchExecutor {
                             &down_id,
                         )?);
                     }
-                    self.inner.set_outputs(new_outputs)
+                    self.single_inner_mut().set_outputs(new_outputs)
                 }
             }
             Some(Mutation::AddOutput(adds)) => {
@@ -216,7 +234,7 @@ impl DispatchExecutor {
                             &down_id,
                         )?);
                     }
-                    self.inner.add_outputs(outputs_to_add);
+                    self.single_inner_mut().add_outputs(outputs_to_add);
                 }
             }
             _ => {}
@@ -227,15 +245,11 @@ impl DispatchExecutor {
 
     /// For `Stop`, update the outputs after we dispatch the barrier.
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
-        #[allow(clippy::single_match)]
-        match mutation.as_deref() {
-            Some(Mutation::Stop(stops)) => {
-                // Remove outputs only if this actor itself is not to be stopped.
-                if !stops.contains(&self.actor_id) {
-                    self.inner.remove_outputs(stops);
-                }
+        if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
+            // Remove outputs only if this actor itself is not to be stopped.
+            if !stops.contains(&self.actor_id) {
+                self.single_inner_mut().remove_outputs(stops);
             }
-            _ => {}
         }
 
         Ok(())
@@ -814,7 +828,7 @@ mod tests {
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
                     assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 4);
+                    assert_eq!(chunk1.cardinality(), 5);
                     assert!(chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
                     assert_eq!(
                         chunk1.ops()[6],
@@ -830,12 +844,12 @@ mod tests {
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
                     assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 3);
+                    assert_eq!(chunk1.cardinality(), 2);
                     assert!(
                         !chunk1.visibility().as_ref().unwrap().is_set(3).unwrap(),
                         "Should keep original invisible mark"
                     );
-                    assert!(chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
+                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
 
                     assert_eq!(
                         chunk1.ops()[4],
@@ -905,7 +919,7 @@ mod tests {
 
         let mut executor = Box::new(DispatchExecutor::new(
             Box::new(input),
-            DispatcherImpl::Simple(SimpleDispatcher::new(output)),
+            vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
             actor_id,
             ctx.clone(),
         ));

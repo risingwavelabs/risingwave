@@ -42,6 +42,8 @@ use async_trait::async_trait;
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
 #[async_trait]
 pub trait HummockIterator: Send + Sync {
+    type Direction: HummockIteratorDirection;
+
     /// Moves a valid iterator to the next key.
     ///
     /// Note:
@@ -103,9 +105,34 @@ pub trait HummockIterator: Send + Sync {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
 }
 
-pub type BoxedHummockIterator<'a> = Box<dyn HummockIterator + 'a>;
+pub trait ForwardHummockIterator = HummockIterator<Direction = Forward>;
+pub trait BackwardHummockIterator = HummockIterator<Direction = Backward>;
 
-pub mod variants {
-    pub const FORWARD: usize = 0;
-    pub const BACKWARD: usize = 1;
+pub type BoxedForwardHummockIterator = Box<dyn ForwardHummockIterator>;
+pub type BoxedBackwardHummockIterator = Box<dyn BackwardHummockIterator>;
+pub type BoxedHummockIterator<D> = Box<dyn HummockIterator<Direction = D>>;
+
+pub enum DirectionEnum {
+    Forward,
+    Backward,
+}
+
+pub trait HummockIteratorDirection: Sync + Send {
+    fn direction() -> DirectionEnum;
+}
+
+pub struct Forward;
+impl HummockIteratorDirection for Forward {
+    #[inline(always)]
+    fn direction() -> DirectionEnum {
+        DirectionEnum::Forward
+    }
+}
+
+pub struct Backward;
+impl HummockIteratorDirection for Backward {
+    #[inline(always)]
+    fn direction() -> DirectionEnum {
+        DirectionEnum::Backward
+    }
 }

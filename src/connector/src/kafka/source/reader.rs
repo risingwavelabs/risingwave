@@ -25,10 +25,10 @@ use rdkafka::ClientConfig;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
 
-use crate::base::{InnerMessage, SourceReader};
+use crate::base::{SourceMessage, SplitReader};
 use crate::kafka::split::KafkaSplit;
 use crate::kafka::KAFKA_CONFIG_BROKERS_KEY;
-use crate::Properties;
+use crate::{ConnectorState, Properties};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -38,8 +38,8 @@ pub struct KafkaSplitReader {
 }
 
 #[async_trait]
-impl SourceReader for KafkaSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
+impl SplitReader for KafkaSplitReader {
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         let mut stream = self
             .consumer
             .stream()
@@ -52,12 +52,12 @@ impl SourceReader for KafkaSplitReader {
 
         chunk
             .into_iter()
-            .map(|msg| msg.map_err(|e| anyhow!(e)).map(InnerMessage::from))
-            .collect::<Result<Vec<InnerMessage>>>()
+            .map(|msg| msg.map_err(|e| anyhow!(e)).map(SourceMessage::from))
+            .collect::<Result<Vec<SourceMessage>>>()
             .map(Some)
     }
 
-    async fn new(properties: Properties, _state: Option<crate::ConnectorState>) -> Result<Self>
+    async fn new(properties: Properties, _state: Option<ConnectorState>) -> Result<Self>
     where
         Self: Sized,
     {

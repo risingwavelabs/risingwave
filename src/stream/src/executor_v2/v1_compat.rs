@@ -35,7 +35,7 @@ use super::{
     HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use crate::executor::AggCall;
+use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::executor_v2::top_n::TopNExecutor;
 use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;

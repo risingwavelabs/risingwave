@@ -26,7 +26,7 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of list array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -294,11 +294,7 @@ impl<'a> ListRef<'a> {
             ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
                 .map(|o| arr.value.value_at(o))
                 .collect(),
-            ListRef::ValueRef { val } => val
-                .values
-                .iter()
-                .map(|d| d.as_ref().map(|s| s.as_scalar_ref_impl()))
-                .collect::<Vec<DatumRef<'a>>>(),
+            ListRef::ValueRef { val } => val.values.iter().map(to_datum_ref).collect(),
         }
     }
 }

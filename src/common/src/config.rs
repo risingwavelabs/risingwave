@@ -87,10 +87,6 @@ impl Default for StreamingConfig {
 /// Currently all configurations are server before they can be specified with DDL syntaxes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Size of state store shared buffer (MB)
-    #[serde(default = "default::shared_buffer_size")]
-    pub shared_buffer_threshold_size: u32,
-
     /// Target size of the SSTable.
     #[serde(default = "default::sst_size")]
     pub sstable_size: u32,
@@ -106,6 +102,15 @@ pub struct StorageConfig {
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     #[serde(default = "default::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
+
+    /// Size threshold to trigger shared buffer flush.
+    #[serde(default = "default::shared_buffer_threshold")]
+    pub shared_buffer_threshold: u32,
+
+    /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
+    /// is enough space.
+    #[serde(default = "default::shared_buffer_capacity")]
+    pub shared_buffer_capacity: u32,
 
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::data_directory")]
@@ -165,10 +170,6 @@ impl FrontendConfig {
 }
 
 mod default {
-    pub fn shared_buffer_size() -> u32 {
-        // 256MB
-        268435456
-    }
 
     pub fn heartbeat_interval() -> u32 {
         1000
@@ -193,6 +194,16 @@ mod default {
 
     pub fn share_buffers_sync_parallelism() -> u32 {
         2
+    }
+
+    pub fn shared_buffer_threshold() -> u32 {
+        // 192MB
+        201326592
+    }
+
+    pub fn shared_buffer_capacity() -> u32 {
+        // 256MB
+        268435456
     }
 
     pub fn data_directory() -> String {
