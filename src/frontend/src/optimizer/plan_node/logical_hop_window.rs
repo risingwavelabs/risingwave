@@ -88,9 +88,19 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
+        let mut time_col =  self.time_col.clone();
+        time_col.index = input_col_change.map(time_col.index);
+        let new_hop =  Self::new(input, time_col, self.window_slide, self.window_size);
+
+        let (mut mapping, new_input_col_num) =  input_col_change.into_parts();
+        assert_eq!(new_input_col_num, input.schema().len());
+        assert_eq!(new_input_col_num+2, new_hop.schema().len());
+        mapping.push(Some(new_input_col_num));
+        mapping.push(Some(new_input_col_num+1));
+
         (
-            Self::new(input, self.time_col, self.window_slide, self.window_size),
-            input_col_change,
+            new_hop,
+            ColIndexMapping::new(mapping),
         )
     }
 }
@@ -128,4 +138,6 @@ impl ToStream for LogicalHopWindow {
         let new_logical = self.clone_with_input(new_input);
         StreamHopWindow::new(new_logical).into()
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
 }
