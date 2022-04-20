@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! LruCache implementation port from github.com/facebook/rocksdb. The class `LruCache` is
+//! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
 use std::ptr::null_mut;
 use std::sync::Arc;
@@ -27,26 +27,26 @@ const REVERSE_IN_CACHE: u8 = !IN_CACHE;
 /// The cache keeps all its entries in a hash table. Some elements
 /// are also stored on LRU list.
 ///
-/// LruHandle can be in these states:
+/// `LruHandle` can be in these states:
 /// 1. Referenced externally AND in hash table.
 ///    In that case the entry is *not* in the LRU list
-///    (refs >= 1 && in_cache == true)
+///    (`refs` >= 1 && `in_cache` == true)
 /// 2. Not referenced externally AND in hash table.
 ///    In that case the entry is in the LRU list and can be freed.
-///    (refs == 0 && in_cache == true)
+///    (`refs` == 0 && `in_cache` == true)
 /// 3. Referenced externally AND not in hash table.
 ///    In that case the entry is not in the LRU list and not in hash table.
 ///    The entry can be freed when refs becomes 0.
-///    (refs >= 1 && in_cache == false)
+///    (`refs` >= 1 && `in_cache` == false)
 ///
-/// All newly created LruHandles are in state 1. If you call
-/// LruCacheShard::release on entry in state 1, it will go into state 2.
-/// To move from state 1 to state 3, either call LruCacheShard::erase or
-/// LruCacheShard::insert with the same key (but possibly different value).
-/// To move from state 2 to state 1, use LruCacheShard::lookup.
+/// All newly created `LruHandle`s are in state 1. If you call
+/// `LruCacheShard::release` on entry in state 1, it will go into state 2.
+/// To move from state 1 to state 3, either call `LruCacheShard::erase` or
+/// `LruCacheShard::insert` with the same key (but possibly different value).
+/// To move from state 2 to state 1, use `LruCacheShard::lookup`.
 /// Before destruction, make sure that no handles are in state 1. This means
-/// that any successful LruCacheShard::lookup/LruCacheShard::insert have a
-/// matching LruCache::release (to move into state 2) or LruCacheShard::rrase
+/// that any successful `LruCacheShard::lookup/LruCacheShard::insert` have a
+/// matching `LruCache::release` (to move into state 2) or `LruCacheShard::erase`
 /// (to move into state 3).
 pub struct LruHandle<K: PartialEq + Default, T> {
     // next element in the linked-list of hash bucket, only used by hash-table.
