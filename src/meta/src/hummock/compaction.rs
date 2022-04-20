@@ -216,12 +216,13 @@ impl CompactStatus {
                     }
                 }
 
-                let mut rng = thread_rng();
-                polysst_candidates.shuffle(&mut rng);
                 if select_level == 0 {
                     polysst_candidates.sort_by(|(table_id_a, ..), (table_id_b, ..)| {
                         ord_table_id(*table_id_a, *table_id_b)
                     });
+                } else {
+                    let mut rng = thread_rng();
+                    polysst_candidates.shuffle(&mut rng);
                 }
 
                 for (_, (sst_idx, next_sst_idx), select_level_inputs, key_range) in
