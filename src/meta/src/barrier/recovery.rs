@@ -58,7 +58,7 @@ where
     /// Recovery the whole cluster from the latest epoch.
     pub(crate) async fn recovery(
         &self,
-        prev_epoch: u64,
+        prev_epoch: Epoch,
         prev_command: Option<Command>,
     ) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
@@ -76,7 +76,7 @@ where
             let mut new_epoch = Epoch::now();
 
             // Reset all compute nodes, stop and drop existing actors.
-            self.reset_compute_nodes(&info, prev_epoch, new_epoch.0)
+            self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
                 .await;
 
             // Refresh sources in local source manger of compute node.
@@ -95,15 +95,15 @@ where
                 return Err(err);
             }
 
-            let prev_epoch = new_epoch.0;
+            let prev_epoch = new_epoch;
             new_epoch = Epoch::now();
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_clients_ref(),
                 &info,
-                prev_epoch,
-                new_epoch.0,
+                &prev_epoch,
+                &new_epoch,
                 Command::checkpoint(),
             );
 
@@ -249,7 +249,12 @@ where
     }
 
     /// Reset all compute nodes by calling `force_stop_actors`.
-    async fn reset_compute_nodes(&self, info: &BarrierActorInfo, prev_epoch: u64, new_epoch: u64) {
+    async fn reset_compute_nodes(
+        &self,
+        info: &BarrierActorInfo,
+        prev_epoch: &Epoch,
+        new_epoch: &Epoch,
+    ) {
         let futures = info.node_map.iter().map(|(_, worker_node)| {
             let retry_strategy = Self::get_retry_strategy();
 
@@ -262,8 +267,8 @@ where
                         .force_stop_actors(ForceStopActorsRequest {
                             request_id: Uuid::new_v4().to_string(),
                             epoch: Some(ProstEpoch {
-                                curr: new_epoch,
-                                prev: prev_epoch,
+                                curr: new_epoch.0,
+                                prev: prev_epoch.0,
                             }),
                         })
                         .await

@@ -138,7 +138,8 @@ struct NotificationManagerCore {
     /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
 
-    current_version: u64,
+    /// The current notification version.
+    current_version: NotificationVersion,
 }
 
 impl NotificationManagerCore {

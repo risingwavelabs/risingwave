@@ -20,6 +20,7 @@ lazy_static::lazy_static! {
     static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Epoch(pub u64);
 
 /// `INVALID_EPOCH` defines the invalid epoch value.
@@ -58,8 +59,6 @@ impl fmt::Display for Epoch {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-
     use chrono::{Local, TimeZone, Utc};
 
     use super::*;
@@ -69,6 +68,6 @@ mod tests {
         let utc = Utc.ymd(2021, 4, 1).and_hms(0, 0, 0);
         let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
         let singularity_st = SystemTime::from(singularity_dt);
-        assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH.deref());
+        assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);
     }
 }

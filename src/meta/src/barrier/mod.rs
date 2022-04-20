@@ -212,7 +212,7 @@ where
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = Epoch::now().0;
+            let new_epoch = Epoch::now();
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
@@ -222,7 +222,7 @@ where
             for finished in finished_create_mviews {
                 unfinished.finish_actors(finished.epoch, once(finished.actor_id));
             }
-            state.prev_epoch = new_epoch.0;
+            state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
         }
 
@@ -242,14 +242,14 @@ where
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
-            let new_epoch = Epoch::now().0;
+            let new_epoch = Epoch::now();
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_clients_ref(),
                 &info,
-                state.prev_epoch,
-                new_epoch,
+                &state.prev_epoch,
+                &new_epoch,
                 command.clone(),
             );
 
@@ -262,7 +262,7 @@ where
 
                     // Then try to finish the barrier for Create MVs.
                     let actors_to_finish = command_ctx.actors_to_finish();
-                    unfinished.add(new_epoch, actors_to_finish, notifiers);
+                    unfinished.add(new_epoch.0, actors_to_finish, notifiers);
                     for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
                         unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                     }
@@ -283,7 +283,7 @@ where
                             unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                         }
 
-                        state.prev_epoch = new_epoch.0;
+                        state.prev_epoch = new_epoch;
                     } else {
                         panic!("failed to execute barrier: {:?}", e);
                     }
@@ -304,19 +304,19 @@ where
         // Wait for all barriers collected
         let result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
-        if command_context.prev_epoch != INVALID_EPOCH {
+        if command_context.prev_epoch.0 != INVALID_EPOCH {
             match result {
                 Ok(_) => {
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
                     self.hummock_manager
-                        .commit_epoch(command_context.prev_epoch)
+                        .commit_epoch(command_context.prev_epoch.0)
                         .await?;
                 }
                 Err(_) => {
                     self.hummock_manager
-                        .abort_epoch(command_context.prev_epoch)
+                        .abort_epoch(command_context.prev_epoch.0)
                         .await?;
                 }
             };
@@ -350,8 +350,8 @@ where
                 let request_id = Uuid::new_v4().to_string();
                 let barrier = Barrier {
                     epoch: Some(risingwave_pb::data::Epoch {
-                        curr: command_context.curr_epoch,
-                        prev: command_context.prev_epoch,
+                        curr: command_context.curr_epoch.0,
+                        prev: command_context.prev_epoch.0,
                     }),
                     mutation: Some(mutation),
                     // TODO(chi): add distributed tracing
