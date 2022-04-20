@@ -14,8 +14,9 @@
 
 use std::rc::Rc;
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundSource, BoundWindowTableFunction, Relation,
@@ -23,7 +24,7 @@ use crate::binder::{
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalJoin, LogicalProject, LogicalScan, LogicalSource, PlanRef,
+    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource, PlanRef,
 };
 use crate::planner::Planner;
 
@@ -70,11 +71,11 @@ impl Planner {
                 table_function.time_col,
                 table_function.args,
             ),
-            Hop => Err(ErrorCode::NotImplemented(
-                "HOP window function is not implemented yet".to_string(),
-                1191.into(),
-            )
-            .into()),
+            Hop => self.plan_hop_window(
+                table_function.input,
+                table_function.time_col,
+                table_function.args,
+            ),
         }
     }
 
@@ -128,5 +129,30 @@ impl Planner {
             )
             .into()),
         }
+    }
+
+    fn plan_hop_window(
+        &mut self,
+        input: Relation,
+        time_col: InputRef,
+        args: Vec<ExprImpl>,
+    ) -> Result<PlanRef> {
+        let input = self.plan_relation(input)?;
+        let mut args = args.into_iter();
+        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
+            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+        };
+        let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
+            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+        };
+        let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
+            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+        };
+        Ok(LogicalHopWindow::create(
+            input,
+            time_col,
+            window_slide,
+            window_size,
+        ))
     }
 }
