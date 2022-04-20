@@ -291,11 +291,11 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
-                    {timestamp, interval, timestamp, timestamp_interval_add},
-                    {interval, timestamp, timestamp, interval_timestamp_add},
-                    {interval, date, timestamp, interval_date_add},
-                    {date, interval, timestamp,  date_interval_add},
-                    {interval, interval, interval,  general_add},
+                    { timestamp, interval, timestamp, timestamp_interval_add },
+                    { interval, timestamp, timestamp, interval_timestamp_add },
+                    { interval, date, timestamp, interval_date_add },
+                    { date, interval, timestamp, date_interval_add },
+                    { interval, interval, interval, general_add },
                 },
             }
         }
@@ -305,11 +305,11 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
-                    {timestamp, timestamp, interval, timestamp_timestamp_sub},
-                    {timestamp, interval, timestamp, timestamp_interval_sub},
-                    {date, date, int32, date_date_sub},
-                    {date, interval, timestamp,  date_interval_sub},
-                    {interval, interval, interval,  general_sub},
+                    { timestamp, timestamp, interval, timestamp_timestamp_sub },
+                    { timestamp, interval, timestamp, timestamp_interval_sub },
+                    { date, date, int32, date_date_sub },
+                    { date, interval, timestamp, date_interval_sub },
+                    { interval, interval, interval, general_sub },
                 },
             }
         }
@@ -319,12 +319,12 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_mul,
                 {
-                    {interval, int16, interval,  interval_int_mul},
-                    {interval, int32, interval,  interval_int_mul},
-                    {interval, int64, interval,  interval_int_mul},
-                    {int16, interval, interval,  int_interval_mul},
-                    {int32, interval, interval,  int_interval_mul},
-                    {int64, interval, interval,  int_interval_mul},
+                    { interval, int16, interval, interval_int_mul },
+                    { interval, int32, interval, interval_int_mul },
+                    { interval, int64, interval, interval_int_mul },
+                    { int16, interval, interval, int_interval_mul },
+                    { int32, interval, interval, int_interval_mul },
+                    { int64, interval, interval, int_interval_mul },
                 },
             }
         }
