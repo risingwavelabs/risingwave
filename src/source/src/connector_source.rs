@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::executor::block_on;
 use risingwave_common::array::StreamChunk;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
@@ -90,13 +89,11 @@ impl Source for ConnectorSource {
             context.splits
         );
 
-        let reader = block_on(async move {
-            SourceReaderImpl::create(
-                Properties::new(self.config.clone()),
-                ConnectorStateV2::Splits(context.splits),
-            )
-            .await
-        })
+        let reader = SourceReaderImpl::create(
+            Properties::new(self.config.clone()),
+            ConnectorStateV2::Splits(context.splits),
+        )
+        .await
         .to_rw_result()?;
 
         let columns = self.get_target_columns(column_ids)?;
