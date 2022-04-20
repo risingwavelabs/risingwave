@@ -37,7 +37,7 @@ services:
       start_period: 10s
 
   kafkacat:
-    image: confluentinc/cp-kafkacat:7.1.0
+    image: edenhill/kafkacat:1.6.0
     container_name: kafkacat
     depends_on:
       - broker
