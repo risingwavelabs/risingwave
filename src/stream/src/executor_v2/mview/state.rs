@@ -17,9 +17,10 @@ use std::collections::HashMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::storage_value::{StorageValue, ValueMeta};
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
@@ -80,16 +81,22 @@ impl<S: StateStore> ManagedMViewState<S> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         batch.reserve(self.cache.len() * self.column_ids.len());
         let mut local = batch.prefixify(&self.keyspace);
+        let hash_builder = CRC32FastBuilder {};
 
         for (arrange_keys, cells) in self.cache.drain() {
             let row = cells.into_option();
             let arrange_key_buf = serialize_pk(&arrange_keys, &self.key_serializer)?;
             let bytes = serialize_pk_and_row(&arrange_key_buf, &row, &self.column_ids)?;
+
+            // We compute vnode on pk in materialized view since materialized views are grouped by
+            // pk.
+            let vnode = arrange_keys.hash_row(&hash_builder).to_vnode();
+            let value_meta = ValueMeta::new_with_vnode(vnode);
+
             for (key, value) in bytes {
                 match value {
-                    // TODO(Yuanxin): Implement value meta
-                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                    None => local.delete(key),
+                    Some(val) => local.put(key, StorageValue::new_put(value_meta, val)),
+                    None => local.delete_with_value_meta(key, value_meta),
                 }
             }
         }
