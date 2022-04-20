@@ -252,6 +252,19 @@ where
             _ => {}
         };
 
+        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+        // with only equal conditions
+        if let Node::HashJoinNode(hash_join_node) = stream_node.get_node()? {
+            if hash_join_node.get_join_type()? == JoinType::Inner
+                && hash_join_node.condition.is_none()
+            {
+                const ENABLE_DELTA_JOIN: bool = false;
+                if ENABLE_DELTA_JOIN {
+                    return self.build_delta_join(current_fragment, stream_node);
+                };
+            }
+        }
+
         let inputs = std::mem::take(&mut stream_node.input);
 
         // Visit plan children.
@@ -289,20 +302,6 @@ where
                         }
 
                         Ok(child_node)
-                    }
-
-                    // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-                    // with only equal conditions
-                    Node::HashJoinNode(hash_join_node)
-                        if hash_join_node.get_join_type()? == JoinType::Inner
-                            && hash_join_node.condition.is_none() =>
-                    {
-                        const ENABLE_DELTA_JOIN: bool = false;
-                        if ENABLE_DELTA_JOIN {
-                            self.build_delta_join(current_fragment, child_node)
-                        } else {
-                            self.build_fragment(current_fragment, child_node)
-                        }
                     }
 
                     // For other children, visit recursively.
