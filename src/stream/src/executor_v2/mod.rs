@@ -20,9 +20,7 @@ pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use self::v1_compat::StreamExecutorV1;
-pub use super::executor::{
-    Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
-};
+pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef};
 
 pub mod aggregation;
 mod batch_query;

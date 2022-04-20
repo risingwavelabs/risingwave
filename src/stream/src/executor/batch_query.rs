@@ -25,9 +25,7 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{
-    BatchQueryExecutor as BatchQueryExecutorV2, BoxedExecutor, Executor as ExecutorV2,
-};
+use crate::executor_v2::{BatchQueryExecutor as BatchQueryExecutorV2, BoxedExecutor, Executor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct BatchQueryExecutorBuilder;

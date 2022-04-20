@@ -27,7 +27,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
-use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
+use super::{ExecutorV1, ExecutorV1State, Message, PkIndices, PkIndicesRef, StatefulExecutorV1};
 use crate::common::StreamChunkBuilder;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -129,7 +129,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Box<dyn ExecutorV1>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
         let source_r = Box::new(params.input.remove(1).v1());
         let source_l = Box::new(params.input.remove(0).v1());
@@ -172,7 +172,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                         condition,
                         params.op_info,
                         key_indices,
-                    )) as Box<dyn Executor>, )*
+                    )) as Box<dyn ExecutorV1>, )*
                     _ => todo!("Join type {:?} not implemented", typ),
                 }
             }
@@ -223,7 +223,7 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     op_info: String,
 
     /// Executor state
-    executor_state: ExecutorState,
+    executor_state: ExecutorV1State,
 
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -246,7 +246,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
 }
 
 #[async_trait]
-impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S, T> {
+impl<S: StateStore, const T: JoinTypePrimitive> ExecutorV1 for HashJoinExecutor<S, T> {
     async fn next(&mut self) -> Result<Message> {
         let msg = self.aligner.next().await;
         if let Some(barrier) = self.try_init_executor(&msg) {
@@ -268,7 +268,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -301,8 +301,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 #[allow(clippy::too_many_arguments)]
 impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     pub fn new(
-        input_l: Box<dyn Executor>,
-        input_r: Box<dyn Executor>,
+        input_l: Box<dyn ExecutorV1>,
+        input_r: Box<dyn ExecutorV1>,
         params_l: JoinParams,
         params_r: JoinParams,
         pk_indices: PkIndices,
@@ -385,7 +385,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::Init,
+            executor_state: ExecutorV1State::Init,
             key_indices,
         }
     }
@@ -628,12 +628,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutor for HashJoinExecutor<S, T> {
-    fn executor_state(&self) -> &ExecutorState {
+impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutorV1 for HashJoinExecutor<S, T> {
+    fn executor_state(&self) -> &ExecutorV1State {
         &self.executor_state
     }
 
-    fn update_executor_state(&mut self, new_state: ExecutorState) {
+    fn update_executor_state(&mut self, new_state: ExecutorV1State) {
         self.executor_state = new_state;
     }
 }
@@ -652,7 +652,7 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::executor::test_utils::MockAsyncSource;
-    use crate::executor::{Barrier, Epoch, Executor, Message};
+    use crate::executor::{Barrier, Epoch, ExecutorV1, Message};
 
     fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
         Keyspace::executor_root(MemoryStateStore::new(), 0x2333)

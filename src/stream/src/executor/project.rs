@@ -20,9 +20,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{
-    BoxedExecutor, Executor as ExecutorV2, ProjectExecutor as ProjectExecutorV2,
-};
+use crate::executor_v2::{BoxedExecutor, Executor, ProjectExecutor as ProjectExecutorV2};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct ProjectExecutorBuilder;

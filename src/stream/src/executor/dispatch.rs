@@ -718,17 +718,17 @@ impl Dispatcher for SimpleDispatcher {
 #[cfg(test)]
 mod sender_consumer {
     use super::*;
-    use crate::executor::Executor;
+    use crate::executor::ExecutorV1;
 
     /// `SenderConsumer` consumes data from input executor and send it into a channel.
     #[derive(Debug)]
     pub struct SenderConsumer {
-        input: Box<dyn Executor>,
+        input: Box<dyn ExecutorV1>,
         channel: BoxedOutput,
     }
 
     impl SenderConsumer {
-        pub fn new(input: Box<dyn Executor>, channel: BoxedOutput) -> Self {
+        pub fn new(input: Box<dyn ExecutorV1>, channel: BoxedOutput) -> Self {
             Self { input, channel }
         }
     }

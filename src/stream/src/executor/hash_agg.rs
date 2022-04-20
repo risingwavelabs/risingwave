@@ -26,7 +26,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{ExecutorBuilder, PkIndices};
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{BoxedExecutor, Executor as ExecutorV2, HashAggExecutor};
+use crate::executor_v2::{BoxedExecutor, Executor, HashAggExecutor};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);

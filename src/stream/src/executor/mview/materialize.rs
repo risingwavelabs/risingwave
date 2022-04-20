@@ -20,9 +20,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{ExecutorBuilder, Result};
-use crate::executor_v2::{
-    BoxedExecutor, Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2,
-};
+use crate::executor_v2::{BoxedExecutor, Executor, MaterializeExecutor as MaterializeExecutorV2};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct MaterializeExecutorBuilder;

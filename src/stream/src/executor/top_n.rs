@@ -20,8 +20,8 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{ExecutorBuilder};
-use crate::executor_v2::{BoxedExecutor, Executor as ExecutorV2, TopNExecutor as TopNExecutorV2};
+use crate::executor::ExecutorBuilder;
+use crate::executor_v2::{BoxedExecutor, Executor, TopNExecutor as TopNExecutorV2};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct TopNExecutorBuilder {}

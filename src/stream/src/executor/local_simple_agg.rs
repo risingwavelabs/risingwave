@@ -19,10 +19,10 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use crate::executor::{ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::{
-    BoxedExecutor, Executor as ExecutorV2, LocalSimpleAggExecutor as LocalSimpleAggExecutorV2,
+    BoxedExecutor, Executor, LocalSimpleAggExecutor as LocalSimpleAggExecutorV2,
 };
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 

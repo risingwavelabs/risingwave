@@ -28,13 +28,12 @@ use crate::executor::test_utils::create_in_memory_keyspace;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{
-    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor,
-    SimpleAggExecutor,
+    Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor, SimpleAggExecutor,
 };
 use crate::task::SharedContext;
 
 pub struct MockConsumer {
-    input: Box<dyn Executor>,
+    input: Box<dyn ExecutorV1>,
     data: Arc<Mutex<Vec<StreamChunk>>>,
 }
 impl std::fmt::Debug for MockConsumer {
@@ -46,7 +45,7 @@ impl std::fmt::Debug for MockConsumer {
 }
 
 impl MockConsumer {
-    pub fn new(input: Box<dyn Executor>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
+    pub fn new(input: Box<dyn ExecutorV1>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
         Self { input, data }
     }
 }

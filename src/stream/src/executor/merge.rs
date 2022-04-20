@@ -17,7 +17,7 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use super::{Result};
+use super::Result;
 use crate::executor::ExecutorBuilder;
 use crate::executor_v2::BoxedExecutor;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};

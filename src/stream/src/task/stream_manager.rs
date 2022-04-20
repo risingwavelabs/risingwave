@@ -39,7 +39,7 @@ use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{BoxedExecutor, Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor, MergeExecutor as MergeExecutorV2};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -527,11 +527,11 @@ impl LocalStreamManagerCore {
 
     #[allow(dead_code)]
     fn wrap_executor_for_debug(
-        mut executor: Box<dyn Executor>,
+        mut executor: Box<dyn ExecutorV1>,
         actor_id: ActorId,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Box<dyn ExecutorV1>> {
         if !cfg!(debug_assertions) {
             return Ok(executor);
         }

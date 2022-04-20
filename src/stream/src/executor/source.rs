@@ -37,7 +37,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::executor::{ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
@@ -100,7 +100,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Box<dyn ExecutorV1>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
@@ -297,7 +297,7 @@ impl SourceReader {
 }
 
 #[async_trait]
-impl Executor for SourceExecutor {
+impl ExecutorV1 for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if let Some(mut reader) = self.reader.take() {
             reader

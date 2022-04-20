@@ -37,11 +37,9 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as ExecutorV1, Message, PkIndices, SourceExecutor, StreamingMetrics,
+    Barrier, ExecutorV1, Message, PkIndices, SourceExecutor, StreamingMetrics,
 };
-use risingwave_stream::executor_v2::{
-    Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2,
-};
+use risingwave_stream::executor_v2::{Executor, MaterializeExecutor as MaterializeExecutorV2};
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
