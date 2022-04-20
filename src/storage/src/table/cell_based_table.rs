@@ -69,6 +69,13 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::CellBasedTable(rw.into())
 }
 
+pub enum Op {
+    Insert,
+    Delete,
+    UpdateDelete,
+    UpdateInsert,
+}
+
 impl<S: StateStore> CellBasedTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
@@ -185,23 +192,39 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows(
         &mut self,
-        rows: Vec<(Row, Option<Row>)>,
+        rows: Vec<(Row, Option<Row>, Op)>,
         epoch: u64,
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        for (pk, cell_values) in rows {
+        for (pk, cell_values, op) in rows {
             let arrange_key_buf =
                 serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?;
-            let bytes = self
-                .cell_based_row_serializer
-                .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                .map_err(err)?;
-            for (key, value) in bytes {
-                match value {
-                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                    None => local.delete(key),
+            match op {
+                Op::Delete => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, value) in bytes {
+                        if value.is_some() {
+                            local.delete(key);
+                        }
+                    }
                 }
+                Op::Insert => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, value) in bytes {
+                        match value {
+                            Some(val) => local.put(key, StorageValue::new_default_put(val)),
+                            None => local.delete(key),
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         batch.ingest(epoch).await?;

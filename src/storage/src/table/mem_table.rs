@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![allow(dead_code)]
-#![allow(unused)]
-use std::collections::{btree_map, BTreeMap};
+use std::collections::btree_map::{self, Entry};
+use std::collections::BTreeMap;
 
-use futures::Future;
 use risingwave_common::array::Row;
 
 use crate::error::StorageResult;
@@ -24,8 +23,23 @@ use crate::error::StorageResult;
 pub enum RowOp {
     Insert(Row),
     Delete(Row),
-    Update((Row, Row)),
+    Update(Row),
 }
+impl RowOp {
+    pub fn is_insert(&self) -> bool {
+        matches!(self, Self::Insert(_))
+    }
+
+    pub fn is_delete(&self) -> bool {
+        matches!(self, Self::Delete(_))
+    }
+
+    pub fn is_update(&self) -> bool {
+        matches!(self, Self::Delete(_))
+    }
+}
+/// `MemTable` is a buffer for modify operations without encoding
+#[derive(Clone)]
 pub struct MemTable {
     pub buffer: BTreeMap<Row, RowOp>,
 }
@@ -45,25 +59,64 @@ impl MemTable {
     }
 
     /// read methods
-    pub async fn get_row(&self, pk: &Row) -> StorageResult<Option<RowOp>> {
-        todo!()
+    pub fn get_row(&self, pk: &Row) -> StorageResult<Option<RowOp>> {
+        let res = self.buffer.get(pk);
+        match res {
+            Some(row_op) => Ok(Some(row_op.clone())),
+            None => Ok(None),
+        }
     }
 
     /// write methods
-    pub async fn insert(&mut self, _pk: Row, _value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Insert(value));
+            }
+            Entry::Occupied(mut e) => {
+                if e.get().is_delete() {
+                    e.insert(RowOp::Update(value));
+                } else {
+                    panic!(
+                        "invalid flush status: double insert {:?} -> {:?}",
+                        e.key(),
+                        value
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
-    pub async fn delete(&mut self, _pk: Row, _old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Delete(old_value));
+            }
+            Entry::Occupied(mut e) => {
+                if e.get().is_insert() {
+                    e.remove();
+                } else if e.get().is_update() {
+                    e.insert(RowOp::Delete(old_value));
+                } else {
+                    panic!(
+                        "invalid flush status: double delete {:?} -> {:?}",
+                        e.key(),
+                        old_value
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
-    pub async fn update(
-        &mut self,
-        _pk: Row,
-        _old_value: Row,
-        _new_value: Row,
-    ) -> StorageResult<()> {
+    pub fn into_parts(self) -> BTreeMap<Row, RowOp> {
+        self.buffer
+    }
+
+    pub fn update(&mut self, _pk: Row, _old_value: Row, _new_value: Row) -> StorageResult<()> {
         Ok(())
     }
 
