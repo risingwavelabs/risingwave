@@ -106,6 +106,15 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
+      - name: e2e test, streaming, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
