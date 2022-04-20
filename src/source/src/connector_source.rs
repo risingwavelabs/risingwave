@@ -27,7 +27,7 @@ use crate::common::SourceChunkBuilder;
 use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
-/// processing. [`ConnectorSource`] introduces schema at this level while [`SplitReaderImpl`]
+/// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReaderImpl`]
 /// simply loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
