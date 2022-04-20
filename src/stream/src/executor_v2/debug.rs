@@ -34,6 +34,7 @@ struct DebugExtraInfo {
     metrics: Arc<StreamingMetrics>,
 }
 
+/// [`DebugExecutor`] will do some sanity checks and logging for the wrapped executor.
 pub struct DebugExecutor {
     input: BoxedExecutor,
 

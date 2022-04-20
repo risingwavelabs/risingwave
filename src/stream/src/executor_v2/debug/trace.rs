@@ -24,6 +24,7 @@ use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{ExecutorInfo, MessageStream};
 use crate::task::ActorId;
 
+/// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
 #[try_stream(ok = Message, error = TracedStreamExecutorError)]
 pub async fn trace(
     info: Arc<ExecutorInfo>,

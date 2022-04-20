@@ -23,6 +23,8 @@ use crate::executor::Message;
 use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{ExecutorInfo, MessageStream};
 
+/// Streams wrapped by `schema_check` will check the passing stream chunk against the expected
+/// schema.
 #[try_stream(ok = Message, error = TracedStreamExecutorError)]
 pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     #[for_await]

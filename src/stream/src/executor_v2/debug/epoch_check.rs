@@ -20,8 +20,11 @@ use crate::executor::Message;
 use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{ExecutorInfo, MessageStream};
 
+/// Streams wrapped by `epoch_check` will check whether the epoch in the barriers are monotonically
+/// increasing.
 #[try_stream(ok = Message, error = TracedStreamExecutorError)]
 pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
+    // Epoch number recorded from last barrier message.
     let mut last_epoch = None;
 
     #[for_await]

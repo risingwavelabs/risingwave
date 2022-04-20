@@ -23,6 +23,8 @@ use crate::executor::Message;
 use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{ExecutorInfo, MessageStream};
 
+/// Streams wrapped by `update_check` will check whether the two rows of updates are next to each
+/// other.
 #[try_stream(ok = Message, error = TracedStreamExecutorError)]
 pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     #[for_await]
