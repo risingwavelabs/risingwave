@@ -87,6 +87,13 @@ message HashJoinNode {
   bool is_delta_join = 6;
 }
 
+message HopWindowNode {
+  // TODO: Use concrete types.
+  expr.ExprNode time_col = 1;
+  expr.ExprNode window_slide = 2;
+  expr.ExprNode window_size = 3;
+}
+
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
   // The schema of input columns. TODO: remove this field.
@@ -172,6 +179,7 @@ message StreamNode {
     TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
     TopNNode top_n_node = 12;
+    HopWindowNode hop_window_node = 23;
     MergeNode merge_node = 13;
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;

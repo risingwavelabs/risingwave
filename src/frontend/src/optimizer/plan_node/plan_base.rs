@@ -39,6 +39,7 @@ pub struct PlanBase {
     /// means the stream contains only insert operation.
     pub append_only: bool,
 }
+
 impl PlanBase {
     pub fn new_logical(ctx: OptimizerContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
         let id = ctx.next_plan_node_id();
