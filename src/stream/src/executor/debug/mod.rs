@@ -28,7 +28,7 @@ pub use self::epoch_check::*;
 pub use self::schema_check::*;
 pub use self::trace::*;
 pub use self::update_check::*;
-use super::{Executor, Message};
+use super::{ExecutorV1, Message};
 
 /// [`DebugExecutor`] is an abstraction of wrapper executors, generally used for debug purpose. Data
 /// related functions are mostly delegated to the `input` executor.
@@ -36,13 +36,13 @@ use super::{Executor, Message};
 pub trait DebugExecutor: Send + Debug + 'static {
     async fn next(&mut self) -> Result<Message>;
 
-    fn input(&self) -> &dyn Executor;
+    fn input(&self) -> &dyn ExecutorV1;
 
-    fn input_mut(&mut self) -> &mut dyn Executor;
+    fn input_mut(&mut self) -> &mut dyn ExecutorV1;
 }
 
 #[async_trait]
-impl<E> Executor for E
+impl<E> ExecutorV1 for E
 where
     E: DebugExecutor,
 {

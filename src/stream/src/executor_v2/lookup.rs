@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{Executor as ExecutorV1, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
 use crate::task::{unique_operator_id, ExecutorParams, LocalStreamManagerCore};
 
@@ -33,7 +33,7 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
-use super::ExecutorV1AsV2;
+use super::BoxedExecutor;
 
 #[cfg(test)]
 mod tests;
@@ -96,13 +96,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn ExecutorV1>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::LookupNode)?;
 
         let stream = params.input.remove(1);
-        let stream = Box::new(ExecutorV1AsV2(stream));
         let arrangement = params.input.remove(0);
-        let arrangement = Box::new(ExecutorV1AsV2(arrangement));
 
         let arrangement_col_descs = arrangement
             .schema()
@@ -133,22 +131,17 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let arrangement_keyspace_id =
             unique_operator_id(node.arrange_fragment_id, node.arrange_operator_id);
 
-        Ok(Box::new(
-            Box::new(LookupExecutor::new(LookupExecutorParams {
-                arrangement,
-                stream,
-                arrangement_keyspace: Keyspace::shared_executor_root(
-                    store,
-                    arrangement_keyspace_id,
-                ),
-                arrangement_col_descs,
-                arrangement_order_rules,
-                pk_indices: params.pk_indices,
-                use_current_epoch: node.use_current_epoch,
-                stream_join_key_indices: node.stream_key.iter().map(|x| *x as usize).collect(),
-                arrange_join_key_indices: node.arrange_key.iter().map(|x| *x as usize).collect(),
-            }))
-            .v1(),
-        ))
+        Ok(LookupExecutor::new(LookupExecutorParams {
+            arrangement,
+            stream,
+            arrangement_keyspace: Keyspace::shared_executor_root(store, arrangement_keyspace_id),
+            arrangement_col_descs,
+            arrangement_order_rules,
+            pk_indices: params.pk_indices,
+            use_current_epoch: node.use_current_epoch,
+            stream_join_key_indices: node.stream_key.iter().map(|x| *x as usize).collect(),
+            arrange_join_key_indices: node.arrange_key.iter().map(|x| *x as usize).collect(),
+        })
+        .boxed())
     }
 }
