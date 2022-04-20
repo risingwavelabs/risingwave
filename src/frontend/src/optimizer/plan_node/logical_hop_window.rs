@@ -19,8 +19,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch,
-    ToStream,
+    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
 use crate::utils::ColIndexMapping;
