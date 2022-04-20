@@ -98,8 +98,8 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        // If `select_item` have index, get the column_desc from `context.columns` and form field
-        // to store `field_desc`.
+        // If `select_item` have index, get the column_desc from `context.columns` and get
+        // `field_desc` if this is a Field `FunctionCall` type.
         // If not, use `alias` and `data_type` to form field.
         let fields = select_items
             .iter()
@@ -353,22 +353,8 @@ impl Binder {
             .unzip()
     }
 
-    fn get_field_index(expr: &ExprImpl) -> Option<usize> {
-        match expr {
-            ExprImpl::Literal(literal) => match literal.get_data() {
-                None => None,
-                Some(t) => {
-                    if let ScalarImpl::Int32(i) = t {
-                        Some(*i as usize)
-                    } else {
-                        None
-                    }
-                }
-            },
-            _ => None,
-        }
-    }
-
+    /// If the expr is Field `FunctionCall`, use the inputs to find the `field_desc`,
+    /// If not return the original `column_desc`.
     pub fn get_desc(expr: &ExprImpl, column_desc: ColumnDesc) -> Result<ColumnDesc> {
         match expr {
             ExprImpl::FunctionCall(func) => match func.get_expr_type() {
@@ -376,13 +362,23 @@ impl Binder {
                     let mut desc = column_desc;
                     let inputs = func.inputs();
                     for data in &inputs[1..] {
-                        match Self::get_field_index(data) {
-                            None => {
-                                unreachable!()
-                            }
-                            Some(t) => {
-                                desc = desc.field_descs[t].clone();
-                            }
+                        let err = Err(ErrorCode::InternalError(format!(
+                            "Mismatch the type of inputs in Field FunctionCall {:?}",
+                            data
+                        ))
+                        .into());
+                        // The inputs of Field `FunctionCall` must be i32 Literal, so get the index
+                        // to find `field_desc`.
+                        match data {
+                            ExprImpl::Literal(literal) => match literal.get_data() {
+                                Some(ScalarImpl::Int32(i)) => {
+                                    desc = desc.field_descs[(*i as usize)].clone();
+                                }
+                                _ => {
+                                    return err;
+                                }
+                            },
+                            _ => return err,
                         }
                     }
                     Ok(desc)
