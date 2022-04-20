@@ -67,7 +67,7 @@ impl HummockStorage {
                     let table_end = user_key(table_range.right.as_slice());
                     range_overlap(&key_range, table_start, table_end, reversed)
                 })
-                .map(|info| info.clone())
+                .cloned()
                 .collect_vec();
             if table_infos.is_empty() {
                 continue;

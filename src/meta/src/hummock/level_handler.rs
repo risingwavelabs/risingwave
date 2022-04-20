@@ -34,11 +34,11 @@ impl From<&SstableInfo> for SSTableStat {
     }
 }
 
-impl Into<SstableInfo> for SSTableStat {
-    fn into(self) -> SstableInfo {
+impl From<SSTableStat> for SstableInfo {
+    fn from(stat: SSTableStat) -> SstableInfo {
         SstableInfo {
-            key_range: Some(self.key_range.into()),
-            id: self.table_id,
+            key_range: Some(stat.key_range.into()),
+            id: stat.table_id,
         }
     }
 }

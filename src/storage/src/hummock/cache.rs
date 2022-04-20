@@ -328,8 +328,9 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
             let ptr = Box::into_raw(handle);
             let old = self.table.insert(hash, ptr);
             if !old.is_null() {
-                let data = self.remove_cache_handle(old).unwrap();
-                last_reference_list.push(data);
+                if let Some(data) = self.remove_cache_handle(old) {
+                    last_reference_list.push(data);
+                }
             }
             self.usage += charge;
             (*ptr).add_ref();
