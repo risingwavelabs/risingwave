@@ -33,13 +33,12 @@ impl StreamHopWindow {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
-        let input_dist = input.distribution();
 
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
-            logical.distribution().clone(),
+            input.distribution().clone(),
             logical.input().append_only(),
         );
         Self { base, logical }
