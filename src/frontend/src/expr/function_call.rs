@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
@@ -187,10 +187,32 @@ impl Expr for FunctionCall {
         }
     }
 
-    fn get_index(&self) -> Option<usize> {
-        match self.inputs.get(0) {
-            Some(expr) => expr.get_index(),
-            None => None,
+    fn get_indexs(&self) -> Option<Vec<usize>> {
+        if ExprType::Field == self.func_type {
+            if let ExprImpl::InputRef(input) = &self.inputs[0] {
+                let mut indexs = vec![input.index()];
+                for expr in &self.inputs[1..] {
+                    if let ExprImpl::Literal(literal) = expr {
+                        match literal.get_data() {
+                            Some(ScalarImpl::Int32(i)) => {
+                                indexs.push(*i as usize);
+                            }
+                            _ => {
+                                unreachable!()
+                            }
+                        }
+                    } else {
+                        unreachable!()
+                    }
+                }
+                return Some(indexs);
+            }
+            unreachable!()
+        } else {
+            match self.inputs.get(0) {
+                Some(expr) => expr.get_indexs(),
+                None => None,
+            }
         }
     }
 }

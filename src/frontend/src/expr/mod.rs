@@ -54,8 +54,8 @@ pub trait Expr: Into<ExprImpl> {
     /// Serialize the expression
     fn to_protobuf(&self) -> ExprNode;
 
-    /// Get the index of expr
-    fn get_index(&self) -> Option<usize>;
+    /// Get the indexs of expr to find `column_desc`
+    fn get_indexs(&self) -> Option<Vec<usize>>;
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
@@ -209,14 +209,14 @@ impl Expr for ExprImpl {
         }
     }
 
-    fn get_index(&self) -> Option<usize> {
+    fn get_indexs(&self) -> Option<Vec<usize>> {
         match self {
-            ExprImpl::InputRef(e) => e.get_index(),
-            ExprImpl::Literal(e) => e.get_index(),
-            ExprImpl::FunctionCall(e) => e.get_index(),
-            ExprImpl::AggCall(e) => e.get_index(),
-            ExprImpl::Subquery(e) => e.get_index(),
-            ExprImpl::CorrelatedInputRef(e) => e.get_index(),
+            ExprImpl::InputRef(e) => e.get_indexs(),
+            ExprImpl::Literal(e) => e.get_indexs(),
+            ExprImpl::FunctionCall(e) => e.get_indexs(),
+            ExprImpl::AggCall(e) => e.get_indexs(),
+            ExprImpl::Subquery(e) => e.get_indexs(),
+            ExprImpl::CorrelatedInputRef(e) => e.get_indexs(),
         }
     }
 }

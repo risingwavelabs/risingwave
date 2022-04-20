@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Scalar};
 use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -106,9 +106,12 @@ impl Binder {
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                match s.get_index() {
+                match s.get_indexs() {
                     Some(index) => {
-                        let desc = Self::get_desc(s, (self.context.columns[index]).desc.clone())?;
+                        let desc = Self::get_desc(
+                            &index[1..],
+                            (self.context.columns[index[0]]).desc.clone(),
+                        )?;
                         let mut field: Field = (&desc).into();
                         field.name = name;
                         Ok(field)
@@ -353,39 +356,21 @@ impl Binder {
             .unzip()
     }
 
-    /// If the expr is Field `FunctionCall`, use the inputs to find the `field_desc`,
-    /// If not return the original `column_desc`.
-    pub fn get_desc(expr: &ExprImpl, column_desc: ColumnDesc) -> Result<ColumnDesc> {
-        match expr {
-            ExprImpl::FunctionCall(func) => match func.get_expr_type() {
-                ExprType::Field => {
-                    let mut desc = column_desc;
-                    let inputs = func.inputs();
-                    for data in &inputs[1..] {
-                        let err = Err(ErrorCode::InternalError(format!(
-                            "Mismatch the type of inputs in Field FunctionCall {:?}",
-                            data
-                        ))
-                        .into());
-                        // The inputs of Field `FunctionCall` must be i32 Literal, so get the index
-                        // to find `field_desc`.
-                        match data {
-                            ExprImpl::Literal(literal) => match literal.get_data() {
-                                Some(ScalarImpl::Int32(i)) => {
-                                    desc = desc.field_descs[(*i as usize)].clone();
-                                }
-                                _ => {
-                                    return err;
-                                }
-                            },
-                            _ => return err,
-                        }
-                    }
-                    Ok(desc)
+    pub fn get_desc(indexs: &[usize], column_desc: ColumnDesc) -> Result<ColumnDesc> {
+        let mut column_desc = column_desc;
+        for i in indexs {
+            match column_desc.field_descs.get(*i) {
+                None => {
+                    return Err(ErrorCode::InternalError(
+                        "Index out of field_descs bound".to_string(),
+                    )
+                    .into());
                 }
-                _ => Ok(column_desc),
-            },
-            _ => Ok(column_desc),
+                Some(desc) => {
+                    column_desc = desc.clone();
+                }
+            }
         }
+        Ok(column_desc)
     }
 }

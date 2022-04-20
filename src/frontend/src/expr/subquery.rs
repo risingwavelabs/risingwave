@@ -82,7 +82,7 @@ impl Expr for Subquery {
         unreachable!("Subquery {:?} has not been unnested", self)
     }
 
-    fn get_index(&self) -> Option<usize> {
+    fn get_indexs(&self) -> Option<Vec<usize>> {
         None
     }
 }

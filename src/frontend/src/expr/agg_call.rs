@@ -128,9 +128,9 @@ impl Expr for AggCall {
         )
     }
 
-    fn get_index(&self) -> Option<usize> {
+    fn get_indexs(&self) -> Option<Vec<usize>> {
         match self.inputs.get(0) {
-            Some(expr) => expr.get_index(),
+            Some(expr) => expr.get_indexs(),
             None => None,
         }
     }

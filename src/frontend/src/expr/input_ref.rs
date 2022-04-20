@@ -134,7 +134,7 @@ impl Expr for InputRef {
         }
     }
 
-    fn get_index(&self) -> Option<usize> {
-        Some(self.index)
+    fn get_indexs(&self) -> Option<Vec<usize>> {
+        Some(vec![self.index])
     }
 }
