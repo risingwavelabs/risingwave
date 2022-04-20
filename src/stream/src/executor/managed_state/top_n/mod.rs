@@ -61,23 +61,19 @@ async fn deserialize_bytes_to_pk_and_row<
                 let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf, ordered_row_deserializer)?;
                 result.push((pk, row));
                 if let Some(num_rows) = num_rows && result.len() == num_rows {
-                    break;
+                    return Ok(result);
                 }
             }
             None => {}
         }
     }
-    if let Some(num_rows) = num_rows && result.len() == num_rows {
-        // do nothing
-    } else {
-        // This branch implies that all the key value pairs have been drained from `pk_row_bytes_iter`.
-        // Try to take out the final row.
-        // It is possible that `iter` is empty, so we may read nothing and there is no such final row.
-        let pk_buf_and_row = cell_based_row_deserializer.take();
-        if let Some(mut pk_buf_and_row) = pk_buf_and_row {
-            let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf_and_row.0, ordered_row_deserializer)?;
-            result.push((pk, pk_buf_and_row.1));
-        }
+    // Reaching here implies that all the key value pairs have been drained from
+    // `pk_row_bytes_iter`. Try to take out the final row.
+    // It is possible that `iter` is empty, so we may read nothing and there is no such final row.
+    let pk_buf_and_row = cell_based_row_deserializer.take();
+    if let Some(mut pk_buf_and_row) = pk_buf_and_row {
+        let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf_and_row.0, ordered_row_deserializer)?;
+        result.push((pk, pk_buf_and_row.1));
     }
     Ok(result)
 }

@@ -258,7 +258,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         number_rows: Option<usize>,
         epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        let iter = self.keyspace.iter_strip_prefix(epoch).await?;
+        let iter = self.keyspace.iter(epoch).await?;
         let pk_and_rows = deserialize_bytes_to_pk_and_row::<TOP_N_MIN, _>(
             iter,
             &mut self.ordered_row_deserializer,

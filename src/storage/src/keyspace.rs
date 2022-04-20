@@ -163,16 +163,16 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn iter(&'_ self, epoch: u64) -> StorageResult<S::Iter<'_>> {
+    async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter<'_>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         self.store.iter(range, epoch).await
     }
 
-    pub async fn iter_strip_prefix(
+    pub async fn iter(
         &'_ self,
         epoch: u64,
     ) -> StorageResult<impl StateStoreIter<Item = (Bytes, Bytes)> + '_> {
-        let iter = self.iter(epoch).await?;
+        let iter = self.iter_inner(epoch).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),
@@ -186,7 +186,7 @@ impl<S: StateStore> Keyspace<S> {
     }
 }
 
-pub struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
+struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
     iter: I,
     prefix_len: usize,
 }

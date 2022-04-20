@@ -272,7 +272,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         number_rows: Option<usize>,
         epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        let iter = self.keyspace.iter_strip_prefix(epoch).await?;
+        let iter = self.keyspace.iter(epoch).await?;
         let pk_and_rows = deserialize_bytes_to_pk_and_row::<TOP_N_TYPE, _>(
             iter,
             &mut self.ordered_row_deserializer,
