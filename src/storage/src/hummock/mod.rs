@@ -33,9 +33,9 @@ mod compactor_tests;
 mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
-pub(crate) mod iterator;
+pub mod iterator;
 pub mod local_version_manager;
-mod shared_buffer;
+pub mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
 mod sstable_store;

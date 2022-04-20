@@ -36,11 +36,12 @@ use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
-        shared_buffer_threshold_size: 67108864, // 64MB
         sstable_size: 256 * (1 << 20),
         block_size: 64 * (1 << 10),
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
+        shared_buffer_capacity: 64 << 20,
+        shared_buffer_threshold: 48 << 20,
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
@@ -151,7 +152,7 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-pub async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
+pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
     let mut c: usize = 0;
     while iter.next().await.unwrap().is_some() {
         c += 1
