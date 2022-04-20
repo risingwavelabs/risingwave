@@ -531,7 +531,7 @@ pub fn create_executor(
 }
 
 /// `StreamConsumer` is the last step in an actor.
-pub trait StreamConsumer: Send + Debug + 'static {
+pub trait StreamConsumer: Send + 'static {
     type BarrierStream: Stream<Item = Result<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;

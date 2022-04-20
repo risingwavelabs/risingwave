@@ -129,70 +129,38 @@ pub fn new_output(
     }
 }
 
-/// `DispatchExecutor` consumes messages and send them into downstream actors. Usually,
+/// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
-    // input: Box<dyn Executor>,
     input: BoxedExecutor,
-
     inner: DispatchExecutorInner,
 }
 
-impl std::fmt::Debug for DispatchExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DispatchExecutor")
-            .field("input", &self.input.info())
-            .field("inner", &self.inner)
-            .finish()
-    }
-}
-
-#[derive(Debug)]
 struct DispatchExecutorInner {
-    inner: Vec<DispatcherImpl>,
-
+    dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
-
     context: Arc<SharedContext>,
-}
-
-impl DispatchExecutor {
-    pub fn new(
-        input: BoxedExecutor,
-        inner: Vec<DispatcherImpl>,
-        actor_id: u32,
-        context: Arc<SharedContext>,
-    ) -> Self {
-        Self {
-            input,
-            inner: DispatchExecutorInner {
-                inner,
-                actor_id,
-                context,
-            },
-        }
-    }
 }
 
 impl DispatchExecutorInner {
     fn single_inner_mut(&mut self) -> &mut DispatcherImpl {
         assert_eq!(
-            self.inner.len(),
+            self.dispatchers.len(),
             1,
             "only support mutation on one-dispatcher actors"
         );
-        &mut self.inner[0]
+        &mut self.dispatchers[0]
     }
 
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
-                if self.inner.len() == 1 {
+                if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
                 } else {
-                    for dispatcher in &mut self.inner {
+                    for dispatcher in &mut self.dispatchers {
                         dispatcher.dispatch_data(chunk.clone()).await?;
                     }
                 }
@@ -200,7 +168,7 @@ impl DispatchExecutorInner {
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
-                for dispatcher in &mut self.inner {
+                for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
                 self.post_mutate_outputs(&mutation).await?;
@@ -211,8 +179,12 @@ impl DispatchExecutorInner {
 
     /// For `Add` and `Update`, update the outputs before we dispatch the barrier.
     async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
-        match mutation.as_deref() {
-            Some(Mutation::UpdateOutputs(updates)) => {
+        let Some(mutation) = mutation.as_deref() else {
+            return Ok(())
+        };
+
+        match mutation {
+            Mutation::UpdateOutputs(updates) => {
                 if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
 
@@ -235,7 +207,8 @@ impl DispatchExecutorInner {
                     self.single_inner_mut().set_outputs(new_outputs)
                 }
             }
-            Some(Mutation::AddOutput(adds)) => {
+
+            Mutation::AddOutput(adds) => {
                 if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
@@ -251,6 +224,7 @@ impl DispatchExecutorInner {
                     self.single_inner_mut().add_outputs(outputs_to_add);
                 }
             }
+
             _ => {}
         };
 
@@ -267,6 +241,24 @@ impl DispatchExecutorInner {
         }
 
         Ok(())
+    }
+}
+
+impl DispatchExecutor {
+    pub fn new(
+        input: BoxedExecutor,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: u32,
+        context: Arc<SharedContext>,
+    ) -> Self {
+        Self {
+            input,
+            inner: DispatchExecutorInner {
+                dispatchers,
+                actor_id,
+                context,
+            },
+        }
     }
 }
 
@@ -721,7 +713,6 @@ mod sender_consumer {
     use crate::executor::ExecutorV1;
 
     /// `SenderConsumer` consumes data from input executor and send it into a channel.
-    #[derive(Debug)]
     pub struct SenderConsumer {
         input: Box<dyn ExecutorV1>,
         channel: BoxedOutput,

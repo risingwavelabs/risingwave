@@ -396,7 +396,8 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
     ) -> Result<impl StreamConsumer> {
         // create downstream receivers
-        let mut dispatcher_impls = vec![];
+        let mut dispatcher_impls = Vec::with_capacity(dispatchers.len());
+
         for dispatcher in dispatchers {
             let outputs = dispatcher
                 .downstream_actor_id
@@ -406,6 +407,7 @@ impl LocalStreamManagerCore {
                     new_output(&self.context, downstream_addr, actor_id, *down_id)
                 })
                 .collect::<Result<Vec<_>>>()?;
+
             use stream_plan::DispatcherType::*;
             let dispatcher_impl = match dispatcher.get_type()? {
                 Hash => {
