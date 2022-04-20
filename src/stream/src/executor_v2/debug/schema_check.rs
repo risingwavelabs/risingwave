@@ -110,7 +110,7 @@ mod tests {
         source.push_chunks([chunk].into_iter());
         source.push_barrier(1, false);
 
-        let checked = schema_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
@@ -139,7 +139,7 @@ mod tests {
         source.push_chunks([chunk].into_iter());
         source.push_barrier(1, false);
 
-        let checked = schema_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
         checked.next().await.unwrap().unwrap();
     }

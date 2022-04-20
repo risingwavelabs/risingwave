@@ -84,7 +84,7 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let checked = update_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -102,7 +102,7 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let checked = update_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -120,7 +120,7 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let checked = update_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -133,7 +133,7 @@ mod tests {
         let mut source = MockSource::new(Default::default(), vec![]);
         source.push_chunks(once(chunk));
 
-        let checked = update_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap();

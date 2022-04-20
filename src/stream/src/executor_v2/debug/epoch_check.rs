@@ -81,7 +81,7 @@ mod tests {
         source.push_barrier(114, false);
         source.push_barrier(514, false);
 
-        let checked = epoch_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
@@ -100,7 +100,7 @@ mod tests {
         source.push_barrier(514, false);
         source.push_barrier(114, false);
 
-        let checked = epoch_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
@@ -117,7 +117,7 @@ mod tests {
         source.push_chunks([StreamChunk::default()].into_iter());
         source.push_barrier(114, false);
 
-        let checked = epoch_check(Arc::new(ExecutorInfo::default()), source.boxed().execute());
+        let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
