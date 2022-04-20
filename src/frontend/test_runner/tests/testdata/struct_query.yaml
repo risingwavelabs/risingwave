@@ -87,7 +87,7 @@
       LogicalScan { table: v, columns: [id, country1, country2, country3, zipcode, rate, _row_id#0] }
 - sql: |
     create materialized view v as select * from t;
-    select (c).city.zipcode from (select (v).country as c from v);
+    select (c).zipcode from (select (v).country.city as c from v);
   create_source:
     row_format: protobuf
     name: t
@@ -110,6 +110,6 @@
         string zipcode = 2;
       }
   logical_plan: |
-    LogicalProject { exprs: [Field($0, 1:Struct { fields: [Varchar, Varchar] }, 1:Varchar)], expr_alias: [zipcode] }
-      LogicalProject { exprs: [Field($1)], expr_alias: [c] }
+    LogicalProject { exprs: [Field($0, 1:Varchar)], expr_alias: [zipcode] }
+      LogicalProject { exprs: [Field($1, 1:Struct { fields: [Varchar, Varchar] })], expr_alias: [c] }
         LogicalScan { table: v, columns: [id, country, zipcode, rate, _row_id#0] }

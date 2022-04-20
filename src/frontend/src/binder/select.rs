@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -108,14 +108,15 @@ impl Binder {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
                 match s.get_index() {
                     Some(index) => {
-                        let mut field: Field = (&self.context.columns[index].desc).into();
+                        let desc = Self::get_desc(s, (self.context.columns[index]).desc.clone())?;
+                        let mut field: Field = (&desc).into();
                         field.name = name;
-                        field
+                        Ok(field)
                     }
-                    None => Field::with_name(s.return_type(), name),
+                    None => Ok(Field::with_name(s.return_type(), name)),
                 }
             })
-            .collect_vec();
+            .collect::<Result<Vec<Field>>>()?;
 
         Ok(BoundSelect {
             distinct: select.distinct,
@@ -350,5 +351,45 @@ impl Binder {
                 )
             })
             .unzip()
+    }
+
+    fn get_field_index(expr: &ExprImpl) -> Option<usize> {
+        match expr {
+            ExprImpl::Literal(literal) => match literal.get_data() {
+                None => None,
+                Some(t) => {
+                    if let ScalarImpl::Int32(i) = t {
+                        Some(*i as usize)
+                    } else {
+                        None
+                    }
+                }
+            },
+            _ => None,
+        }
+    }
+
+    pub fn get_desc(expr: &ExprImpl, column_desc: ColumnDesc) -> Result<ColumnDesc> {
+        match expr {
+            ExprImpl::FunctionCall(func) => match func.get_expr_type() {
+                ExprType::Field => {
+                    let mut desc = column_desc;
+                    let inputs = func.inputs();
+                    for data in &inputs[1..] {
+                        match Self::get_field_index(data) {
+                            None => {
+                                unreachable!()
+                            }
+                            Some(t) => {
+                                desc = desc.field_descs[t].clone();
+                            }
+                        }
+                    }
+                    Ok(desc)
+                }
+                _ => Ok(column_desc),
+            },
+            _ => Ok(column_desc),
+        }
     }
 }
