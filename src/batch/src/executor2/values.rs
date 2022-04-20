@@ -231,7 +231,7 @@ mod tests {
 
         let fields = vec![Field::unnamed(DataType::Int32)];
 
-        let mut values_executor = Box::new(ValuesExecutor2 {
+        let values_executor = Box::new(ValuesExecutor2 {
             rows: rows.into_iter(),
             schema: Schema { fields },
             identity: "ValuesExecutor2".to_string(),
