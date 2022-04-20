@@ -82,6 +82,9 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated int32 distribution_keys = 5;
+  // Whether to use delta join for this hash join node.
+  // TODO: remove this in the future when we have a separate DeltaHashJoin node.
+  bool is_delta_join = 6;
 }
 
 message MergeNode {

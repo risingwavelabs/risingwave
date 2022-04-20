@@ -255,13 +255,16 @@ where
         // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
         // with only equal conditions
         if let Node::HashJoinNode(hash_join_node) = stream_node.get_node()? {
-            if hash_join_node.get_join_type()? == JoinType::Inner
-                && hash_join_node.condition.is_none()
-            {
-                const ENABLE_DELTA_JOIN: bool = false;
-                if ENABLE_DELTA_JOIN {
+            if hash_join_node.is_delta_join {
+                if hash_join_node.get_join_type()? == JoinType::Inner
+                    && hash_join_node.condition.is_none()
+                {
                     return self.build_delta_join(current_fragment, stream_node);
-                };
+                } else {
+                    panic!(
+                        "only inner join without non-equal condition is supported for delta joins"
+                    );
+                }
             }
         }
 
