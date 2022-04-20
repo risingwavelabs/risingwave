@@ -19,7 +19,35 @@ use spin::Mutex;
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
+// LRU cache implementation port from github.com/facebook/rocksdb. The class `LruCache` is
+// thread-safe, because every operation on cache will be protected by a spin lock.
 
+// An entry is a variable length heap-allocated structure.
+// Entries are referenced by cache and/or by any external entity.
+// The cache keeps all its entries in a hash table. Some elements
+// are also stored on LRU list.
+//
+// LruHandle can be in these states:
+// 1. Referenced externally AND in hash table.
+//    In that case the entry is *not* in the LRU list
+//    (refs >= 1 && in_cache == true)
+// 2. Not referenced externally AND in hash table.
+//    In that case the entry is in the LRU list and can be freed.
+//    (refs == 0 && in_cache == true)
+// 3. Referenced externally AND not in hash table.
+//    In that case the entry is not in the LRU list and not in hash table.
+//    The entry can be freed when refs becomes 0.
+//    (refs >= 1 && in_cache == false)
+//
+// All newly created LruHandles are in state 1. If you call
+// LruCacheShard::Release on entry in state 1, it will go into state 2.
+// To move from state 1 to state 3, either call LruCacheShard::Erase or
+// LruCacheShard::Insert with the same key (but possibly different value).
+// To move from state 2 to state 1, use LruCacheShard::Lookup.
+// Before destruction, make sure that no handles are in state 1. This means
+// that any successful LruCacheShard::Lookup/LruCacheShard::Insert have a
+// matching LruCache::Release (to move into state 2) or LruCacheShard::Erase
+// (to move into state 3).
 pub struct LruHandle<K: PartialEq + Default, T> {
     next_hash: *mut LruHandle<K, T>,
     next: *mut LruHandle<K, T>,
@@ -187,7 +215,7 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     }
 }
 
-pub struct LRUCacheShard<K: PartialEq + Default, T> {
+pub struct LruCacheShard<K: PartialEq + Default, T> {
     lru: Box<LruHandle<K, T>>,
     table: LruHandleTable<K, T>,
     object_pool: Vec<Box<LruHandle<K, T>>>,
@@ -197,10 +225,10 @@ pub struct LRUCacheShard<K: PartialEq + Default, T> {
     strict_capacity_limit: bool,
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for LRUCacheShard<K, T> {}
-unsafe impl<K: PartialEq + Default, T> Sync for LRUCacheShard<K, T> {}
+unsafe impl<K: PartialEq + Default, T> Send for LruCacheShard<K, T> {}
+unsafe impl<K: PartialEq + Default, T> Sync for LruCacheShard<K, T> {}
 
-impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
+impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize, strict_capacity_limit: bool) -> Self {
         let mut lru = Box::new(LruHandle::new(K::default(), None));
         lru.prev = lru.as_mut();
@@ -362,19 +390,19 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
     }
 }
 
-pub struct LRUCache<K: PartialEq + Default, T> {
+pub struct LruCache<K: PartialEq + Default, T> {
     num_shard_bits: usize,
-    shards: Vec<Mutex<LRUCacheShard<K, T>>>,
+    shards: Vec<Mutex<LruCacheShard<K, T>>>,
 }
 
-impl<K: PartialEq + Default, T> LRUCache<K, T> {
+impl<K: PartialEq + Default, T> LruCache<K, T> {
     pub fn new(num_shard_bits: usize, capacity: usize, object_cache: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
         let per_shard_object = object_cache / num_shards;
         for _ in 0..num_shards {
-            shards.push(Mutex::new(LRUCacheShard::new(
+            shards.push(Mutex::new(LruCacheShard::new(
                 per_shard,
                 per_shard_object,
                 false,
@@ -456,7 +484,7 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
 }
 
 pub struct CachableEntry<K: PartialEq + Default, T> {
-    cache: Arc<LRUCache<K, T>>,
+    cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
 }
 
@@ -488,7 +516,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::cache::{LruHandle, IN_CACHE};
-    use crate::hummock::LRUCache;
+    use crate::hummock::LruCache;
 
     pub struct Block {
         pub offset: u64,
@@ -500,8 +528,8 @@ mod tests {
         println!("not in cache: {}, in cache {}", REVERSE_IN_CACHE, IN_CACHE);
         println!(
             "cache shard size: {}, cache size {}",
-            std::mem::size_of::<Mutex<LRUCacheShard<u32, String>>>(),
-            std::mem::size_of::<LRUCache<String, String>>()
+            std::mem::size_of::<Mutex<LruCacheShard<u32, String>>>(),
+            std::mem::size_of::<LruCache<String, String>>()
         );
         let mut h = Box::new(LruHandle::new(1, Some(2)));
         h.set_in_cache(true);
@@ -512,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LRUCache::<(u64, u64), Block>::new(2, 256, 16));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 0);
         assert_eq!(cache.shard(10), 0);
@@ -520,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic() {
-        let cache = Arc::new(LRUCache::<(u64, u64), Block>::new(2, 256, 16));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
         let seed = 10244021u64;
         let mut rng = SmallRng::seed_from_u64(seed);
         for _ in 0..100000 {
@@ -548,7 +576,7 @@ mod tests {
         assert_eq!(256, cache.get_memory_usage());
     }
 
-    fn validate_lru_list(cache: &mut LRUCacheShard<String, String>, keys: Vec<&str>) {
+    fn validate_lru_list(cache: &mut LruCacheShard<String, String>, keys: Vec<&str>) {
         unsafe {
             let mut lru: *mut LruHandle<String, String> = cache.lru.as_mut();
             for k in keys {
@@ -564,11 +592,11 @@ mod tests {
         }
     }
 
-    fn create_cache(capacity: usize) -> LRUCacheShard<String, String> {
-        LRUCacheShard::new(capacity, capacity, false)
+    fn create_cache(capacity: usize) -> LruCacheShard<String, String> {
+        LruCacheShard::new(capacity, capacity, false)
     }
 
-    fn lookup(cache: &mut LRUCacheShard<String, String>, key: &str) -> bool {
+    fn lookup(cache: &mut LruCacheShard<String, String>, key: &str) -> bool {
         unsafe {
             let h = cache.lookup(0, &key.to_string());
             let exist = !h.is_null();
@@ -580,7 +608,7 @@ mod tests {
         }
     }
 
-    fn insert(cache: &mut LRUCacheShard<String, String>, key: &str, value: &str) {
+    fn insert(cache: &mut LruCacheShard<String, String>, key: &str, value: &str) {
         let mut free_list = vec![];
         unsafe {
             let handle = cache.insert(

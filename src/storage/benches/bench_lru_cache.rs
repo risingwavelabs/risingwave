@@ -24,7 +24,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_storage::hummock::{HummockError, HummockResult, LRUCache};
+use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
 use tokio::runtime::{Builder, Runtime};
 
 pub struct Block {
@@ -74,20 +74,20 @@ impl CacheBase for MokaCache {
     }
 }
 
-pub struct LRUCacheImpl {
-    inner: Arc<LRUCache<(u64, u64), Arc<Block>>>,
+pub struct LruCacheImpl {
+    inner: Arc<LruCache<(u64, u64), Arc<Block>>>,
 }
 
-impl LRUCacheImpl {
+impl LruCacheImpl {
     pub fn new(capacity: usize) -> Self {
         Self {
-            inner: Arc::new(LRUCache::new(3, capacity, 1024)),
+            inner: Arc::new(LruCache::new(3, capacity, 1024)),
         }
     }
 }
 
 #[async_trait]
-impl CacheBase for LRUCacheImpl {
+impl CacheBase for LruCacheImpl {
     async fn try_get_with(&self, sst_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let mut hasher = DefaultHasher::new();
         let key = (sst_id, block_idx);
@@ -172,7 +172,7 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
 fn bench_block_cache(c: &mut Criterion) {
     let block_cache = Arc::new(MokaCache::new(2048));
     bench_cache(block_cache, c);
-    let block_cache = Arc::new(LRUCacheImpl::new(2048));
+    let block_cache = Arc::new(LruCacheImpl::new(2048));
     bench_cache(block_cache, c);
 }
 
