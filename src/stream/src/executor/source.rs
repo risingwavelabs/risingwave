@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use either::Either;
@@ -170,9 +170,12 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
         stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
-        // fixme(chen): sleep to avoid conflict
-        std::thread::sleep(Duration::from_millis(rand::random::<u64>() % 1000));
-
+        // todo(chen): dirty code to generate row_id start position
+        let row_id_start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let row_id_start = row_id_start << 32;
         Ok(Self {
             source_id,
             source_desc,
@@ -181,12 +184,7 @@ impl SourceExecutor {
             pk_indices,
             barrier_receiver: Some(barrier_receiver),
             // fixme(chen): may conflict
-            next_row_id: AtomicU64::from(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64,
-            ),
+            next_row_id: AtomicU64::from(row_id_start),
             identity: format!("SourceExecutor {:X}", executor_id),
             op_info,
             reader_stream: None,
