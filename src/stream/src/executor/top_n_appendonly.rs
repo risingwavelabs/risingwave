@@ -21,9 +21,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{
-    AppendOnlyTopNExecutor as AppendOnlyTopNExecutorV2, BoxedExecutor, Executor,
-};
+use crate::executor_v2::{AppendOnlyTopNExecutor, BoxedExecutor, Executor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct AppendOnlyTopNExecutorBuilder {}
@@ -57,7 +55,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
-        Ok(AppendOnlyTopNExecutorV2::new_from_v1(
+        Ok(AppendOnlyTopNExecutor::new_from_v1(
             params.input.remove(0),
             order_types,
             (node.offset as usize, limit),

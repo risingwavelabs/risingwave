@@ -39,7 +39,7 @@ use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{BoxedExecutor, Executor, MergeExecutor as MergeExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor, MergeExecutor};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -572,7 +572,7 @@ impl LocalStreamManagerCore {
         if upstreams.len() == 1 {
             Ok(ReceiverExecutor::new(schema, params.pk_indices, rxs.remove(0)).boxed())
         } else {
-            Ok(MergeExecutorV2::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
+            Ok(MergeExecutor::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
         }
     }
 

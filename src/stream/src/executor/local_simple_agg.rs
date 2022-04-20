@@ -21,9 +21,7 @@ use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{
-    BoxedExecutor, Executor, LocalSimpleAggExecutor as LocalSimpleAggExecutorV2,
-};
+use crate::executor_v2::{BoxedExecutor, Executor, LocalSimpleAggExecutor};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 pub struct LocalSimpleAggExecutorBuilder {}
@@ -42,7 +40,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .map(build_agg_call_from_prost)
             .try_collect()?;
 
-        Ok(LocalSimpleAggExecutorV2::new_from_v1(
+        Ok(LocalSimpleAggExecutor::new_from_v1(
             params.input.remove(0),
             agg_calls,
             params.pk_indices,

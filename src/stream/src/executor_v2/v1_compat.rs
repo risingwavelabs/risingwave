@@ -56,9 +56,9 @@ pub struct StreamExecutorV1 {
 
 impl fmt::Debug for StreamExecutorV1 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamExecutor")
+        f.debug_struct("StreamExecutorV1")
             .field("info", &self.info)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -128,7 +128,7 @@ impl ExecutorV1AsV2 {
         loop {
             let msg = self.0.next().await;
             match msg {
-                // For snapshot input of `Chain`, we use `Eof` to represent the end of stream.
+                // We previously use `Eof` to represent the end of stream.
                 Err(e) if matches!(e.inner(), ErrorCode::Eof) => break,
                 _ => yield msg.map_err(StreamExecutorError::executor_v1)?,
             }

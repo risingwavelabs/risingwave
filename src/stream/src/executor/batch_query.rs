@@ -25,7 +25,7 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{BatchQueryExecutor as BatchQueryExecutorV2, BoxedExecutor, Executor};
+use crate::executor_v2::{BatchQueryExecutor, BoxedExecutor, Executor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct BatchQueryExecutorBuilder;
@@ -58,7 +58,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         let parallel_info = node.get_parallel_info()?;
 
-        let v2 = BatchQueryExecutorV2::new_from_v1(
+        let executor = BatchQueryExecutor::new_from_v1(
             table,
             params.pk_indices,
             params.op_info,
@@ -66,6 +66,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             parallel_info.clone(),
         );
 
-        Ok(v2.boxed())
+        Ok(executor.boxed())
     }
 }

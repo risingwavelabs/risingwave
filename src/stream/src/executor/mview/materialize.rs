@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{ExecutorBuilder, Result};
-use crate::executor_v2::{BoxedExecutor, Executor, MaterializeExecutor as MaterializeExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor, MaterializeExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct MaterializeExecutorBuilder;
@@ -48,7 +48,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let v2 = MaterializeExecutorV2::new_from_v1(
+        let executor = MaterializeExecutor::new_from_v1(
             params.input.remove(0),
             keyspace,
             keys,
@@ -57,7 +57,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.op_info,
         );
 
-        Ok(v2.boxed())
+        Ok(executor.boxed())
     }
 }
 
@@ -94,7 +94,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|(idx, _)| ColumnId::from(idx as i32))
             .collect();
 
-        let v2 = MaterializeExecutorV2::new_from_v1(
+        let executor = MaterializeExecutor::new_from_v1(
             params.input.remove(0),
             keyspace,
             keys,
@@ -103,6 +103,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             params.op_info,
         );
 
-        Ok(v2.boxed())
+        Ok(executor.boxed())
     }
 }

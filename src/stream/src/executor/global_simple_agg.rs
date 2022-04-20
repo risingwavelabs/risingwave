@@ -23,7 +23,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{BoxedExecutor, Executor, SimpleAggExecutor as SimpleAggExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor, SimpleAggExecutor};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 pub struct SimpleAggExecutorBuilder {}
@@ -48,7 +48,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
-        Ok(SimpleAggExecutorV2::new_from_v1(
+        Ok(SimpleAggExecutor::new_from_v1(
             params.input.remove(0),
             agg_calls,
             keyspace,
