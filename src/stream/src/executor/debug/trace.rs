@@ -21,7 +21,7 @@ use tracing::event;
 use tracing_futures::Instrument;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Executor, Message};
+use crate::executor::{ExecutorV1, Message};
 use crate::task::ActorId;
 
 /// `TraceExecutor` prints data passing in the stream graph to stdout.
@@ -33,7 +33,7 @@ use crate::task::ActorId;
 /// ```
 pub struct TraceExecutor {
     /// The input of the current executor
-    input: Box<dyn Executor>,
+    input: Box<dyn ExecutorV1>,
     /// Description of input executor
     input_desc: String,
     /// Input position of the input executor
@@ -59,7 +59,7 @@ impl Debug for TraceExecutor {
 
 impl TraceExecutor {
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Box<dyn ExecutorV1>,
         input_desc: String,
         input_pos: usize,
         actor_id: ActorId,
@@ -114,11 +114,11 @@ impl super::DebugExecutor for TraceExecutor {
         }
     }
 
-    fn input(&self) -> &dyn Executor {
+    fn input(&self) -> &dyn ExecutorV1 {
         self.input.as_ref()
     }
 
-    fn input_mut(&mut self) -> &mut dyn Executor {
+    fn input_mut(&mut self) -> &mut dyn ExecutorV1 {
         self.input.as_mut()
     }
 }

@@ -84,7 +84,7 @@ impl MockSource {
 }
 
 #[async_trait]
-impl Executor for MockSource {
+impl ExecutorV1 for MockSource {
     async fn next(&mut self) -> Result<Message> {
         self.epoch += 1;
         match self.msgs.pop_front() {
@@ -173,7 +173,7 @@ impl MockAsyncSource {
 }
 
 #[async_trait]
-impl Executor for MockAsyncSource {
+impl ExecutorV1 for MockAsyncSource {
     async fn next(&mut self) -> Result<Message> {
         self.epoch += 1;
         match self.rx.recv().await {
