@@ -36,7 +36,7 @@ pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
-use crate::executor_v2::{LookupExecutorBuilder, UnionExecutorBuilder};
+use crate::executor_v2::{BoxedExecutor, Executor, LookupExecutorBuilder, UnionExecutorBuilder};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
@@ -91,7 +91,7 @@ pub const INVALID_EPOCH: u64 = 0;
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// Boxed stream of [`StreamMessage`].
-pub type BoxedExecutorStream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
+pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
@@ -355,7 +355,7 @@ impl Message {
 
 /// `Executor` supports handling of control messages.
 #[async_trait]
-pub trait Executor: Send + Debug + 'static {
+pub trait ExecutorV1: Send + Debug + 'static {
     async fn next(&mut self) -> Result<Message>;
 
     /// Return the schema of the OUTPUT of the executor.
@@ -391,26 +391,26 @@ pub trait Executor: Send + Debug + 'static {
 }
 
 #[derive(Debug)]
-pub enum ExecutorState {
+pub enum ExecutorV1State {
     /// Waiting for the first barrier
     Init,
     /// Can read from and write to storage
     Active(u64),
 }
 
-impl ExecutorState {
+impl ExecutorV1State {
     pub fn epoch(&self) -> u64 {
         match self {
-            ExecutorState::Init => panic!("Executor is not active when getting the epoch"),
-            ExecutorState::Active(epoch) => *epoch,
+            ExecutorV1State::Init => panic!("Executor is not active when getting the epoch"),
+            ExecutorV1State::Active(epoch) => *epoch,
         }
     }
 }
 
-pub trait StatefulExecutor: Executor {
-    fn executor_state(&self) -> &ExecutorState;
+pub trait StatefulExecutorV1: ExecutorV1 {
+    fn executor_state(&self) -> &ExecutorV1State;
 
-    fn update_executor_state(&mut self, new_state: ExecutorState);
+    fn update_executor_state(&mut self, new_state: ExecutorV1State);
 
     /// Try initializing the executor if not done.
     /// Return:
@@ -421,16 +421,16 @@ pub trait StatefulExecutor: Executor {
         msg: impl TryInto<&'a Barrier, Error = ()>,
     ) -> Option<Barrier> {
         match self.executor_state() {
-            ExecutorState::Init => {
+            ExecutorV1State::Init => {
                 if let Ok(barrier) = msg.try_into() {
                     // Move to Active state
-                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                    self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
                     Some(barrier.clone())
                 } else {
                     panic!("The first message the executor receives is not a barrier");
                 }
             }
-            ExecutorState::Active(_) => None,
+            ExecutorV1State::Active(_) => None,
         }
     }
 }
@@ -459,12 +459,26 @@ pub fn pk_input_array_refs<'a>(
 }
 
 pub trait ExecutorBuilder {
+    /// For compatibility.
+    fn new_boxed_executor_v1(
+        _executor_params: ExecutorParams,
+        _node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
+    ) -> Result<Box<dyn ExecutorV1>> {
+        unimplemented!()
+    }
+
+    /// Create an executor. May directly override this function to create an executor v2, or it will
+    /// create an [`ExecutorV1`] and wrap it to v2.
     fn new_boxed_executor(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>>;
+    ) -> Result<BoxedExecutor> {
+        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2().boxed())
+    }
 }
 
 #[macro_export]
@@ -491,8 +505,8 @@ pub fn create_executor(
     stream: &mut LocalStreamManagerCore,
     node: &stream_plan::StreamNode,
     store: impl StateStore,
-) -> Result<Box<dyn Executor>> {
-    let real_executor = build_executor! {
+) -> Result<BoxedExecutor> {
+    build_executor! {
         executor_params,
         node,
         store,
@@ -513,12 +527,11 @@ pub fn create_executor(
         Node::ArrangeNode => ArrangeExecutorBuilder,
         Node::LookupNode => LookupExecutorBuilder,
         Node::UnionNode => UnionExecutorBuilder
-    }?;
-    Ok(real_executor)
+    }
 }
 
 /// `StreamConsumer` is the last step in an actor.
-pub trait StreamConsumer: Send + Debug + 'static {
+pub trait StreamConsumer: Send + 'static {
     type BarrierStream: Stream<Item = Result<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;

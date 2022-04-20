@@ -19,9 +19,7 @@ use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-pub use super::executor::{
-    Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
-};
+pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef};
 
 pub mod aggregation;
 mod batch_query;
@@ -62,7 +60,6 @@ pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::{UnionExecutor, UnionExecutorBuilder};
-pub use v1_compat::{ExecutorV1AsV2, StreamExecutorV1};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
@@ -113,36 +110,6 @@ pub trait Executor: Send + 'static {
             schema,
             pk_indices,
             identity,
-        }
-    }
-
-    /// Return an executor which implements [`ExecutorV1`].
-    fn v1(self: Box<Self>) -> StreamExecutorV1
-    where
-        Self: Sized,
-    {
-        let info = self.info();
-        let stream = self.execute();
-
-        StreamExecutorV1 {
-            executor_v2: None,
-            stream: Some(stream),
-            info,
-        }
-    }
-
-    /// Return an executor which implements [`ExecutorV1`] and requires [`ExecutorV1::init`] to be
-    /// called before executing.
-    fn v1_uninited(self: Box<Self>) -> StreamExecutorV1
-    where
-        Self: Sized,
-    {
-        let info = self.info();
-
-        StreamExecutorV1 {
-            executor_v2: Some(self),
-            stream: None,
-            info,
         }
     }
 
