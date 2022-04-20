@@ -32,7 +32,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::base::{SourceMessage, SourceSplit, SourceReader};
+use crate::base::{SourceMessage, SourceReader, SourceSplit};
 use crate::filesystem::file_common::{EntryStat, StatusWatch};
 use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::filesystem::s3::s3_dir::{

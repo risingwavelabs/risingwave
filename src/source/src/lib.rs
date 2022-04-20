@@ -42,7 +42,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_connector::SplitImpl;
 pub use table_v2::*;
 
-use crate::connector_source::{ConnectorReaderContext, ConnectorSource, ConnectorStreamSource};
+use crate::connector_source::{ConnectorReaderContext, ConnectorSource, ConnectorStreamReader};
 
 pub mod parser;
 
@@ -72,7 +72,7 @@ pub enum SourceImpl {
 
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
-    Connector(ConnectorStreamSource),
+    Connector(ConnectorStreamReader),
 }
 
 #[async_trait]
