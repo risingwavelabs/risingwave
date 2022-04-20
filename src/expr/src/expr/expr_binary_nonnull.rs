@@ -41,15 +41,15 @@ pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
 /// In [], the parameters are for constructing new expression
 /// * $l: left expression
 /// * $r: right expression
-/// * ret: return array type
+/// * $ret: return array type
 /// In ()*, the parameters are for generating match cases
 /// * $i1: left array type
 /// * $i2: right array type
-/// * $cast: The cast type in that the operation will calculate
+/// * $rt: The return type in that the operation will calculate
 /// * $The scalar function for expression, it's a generic function and specialized by the type of
-///   `$i1, $i2, $cast`
+///   `$i1, $i2, $rt`
 macro_rules! gen_atm_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident },)*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $rt:ident, $func:ident },)*) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
@@ -57,13 +57,13 @@ macro_rules! gen_atm_impl {
                         BinaryExpression::<
                             $i1! { type_array },
                             $i2! { type_array },
-                            $cast! { type_array },
+                            $rt! { type_array },
                             _
                         >::new(
                             $l,
                             $r,
                             $ret,
-                            $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
+                            $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$rt! { type_array } as Array>::OwnedItem>,
                         )
                     )
                 },
@@ -178,9 +178,8 @@ macro_rules! gen_binary_expr_cmp {
 ///  `atm` means arithmetic here.
 /// They are differentiate cuz one type may not support atm and cmp at the same time. For example,
 /// Varchar can support compare but not arithmetic.
-/// * `general_f`: generic atm function (require a common ``TryInto`` type for two input)
-/// * `interval_date_f`: atm function between interval and date
-/// * `interval_date_f`: atm function between date and interval
+/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
 macro_rules! gen_binary_expr_atm {
     (
         $macro:ident,
@@ -189,7 +188,7 @@ macro_rules! gen_binary_expr_atm {
         $ret:expr,
         $general_f:ident,
         {
-            $( { $i1:ident, $i2:ident, $cast:ident, $func:ident }, )*
+            $( { $i1:ident, $i2:ident, $rt:ident, $func:ident }, )*
         } $(,)?
     ) => {
         $macro! {
@@ -231,7 +230,7 @@ macro_rules! gen_binary_expr_atm {
             { float32, decimal, float64, $general_f },
             { float64, decimal, float64, $general_f },
             $(
-                { $i1, $i2, $cast, $func },
+                { $i1, $i2, $rt, $func },
             )*
         }
     };
