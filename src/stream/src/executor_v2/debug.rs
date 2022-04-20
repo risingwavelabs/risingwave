@@ -58,6 +58,8 @@ impl DebugExecutor {
         }
     }
 
+    #[allow(clippy::redundant_clone)]
+    #[allow(clippy::let_and_return)]
     fn wrap(
         info: Arc<ExecutorInfo>,
         extra: DebugExtraInfo,
