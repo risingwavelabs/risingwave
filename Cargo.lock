@@ -3757,6 +3757,7 @@ dependencies = [
  "risingwave_rpc_client",
  "serde",
  "smallvec",
+ "spin",
  "thiserror",
  "tokio",
  "tokio-retry",
