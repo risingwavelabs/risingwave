@@ -50,20 +50,19 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// `MaterializeExecutor`. For example, if we already have a table with 3 columns: `a, b,
     /// _row_id`, and we create an arrangement with join key `a` on it. `arrangement_col_descs`
     /// should contain all 3 columns.
-    ///
-    /// `MaterializeExecutor`
     pub arrangement_col_descs: Vec<ColumnDesc>,
 
-    /// Should be the same as [`OrderPair`] in the arrangement.
+    /// Should only contain [`OrderPair`] for arrange in the arrangement.
     ///
     /// Still using the above `a, b, _row_id` example. If we create an arrangement with join key
-    /// `a`, there will be two elements in `arrangement_order_rules`.
+    /// `a`, there will be 3 elements in `arrangement_col_descs`, and only 1 element in
+    /// `arrangement_order_rules`.
     ///
-    /// * The first element is the order rule for `a`, which is the join key. Join keys should
+    /// * The only element is the order rule for `a`, which is the join key. Join keys should
     ///   always come first.
-    /// * The second element is the original primary key for the MV.
     ///
-    /// These two parts now compose the arrange keys for the arrangement.
+    /// For the MV pks, they will only be contained in `arrangement_col_descs`, without being part
+    /// of this `arrangement_order_rules`.
     pub arrangement_order_rules: Vec<OrderPair>,
 
     /// Primary key indices of the lookup result (after reordering).
