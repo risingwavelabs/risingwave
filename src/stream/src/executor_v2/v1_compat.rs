@@ -44,7 +44,7 @@ use crate::task::FinishCreateMviewNotifier;
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
 ///
 /// With this wrapper, we can migrate our executors from v1 to v2 step by step.
-pub struct StreamExecutorV1 {
+struct ExecutorV2AsV1 {
     /// The wrapped uninited executor.
     pub(super) executor_v2: Option<BoxedExecutor>,
 
@@ -54,16 +54,16 @@ pub struct StreamExecutorV1 {
     pub(super) info: ExecutorInfo,
 }
 
-impl fmt::Debug for StreamExecutorV1 {
+impl fmt::Debug for ExecutorV2AsV1 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamExecutorV1")
+        f.debug_struct("ExecutorV2AsV1")
             .field("info", &self.info)
             .finish_non_exhaustive()
     }
 }
 
 #[async_trait]
-impl ExecutorV1 for StreamExecutorV1 {
+impl ExecutorV1 for ExecutorV2AsV1 {
     async fn next(&mut self) -> Result<Message> {
         let stream = self.stream.as_mut().expect("not inited");
 
@@ -97,6 +97,33 @@ impl ExecutorV1 for StreamExecutorV1 {
     }
 }
 
+impl dyn Executor {
+    /// Return an executor which implements [`ExecutorV1`].
+    pub fn v1(self: Box<Self>) -> impl ExecutorV1 {
+        let info = self.info();
+        let stream = self.execute();
+
+        ExecutorV2AsV1 {
+            executor_v2: None,
+            stream: Some(stream),
+            info,
+        }
+    }
+
+    /// Return an executor which implements [`ExecutorV1`] and requires [`ExecutorV1::init`] to be
+    /// called before executing.
+    pub fn v1_uninited(self: Box<Self>) -> impl ExecutorV1 {
+        let info = self.info();
+
+        ExecutorV2AsV1 {
+            executor_v2: Some(self),
+            stream: None,
+            info,
+        }
+    }
+}
+
+/// The struct wraps a [`ExecutorV1`] and implements the interface of [`Executor`].
 struct ExecutorV1AsV2(Box<dyn ExecutorV1>);
 
 impl Executor for ExecutorV1AsV2 {
@@ -137,8 +164,8 @@ impl ExecutorV1AsV2 {
 }
 
 impl dyn ExecutorV1 {
-    pub fn v2(self: Box<Self>) -> BoxedExecutor {
-        Box::new(ExecutorV1AsV2(self))
+    pub fn v2(self: Box<Self>) -> impl Executor {
+        ExecutorV1AsV2(self)
     }
 }
 

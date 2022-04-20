@@ -36,7 +36,7 @@ pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
-use crate::executor_v2::{BoxedExecutor, LookupExecutorBuilder, UnionExecutorBuilder};
+use crate::executor_v2::{BoxedExecutor, Executor, LookupExecutorBuilder, UnionExecutorBuilder};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
@@ -477,7 +477,7 @@ pub trait ExecutorBuilder {
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2())
+        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2().boxed())
     }
 }
 

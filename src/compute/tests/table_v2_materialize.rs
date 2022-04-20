@@ -165,7 +165,9 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
     let mut materialize = MaterializeExecutor::new_from_v1(
-        (Box::new(stream_source) as Box<dyn ExecutorV1>).v2(),
+        (Box::new(stream_source) as Box<dyn ExecutorV1>)
+            .v2()
+            .boxed(),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),

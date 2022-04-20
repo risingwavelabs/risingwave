@@ -19,7 +19,6 @@ use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use self::v1_compat::StreamExecutorV1;
 pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef};
 
 pub mod aggregation;
@@ -111,33 +110,6 @@ pub trait Executor: Send + 'static {
             schema,
             pk_indices,
             identity,
-        }
-    }
-
-    /// Return an executor which implements [`ExecutorV1`].
-    fn v1(self: Box<Self>) -> StreamExecutorV1 {
-        let info = self.info();
-        let stream = self.execute();
-
-        StreamExecutorV1 {
-            executor_v2: None,
-            stream: Some(stream),
-            info,
-        }
-    }
-
-    /// Return an executor which implements [`ExecutorV1`] and requires [`ExecutorV1::init`] to be
-    /// called before executing.
-    fn v1_uninited(self: Box<Self>) -> StreamExecutorV1
-    where
-        Self: Sized,
-    {
-        let info = self.info();
-
-        StreamExecutorV1 {
-            executor_v2: Some(self),
-            stream: None,
-            info,
         }
     }
 

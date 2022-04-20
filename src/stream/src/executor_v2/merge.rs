@@ -278,7 +278,7 @@ mod tests {
             handles.push(handle);
         }
 
-        let mut merger = Box::new(merger).v1();
+        let mut merger = merger.boxed().v1();
         for epoch in epochs {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {
