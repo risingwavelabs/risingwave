@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! LruCache implementation port from github.com/facebook/rocksdb. The class `LruCache` is
+//! thread-safe, because every operation on cache will be protected by a spin lock.
 use std::ptr::null_mut;
 use std::sync::Arc;
 
@@ -19,39 +21,43 @@ use spin::Mutex;
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
-// LRU cache implementation port from github.com/facebook/rocksdb. The class `LruCache` is
-// thread-safe, because every operation on cache will be protected by a spin lock.
 
-// An entry is a variable length heap-allocated structure.
-// Entries are referenced by cache and/or by any external entity.
-// The cache keeps all its entries in a hash table. Some elements
-// are also stored on LRU list.
-//
-// LruHandle can be in these states:
-// 1. Referenced externally AND in hash table.
-//    In that case the entry is *not* in the LRU list
-//    (refs >= 1 && in_cache == true)
-// 2. Not referenced externally AND in hash table.
-//    In that case the entry is in the LRU list and can be freed.
-//    (refs == 0 && in_cache == true)
-// 3. Referenced externally AND not in hash table.
-//    In that case the entry is not in the LRU list and not in hash table.
-//    The entry can be freed when refs becomes 0.
-//    (refs >= 1 && in_cache == false)
-//
-// All newly created LruHandles are in state 1. If you call
-// LruCacheShard::Release on entry in state 1, it will go into state 2.
-// To move from state 1 to state 3, either call LruCacheShard::Erase or
-// LruCacheShard::Insert with the same key (but possibly different value).
-// To move from state 2 to state 1, use LruCacheShard::Lookup.
-// Before destruction, make sure that no handles are in state 1. This means
-// that any successful LruCacheShard::Lookup/LruCacheShard::Insert have a
-// matching LruCache::Release (to move into state 2) or LruCacheShard::Erase
-// (to move into state 3).
+/// An entry is a variable length heap-allocated structure.
+/// Entries are referenced by cache and/or by any external entity.
+/// The cache keeps all its entries in a hash table. Some elements
+/// are also stored on LRU list.
+///
+/// LruHandle can be in these states:
+/// 1. Referenced externally AND in hash table.
+///    In that case the entry is *not* in the LRU list
+///    (refs >= 1 && in_cache == true)
+/// 2. Not referenced externally AND in hash table.
+///    In that case the entry is in the LRU list and can be freed.
+///    (refs == 0 && in_cache == true)
+/// 3. Referenced externally AND not in hash table.
+///    In that case the entry is not in the LRU list and not in hash table.
+///    The entry can be freed when refs becomes 0.
+///    (refs >= 1 && in_cache == false)
+///
+/// All newly created LruHandles are in state 1. If you call
+/// LruCacheShard::release on entry in state 1, it will go into state 2.
+/// To move from state 1 to state 3, either call LruCacheShard::erase or
+/// LruCacheShard::insert with the same key (but possibly different value).
+/// To move from state 2 to state 1, use LruCacheShard::lookup.
+/// Before destruction, make sure that no handles are in state 1. This means
+/// that any successful LruCacheShard::lookup/LruCacheShard::insert have a
+/// matching LruCache::release (to move into state 2) or LruCacheShard::rrase
+/// (to move into state 3).
 pub struct LruHandle<K: PartialEq + Default, T> {
+    // next element in the linked-list of hash bucket, only used by hash-table.
     next_hash: *mut LruHandle<K, T>,
+
+    // next element in LRU linked list
     next: *mut LruHandle<K, T>,
+
+    // prev element in LRU linked list
     prev: *mut LruHandle<K, T>,
+
     key: K,
     hash: u64,
     value: Option<T>,
@@ -162,6 +168,7 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     }
 
     unsafe fn insert(&mut self, hash: u64, h: *mut LruHandle<K, T>) -> *mut LruHandle<K, T> {
+        debug_assert!(self.list.len().is_power_of_two());
         let idx = (hash as usize) & (self.list.len() - 1);
         let (mut prev, ptr) = self.find_pointer(idx, &(*h).key);
         if prev.is_null() {
@@ -170,13 +177,13 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
             (*prev).next_hash = h;
         }
 
-        // ptr.key must equal h.key
         if !ptr.is_null() {
+            debug_assert!((*ptr).key.eq(&(*h).key));
             (*h).next_hash = (*ptr).next_hash;
             return ptr;
         } else {
             (*h).next_hash = ptr;
-            assert!(ptr.is_null());
+            debug_assert!(ptr.is_null());
         }
         self.elems += 1;
         if self.elems > self.list.len() {
