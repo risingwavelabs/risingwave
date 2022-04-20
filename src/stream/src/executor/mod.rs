@@ -18,15 +18,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
-use async_trait::async_trait;
 pub use barrier_align::*;
 pub use batch_query::*;
 pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
-use enum_as_inner::EnumAsInner;
 pub use filter::*;
-use futures::Stream;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
@@ -35,27 +32,9 @@ pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
 pub use project::*;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_pb::common::ActorInfo;
-use risingwave_pb::data::barrier::Mutation as ProstMutation;
-use risingwave_pb::data::stream_message::StreamMessage;
-use risingwave_pb::data::{
-    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
-    NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
-};
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_storage::StateStore;
-use smallvec::SmallVec;
 pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
-use tracing::trace_span;
 
 use crate::executor_v2::{LookupExecutorBuilder, UnionExecutorBuilder};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
@@ -82,9 +61,30 @@ mod top_n_appendonly;
 
 #[cfg(test)]
 mod integration_tests;
-
 #[cfg(test)]
 mod test_utils;
+
+use async_trait::async_trait;
+use enum_as_inner::EnumAsInner;
+use futures::Stream;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
+use risingwave_pb::common::ActorInfo;
+use risingwave_pb::data::barrier::Mutation as ProstMutation;
+use risingwave_pb::data::stream_message::StreamMessage;
+use risingwave_pb::data::{
+    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
+    NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
+};
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
+use smallvec::SmallVec;
+use tracing::trace_span;
 
 pub const INVALID_EPOCH: u64 = 0;
 
@@ -517,9 +517,9 @@ pub fn create_executor(
     Ok(real_executor)
 }
 
-/// `StreamConsumer` is the last step in an actor
-#[async_trait]
+/// `StreamConsumer` is the last step in an actor.
 pub trait StreamConsumer: Send + Debug + 'static {
-    /// Run next stream chunk, returns whether the chunk is a barrier.
-    async fn next(&mut self) -> Result<Option<Barrier>>;
+    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+
+    fn execute(self: Box<Self>) -> Self::BarrierStream;
 }

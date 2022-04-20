@@ -20,15 +20,11 @@ use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
 use super::Sstable;
-use crate::hummock::iterator::variants::FORWARD;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{BlockIterator, SstableStoreRef};
 
-pub trait SSTableIteratorBase: HummockIterator {}
-
 pub trait SSTableIteratorType {
-    type SSTableIterator: SSTableIteratorBase;
-    const DIRECTION: usize;
+    type SSTableIterator: HummockIterator;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
 }
@@ -89,6 +85,8 @@ impl SSTableIterator {
 
 #[async_trait]
 impl HummockIterator for SSTableIterator {
+    type Direction = Forward;
+
     async fn next(&mut self) -> HummockResult<()> {
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
@@ -143,12 +141,8 @@ impl HummockIterator for SSTableIterator {
     }
 }
 
-impl SSTableIteratorBase for SSTableIterator {}
-
 impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
-
-    const DIRECTION: usize = FORWARD;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
         SSTableIterator::new(table, sstable_store)

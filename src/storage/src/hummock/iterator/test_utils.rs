@@ -17,12 +17,17 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use futures::executor::block_on;
+use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use sstable_store::{SstableStore, SstableStoreRef};
 
+use crate::hummock::iterator::BoxedForwardHummockIterator;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{gen_test_sstable, gen_test_sstable_inner};
-use crate::hummock::{sstable_store, CachePolicy, HummockValue, SSTableBuilderOptions, Sstable};
+use crate::hummock::{
+    sstable_store, CachePolicy, HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable,
+};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
@@ -132,4 +137,24 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
         sstable_store,
     )
     .await
+}
+
+pub fn gen_merge_iterator_interleave_test_sstable_iters(
+    key_count: usize,
+    count: usize,
+) -> Vec<BoxedForwardHummockIterator> {
+    let sstable_store = mock_sstable_store();
+    (0..count)
+        .map(|i: usize| {
+            let table = block_on(gen_iterator_test_sstable_base(
+                i as u64,
+                default_builder_opt_for_test(),
+                |x| x * count + i,
+                sstable_store.clone(),
+                key_count,
+            ));
+            Box::new(SSTableIterator::new(Arc::new(table), sstable_store.clone()))
+                as BoxedForwardHummockIterator
+        })
+        .collect_vec()
 }
