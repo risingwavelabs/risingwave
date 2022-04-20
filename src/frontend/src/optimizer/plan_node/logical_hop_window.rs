@@ -19,7 +19,8 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch, ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch,
+    ToStream,
 };
 use crate::expr::InputRef;
 use crate::utils::ColIndexMapping;
@@ -121,11 +122,8 @@ impl fmt::Display for LogicalHopWindow {
 }
 
 impl ColPrunable for LogicalHopWindow {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
-        let new_input = self.input.prune_col(required_cols);
-        self.clone_with_input(new_input).into()
+    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
+        unimplemented!("LogicalHopWindow::prune_col")
     }
 }
 
