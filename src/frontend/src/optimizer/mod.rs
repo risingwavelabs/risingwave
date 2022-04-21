@@ -200,7 +200,7 @@ impl PlanRoot {
             Convention::Stream => self
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
-            _ => panic!(),
+            _ => unreachable!(),
         };
 
         // Ignore the required_dist and required_order, as they are provided by user now.
