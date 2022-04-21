@@ -174,15 +174,17 @@
             LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], agg_calls: [min($33)] }
               LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
                 LogicalJoin { type: LeftOuter, on: ($1 = $34) }
-                  LogicalJoin { type: Inner, on: always }
-                    LogicalJoin { type: Inner, on: always }
-                      LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: ($27 = $30) }
+                    LogicalJoin { type: Inner, on: ($14 = $25) }
+                      LogicalJoin { type: Inner, on: ($1 = $19) AND ($11 = $20) }
                         LogicalJoin { type: Inner, on: always }
-                          LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
+                          LogicalFilter { predicate: ($6 = 4:Int32) AND Like($5, '%TIN':Varchar) }
+                            LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                           LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                         LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
                       LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
-                    LogicalScan { table: region, columns: [_row_id#0, r_regionkey, r_name, r_comment] }
+                    LogicalFilter { predicate: ($2 = 'AFRICA':Varchar) }
+                      LogicalScan { table: region, columns: [_row_id#0, r_regionkey, r_name, r_comment] }
                   LogicalProject { exprs: [$1, $0], expr_alias: [ ,  ] }
                     LogicalJoin { type: Inner, on: ($2 = $3) }
                       LogicalProject { exprs: [$0, $1, $4], expr_alias: [ ,  ,  ] }
@@ -935,13 +937,14 @@
     LogicalProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue] }
       LogicalFilter { predicate: ($4 = $5) }
         LogicalJoin { type: LeftOuter, on: always }
-          LogicalJoin { type: Inner, on: always }
-            LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
-            LogicalProject { exprs: [$1], expr_alias: [total_revenue] }
-              LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
-                LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
-                  LogicalFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                    LogicalScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
+          LogicalProject { exprs: [$0, $1, $2, $3, $5], expr_alias: [ ,  ,  ,  ,  ] }
+            LogicalJoin { type: Inner, on: ($0 = $4) }
+              LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
+              LogicalProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
+                LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+                  LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
+                    LogicalFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                      LogicalScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
           LogicalProject { exprs: [$0], expr_alias: [max_revenue] }
             LogicalAgg { group_keys: [], agg_calls: [max($0)] }
               LogicalProject { exprs: [$1], expr_alias: [ ] }
@@ -979,9 +982,10 @@
               LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26], agg_calls: [sum($27), count($27)] }
                 LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
                   LogicalJoin { type: LeftOuter, on: ($28 = $18) }
-                    LogicalJoin { type: Inner, on: always }
+                    LogicalJoin { type: Inner, on: ($18 = $2) }
                       LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                      LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
+                      LogicalFilter { predicate: ($4 = 'Brand#13':Varchar) AND ($7 = 'JUMBO PKG':Varchar) }
+                        LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                     LogicalProject { exprs: [$1, $0], expr_alias: [ ,  ] }
                       LogicalFilter { predicate: always }
                         LogicalScan { table: lineitem, columns: [l_partkey, l_quantity] }
