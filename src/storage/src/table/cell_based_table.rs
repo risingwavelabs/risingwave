@@ -186,7 +186,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows(
         &mut self,
-        rows: Vec<(Row, Option<Row>, Op)>,
+        rows: Vec<(Row, Row, Op)>,
         epoch: u64,
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
@@ -199,7 +199,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::Delete => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         if value.is_some() {
@@ -210,7 +210,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::Insert => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         if let Some(val) = value {
@@ -221,7 +221,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::UpdateDelete => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         if value.is_some() {
@@ -232,7 +232,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::UpdateInsert => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
                         .map_err(err)?;
                     let mut update_insert_keys = HashSet::new();
                     for (key, _) in bytes.clone() {
