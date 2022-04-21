@@ -94,16 +94,16 @@ impl FunctionCall {
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
         )
-        .ok_or_else(|| err_f(&inputs))
+        .map_err(|_| err_f(&inputs))
         .map(|return_type| Self::new_with_return_type(func_type, inputs, return_type))
     }
 
-    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
+    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<Self> {
         let return_type = infer_type(
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
         )?; // should be derived from inputs
-        Some(Self::new_with_return_type(func_type, inputs, return_type))
+        Ok(Self::new_with_return_type(func_type, inputs, return_type))
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.

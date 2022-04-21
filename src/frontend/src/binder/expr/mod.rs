@@ -164,16 +164,7 @@ impl Binder {
             }
         };
         let expr = self.bind_expr(expr)?;
-        let return_type = expr.return_type();
-        FunctionCall::new(func_type, vec![expr])
-            .ok_or_else(|| {
-                ErrorCode::NotImplemented(
-                    format!("unsupported unary expression {:?} {:?}", op, return_type),
-                    112.into(),
-                )
-                .into()
-            })
-            .map(|f| f.into())
+        FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
     }
 
     /// Directly returns the expression itself if it is a positive number.
@@ -312,9 +303,7 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
-        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
-            ErrorCode::NotImplemented(format!("{:?}", &func_type), None.into()).into()
-        })
+        FunctionCall::new(func_type, vec![expr])
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
