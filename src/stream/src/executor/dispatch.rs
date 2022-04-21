@@ -208,8 +208,8 @@ impl DispatchExecutorInner {
                 }
             }
 
-            Mutation::AddOutput(adds) => {
-                if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
+            Mutation::AddOutput(mutation) => {
+                if let Some(downstream_actor_infos) = mutation.actors.get(&self.actor_id) {
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
                         let down_id = downstream_actor_info.get_actor_id();
@@ -766,6 +766,7 @@ mod tests {
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
+    use crate::executor::AddMutation;
     use crate::executor_v2::receiver::ReceiverExecutor;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
@@ -988,7 +989,10 @@ mod tests {
                     233,
                     vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
                 );
-                actors
+                AddMutation {
+                    actors,
+                    row_id_steps: HashMap::default(),
+                }
             })),
         ))
         .await

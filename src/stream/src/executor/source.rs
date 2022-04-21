@@ -14,9 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use either::Either;
@@ -30,6 +28,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::SplitImpl;
+use risingwave_pb::data::RowIdStepInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
@@ -37,8 +36,10 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::executor::{
+    Barrier, Epoch, ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef,
+};
+use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
     /// the future that builds stream_reader. It is required because source should not establish
@@ -53,18 +54,56 @@ struct SourceReader {
 type ReaderStream =
     Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<StreamChunk>>> + Send>>;
 
+struct RowIdGenerator {
+    /// The current local row id.
+    current_row_id: u64,
+    /// The current epoch.
+    epoch: Epoch,
+    /// row id step info.
+    step_info: RowIdStepInfo,
+}
+
+impl RowIdGenerator {
+    fn new(actor_id: ActorId, barrier: &Barrier) -> Self {
+        Self {
+            current_row_id: 0,
+            epoch: barrier.epoch,
+            step_info: barrier
+                .get_row_id_step_info(actor_id)
+                .expect("Row id step info"),
+        }
+    }
+
+    fn update(&mut self, epoch: Epoch) {
+        assert!(epoch.curr > self.epoch.curr);
+        self.epoch = epoch;
+        self.current_row_id = 0;
+    }
+
+    fn next_row_id(&mut self) -> i64 {
+        let row_id = (self.epoch.curr << 22)
+            + self.current_row_id * self.step_info.step
+            + self.step_info.offset;
+        self.current_row_id += 1;
+        row_id as i64
+    }
+}
+
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
 pub struct SourceExecutor {
     source_id: TableId,
     source_desc: SourceDesc,
 
+    actor_id: ActorId,
+
     column_ids: Vec<ColumnId>,
     schema: Schema,
+
     pk_indices: PkIndices,
 
-    /// current allocated row id
-    next_row_id: AtomicU64,
+    /// row id generator
+    row_id_generator: Option<RowIdGenerator>,
 
     /// Identity string
     identity: String,
@@ -140,6 +179,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         Ok(Box::new(SourceExecutor::new(
             source_id,
             source_desc,
+            params.actor_id,
             keyspace,
             column_ids,
             schema,
@@ -159,6 +199,7 @@ impl SourceExecutor {
     pub fn new<S: StateStore>(
         source_id: TableId,
         source_desc: SourceDesc,
+        actor_id: ActorId,
         _keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
@@ -170,21 +211,15 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
         stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
-        // todo(chen): dirty code to generate row_id start position
-        let row_id_start = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        let row_id_start = row_id_start << 32;
         Ok(Self {
             source_id,
             source_desc,
+            actor_id,
             column_ids,
             schema,
             pk_indices,
             barrier_receiver: Some(barrier_receiver),
-            // fixme(chen): may conflict
-            next_row_id: AtomicU64::from(row_id_start),
+            row_id_generator: None,
             identity: format!("SourceExecutor {:X}", executor_id),
             op_info,
             reader_stream: None,
@@ -199,7 +234,12 @@ impl SourceExecutor {
 
         for _ in 0..len {
             builder
-                .append(Some(self.next_row_id.fetch_add(1, Ordering::Relaxed) as i64))
+                .append(Some(
+                    self.row_id_generator
+                        .as_mut()
+                        .expect("row id generator")
+                        .next_row_id(),
+                ))
                 .unwrap();
         }
 
@@ -284,8 +324,8 @@ impl ExecutorV1 for SourceExecutor {
                     .unwrap();
 
                 // todo: use epoch from msg to restore state from state store
-
-                assert!(matches!(msg, Message::Barrier(_)));
+                let barrier = msg.as_barrier().expect("not barrier msg");
+                self.row_id_generator = Some(RowIdGenerator::new(self.actor_id, barrier));
 
                 let reader = self
                     .source_desc
@@ -303,11 +343,11 @@ impl ExecutorV1 for SourceExecutor {
                     )
                     .await?;
 
-                let barrier = self.barrier_receiver.take().unwrap();
+                let barrier_receiver = self.barrier_receiver.take().unwrap();
 
                 let reader = SourceReader {
                     stream_reader: Some(Box::new(reader)),
-                    barrier_receiver: barrier,
+                    barrier_receiver,
                 };
 
                 self.reader_stream.replace(reader.into_stream().boxed());
@@ -317,20 +357,24 @@ impl ExecutorV1 for SourceExecutor {
             Some(stream) => {
                 match stream.as_mut().next().await {
                     // This branch will be preferred.
-                    Some(Either::Left(message)) => message,
+                    Some(Either::Left(message)) => {
+                        let barrier = message
+                            .as_ref()
+                            .unwrap()
+                            .as_barrier()
+                            .expect("not barrier msg");
+                        self.row_id_generator
+                            .as_mut()
+                            .expect("row id generator not set")
+                            .update(barrier.epoch);
+
+                        message
+                    }
 
                     // If there's barrier, this branch will be deferred.
                     Some(Either::Right(chunk)) => {
                         let mut chunk = chunk?;
-                        // Refill row id only if not a table source.
-                        // Note(eric): Currently, rows from external sources are filled with row_ids
-                        // here, but rows from tables (by insert statements)
-                        // are filled in InsertExecutor.
-                        //
-                        // TODO: in the future, we may add row_id column here for TableV2 as well
-                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-                            chunk = self.refill_row_id_column(chunk);
-                        }
+                        chunk = self.refill_row_id_column(chunk);
 
                         self.metrics
                             .source_output_row_count
@@ -469,6 +513,7 @@ mod tests {
         let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
+            1,
             keyspace,
             column_ids,
             schema,
@@ -607,6 +652,7 @@ mod tests {
         let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
+            1,
             keyspace,
             column_ids,
             schema,

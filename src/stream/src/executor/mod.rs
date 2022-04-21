@@ -75,8 +75,9 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{
-    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
-    NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
+    Actors as MutationActors, AddMutation as ProstAddMutation, Barrier as ProstBarrier,
+    Epoch as ProstEpoch, NothingMutation, RowIdStepInfo, StopMutation,
+    StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -92,10 +93,16 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct AddMutation {
+    pub actors: HashMap<ActorId, Vec<ActorInfo>>,
+    pub row_id_steps: HashMap<ActorId, RowIdStepInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     UpdateOutputs(HashMap<ActorId, Vec<ActorInfo>>),
-    AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
+    AddOutput(AddMutation),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -180,11 +187,21 @@ impl Barrier {
     pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
         matches!(
             self.mutation.as_deref(),
-            Some(Mutation::AddOutput(map)) if map
+            Some(Mutation::AddOutput(mutation)) if mutation.actors
                 .values()
                 .flatten()
                 .any(|info| info.actor_id == actor_id)
         )
+    }
+
+    pub fn get_row_id_step_info(&self, actor_id: ActorId) -> Option<RowIdStepInfo> {
+        self.mutation.as_ref().and_then(|mutation| {
+            if let Mutation::AddOutput(mutation) = mutation.as_ref() {
+                mutation.row_id_steps.get(&actor_id).cloned()
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -234,8 +251,9 @@ impl Barrier {
                             .collect(),
                     }))
                 }
-                Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(AddMutation {
+                Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(ProstAddMutation {
                     actors: adds
+                        .actors
                         .iter()
                         .map(|(&id, actors)| {
                             (
@@ -246,6 +264,7 @@ impl Barrier {
                             )
                         })
                         .collect(),
+                    row_id_step_info: adds.row_id_steps.clone(),
                 })),
             },
             span: vec![],
@@ -269,12 +288,14 @@ impl Barrier {
                 .into(),
             ),
             ProstMutation::Add(adds) => Some(
-                Mutation::AddOutput(
-                    adds.actors
+                Mutation::AddOutput(AddMutation {
+                    actors: adds
+                        .actors
                         .iter()
                         .map(|(&id, actors)| (id, actors.get_info().clone()))
                         .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
-                )
+                    row_id_steps: adds.row_id_step_info.clone(),
+                })
                 .into(),
             ),
         };

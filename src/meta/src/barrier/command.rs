@@ -129,7 +129,11 @@ where
                 Mutation::Stop(StopMutation { actors })
             }
 
-            Command::CreateMaterializedView { dispatches, .. } => {
+            Command::CreateMaterializedView {
+                table_fragments,
+                dispatches,
+                ..
+            } => {
                 let actors = dispatches
                     .iter()
                     .map(|(&up_actor_id, down_actor_infos)| {
@@ -141,7 +145,11 @@ where
                         )
                     })
                     .collect();
-                Mutation::Add(AddMutation { actors })
+                let row_id_step_info = table_fragments.source_row_id_step_info();
+                Mutation::Add(AddMutation {
+                    actors,
+                    row_id_step_info,
+                })
             }
         };
 

@@ -150,6 +150,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let stream_source = SourceExecutor::new(
         source_table_id,
         source_desc.clone(),
+        1,
         keyspace,
         all_column_ids.clone(),
         all_schema.clone(),

@@ -95,7 +95,11 @@ impl Executor for InsertExecutor {
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
                 builder
-                    .append(Some(source.next_row_id(self.worker_id)))
+                    .append(if self.frontend_v2 {
+                        Some(source.next_row_id(self.worker_id))
+                    } else {
+                        None
+                    })
                     .unwrap();
             }
 
