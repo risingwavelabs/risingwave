@@ -330,26 +330,24 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
 
                 let connector_type = match self.source_desc.source.as_ref() {
                     SourceImpl::Connector(source) => source.config.get_connector_type()?,
-                    _ => {
-                        return Err(RwError::from(InternalError(
-                            "expected connector source for SourceExecutor, got table source"
-                                .to_string(),
-                        )));
-                    }
+                    _ => "".to_string()
                 };
 
-                let states = filter_prev_states(
-                    &self.state_store,
-                    &self.stream_source_splits,
-                    epoch_prev,
-                    connector_type,
-                )
-                .await?;
-                trace!(
-                    "source executor {:?} assigned split {:?}",
-                    self.source_id,
-                    states
-                );
+                let mut states = self.stream_source_splits.clone();
+                if !connector_type.is_empty() {
+                    states = filter_prev_states(
+                        &self.state_store,
+                        &self.stream_source_splits,
+                        epoch_prev,
+                        connector_type,
+                    )
+                    .await?;
+                    trace!(
+                        "source executor {:?} assigned split {:?}",
+                        self.source_id,
+                        states
+                    );
+                }
                 let reader = self
                     .source_desc
                     .source
