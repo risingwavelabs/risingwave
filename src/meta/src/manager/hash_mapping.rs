@@ -102,7 +102,7 @@ where
             .await
     }
 
-    /// Modifies hash mappings for all operators when a node enters the cluster.
+    /// Modifies hash mappings for all operators according to strategies when a node enters the cluster.
     pub async fn add_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
         assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
@@ -119,7 +119,7 @@ where
         }
     }
 
-    /// Modifies hash mappings for all operators when a node leaves the cluster.
+    /// Modifies hash mappings for all operators according to strategies when a node leaves the cluster.
     pub async fn delete_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
         assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
