@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::zip_eq;
+use itertools::{zip_eq, Itertools as _};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
@@ -359,12 +359,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     Ok(data_type)
 }
 
+/// Find the `least_restrictive` type over a list of `exprs`, and add implicit cast when necessary.
+/// Used by `VALUES`, `CASE`, `UNION`, etc. See [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
 pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<DataType> {
     use std::mem::swap;
 
-    use itertools::Itertools as _;
-
     let exprs = exprs.collect_vec();
+    // Essentially a filter_map followed by a try_reduce, which is unstable.
     let mut ret_type = None;
     for e in &exprs {
         if e.is_null() {
