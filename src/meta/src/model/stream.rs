@@ -83,7 +83,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>, distribution_keys: Vec<i32>) -> Self {
+    pub fn new(
+        table_id: TableId,
+        fragments: BTreeMap<FragmentId, Fragment>,
+        distribution_keys: Vec<i32>,
+    ) -> Self {
         Self {
             table_id,
             fragments,
@@ -148,7 +152,7 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
 
-    /// Returns distribution_keys.
+    /// Returns distribution keys.
     pub fn distribution_keys(&self) -> Vec<i32> {
         self.distribution_keys.clone()
     }
@@ -246,7 +250,10 @@ impl TableFragments {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id].get_parallel_unit().unwrap().worker_node_id  as WorkerId;
+                let node_id = self.actor_status[&actor.actor_id]
+                    .get_parallel_unit()
+                    .unwrap()
+                    .worker_node_id as WorkerId;
                 if !include_inactive
                     && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
                 {
@@ -266,7 +273,7 @@ impl TableFragments {
         let source_actor_ids = self.source_actor_ids();
         for &actor_id in &source_actor_ids {
             let actor_status = &self.actor_status[&actor_id];
-            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id  as WorkerId)
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
         }
@@ -286,8 +293,14 @@ impl TableFragments {
 
     pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
         let sink_actor_ids = self.sink_actor_ids();
-        sink_actor_ids.iter().map(|actor_id| {
-            (self.actor_status[actor_id].get_parallel_unit().unwrap().id, *actor_id)
-        }).collect()
+        sink_actor_ids
+            .iter()
+            .map(|actor_id| {
+                (
+                    self.actor_status[actor_id].get_parallel_unit().unwrap().id,
+                    *actor_id,
+                )
+            })
+            .collect()
     }
 }

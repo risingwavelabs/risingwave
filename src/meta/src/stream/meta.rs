@@ -331,16 +331,22 @@ where
     }
 
     // we will read three things at once, avoiding locking too much.
-    pub async fn get_build_graph_info(&self, table_ids: &HashSet<TableId>) -> Result<BuildGraphInfo> {
+    pub async fn get_build_graph_info(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> Result<BuildGraphInfo> {
         let map = &self.core.read().await.table_fragments;
         let mut info: BuildGraphInfo = Default::default();
 
         for table_id in table_ids {
             match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.table_node_actors.insert(table_id.clone(), table_fragment.node_actor_ids());
-                    info.table_sink_actor_ids.insert(table_id.clone(), table_fragment.sink_actor_ids());
-                    info.upstream_distribution_keys.insert(table_id.clone(), table_fragment.distribution_keys());
+                    info.table_node_actors
+                        .insert(*table_id, table_fragment.node_actor_ids());
+                    info.table_sink_actor_ids
+                        .insert(*table_id, table_fragment.sink_actor_ids());
+                    info.upstream_distribution_keys
+                        .insert(*table_id, table_fragment.distribution_keys());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(
@@ -353,14 +359,20 @@ where
         Ok(info)
     }
 
-    pub async fn get_sink_parallel_unit_ids(&self, table_ids: Vec<TableId>) -> Result<HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>> {
+    pub async fn get_sink_parallel_unit_ids(
+        &self,
+        table_ids: Vec<TableId>,
+    ) -> Result<HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>> {
         let map = &self.core.read().await.table_fragments;
         let mut info: HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>> = HashMap::new();
 
         for table_id in table_ids {
             match map.get(&table_id) {
                 Some(table_fragment) => {
-                    info.insert(table_id.clone(), table_fragment.parallel_unit_sink_actor_id());
+                    info.insert(
+                        table_id,
+                        table_fragment.parallel_unit_sink_actor_id(),
+                    );
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

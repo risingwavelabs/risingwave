@@ -41,7 +41,6 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     parallel_unit_id: u32,
     hash_mapping: Vec<u32>,
-
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -103,7 +102,8 @@ where
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         for hv in &hash_values {
             new_visibility.append(
-                self.hash_mapping[(hv.0 % VIRTUAL_NODE_COUNT as u64) as usize] == self.parallel_unit_id,
+                self.hash_mapping[(hv.0 % VIRTUAL_NODE_COUNT as u64) as usize]
+                    == self.parallel_unit_id,
             );
         }
         let new_visibility = new_visibility.finish();

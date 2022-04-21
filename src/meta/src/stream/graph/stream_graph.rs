@@ -21,16 +21,12 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 
-use crate::cluster::{ParallelUnitId, WorkerId};
+use crate::cluster::WorkerId;
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
-use crate::storage::MetaStore;
-use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
+use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext};
 
 /// A list of actors with order.
 #[derive(Debug, Clone)]
@@ -264,7 +260,6 @@ pub struct StreamGraphBuilder {
     table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
 
     upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
-
 }
 
 impl StreamGraphBuilder {
@@ -415,8 +410,6 @@ impl StreamGraphBuilder {
                 &mut dispatch_upstreams,
                 actor.get_nodes()?,
                 &mut upstream_actors,
-                builder.get_fragment_id(),
-                actor_id.as_global_id(),
             )?);
 
             graph
@@ -436,7 +429,6 @@ impl StreamGraphBuilder {
                     }
                 }
             }
-
         }
         for actor_ids in ctx.upstream_node_actors.values_mut() {
             actor_ids.sort_unstable();
@@ -458,20 +450,12 @@ impl StreamGraphBuilder {
         dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
-        fragment_id: LocalFragmentId,
-        actor_id: ActorId,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
             }
-            Node::ChainNode(_) => self.resolve_chain_node(
-                ctx,
-                dispatch_upstreams,
-                stream_node,
-                fragment_id,
-                actor_id,
-            ),
+            Node::ChainNode(_) => self.resolve_chain_node(ctx, dispatch_upstreams, stream_node),
             _ => {
                 let mut new_stream_node = stream_node.clone();
                 for (idx, input) in stream_node.input.iter().enumerate() {
@@ -493,13 +477,8 @@ impl StreamGraphBuilder {
                             };
                         }
                         Node::ChainNode(_) => {
-                            new_stream_node.input[idx] = self.resolve_chain_node(
-                                ctx,
-                                dispatch_upstreams,
-                                input,
-                                fragment_id,
-                                actor_id,
-                            )?;
+                            new_stream_node.input[idx] =
+                                self.resolve_chain_node(ctx, dispatch_upstreams, input)?;
                         }
                         _ => {
                             new_stream_node.input[idx] = self.build_inner(
@@ -507,8 +486,6 @@ impl StreamGraphBuilder {
                                 dispatch_upstreams,
                                 input,
                                 upstream_actor_id,
-                                fragment_id,
-                                actor_id,
                             )?;
                         }
                     }
@@ -518,19 +495,18 @@ impl StreamGraphBuilder {
         }
     }
 
+    // TODO: we may totally move this into stream manager because we don't resolve upstream actor
+    // info here in Rust frontend.
     fn resolve_chain_node(
         &self,
         ctx: &mut CreateMaterializedViewContext,
         dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
-        fragment_id: LocalFragmentId,
-        actor_id: ActorId,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
-
 
             let upstream_actor_ids = HashSet::<ActorId>::from_iter(
                 match ctx.table_sink_map.entry(table_id) {
@@ -539,12 +515,14 @@ impl StreamGraphBuilder {
                         v.insert(actor_ids).clone()
                     }
                     Entry::Occupied(o) => o.get().clone(),
-                }.into_iter(),
+                }
+                .into_iter(),
             );
 
             if ctx.is_legacy_frontend {
                 dispatch_upstreams.extend(upstream_actor_ids.iter());
-                let chain_upstream_table_node_actors = self.table_node_actors.get(&table_id).unwrap();
+                let chain_upstream_table_node_actors =
+                    self.table_node_actors.get(&table_id).unwrap();
                 let chain_upstream_node_actors = chain_upstream_table_node_actors
                     .iter()
                     .flat_map(|(node_id, actor_ids)| {
@@ -580,8 +558,7 @@ impl StreamGraphBuilder {
                 unreachable!("input[1].node should be a BatchPlanNode");
             }
 
-
-            let mut chain_input = vec![
+            let chain_input = vec![
                 StreamNode {
                     input: vec![],
                     pk_indices: stream_node.pk_indices.clone(),

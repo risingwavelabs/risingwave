@@ -15,7 +15,6 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
@@ -44,7 +43,7 @@ impl StreamTableScan {
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
             Distribution::AnyShard, // Mark as `AnyShard` cause we don't know the distribution yet.
-            false, // TODO: determine the `append-only` field of table scan
+            false,                  // TODO: determine the `append-only` field of table scan
         );
         Self {
             base,
@@ -102,10 +101,10 @@ impl StreamTableScan {
                 })
                 .collect(),
             /// StreamTableScan should follow the same distribution as upstream materialize node.
-            /// So this will be filled in fragmenter.
+            /// So this will be filled in meta.
             distribution_keys: vec![],
             // Will fill when resolving chain node.
-            hash_mapping: vec![0; VIRTUAL_NODE_COUNT],
+            hash_mapping: vec![],
             parallel_unit_id: 0,
         };
 

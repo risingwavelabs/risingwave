@@ -119,13 +119,16 @@ where
         self.generate_fragment_graph(stream_node)?;
         // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
 
-
         // save distribution key in ctx
         ctx.distribution_keys = self.distribution_keys.clone();
 
-        // resolve upstream table infos
-
-        let info = self.fragment_manager.get_build_graph_info(&self.dependent_table_ids).await?;
+        // resolve upstream table infos first
+        // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
+        // stream manager and remove dependency on fragment manager.
+        let info = self
+            .fragment_manager
+            .get_build_graph_info(&self.dependent_table_ids)
+            .await?;
         self.stream_graph.fill_info(info);
 
         let fragment_len = self.fragment_graph.fragment_len() as u32;
@@ -263,23 +266,24 @@ where
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
 
-            Node::MaterializeNode(ref node) =>  {
+            Node::MaterializeNode(ref node) => {
                 current_fragment.fragment_type = FragmentType::Sink;
                 // store distribution keys, later it will be persisted with `TableFragment`
                 assert!(self.distribution_keys.is_empty()); // should have only one sink node.
                 self.distribution_keys = node.distribution_keys.clone();
-            },
+            }
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
 
-            Node::ChainNode(ref node) =>  {
+            Node::ChainNode(ref node) => {
                 // TODO: Remove this when we deprecate Java frontend.
                 current_fragment.is_singleton = self.is_legacy_frontend;
 
                 // memorize table id for later use
-                self.dependent_table_ids.insert(TableId::from(&node.table_ref_id));
-            },
+                self.dependent_table_ids
+                    .insert(TableId::from(&node.table_ref_id));
+            }
 
             _ => {}
         };
@@ -392,8 +396,7 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            let actor_builder =
-                StreamActorBuilder::new(*id, fragment_id, node.clone());
+            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
             self.stream_graph.add_actor(actor_builder);
         }
 

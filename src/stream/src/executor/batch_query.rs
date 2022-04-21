@@ -58,7 +58,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .collect_vec();
 
         let parallel_unit_id = node.get_parallel_unit_id() as u32;
-        let mut hash_mapping = node.get_hash_mapping().iter().map(|id| *id as u32).collect_vec();
+        let mut hash_mapping = node
+            .get_hash_mapping()
+            .iter()
+            .map(|id| *id as u32)
+            .collect_vec();
         // TODO: remove this when we deprecate Java frontend;
         if hash_mapping.is_empty() {
             hash_mapping = vec![0; VIRTUAL_NODE_COUNT];
