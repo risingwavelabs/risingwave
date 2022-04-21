@@ -243,6 +243,7 @@ mod stream_project;
 mod stream_simple_agg;
 mod stream_source;
 mod stream_table_scan;
+mod stream_topn;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -278,6 +279,7 @@ pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
@@ -333,6 +335,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
+            ,{ Stream, TopN }
         }
     };
 }
@@ -398,6 +401,7 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
+            ,{ Stream, TopN }
         }
     };
 }
