@@ -23,9 +23,7 @@ use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
-use crate::executor_v2::error::{
-    StreamExecutorError, StreamExecutorResult, TracedStreamExecutorError,
-};
+use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor_v2::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef};
 
 #[async_trait]
@@ -84,7 +82,7 @@ where
     /// We remark that topN executor diffs from aggregate executor as it must output diffs
     /// whenever it applies a batch of input data. Therefore, topN executor flushes data only
     /// instead of computing diffs and flushing when receiving a barrier.
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     pub(crate) async fn top_n_executor_execute(mut self: Box<Self>) {
         let mut input = self.input.execute();
         let first_msg = input.next().await.unwrap()?;
