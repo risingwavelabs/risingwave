@@ -98,21 +98,6 @@
       BatchFilter { predicate: ($1 = 1:Int32) }
         BatchScan { table: t, columns: [_row_id#0, v1, v2] }
 - sql: |
-    create table t (v1 real not null);
-    select v1, count(*) from t group by v1;
-  batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchHashAgg { group_keys: [$0], aggs: [count] }
-        BatchExchange { order: [], dist: HashShard([0]) }
-          BatchScan { table: t, columns: [v1] }
-- sql: |
-    create table t (v1 real not null);
-    select count(*) from t;
-  batch_plan: |
-    BatchSimpleAgg { aggs: [count] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [] }
-- sql: |
     /* test boolean expression common factor extraction */
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND v2 AND ((v1 AND v2) OR (v2 AND v3));
