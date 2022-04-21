@@ -2,7 +2,10 @@ status = [
   "frontend-check",
   "misc-check",
   "compute-node-build-dev",
+  "compute-node-test",
   "e2e-test-risedev-dev",
   "e2e-test-source",
   "license-header-check"
 ]
+
+timeout_sec = 3600
