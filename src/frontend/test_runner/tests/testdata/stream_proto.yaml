@@ -11,6 +11,7 @@
                   - mergeNode: {}
                   - pkIndices:
                       - 1
+                    appendOnly: true
                     batchPlanNode:
                       tableRefId:
                         tableId: 1
@@ -143,6 +144,7 @@
               - mergeNode: {}
               - pkIndices:
                   - 1
+                appendOnly: true
                 batchPlanNode:
                   tableRefId:
                     tableId: 1
@@ -245,6 +247,7 @@
               - mergeNode: {}
               - pkIndices:
                   - 1
+                appendOnly: true
                 batchPlanNode:
                   tableRefId:
                     tableId: 1
@@ -352,6 +355,7 @@
                   - mergeNode: {}
                   - pkIndices:
                       - 1
+                    appendOnly: true
                     batchPlanNode:
                       tableRefId:
                         tableId: 1
@@ -488,6 +492,7 @@
                           - mergeNode: {}
                           - pkIndices:
                               - 2
+                            appendOnly: true
                             batchPlanNode:
                               tableRefId:
                                 tableId: 1
