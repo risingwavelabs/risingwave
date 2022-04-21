@@ -20,12 +20,12 @@ use risingwave_common::for_all_variants;
 use tracing::event;
 
 use crate::executor::Message;
-use crate::executor_v2::error::TracedStreamExecutorError;
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{ExecutorInfo, MessageStream};
 
 /// Streams wrapped by `schema_check` will check the passing stream chunk against the expected
 /// schema.
-#[try_stream(ok = Message, error = TracedStreamExecutorError)]
+#[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     #[for_await]
     for message in input {
