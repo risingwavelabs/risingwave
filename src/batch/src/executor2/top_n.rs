@@ -142,6 +142,7 @@ impl Executor2 for TopNExecutor2 {
         self.do_execute()
     }
 }
+
 impl TopNExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
