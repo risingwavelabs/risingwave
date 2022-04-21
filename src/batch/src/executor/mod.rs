@@ -42,7 +42,9 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
-use crate::executor2::{BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2,InsertExecutor2};
+use crate::executor2::{
+    BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, InsertExecutor2, TraceExecutor2,
+};
 use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
