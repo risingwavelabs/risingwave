@@ -155,7 +155,7 @@ impl ColPrunable for LogicalHopWindow {
                     new_hop.schema().len(),
                     new_hop.schema().len() - 1,
                 );
-                LogicalProject::with_mapping(new_hop.into(), proj_map).into()
+                LogicalProject::with_mapping(new_hop.into(), proj_map)
             }
             (false, true) => {
                 let mut proj_map = ColIndexMapping::identity_or_none(
@@ -164,7 +164,7 @@ impl ColPrunable for LogicalHopWindow {
                 );
                 proj_map.put(new_hop.schema().len() - 1, Some(new_hop.schema().len() - 2));
                 proj_map.put(new_hop.schema().len() - 2, None);
-                LogicalProject::with_mapping(new_hop.into(), proj_map).into()
+                LogicalProject::with_mapping(new_hop.into(), proj_map)
             }
             (false, false) => unreachable!(),
         }
