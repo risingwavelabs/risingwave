@@ -40,9 +40,9 @@ where
 }
 
 /// Works in a reversed way as `compress_data`.
-pub fn decompress_data<T>(original_indices: Vec<u64>, data: Vec<T>) -> Vec<T>
+pub fn decompress_data<T>(original_indices: &[u64], data: &[T]) -> Vec<T>
 where
-    T: Clone,
+    T: Clone + Copy,
 {
     match original_indices.last() {
         Some(last_idx) => {
@@ -50,7 +50,7 @@ where
             original_indices
                 .into_iter()
                 .zip_eq(data)
-                .for_each(|(idx, x)| {
+                .for_each(|(&idx, &x)| {
                     original_data.resize(idx as usize + 1, x);
                 });
             original_data
@@ -72,7 +72,7 @@ mod tests {
         let expect_data = Vec::from([3u32, 4, 5, 6, 7, 8, 9]);
         assert_eq!(compressed_original_indices, expect_original_indices);
         assert_eq!(compressed_data, expect_data);
-        let decompressed_data = decompress_data(compressed_original_indices, compressed_data);
+        let decompressed_data = decompress_data(&compressed_original_indices, &compressed_data);
         assert_eq!(decompressed_data, original_data);
 
         // Complex
@@ -88,14 +88,14 @@ mod tests {
         let expect_data = Vec::from([5u32, 1, 2, 3, 4, 5, 4]);
         assert_eq!(compressed_original_indices, expect_original_indices);
         assert_eq!(compressed_data, expect_data);
-        let decompressed_data = decompress_data(compressed_original_indices, compressed_data);
+        let decompressed_data = decompress_data(&compressed_original_indices, &compressed_data);
         assert_eq!(decompressed_data, long_original_data);
 
         // Empty
         let (compressed_original_indices, compressed_data) = compress_data::<u8>(&[]);
         assert!(compressed_original_indices.is_empty());
         assert!(compressed_data.is_empty());
-        let decompressed_data = decompress_data(compressed_original_indices, compressed_data);
+        let decompressed_data = decompress_data(&compressed_original_indices, &compressed_data);
         assert!(decompressed_data.is_empty());
     }
 }

@@ -417,14 +417,10 @@ impl LocalStreamManagerCore {
                         .iter()
                         .map(|i| *i as usize)
                         .collect();
-                    let compressed_mapping = dispatcher.hash_mapping.clone().ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(
-                            "hash dispatcher doesn't have consistent hash mapping".to_string(),
-                        ))
-                    })?;
+                    let compressed_mapping = dispatcher.get_hash_mapping()?;
                     let hash_mapping = decompress_data(
-                        compressed_mapping.original_indices,
-                        compressed_mapping.data,
+                        &compressed_mapping.original_indices,
+                        &compressed_mapping.data,
                     );
 
                     DispatcherImpl::Hash(HashDataDispatcher::new(
