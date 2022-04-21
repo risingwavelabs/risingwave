@@ -101,6 +101,16 @@ impl ColumnDesc {
         }
     }
 
+    pub fn without_column_id(data_type: DataType, name: impl Into<String>) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id: ColumnId::new(0),
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+        }
+    }
+
     /// Convert to proto
     pub fn to_protobuf(&self) -> ProstColumnDesc {
         ProstColumnDesc {

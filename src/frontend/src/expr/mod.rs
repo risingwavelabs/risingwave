@@ -58,7 +58,9 @@ pub trait Expr: Into<ExprImpl> {
     /// For atomic `column_desc` will return a single usize or just `None`.
     /// For nested `column_desc` will return a list of usize.
     /// Only `InputRef`, `FunctionCall` and `AggCall` will return field indexs.
-    fn get_field_indexs(&self) -> Option<Vec<usize>>;
+    fn get_field_indexs(&self) -> Option<Vec<usize>> {
+        None
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]

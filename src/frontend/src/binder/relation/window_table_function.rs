@@ -15,7 +15,7 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
@@ -114,19 +114,11 @@ impl Binder {
         let columns = columns.iter().cloned().chain(
             [
                 ColumnCatalog {
-                    column_desc: ColumnDesc::with_named(
-                        ColumnId::new(0),
-                        DataType::Timestamp,
-                        "window_start",
-                    ),
+                    column_desc: ColumnDesc::without_column_id(DataType::Timestamp, "window_start"),
                     is_hidden: false,
                 },
                 ColumnCatalog {
-                    column_desc: ColumnDesc::with_named(
-                        ColumnId::new(0),
-                        DataType::Timestamp,
-                        "window_end",
-                    ),
+                    column_desc: ColumnDesc::without_column_id(DataType::Timestamp, "window_end"),
                     is_hidden: false,
                 },
             ]
