@@ -310,16 +310,11 @@ mod tests {
                 ]),
             )
             .unwrap();
-        state_table.commit(epoch).await.unwrap();
 
         state_table
             .insert(
                 Row(vec![Some(7_i32.into())]),
-                Row(vec![
-                    Some(7_i32.into()),
-                    Some(77_i32.into()),
-                    Some(777_i32.into()),
-                ]),
+                Row(vec![Some(7_i32.into()), None, None]),
             )
             .unwrap();
         state_table.commit(epoch).await.unwrap();
@@ -345,21 +340,13 @@ mod tests {
         state_table
             .delete(
                 Row(vec![Some(7_i32.into())]),
-                Row(vec![
-                    Some(7_i32.into()),
-                    Some(77_i32.into()),
-                    Some(777_i32.into()),
-                ]),
+                Row(vec![Some(7_i32.into()), None, None]),
             )
             .unwrap();
         state_table
             .insert(
                 Row(vec![Some(7_i32.into())]),
-                Row(vec![
-                    Some(7777_i32.into()),
-                    Some(7777_i32.into()),
-                    Some(7777_i32.into()),
-                ]),
+                Row(vec![Some(7777_i32.into()), Some(7777_i32.into()), None]),
             )
             .unwrap();
         let row6 = state_table
@@ -377,7 +364,7 @@ mod tests {
             Some(Row(vec![
                 Some(7777_i32.into()),
                 Some(7777_i32.into()),
-                Some(7777_i32.into())
+                None
             ]))
         );
 
@@ -400,7 +387,7 @@ mod tests {
             Some(Row(vec![
                 Some(7777_i32.into()),
                 Some(7777_i32.into()),
-                Some(7777_i32.into())
+                None
             ]))
         );
 
