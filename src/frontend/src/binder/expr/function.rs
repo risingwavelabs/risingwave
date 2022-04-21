@@ -49,7 +49,6 @@ impl Binder {
             let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
-                "like" => ExprType::Like,
                 "upper" => ExprType::Upper,
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
@@ -57,13 +56,6 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
-                "case" => ExprType::Case,
-                "is true" => ExprType::IsTrue,
-                "is not true" => ExprType::IsNotTrue,
-                "is false" => ExprType::IsFalse,
-                "is not false" => ExprType::IsNotFalse,
-                "is null" => ExprType::IsNull,
-                "is not null" => ExprType::IsNotNull,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit

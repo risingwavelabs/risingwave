@@ -100,7 +100,7 @@ fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Resul
         .get(&FuncSign::new(func_type, inputs_type.clone()))
         .cloned()
         .ok_or_else(|| {
-            ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 122.into())
+            ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 112.into())
                 .into()
         })
 }
