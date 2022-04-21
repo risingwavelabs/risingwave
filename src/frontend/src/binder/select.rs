@@ -98,27 +98,24 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        // Get indexs from `select_item` to find the `field_descs` step by index.
-        // If `select_item` not have indexs, use `alias` and `data_type` to form
+        // Get index from `select_item` to find the `column_desc` in bindings,
+        // and then get the `field_desc` in expr
+        // If `select_item` not have index, use `alias` and `data_type` to form
         // field.
         let fields = select_items
             .iter()
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                match s.get_field_indexs() {
+                match s.get_index() {
                     Some(index) => {
-                        let desc = Self::get_desc(
-                            &index[1..],
-                            (self.context.columns[index[0]]).desc.clone(),
-                        )?;
-                        let field = Field::with_struct(
+                        let column = s.get_field(self.context.columns[index].desc.clone())?;
+                        Ok(Field::with_struct(
                             s.return_type(),
                             name,
-                            desc.field_descs.iter().map(|f| f.into()).collect_vec(),
-                            desc.type_name,
-                        );
-                        Ok(field)
+                            column.field_descs.iter().map(|f| f.into()).collect_vec(),
+                            column.type_name,
+                        ))
                     }
                     None => Ok(Field::with_name(s.return_type(), name)),
                 }
@@ -257,35 +254,22 @@ impl Binder {
     }
 
     /// Bind wildcard field column, e.g. `(table.v1).*`.
-    /// Will return vector of `FunctionCall` which the first is `input_ref` expr and other is
-    /// `literal` expr, and vector of alias.
+    /// Will return vector of Field type `FunctionCall` and alias.
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
         ids: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
-        let (column_desc, mut exprs) = Self::bind_field(&idents, binding.desc.clone())?;
-        exprs.insert(
-            0,
+        let (exprs, column) = Self::bind_field(
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
-        );
+            &idents,
+            binding.desc.clone(),
+            true,
+        )?;
         Ok((
-            column_desc
-                .field_descs
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let mut exprs = exprs.clone();
-                    exprs.push(
-                        Literal::new(Some((i as i32).to_scalar_value()), f.data_type.clone())
-                            .into(),
-                    );
-                    FunctionCall::new_with_return_type(ExprType::Field, exprs, f.data_type.clone())
-                        .into()
-                })
-                .collect_vec(),
-            column_desc
+            exprs,
+            column
                 .field_descs
                 .iter()
                 .map(|f| Some(f.name.clone()))
@@ -294,50 +278,86 @@ impl Binder {
     }
 
     /// Bind single field column, e.g. `(table.v1).v2`.
-    /// Will return `FunctionCall` which the first args is `input_ref` expr and other is `literal`
-    /// expr, and alias.
+    /// Will return Field type `FunctionCall` and alias.
     pub fn bind_single_field_column(
         &mut self,
         expr: Expr,
         ids: &[Ident],
     ) -> Result<(ExprImpl, Option<String>)> {
         let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
-        let (column_desc, mut exprs) = Self::bind_field(&idents, binding.desc.clone())?;
-        exprs.insert(
-            0,
+        let (exprs, column) = Self::bind_field(
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
-        );
-        Ok((
-            FunctionCall::new_with_return_type(
-                ExprType::Field,
-                exprs,
-                column_desc.data_type.clone(),
-            )
-            .into(),
-            Some(column_desc.name),
-        ))
+            &idents,
+            binding.desc.clone(),
+            false,
+        )?;
+        Ok((exprs[0].clone(), Some(column.name)))
     }
 
     /// Bind field in recursive way, each field in the binding path will store as `literal` in
     /// exprs and return.
-    pub fn bind_field(idents: &[Ident], desc: ColumnDesc) -> Result<(ColumnDesc, Vec<ExprImpl>)> {
+    /// `col` describes what `expr` contains.
+    pub fn bind_field(
+        expr: ExprImpl,
+        idents: &[Ident],
+        desc: ColumnDesc,
+        wildcard: bool,
+    ) -> Result<(Vec<ExprImpl>, ColumnDesc)> {
         match idents.get(0) {
             Some(ident) => {
-                let field_name = ident.value.clone();
-                for (index, col) in desc.field_descs.into_iter().enumerate() {
-                    if field_name == col.name {
-                        let (desc, mut exprs) = Self::bind_field(&idents[1..], col.clone())?;
-                        exprs.insert(
-                            0,
-                            Literal::new(Some((index as i32).to_scalar_value()), col.data_type)
-                                .into(),
-                        );
-                        return Ok((desc, exprs));
-                    }
-                }
-                Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", field_name)).into())
+                let (field, field_index) = desc.field(&ident.value)?;
+                let expr = FunctionCall::new_with_return_type(
+                    ExprType::Field,
+                    vec![
+                        expr,
+                        Literal::new(Some(field_index.to_scalar_value()), DataType::Int32).into(),
+                    ],
+                    field.data_type.clone(),
+                )
+                .into();
+                Self::bind_field(expr, &idents[1..], field, wildcard)
             }
-            None => Ok((desc, vec![])),
+            None => {
+                if wildcard {
+                    Self::bind_wildcard_field(expr, desc)
+                } else {
+                    Ok((vec![expr], desc))
+                }
+            }
+        }
+    }
+
+    /// Will fail if it's an atomic value.
+    /// Rewrite (expr:Struct).* to [Field(expr, 0), Field(expr, 1), ... Field(expr, n)].
+    pub fn bind_wildcard_field(
+        expr: ExprImpl,
+        desc: ColumnDesc,
+    ) -> Result<(Vec<ExprImpl>, ColumnDesc)> {
+        if desc.field_descs.is_empty() {
+            Err(
+                ErrorCode::BindError(format!("The field {} is not the nested column", desc.name))
+                    .into(),
+            )
+        } else {
+            Ok((
+                desc.field_descs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        FunctionCall::new_with_return_type(
+                            ExprType::Field,
+                            vec![
+                                expr.clone(),
+                                Literal::new(Some((i as i32).to_scalar_value()), DataType::Int32)
+                                    .into(),
+                            ],
+                            f.data_type.clone(),
+                        )
+                        .into()
+                    })
+                    .collect_vec(),
+                desc,
+            ))
         }
     }
 
@@ -352,23 +372,5 @@ impl Binder {
                 )
             })
             .unzip()
-    }
-
-    /// Get `field_desc` according to the indexs path.
-    pub fn get_desc(indexs: &[usize], mut column_desc: ColumnDesc) -> Result<ColumnDesc> {
-        for i in indexs {
-            match column_desc.field_descs.get(*i) {
-                None => {
-                    return Err(ErrorCode::InternalError(
-                        "Index out of field_descs bound".to_string(),
-                    )
-                    .into());
-                }
-                Some(desc) => {
-                    column_desc = desc.clone();
-                }
-            }
-        }
-        Ok(column_desc)
     }
 }

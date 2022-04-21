@@ -54,12 +54,14 @@ pub trait Expr: Into<ExprImpl> {
     /// Serialize the expression
     fn to_protobuf(&self) -> ExprNode;
 
-    /// Get the field indexs of expr to find `field_descs` in `column_desc`.
-    /// For atomic `column_desc` will return a single usize or just `None`.
-    /// For nested `column_desc` will return a list of usize.
-    /// Only `InputRef`, `FunctionCall` and `AggCall` will return field indexs.
-    fn get_field_indexs(&self) -> Option<Vec<usize>> {
+    /// Get the input index of the expr
+    fn get_index(&self) -> Option<usize> {
         None
+    }
+
+    /// Get `field_desc` by `column_desc` and expr
+    fn get_field(&self, column: ColumnDesc) -> Result<ColumnDesc> {
+        Ok(column)
     }
 }
 
@@ -214,14 +216,25 @@ impl Expr for ExprImpl {
         }
     }
 
-    fn get_field_indexs(&self) -> Option<Vec<usize>> {
+    fn get_index(&self) -> Option<usize> {
         match self {
-            ExprImpl::InputRef(e) => e.get_field_indexs(),
-            ExprImpl::Literal(e) => e.get_field_indexs(),
-            ExprImpl::FunctionCall(e) => e.get_field_indexs(),
-            ExprImpl::AggCall(e) => e.get_field_indexs(),
-            ExprImpl::Subquery(e) => e.get_field_indexs(),
-            ExprImpl::CorrelatedInputRef(e) => e.get_field_indexs(),
+            ExprImpl::InputRef(e) => e.get_index(),
+            ExprImpl::Literal(e) => e.get_index(),
+            ExprImpl::FunctionCall(e) => e.get_index(),
+            ExprImpl::AggCall(e) => e.get_index(),
+            ExprImpl::Subquery(e) => e.get_index(),
+            ExprImpl::CorrelatedInputRef(e) => e.get_index(),
+        }
+    }
+
+    fn get_field(&self, column: ColumnDesc) -> Result<ColumnDesc> {
+        match self {
+            ExprImpl::InputRef(e) => e.get_field(column),
+            ExprImpl::Literal(e) => e.get_field(column),
+            ExprImpl::FunctionCall(e) => e.get_field(column),
+            ExprImpl::AggCall(e) => e.get_field(column),
+            ExprImpl::Subquery(e) => e.get_field(column),
+            ExprImpl::CorrelatedInputRef(e) => e.get_field(column),
         }
     }
 }
@@ -313,6 +326,7 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::catalog::ColumnDesc;
 
 use crate::utils::Condition;
 

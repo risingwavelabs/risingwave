@@ -19,6 +19,7 @@ use risingwave_pb::plan::{
 };
 
 use crate::catalog::Field;
+use crate::error::ErrorCode;
 use crate::types::DataType;
 use crate::util::sort_util::OrderType;
 
@@ -101,16 +102,6 @@ impl ColumnDesc {
         }
     }
 
-    pub fn without_column_id(data_type: DataType, name: impl Into<String>) -> ColumnDesc {
-        ColumnDesc {
-            data_type,
-            column_id: ColumnId::new(0),
-            name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
-        }
-    }
-
     /// Convert to proto
     pub fn to_protobuf(&self) -> ProstColumnDesc {
         ProstColumnDesc {
@@ -145,6 +136,15 @@ impl ColumnDesc {
                 .collect_vec(),
         );
         descs
+    }
+
+    pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
+        for (index, col) in self.field_descs.iter().enumerate() {
+            if col.name == *name {
+                return Ok((col.clone(), index as i32));
+            }
+        }
+        Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
     }
 
     #[cfg(test)]

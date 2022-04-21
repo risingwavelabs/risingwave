@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 
@@ -187,37 +188,66 @@ impl Expr for FunctionCall {
         }
     }
 
+    fn get_index(&self) -> Option<usize> {
+        // if ExprType::Field == self.func_type {
+        //     if let ExprImpl::InputRef(input) = &self.inputs[0] {
+        //         let mut indexs = vec![input.index()];
+        //         for expr in &self.inputs[1..] {
+        //             if let ExprImpl::Literal(literal) = expr {
+        //                 match literal.get_data() {
+        //                     Some(ScalarImpl::Int32(i)) => {
+        //                         indexs.push(*i as usize);
+        //                     }
+        //                     _ => {
+        //                         unreachable!()
+        //                     }
+        //                 }
+        //             } else {
+        //                 unreachable!()
+        //             }
+        //         }
+        //         return Some(indexs);
+        //     }
+        //     unreachable!()
+        // } else {
+        match self.inputs.get(0) {
+            Some(expr) => expr.get_index(),
+            None => None,
+        }
+    }
+
     /// If `func_type` is `Field` which means this is a nested column,
-    /// so concat the index of each inputs.
-    /// The first of inputs must be `InputRef` and following must be `Literal` which contains i32
-    /// value.
-    /// Only check the first input of `Aggcall` because if we use nested column
-    /// now it must be appear at first index.
-    fn get_field_indexs(&self) -> Option<Vec<usize>> {
+    /// we can get the `field_desc` in recursive way.
+    /// The first input must be `InputRef` or `FunctionCall`
+    /// and second input must be `Literal` which contains i32 value.
+    /// Only check the first input because if we use nested column
+    /// it must be appear at first index.
+    fn get_field(&self, mut column: ColumnDesc) -> Result<ColumnDesc> {
         if ExprType::Field == self.func_type {
-            if let ExprImpl::InputRef(input) = &self.inputs[0] {
-                let mut indexs = vec![input.index()];
-                for expr in &self.inputs[1..] {
-                    if let ExprImpl::Literal(literal) = expr {
-                        match literal.get_data() {
-                            Some(ScalarImpl::Int32(i)) => {
-                                indexs.push(*i as usize);
-                            }
-                            _ => {
-                                unreachable!()
-                            }
-                        }
-                    } else {
+            if let ExprImpl::FunctionCall(function) = &self.inputs[0] {
+                column = function.get_field(column)?;
+            }
+            let expr = &self.inputs[1];
+            if let ExprImpl::Literal(literal) = expr {
+                match literal.get_data() {
+                    Some(ScalarImpl::Int32(i)) => match column.field_descs.get(*i as usize) {
+                        Some(desc) => Ok(desc.clone()),
+                        None => Err(ErrorCode::InternalError(
+                            "Index out of field_desc bound".to_string(),
+                        )
+                        .into()),
+                    },
+                    _ => {
                         unreachable!()
                     }
                 }
-                return Some(indexs);
+            } else {
+                unreachable!()
             }
-            unreachable!()
         } else {
             match self.inputs.get(0) {
-                Some(expr) => expr.get_field_indexs(),
-                None => None,
+                Some(expr) => expr.get_field(column),
+                None => Ok(column),
             }
         }
     }
