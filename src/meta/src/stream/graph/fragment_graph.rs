@@ -52,6 +52,9 @@ pub struct StreamFragment {
 
     /// mark whether this fragment has been sealed.
     pub is_sealed: bool,
+
+    /// Number of table ids (stateful states) for this fragment.
+    pub table_ids_cnt: usize,
 }
 
 impl StreamFragment {
@@ -62,6 +65,7 @@ impl StreamFragment {
             is_singleton: false,
             node: None,
             is_sealed: false,
+            table_ids_cnt: 0,
         }
     }
 

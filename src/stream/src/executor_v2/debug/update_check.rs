@@ -20,12 +20,12 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 
 use crate::executor::Message;
-use crate::executor_v2::error::TracedStreamExecutorError;
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{ExecutorInfo, MessageStream};
 
 /// Streams wrapped by `update_check` will check whether the two rows of updates are next to each
 /// other.
-#[try_stream(ok = Message, error = TracedStreamExecutorError)]
+#[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     #[for_await]
     for message in input {

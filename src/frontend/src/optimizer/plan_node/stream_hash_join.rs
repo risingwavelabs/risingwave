@@ -168,6 +168,7 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as i32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            ..Default::default()
         })
     }
 }

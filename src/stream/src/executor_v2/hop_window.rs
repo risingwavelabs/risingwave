@@ -24,7 +24,7 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node;
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
+use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
 
 #[allow(unused)]
@@ -74,7 +74,7 @@ impl Executor for HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let Self {
             input,
@@ -87,7 +87,7 @@ impl HopWindowExecutor {
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
             .ok_or_else(|| {
-                StreamExecutorError::InvalidArgument(format!(
+                StreamExecutorError::invalid_argument(format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
                 ))
@@ -106,7 +106,7 @@ impl HopWindowExecutor {
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
         // Let's pre calculate (`window_size` - `window_slide`).
         let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
-            StreamExecutorError::InvalidArgument(format!(
+            StreamExecutorError::invalid_argument(format!(
                 "window_size {} cannot be subtracted by window_slide {}",
                 window_size, window_slide
             ))
@@ -138,18 +138,18 @@ impl HopWindowExecutor {
                 continue;
             };
             // TODO: compact may be not necessary here.
-            let chunk = chunk.compact().map_err(StreamExecutorError::ExecutorV1)?;
+            let chunk = chunk.compact().map_err(StreamExecutorError::executor_v1)?;
             let (data_chunk, ops) = chunk.into_parts();
             let hop_start = hop_start
                 .eval(&data_chunk)
-                .map_err(StreamExecutorError::EvalError)?;
+                .map_err(StreamExecutorError::eval_error)?;
             let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
             let (origin_cols, visibility) = data_chunk.into_parts();
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
                 let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                    StreamExecutorError::InvalidArgument(format!(
+                    StreamExecutorError::invalid_argument(format!(
                         "window_slide {} cannot be multiplied by {}",
                         window_slide, i
                     ))
@@ -161,7 +161,7 @@ impl HopWindowExecutor {
                 .boxed();
                 let window_end_offset =
                     window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                        StreamExecutorError::InvalidArgument(format!(
+                        StreamExecutorError::invalid_argument(format!(
                             "window_slide {} cannot be multiplied by {}",
                             window_slide, i
                         ))
@@ -179,7 +179,7 @@ impl HopWindowExecutor {
                 );
                 let window_start_col = window_start_expr
                     .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::EvalError)?;
+                    .map_err(StreamExecutorError::eval_error)?;
                 let window_end_expr = new_binary_expr(
                     expr_node::Type::Add,
                     DataType::Timestamp,
@@ -188,7 +188,7 @@ impl HopWindowExecutor {
                 );
                 let window_end_col = window_end_expr
                     .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::EvalError)?;
+                    .map_err(StreamExecutorError::eval_error)?;
                 let mut new_cols = origin_cols.clone();
                 new_cols.extend_from_slice(&[
                     Column::new(window_start_col),
