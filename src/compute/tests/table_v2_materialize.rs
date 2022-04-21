@@ -14,12 +14,14 @@
 
 use std::sync::Arc;
 
+use futures::stream::StreamExt;
 use itertools::Itertools;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
-    CreateTableExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor,
+    CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
+use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
+use risingwave_batch::executor2::{DeleteExecutor2, Executor2};
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
@@ -302,17 +304,17 @@ async fn test_table_v2_materialize() -> Result<()> {
         column_nonnull! { I64Array, [0] }, // row id column
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let delete_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
-    let mut delete = DeleteExecutor::new(
+    let delete_inner: Box<dyn BatchExecutor> =
+        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let delete = Box::new(DeleteExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(delete_inner),
-    );
+        Box::new(ExecutorWrapper::from(delete_inner)),
+    ));
 
     tokio::spawn(async move {
-        delete.open().await?;
-        delete.next().await?;
-        delete.close().await?;
+        let mut stream = delete.execute();
+        let _ = stream.next().await.unwrap()?;
         Ok::<_, RwError>(())
     });
 
