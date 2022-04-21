@@ -27,7 +27,7 @@ impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
         let mut plan = self.plan_set_expr(query.body)?;
-        let order = Order {
+        let mut order = Order {
             field_order: query.order,
         };
         if query.limit.is_some() || query.offset.is_some() {
@@ -37,8 +37,11 @@ impl Planner {
                 // Create a logical limit if with limit/offset but without order-by
                 LogicalLimit::create(plan, limit, offset)
             } else {
+                // required_order is not needed any more
+                let mut topn_order = Order::any().clone();
+                std::mem::swap(&mut topn_order, &mut order);
                 // Create a logical top-n if with limit/offset and order-by
-                LogicalTopN::create(plan, limit, offset, order.clone())
+                LogicalTopN::create(plan, limit, offset, topn_order)
             }
         }
         let dist = Distribution::Single;
