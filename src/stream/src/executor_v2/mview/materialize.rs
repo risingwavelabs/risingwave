@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::mview::ManagedMViewState;
 use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
@@ -62,7 +62,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let input = self.input.execute();
         #[for_await]
@@ -112,7 +112,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     self.local_state
                         .flush(b.epoch.prev)
                         .await
-                        .map_err(StreamExecutorError::ExecutorV1)?;
+                        .map_err(StreamExecutorError::executor_v1)?;
                     Message::Barrier(b)
                 }
             }

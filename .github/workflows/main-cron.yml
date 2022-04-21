@@ -5,18 +5,16 @@
 #
 # ========================================================================
 
-name: CI (main)
+name: CI (main-cronjob)
 on:
-  push:
-    branches: [main]
-    tags:
-      - "v*"
+  schedule:
+    - cron: '0 0 * * *'
   workflow_dispatch:
 env:
   RUST_TOOLCHAIN: nightly-2022-04-09
   CACHE_KEY_SUFFIX: v20220412
   CARGO_TERM_COLOR: always
-  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz
+  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
@@ -267,21 +265,21 @@ jobs:
         run: |
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
-      - name: e2e, ci-3cn-1fe, streaming
+      - name: e2e test, streaming, Rust frontend, 3 node
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e, ci-3cn-1fe, delta join
+      - name: e2e test, streaming, Rust frontend, 1 node
         timeout-minutes: 2
         run: |
-          ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
+          ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e, ci-3cn-1fe, batch distributed
+      - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
@@ -289,137 +287,14 @@ jobs:
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node (legacy frontend)
+      - name: e2e test streaming 3-node
         timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test batch 3-node (legacy frontend)
-        timeout-minutes: 2
-        run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: Dump last 300 lines of logs on failure
-        if: ${{ failure() }}
-        run: ~/cargo-make/makers logs
-      - uses: actions/upload-artifact@v2
-        if: ${{ failure() }}
-        name: Upload RiseDev logs on failure (You may find it in artifacts)
-        with:
-          path: .risingwave/log/
-          name: risedev-logs
-  end-to-end-risedev-release:
-    name: e2e-test-risedev-release
-    needs:
-      - compute-node-build-release
-      - frontend-check
-      - start-runner-c
-    runs-on: ${{ needs.start-runner-c.outputs.label }}
-    container:
-      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
-      options: --security-opt seccomp=unconfined
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - name: Set up JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
-      - name: Install rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          profile: minimal
-      - name: Cache Cargo home
-        uses: actions/cache@v2
-        id: cache
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
-      - uses: actions/download-artifact@v2
-        name: Download risingwave binary
-        with:
-          name: risingwave-release
-          path: ./target/debug
-      - uses: actions/download-artifact@v2
-        name: Download frontend binary
-        with:
-          name: risingwave-fe-runnable.jar
-          path: ./.risingwave/bin
-      - uses: actions/download-artifact@v2
-        name: Download playground binary
-        with:
-          name: risedev-playground-release
-          path: ./target/debug
-      - name: Adjust permission
-        run: |
-          chmod +x ./target/debug/risingwave
-          chmod +x ./target/debug/risedev-playground
-      - name: Install required components
-        run: |
-          apt-get update -yy -o Acquire::Retries=3
-          apt-get install --upgrade -yy tmux -o Acquire::Retries=3
-      - name: Generate RiseDev CI config
-        run: |
-          cp risedev-components.ci.env risedev-components.user.env
-      - name: Download sqllogictest
-        run: |
-          wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
-          chmod +x ${DIR}/${BINARY}
-        env:
-          DIR: /usr/local/bin
-          BINARY: sqllogictest
-      - name: Download cargo-make
-        run: |
-          curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
-          unzip ~/cargo-make.zip -d ~
-          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
-      - name: Prepare RiseDev playground
-        run: |
-          ~/cargo-make/makers pre-start-playground
-          ~/cargo-make/makers link-all-in-one-binaries
-      - name: e2e, ci-3cn-1fe, streaming
-        timeout-minutes: 2
-        run: |
-          ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e, ci-3cn-1fe, delta join
-        timeout-minutes: 2
-        run: |
-          ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e, ci-3cn-1fe, batch distributed
-        timeout-minutes: 2
-        run: |
-          ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
-          sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node (legacy frontend)
-        timeout-minutes: 4
-        run: |
-          ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e test batch 3-node (legacy frontend)
+      - name: e2e test batch 3-node
         timeout-minutes: 2
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
@@ -631,74 +506,6 @@ jobs:
           if-no-files-found: error
           path: |
             target/debug/risedev-playground
-  compute-node-build-release:
-    needs: start-runner-c
-    runs-on: ${{ needs.start-runner-c.outputs.label }}
-    container:
-      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
-      options: --security-opt seccomp=unconfined
-    name: compute-node-build-release
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v1
-        with:
-          version: "3.x"
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt
-      - name: Cache Cargo home
-        uses: actions/cache@v2
-        id: cache
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
-      - name: Install required tools
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          cargo install cargo-sort cargo-hakari
-      - name: Run rust cargo-sort check
-        run: |
-          cargo sort -c -w
-      - name: Run rust cargo-hakari check
-        run: |
-          cargo hakari verify
-      - name: Run rust format check
-        run: |
-          cargo fmt --all -- --check
-      - name: Build Rust components
-        run: |
-          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile release
-      - name: Compress RisingWave debug info
-        run: |
-          objcopy --compress-debug-sections=zlib-gnu target/release/risingwave
-      - uses: actions/upload-artifact@v2
-        with:
-          name: risingwave-release
-          if-no-files-found: error
-          path: |
-            target/release/risingwave
-      - uses: actions/upload-artifact@v2
-        with:
-          name: risingwave_regress_test-release
-          if-no-files-found: error
-          path: |
-            target/release/risingwave_regress_test
-      - uses: actions/upload-artifact@v2
-        with:
-          name: risedev-playground-release
-          if-no-files-found: error
-          path: |
-            target/release/risedev-playground
   compute-node-test:
     needs:
       - start-runner-b
@@ -785,52 +592,6 @@ jobs:
         run: |
           buf lint
         working-directory: proto
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    needs:
-      - compute-node-build-release
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - name: Build Changelog
-        id: github_release
-        uses: mikepenz/release-changelog-builder-action@v2
-        with:
-          configuration: ".github/changelog.json"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Release
-        uses: actions/create-release@v1
-        id: create_release
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: ${{ github.ref }}
-          body: ${{steps.github_release.outputs.changelog}}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/download-artifact@v2
-        name: Download risingwave binary
-        with:
-          name: risingwave-release
-          path: .
-      - name: package as tar
-        run: |
-          chmod +x risingwave
-          tar -czvf risingwave-${GITHUB_REF_NAME}-x86_64-unknown-linux.tar.gz risingwave
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-      - name: add artifact
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: risingwave-${{ github.ref_name }}-x86_64-unknown-linux.tar.gz
-          asset_name: risingwave-${{ github.ref_name }}-x86_64-unknown-linux.tar.gz
-          asset_content_type: application/tar+gzip
 
 # ================= THIS FILE IS AUTOMATICALLY GENERATED =================
 #

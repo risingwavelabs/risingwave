@@ -13,13 +13,17 @@
 // limitations under the License.
 
 pub mod executor_wrapper;
+
 mod filter;
+mod insert;
 pub use filter::*;
 mod values;
 pub use values::*;
 mod top_n;
 mod trace;
+pub use filter::*;
 use futures::stream::BoxStream;
+pub use insert::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
