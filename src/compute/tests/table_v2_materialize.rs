@@ -198,7 +198,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     tokio::spawn(async move {
         let mut stream = insert.execute();
-        let _ = stream.next().await.unwrap();
+        let _ = stream.next().await.unwrap()?;
         Ok::<_, RwError>(())
     });
 
