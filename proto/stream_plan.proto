@@ -52,7 +52,7 @@ message MaterializeNode {
   repeated plan.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
-  // TODO: remove this field, not used anywhere
+  // Hash keys of the materialize node, which is a subset of pk.
   repeated int32 distribution_keys = 5;
 }
 
@@ -107,13 +107,6 @@ message ChainNode {
   repeated int32 column_ids = 3;
 }
 
-// BatchParallelInfo is a temporary workaround for parallelized chain node.
-// This should be removed once we support ranged batch query.
-message BatchParallelInfo {
-  uint32 degree = 1;
-  uint32 index = 2;
-}
-
 // BatchPlanNode is used for mv on mv snapshot read.
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
@@ -121,7 +114,6 @@ message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
-  BatchParallelInfo parallel_info = 4;
 }
 
 // Special node for shared state. ArrangeNode will produce a special Materialize executor,

@@ -18,7 +18,6 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
 
@@ -39,9 +38,6 @@ pub struct BatchQueryExecutor<S: StateStore> {
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
 
-    /// This is a workaround for parallelized chain.
-    /// TODO(zbw): Remove this when we support range scan.
-    parallel_info: BatchParallelInfo,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -55,14 +51,12 @@ where
         batch_size: usize,
         info: ExecutorInfo,
         key_indices: Vec<usize>,
-        parallel_info: BatchParallelInfo,
     ) -> Self {
         Self {
             table,
             batch_size,
             info,
             key_indices,
-            parallel_info,
         }
     }
 
@@ -164,10 +158,6 @@ mod test {
             test_batch_size,
             info,
             vec![],
-            BatchParallelInfo {
-                degree: 1,
-                index: 0,
-            },
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);

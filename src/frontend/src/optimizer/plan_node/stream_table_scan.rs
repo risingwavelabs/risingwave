@@ -42,7 +42,7 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::AnyShard,
+            Distribution::AnyShard, // Mark as `AnyShard` cause we don't know the distribution yet.
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
@@ -100,7 +100,8 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            // TODO: add the distribution key from tableCatalog
+            /// StreamTableScan should follow the same distribution as upstream materialize node.
+            /// So this will be filled in fragmenter.
             distribution_keys: vec![],
             // Will fill when resolving chain node.
             parallel_info: None,

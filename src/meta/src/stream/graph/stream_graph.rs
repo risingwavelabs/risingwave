@@ -23,12 +23,13 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
-    BatchParallelInfo, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+    Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
 
+use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
-use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
+use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
 
 /// A list of actors with order.
 #[derive(Debug, Clone)]
@@ -92,9 +93,6 @@ pub struct StreamActorBuilder {
 
     /// whether this actor builder has been sealed
     sealed: bool,
-
-    /// parallel degree of corresponding fragment
-    parallel_degree: u32,
 }
 
 impl StreamActorBuilder {
@@ -102,7 +100,6 @@ impl StreamActorBuilder {
         actor_id: LocalActorId,
         fragment_id: LocalFragmentId,
         node: Arc<StreamNode>,
-        parallel_degree: u32,
     ) -> Self {
         Self {
             actor_id,
@@ -111,7 +108,6 @@ impl StreamActorBuilder {
             downstreams: vec![],
             upstreams: HashMap::new(),
             sealed: false,
-            parallel_degree,
         }
     }
 
@@ -121,10 +117,6 @@ impl StreamActorBuilder {
 
     pub fn get_fragment_id(&self) -> LocalFragmentId {
         self.fragment_id
-    }
-
-    pub fn get_parallel_degree(&self) -> u32 {
-        self.parallel_degree
     }
 
     /// Add a dispatcher to this actor. Note that the `downstream_actor_id` field must be left
@@ -262,21 +254,24 @@ impl StreamActorBuilder {
 
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
-pub struct StreamGraphBuilder<S> {
+#[derive(Default)]
+pub struct StreamGraphBuilder {
     actor_builders: BTreeMap<LocalActorId, StreamActorBuilder>,
-    /// (ctx) fragment manager.
-    fragment_manager: FragmentManagerRef<S>,
+
+    table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
+
+    table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
+
+    upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
+
 }
 
-impl<S> StreamGraphBuilder<S>
-where
-    S: MetaStore,
-{
-    pub fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
-        Self {
-            actor_builders: BTreeMap::new(),
-            fragment_manager,
-        }
+impl StreamGraphBuilder {
+    /// Resolve infos at first to avoid blocking call inside.
+    pub fn fill_info(&mut self, info: BuildGraphInfo) {
+        self.table_node_actors = info.table_node_actors;
+        self.table_sink_actor_ids = info.table_sink_actor_ids;
+        self.upstream_distribution_keys = info.upstream_distribution_keys;
     }
 
     /// Insert new generated actor.
@@ -420,7 +415,7 @@ where
                 actor.get_nodes()?,
                 &mut upstream_actors,
                 builder.get_fragment_id(),
-                builder.get_parallel_degree(),
+                actor_id.as_global_id(),
             )?);
 
             graph
@@ -428,16 +423,16 @@ where
                 .or_insert(vec![])
                 .push(actor);
 
-            for up_id in dispatch_upstreams {
-                match ctx.dispatches.entry(up_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().push(actor_id.as_global_id());
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(vec![actor_id.as_global_id()]);
-                    }
-                }
-            }
+            // for up_id in dispatch_upstreams {
+            //     match ctx.dispatches.entry(up_id) {
+            //         Entry::Occupied(mut o) => {
+            //             o.get_mut().push(actor_id.as_global_id());
+            //         }
+            //         Entry::Vacant(v) => {
+            //             v.insert(vec![actor_id.as_global_id()]);
+            //         }
+            //     }
+            // }
         }
         for actor_ids in ctx.upstream_node_actors.values_mut() {
             actor_ids.sort_unstable();
@@ -460,7 +455,7 @@ where
         stream_node: &StreamNode,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         fragment_id: LocalFragmentId,
-        parallel_degree: u32,
+        actor_id: ActorId,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
@@ -471,7 +466,7 @@ where
                 dispatch_upstreams,
                 stream_node,
                 fragment_id,
-                parallel_degree,
+                actor_id,
             ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
@@ -499,7 +494,7 @@ where
                                 dispatch_upstreams,
                                 input,
                                 fragment_id,
-                                parallel_degree,
+                                actor_id,
                             )?;
                         }
                         _ => {
@@ -509,7 +504,7 @@ where
                                 input,
                                 upstream_actor_id,
                                 fragment_id,
-                                parallel_degree,
+                                actor_id,
                             )?;
                         }
                     }
@@ -525,26 +520,32 @@ where
         dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
         fragment_id: LocalFragmentId,
-        parallel_degree: u32,
+        actor_id: ActorId,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
 
-            let (assigned_upstream, parallel_index) =
-                self.assign_upstream_for_chain(table_id, ctx, fragment_id)?;
 
-            dispatch_upstreams.extend(assigned_upstream.iter());
-            let chain_upstream_table_node_actors = self
-                .fragment_manager
-                .blocking_table_node_actors(&table_id)?;
+            let upstream_actor_ids = HashSet::<ActorId>::from_iter(
+                match ctx.table_sink_map.entry(table_id) {
+                    Entry::Vacant(v) => {
+                        let actor_ids = self.table_sink_actor_ids.get(&table_id).unwrap().clone();
+                        v.insert(actor_ids).clone()
+                    }
+                    Entry::Occupied(o) => o.get().clone(),
+                }.into_iter(),
+            );
+
+            // dispatch_upstreams.extend(upstream_actor_ids.iter());
+            let chain_upstream_table_node_actors = self.table_node_actors.get(&table_id).unwrap();
             let chain_upstream_node_actors = chain_upstream_table_node_actors
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {
                     actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
                 })
-                .filter(|(_, actor_id)| assigned_upstream.contains(actor_id))
+                .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
                 .into_group_map();
             for (node_id, actor_ids) in chain_upstream_node_actors {
                 match ctx.upstream_node_actors.entry(node_id) {
@@ -561,21 +562,25 @@ where
             assert_matches!(merge_node.node, Some(Node::MergeNode(_)));
 
             let mut batch_plan_node = input[1].clone();
+            // Get distribution key from fragment_manager
+            let distribution_keys = self
+                .upstream_distribution_keys
+                .get(&table_id)
+                .unwrap()
+                .clone();
             if let Some(Node::BatchPlanNode(ref mut node)) = batch_plan_node.node {
-                node.parallel_info = Some(BatchParallelInfo {
-                    degree: parallel_degree,
-                    index: parallel_index,
-                });
+                node.distribution_keys = distribution_keys;
             } else {
                 unreachable!("input[1].node should be a BatchPlanNode");
             }
 
-            let chain_input = vec![
+
+            let mut chain_input = vec![
                 StreamNode {
                     input: vec![],
                     pk_indices: stream_node.pk_indices.clone(),
                     node: Some(Node::MergeNode(MergeNode {
-                        upstream_actor_id: Vec::from_iter(assigned_upstream.into_iter()),
+                        upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
                         fields: chain_node.upstream_fields.clone(),
                     })),
                     fields: chain_node.upstream_fields.clone(),
@@ -584,6 +589,24 @@ where
                 },
                 batch_plan_node,
             ];
+            // {
+            //     let chain_merge_upstream_ref = if let Some(Node::MergeNode(ref mut node)) = chain_input[0].node {
+            //         &mut node.upstream_actor_id
+            //     } else {
+            //         unreachable!("chain_input[0].node should be a MergeNode");
+            //     };
+            //     match ctx.chain_merge_upstream_refs.entry(table_id) {
+            //         Entry::Occupied(mut o) => {
+            //             o.get_mut().insert(actor_id, chain_merge_upstream_ref);
+            //         }
+            //         Entry::Vacant(v) => {
+            //             let mut map = BTreeMap::new();
+            //             map.insert(actor_id, chain_merge_upstream_ref);
+            //             v.insert(map);
+            //         }
+            //     };
+            // }
+
 
             Ok(StreamNode {
                 input: chain_input,
@@ -598,49 +621,47 @@ where
         }
     }
 
-    /// maintain a `<fragment_id, hashset<upstream_actor_id>>` mapping
-    /// For each actor beginning with chain, we will assign *one* upstream table sink actor
-    /// to this actor. (assert chain actor's parallel degree == upstream parallel degree).
-    fn assign_upstream_for_chain(
-        &self,
-        table_id: TableId,
-        ctx: &mut CreateMaterializedViewContext,
-        fragment_id: LocalFragmentId,
-    ) -> Result<(HashSet<ActorId>, u32)> {
-        let remaining = match ctx
-            .chain_upstream_assignment
-            .entry(fragment_id.as_global_id())
-        {
-            Entry::Vacant(v) => {
-                let mut upstream_actor_ids = match ctx.table_sink_map.entry(table_id) {
-                    Entry::Vacant(v) => {
-                        let actor_ids = self
-                            .fragment_manager
-                            .blocking_get_table_sink_actor_ids(&table_id)?;
-                        v.insert(actor_ids).clone()
-                    }
-                    Entry::Occupied(o) => o.get().clone(),
-                };
-                upstream_actor_ids.dedup();
-                v.insert(upstream_actor_ids)
-            }
-            Entry::Occupied(o) => o.into_mut(),
-        };
-
-        // choose one upstream from remaining.
-        assert!(!remaining.is_empty());
-
-        // TODO: remove this when we deprecate Java frontend.
-        let (assigned_upstreams, parallel_index) = if ctx.is_legacy_frontend {
-            (HashSet::<ActorId>::from_iter(remaining.iter().cloned()), 0)
-        } else {
-            let upstream_id = remaining.pop().unwrap();
-            (
-                HashSet::<ActorId>::from([upstream_id]),
-                remaining.len() as u32,
-            )
-        };
-
-        Ok((assigned_upstreams, parallel_index))
-    }
+    // /// maintain a `<fragment_id, hashset<upstream_actor_id>>` mapping
+    // /// For each actor beginning with chain, we will assign *one* upstream table sink actor
+    // /// to this actor. (assert chain actor's parallel degree == upstream parallel degree).
+    // fn assign_upstream_for_chain(
+    //     &self,
+    //     table_id: TableId,
+    //     ctx: &mut CreateMaterializedViewContext,
+    //     fragment_id: LocalFragmentId,
+    // ) -> Result<(HashSet<ActorId>, ParallelUnitId)> {
+    //     let remaining = match ctx
+    //         .chain_upstream_assignment
+    //         .entry(fragment_id.as_global_id())
+    //     {
+    //         Entry::Vacant(v) => {
+    //             let mut upstream_actor_ids = match ctx.table_sink_map.entry(table_id) {
+    //                 Entry::Vacant(v) => {
+    //                     let actor_ids = self.table_sink_actor_ids.get(&table_id).unwrap().clone();
+    //                     v.insert(actor_ids).clone()
+    //                 }
+    //                 Entry::Occupied(o) => o.get().clone(),
+    //             };
+    //             upstream_actor_ids.dedup();
+    //             v.insert(upstream_actor_ids)
+    //         }
+    //         Entry::Occupied(o) => o.into_mut(),
+    //     };
+    //
+    //     // choose one upstream from remaining.
+    //     assert!(!remaining.is_empty());
+    //
+    //     // TODO: remove this when we deprecate Java frontend.
+    //     let (assigned_upstreams, parallel_index) = if ctx.is_legacy_frontend {
+    //         (HashSet::<ActorId>::from_iter(remaining.iter().cloned()), 0)
+    //     } else {
+    //         let upstream_id = remaining.pop().unwrap();
+    //         (
+    //             HashSet::<ActorId>::from([upstream_id]),
+    //             remaining.len() as u32,
+    //         )
+    //     };
+    //
+    //     Ok((assigned_upstreams, parallel_index))
+    // }
 }
