@@ -431,13 +431,17 @@ impl LocalStreamManagerCore {
                         outputs,
                         column_indices,
                         hash_mapping,
+                        dispatcher.dispatcher_id,
                     ))
                 }
-                Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(outputs)),
+                Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
+                    outputs,
+                    dispatcher.dispatcher_id,
+                )),
                 Simple | NoShuffle => {
                     assert_eq!(outputs.len(), 1);
                     let output = outputs.into_iter().next().unwrap();
-                    DispatcherImpl::Simple(SimpleDispatcher::new(output))
+                    DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
                 }
                 Invalid => unreachable!(),
             };

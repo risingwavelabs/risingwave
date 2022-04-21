@@ -230,6 +230,7 @@ message Dispatcher {
   repeated uint32 column_indices = 2;
   // The hash mapping for consistent hash.
   ActorMapping hash_mapping = 3;
+  uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
