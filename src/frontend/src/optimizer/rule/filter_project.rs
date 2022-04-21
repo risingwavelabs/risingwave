@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
+use itertools::{Either, Itertools};
+
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-use crate::utils::Substitute;
+use crate::expr::{ExprImpl, ExprRewriter};
+use crate::utils::Condition;
 
-/// Pushes a [`LogicalFilter`] past a [`LogicalProject`].
+/// Push what can be pused from [`LogicalFilter`] through [`LogicalProject`].
 pub struct FilterProjectRule {}
 impl Rule for FilterProjectRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -24,15 +28,56 @@ impl Rule for FilterProjectRule {
         let input = filter.input();
         let project = input.as_logical_project()?;
 
-        // convert the predicate to one that references the child of the project
-        let mut subst = Substitute {
-            mapping: project.exprs().clone(),
-        };
-        let predicate = filter.predicate().clone().rewrite_expr(&mut subst);
+        // Collect the indics of `InputRef` in LogicalProject.
+        let input_ref_set: FixedBitSet = project
+            .exprs()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, expr)| {
+                if matches!(expr, ExprImpl::InputRef(_)) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let proj_exprs_len = project.exprs().len();
+        let (pushed_exprs, not_pushed_exprs): (Vec<ExprImpl>, Vec<ExprImpl>) = filter
+            .predicate()
+            .clone()
+            .into_iter()
+            .partition_map(|expr| {
+                // If all the expressions referenced by the predicate are `InputRef`, then this
+                // predicate can be pushed.
+                if expr
+                    .collect_input_refs(proj_exprs_len)
+                    .is_subset(&input_ref_set)
+                {
+                    Either::Left(expr)
+                } else {
+                    Either::Right(expr)
+                }
+            });
 
-        let input = project.input();
-        let pushed_filter = LogicalFilter::create(input, predicate);
-        Some(project.clone_with_input(pushed_filter).into())
+        let pushed_predicate = Condition {
+            conjunctions: {
+                let mut proj_o2i_mapping = project.o2i_col_mapping();
+                pushed_exprs
+                    .into_iter()
+                    .map(|expr| proj_o2i_mapping.rewrite_expr(expr))
+                    .collect()
+            },
+        };
+        let input_filter = LogicalFilter::create(project.input(), pushed_predicate);
+
+        let project = project.clone_with_input(input_filter);
+
+        let not_pushed_predicate = Condition {
+            conjunctions: not_pushed_exprs,
+        };
+        let filter = LogicalFilter::create(project.into(), not_pushed_predicate);
+
+        Some(filter)
     }
 }
 
