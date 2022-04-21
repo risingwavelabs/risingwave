@@ -17,6 +17,7 @@ mod catalog_v2;
 mod env;
 mod epoch;
 mod hash_dispatch;
+mod hash_mapping;
 mod id;
 mod notification;
 mod stream_clients;
