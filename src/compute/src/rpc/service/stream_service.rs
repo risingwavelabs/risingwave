@@ -229,7 +229,7 @@ impl StreamServiceImpl {
 
                 self.env
                     .source_manager()
-                    .create_table_source(&id, columns)?;
+                    .create_table_source(&id, columns, true)?;
             }
         };
 

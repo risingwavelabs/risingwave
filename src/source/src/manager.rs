@@ -42,7 +42,12 @@ const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
-    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    fn create_table_source(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        frontend_v2: bool,
+    ) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
@@ -165,7 +170,12 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    fn create_table_source(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        frontend_v2: bool,
+    ) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -177,12 +187,15 @@ impl SourceManager for MemSourceManager {
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
         let source = SourceImpl::TableV2(TableSourceV2::new(columns));
 
+        // TODO: using None for Java frontend, remove this param when Java frontend deprecated.
+        let row_id_index = if frontend_v2 { Some(0) } else { None };
+
         // Table sources do not need columns and format
         let desc = SourceDesc {
             source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
-            row_id_index: Some(0), // always use the first column as row_id
+            row_id_index, // always use the first column as row_id
         };
 
         sources.insert(*table_id, desc);
@@ -308,7 +321,7 @@ mod tests {
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source(&table_id, table_columns);
+        let res = mem_source_manager.create_table_source(&table_id, table_columns, true);
         assert!(res.is_ok());
 
         // get source

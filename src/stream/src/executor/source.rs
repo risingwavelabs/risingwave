@@ -324,8 +324,13 @@ impl ExecutorV1 for SourceExecutor {
                     .unwrap();
 
                 // todo: use epoch from msg to restore state from state store
-                let barrier = msg.as_barrier().expect("not barrier msg");
-                self.row_id_generator = Some(RowIdGenerator::new(self.actor_id, barrier));
+                // TODO: Remove this conditional judgment when Java frontend deprecated.
+                if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_))
+                    || self.source_desc.row_id_index == Some(0)
+                {
+                    let barrier = msg.as_barrier().expect("not barrier msg");
+                    self.row_id_generator = Some(RowIdGenerator::new(self.actor_id, barrier));
+                }
 
                 let reader = self
                     .source_desc
@@ -358,15 +363,20 @@ impl ExecutorV1 for SourceExecutor {
                 match stream.as_mut().next().await {
                     // This branch will be preferred.
                     Some(Either::Left(message)) => {
-                        let barrier = message
-                            .as_ref()
-                            .unwrap()
-                            .as_barrier()
-                            .expect("not barrier msg");
-                        self.row_id_generator
-                            .as_mut()
-                            .expect("row id generator not set")
-                            .update(barrier.epoch);
+                        // TODO: Remove this conditional judgment when Java frontend deprecated.
+                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_))
+                            || self.source_desc.row_id_index == Some(0)
+                        {
+                            let barrier = message
+                                .as_ref()
+                                .unwrap()
+                                .as_barrier()
+                                .expect("not barrier msg");
+                            self.row_id_generator
+                                .as_mut()
+                                .expect("row id generator not set")
+                                .update(barrier.epoch);
+                        }
 
                         message
                     }
@@ -374,7 +384,12 @@ impl ExecutorV1 for SourceExecutor {
                     // If there's barrier, this branch will be deferred.
                     Some(Either::Right(chunk)) => {
                         let mut chunk = chunk?;
-                        chunk = self.refill_row_id_column(chunk);
+                        // TODO: Remove this conditional judgment when Java frontend deprecated.
+                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_))
+                            || self.source_desc.row_id_index == Some(0)
+                        {
+                            chunk = self.refill_row_id_column(chunk);
+                        }
 
                         self.metrics
                             .source_output_row_count
@@ -466,7 +481,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns, false)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -618,7 +633,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns, false)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 

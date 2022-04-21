@@ -101,9 +101,9 @@ impl InsertExecutor2 {
             for _ in 0..len {
                 builder
                     .append(if self.frontend_v2 {
-                        Some(source.next_row_id(self.worker_id))
-                    } else {
                         None
+                    } else {
+                        Some(source.next_row_id(self.worker_id))
                     })
                     .unwrap();
             }
@@ -233,7 +233,7 @@ mod tests {
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
+        source_manager.create_table_source(&table_id, table_columns.to_vec(), false)?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
