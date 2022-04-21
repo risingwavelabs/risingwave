@@ -25,6 +25,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::compress::decompress_data;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -416,15 +417,15 @@ impl LocalStreamManagerCore {
                         .iter()
                         .map(|i| *i as usize)
                         .collect();
-                    let hash_mapping = dispatcher
-                        .hash_mapping
-                        .clone()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(
-                                "hash dispatcher doesn't have consistent hash mapping".to_string(),
-                            ))
-                        })?
-                        .hash_mapping;
+                    let compressed_mapping = dispatcher.hash_mapping.clone().ok_or_else(|| {
+                        RwError::from(ErrorCode::InternalError(
+                            "hash dispatcher doesn't have consistent hash mapping".to_string(),
+                        ))
+                    })?;
+                    let hash_mapping = decompress_data(
+                        compressed_mapping.original_indices,
+                        compressed_mapping.data,
+                    );
 
                     DispatcherImpl::Hash(HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),

@@ -21,6 +21,7 @@ use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
@@ -185,8 +186,10 @@ where
                                     .collect_vec()
                             };
 
+                            let (original_indices, data) = compress_data(&streaming_hash_mapping);
                             dispatcher.hash_mapping = Some(ActorMapping {
-                                hash_mapping: streaming_hash_mapping,
+                                original_indices,
+                                data,
                             });
                         }
                     });
