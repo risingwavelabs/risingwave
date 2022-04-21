@@ -16,6 +16,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use crate::binder::expr::align_types;
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -87,11 +88,26 @@ impl std::fmt::Debug for FunctionCall {
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
-    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<Self> {
-        let return_type = infer_type(
-            func_type,
-            inputs.iter().map(|expr| expr.return_type()).collect(),
-        )?; // should be derived from inputs
+    pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
+        let return_type = match func_type {
+            ExprType::Case => {
+                let len = inputs.len();
+                align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                    match (i & 1) == 1 || (len & 1) == 1 && i == len - 1 {
+                        true => Some(e),
+                        false => None,
+                    }
+                }))
+            }
+            ExprType::In => {
+                align_types(inputs.iter_mut())?;
+                Ok(DataType::Boolean)
+            }
+            _ => infer_type(
+                func_type,
+                inputs.iter().map(|expr| expr.return_type()).collect(),
+            ),
+        }?;
         Ok(Self {
             func_type,
             return_type,

@@ -133,8 +133,7 @@ impl Binder {
         for elem in list {
             bound_expr_list.push(self.bind_expr(elem)?);
         }
-        align_types(bound_expr_list.iter_mut())?;
-        let in_expr = FunctionCall::new_unchecked(ExprType::In, bound_expr_list, DataType::Boolean);
+        let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
         if negated {
             Ok(
                 FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
@@ -241,13 +240,11 @@ impl Binder {
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
         let mut inputs = Vec::new();
-        let mut results_expr: Vec<ExprImpl> = results
+        let results_expr: Vec<ExprImpl> = results
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .collect::<Result<_>>()?;
-        let mut else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
-
-        let return_type = align_types(results_expr.iter_mut().chain(else_result_expr.iter_mut()))?;
+        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
 
         for (condition, result) in zip_eq(conditions, results_expr) {
             let condition = match operand {
@@ -264,11 +261,7 @@ impl Binder {
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
-        Ok(FunctionCall::new_unchecked(
-            ExprType::Case,
-            inputs,
-            return_type,
-        ))
+        FunctionCall::new(ExprType::Case, inputs)
     }
 
     pub(super) fn bind_is_operator(
