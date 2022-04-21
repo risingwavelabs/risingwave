@@ -85,11 +85,11 @@ impl<S: StateStore> StateTable<S> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         for (pk, row_op) in mem_table {
             match row_op {
-                RowOp::Insert(row) => rows.push((pk, row, Op::Insert)),
-                RowOp::Delete(row) => rows.push((pk, row, Op::Delete)),
+                RowOp::Insert(row) => rows.push((Op::Insert, pk, row)),
+                RowOp::Delete(row) => rows.push((Op::Delete, pk, row)),
                 RowOp::Update((old_row, new_row)) => {
-                    rows.push((pk.clone(), old_row, Op::UpdateDelete));
-                    rows.push((pk, new_row, Op::UpdateInsert));
+                    rows.push((Op::UpdateDelete, pk.clone(), old_row));
+                    rows.push((Op::UpdateInsert, pk, new_row));
                 }
             }
         }

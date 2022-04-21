@@ -186,21 +186,21 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows(
         &mut self,
-        rows: Vec<(Row, Row, Op)>,
+        rows: Vec<(Op, Row, Row)>,
         epoch: u64,
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let mut update_delete_keys = HashSet::new();
-        for (pk, cell_values, op) in rows {
-            let arrange_key_buf =
-                serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?;
+        let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
+        for (op, pk, cell_values) in rows {
+            let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
             match op {
                 Op::Delete => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
-                        .map_err(err)?;
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .unwrap();
                     for (key, value) in bytes {
                         if value.is_some() {
                             local.delete(key);
@@ -210,8 +210,8 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::Insert => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
-                        .map_err(err)?;
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .unwrap();
                     for (key, value) in bytes {
                         if let Some(val) = value {
                             local.put(key, StorageValue::new_default_put(val))
@@ -221,8 +221,8 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::UpdateDelete => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
-                        .map_err(err)?;
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .unwrap();
                     for (key, value) in bytes {
                         if value.is_some() {
                             update_delete_keys.insert(key);
@@ -232,8 +232,8 @@ impl<S: StateStore> CellBasedTable<S> {
                 Op::UpdateInsert => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, Some(cell_values), &self.column_ids)
-                        .map_err(err)?;
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .unwrap();
                     let mut update_insert_keys = HashSet::new();
                     for (key, _) in bytes.clone() {
                         update_insert_keys.insert(key);
