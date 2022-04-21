@@ -35,11 +35,13 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    // #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
 
+    /// Which parallel unit this actor belongs to
     parallel_unit_id: u32,
+    
+    /// Consistent hash mapping for filtering data.
     hash_mapping: Vec<u32>,
 }
 
