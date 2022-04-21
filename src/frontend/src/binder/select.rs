@@ -196,13 +196,13 @@ impl Binder {
     }
 
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
-    /// We will extract ident from `expr` and get the `column_desc` from `column_binding`.
-    /// Will return `column_desc`, `table_name` and field `idents`.
-    pub fn extract_column_desc_and_idents(
+    /// We will extract ident from `expr` to get the `column_binding`.
+    /// Will return `column_binding` and field `idents`.
+    pub fn extract_binding_and_idents(
         &mut self,
         expr: Expr,
         ids: Vec<Ident>,
-    ) -> Result<(ColumnDesc, Option<String>, Vec<Ident>)> {
+    ) -> Result<(&ColumnBinding, Vec<Ident>)> {
         match expr {
             // For CompoundIdentifier, we will use first ident as table name and second ident as
             // column name to get `column_desc`.
@@ -220,8 +220,7 @@ impl Binder {
                 let index = self
                     .context
                     .get_column_binding_index(Some(table_name), column)?;
-                let desc = self.context.columns[index].desc.clone();
-                Ok((desc, Some(table_name.clone()), ids))
+                Ok((&self.context.columns[index], ids))
             }
             // For Identifier, we will first use the ident as
             // column name to get `column_desc`.
@@ -233,15 +232,13 @@ impl Binder {
                 Some(indexs) => {
                     if indexs.len() == 1 {
                         let index = self.context.get_column_binding_index(None, &ident.value)?;
-                        let desc = self.context.columns[index].desc.clone();
-                        Ok((desc, None, ids))
+                        Ok((&self.context.columns[index], ids))
                     } else {
                         let column = &ids[0].value;
                         let index = self
                             .context
                             .get_column_binding_index(Some(&ident.value), column)?;
-                        let desc = self.context.columns[index].desc.clone();
-                        Ok((desc, Some(ident.value), ids[1..].to_vec()))
+                        Ok((&self.context.columns[index], ids[1..].to_vec()))
                     }
                 }
                 None => {
@@ -249,8 +246,7 @@ impl Binder {
                     let index = self
                         .context
                         .get_column_binding_index(Some(&ident.value), column)?;
-                    let desc = self.context.columns[index].desc.clone();
-                    Ok((desc, Some(ident.value), ids[1..].to_vec()))
+                    Ok((&self.context.columns[index], ids[1..].to_vec()))
                 }
             },
             Expr::Cast { .. } => {
@@ -268,9 +264,8 @@ impl Binder {
         expr: Expr,
         ids: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (desc, table, idents) = self.extract_column_desc_and_idents(expr, ids.to_vec())?;
-        let (column_desc, mut exprs) = Self::bind_field(&idents, desc.clone())?;
-        let binding = self.context.get_column_binding(table, &desc.name)?;
+        let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
+        let (column_desc, mut exprs) = Self::bind_field(&idents, binding.desc.clone())?;
         exprs.insert(
             0,
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
@@ -306,9 +301,8 @@ impl Binder {
         expr: Expr,
         ids: &[Ident],
     ) -> Result<(ExprImpl, Option<String>)> {
-        let (desc, table, idents) = self.extract_column_desc_and_idents(expr, ids.to_vec())?;
-        let (column_desc, mut exprs) = Self::bind_field(&idents, desc.clone())?;
-        let binding = self.context.get_column_binding(table, &desc.name)?;
+        let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
+        let (column_desc, mut exprs) = Self::bind_field(&idents, binding.desc.clone())?;
         exprs.insert(
             0,
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
