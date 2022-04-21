@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::collections::HashMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{ConnectorStateV2, Properties, SplitImpl, SplitReaderImpl};
+use risingwave_connector::{ConnectorStateV2, Properties, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
 use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
@@ -63,7 +63,7 @@ impl ConnectorSource {
 }
 
 pub struct ConnectorReaderContext {
-    pub(crate) splits: Vec<SplitImpl>,
+    pub(crate) states: ConnectorStateV2,
 }
 
 #[async_trait]
@@ -79,15 +79,13 @@ impl Source for ConnectorSource {
         log::debug!(
             "Creating new connector source with config {:?}, splits {:?}",
             self.config,
-            context.splits
+            context.states
         );
 
-        let reader = SplitReaderImpl::create(
-            Properties::new(self.config.0.clone()),
-            ConnectorStateV2::Splits(context.splits),
-        )
-        .await
-        .to_rw_result()?;
+        let reader =
+            SplitReaderImpl::create(Properties::new(self.config.0.clone()), context.states)
+                .await
+                .to_rw_result()?;
 
         let columns = self.get_target_columns(column_ids)?;
 
@@ -123,8 +121,10 @@ impl StreamSourceReader for ConnectorStreamReader {
                 for msg in batch {
                     if let Some(content) = msg.payload {
                         events.push(self.parser.parse(content.as_ref(), &self.columns)?);
-                        
-                        *split_offset_mapping.entry(msg.split_id).or_insert("".to_string()) = msg.offset;
+
+                        *split_offset_mapping
+                            .entry(msg.split_id)
+                            .or_insert_with(|| "".to_string()) = msg.offset;
                     }
                 }
                 let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
@@ -134,11 +134,14 @@ impl StreamSourceReader for ConnectorStreamReader {
                     rows.extend(event.rows);
                     ops.extend(event.ops);
                 }
-                Ok((StreamChunk::new(
-                    ops,
-                    Self::build_columns(&self.columns, rows.as_ref())?,
-                    None,
-                ), split_offset_mapping))
+                Ok((
+                    StreamChunk::new(
+                        ops,
+                        Self::build_columns(&self.columns, rows.as_ref())?,
+                        None,
+                    ),
+                    split_offset_mapping,
+                ))
             }
         }
     }

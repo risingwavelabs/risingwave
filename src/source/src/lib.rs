@@ -29,8 +29,8 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
-use std::fmt::Debug;
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
@@ -40,7 +40,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::SplitImpl;
+use risingwave_connector::ConnectorStateV2;
 pub use table_v2::*;
 
 use crate::connector_source::{ConnectorReaderContext, ConnectorSource, ConnectorStreamReader};
@@ -95,7 +95,7 @@ impl StreamSourceReader for SourceStreamReaderImpl {
 
 pub enum SourceReaderContext {
     None(()),
-    ConnectorReaderContext(Vec<SplitImpl>),
+    ConnectorReaderContext(ConnectorStateV2),
 }
 
 impl SourceImpl {
@@ -112,7 +112,7 @@ impl SourceImpl {
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
             (SourceImpl::Connector(c), SourceReaderContext::ConnectorReaderContext(context)) => c
-                .stream_reader(ConnectorReaderContext { splits: context }, column_ids)
+                .stream_reader(ConnectorReaderContext { states: context }, column_ids)
                 .await
                 .map(SourceStreamReaderImpl::Connector),
             _ => Err(RwError::from(InternalError(

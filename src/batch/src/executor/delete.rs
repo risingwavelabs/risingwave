@@ -228,10 +228,10 @@ mod tests {
         reader.open().await?;
         let chunk = reader.next().await?;
 
-        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        assert_eq!(chunk.0.ops().to_vec(), vec![Op::Delete; 5]);
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.0.columns()[0]
                 .array()
                 .as_int64()
                 .iter()
@@ -240,7 +240,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.0.columns()[1]
                 .array()
                 .as_int64()
                 .iter()

@@ -55,11 +55,25 @@ pub trait SourceSplit: Sized {
 }
 
 /// The persistent state of the connector.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectorState {
     pub identifier: Bytes,
     pub start_offset: String,
     pub end_offset: String,
+}
+
+impl SourceSplit for ConnectorState {
+    fn id(&self) -> String {
+        String::from_utf8(self.identifier.to_vec()).unwrap()
+    }
+
+    fn to_string(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -195,5 +209,24 @@ impl SplitEnumeratorImpl {
             KINESIS_SOURCE => todo!(),
             _ => Err(anyhow!("unsupported source type: {}", source_type)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_connector_state_id() -> Result<()> {
+        let state = ConnectorState {
+            identifier: Bytes::from("demo_identifier"),
+            start_offset: "".to_string(),
+            end_offset: "".to_string(),
+        };
+        println!("state: {:?}", state.to_string()?);
+        let state_to_byte = Bytes::from(state.to_string()?);
+        let recover_state = ConnectorState::restore_from_bytes(&state_to_byte)?;
+        assert_eq!(recover_state.id(), state.id());
+        Ok(())
     }
 }

@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,7 +33,7 @@ use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
 #[allow(unused_imports)]
 use risingwave_connector::SourceSplit;
-use risingwave_connector::SplitImpl;
+use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
@@ -54,8 +54,12 @@ struct SourceReader {
 }
 
 /// `SourceReader` will be turned into this stream type.
-type ReaderStream =
-    Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<(StreamChunk, HashMap<String, String>)>>> + Send>>;
+type ReaderStream = Pin<
+    Box<
+        dyn Stream<Item = Either<Result<Message>, Result<(StreamChunk, HashMap<String, String>)>>>
+            + Send,
+    >,
+>;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -91,6 +95,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     source_identify: String,
     state_store: SourceStateHandler<S>,
+    state_cache: Option<ConnectorState>,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -197,6 +202,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             state_store: SourceStateHandler::new(keyspace),
+            state_cache: None,
         })
     }
 
@@ -265,7 +271,10 @@ impl SourceReader {
         PollNext::Left
     }
 
-    pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<(StreamChunk, HashMap<String, String>)>>> {
+    pub fn into_stream(
+        self,
+    ) -> impl Stream<Item = Either<Result<Message>, Result<(StreamChunk, HashMap<String, String>)>>>
+    {
         let stream_reader = Self::stream_reader(self.stream_reader.unwrap());
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
         select_with_strategy(
@@ -276,33 +285,35 @@ impl SourceReader {
     }
 }
 
-async fn filter_prev_states<S: StateStore>(
+async fn try_recover_from_state_store<S: StateStore>(
     state_store: &SourceStateHandler<S>,
-    stream_source_splits: &Vec<SplitImpl>,
+    stream_source_splits: &[SplitImpl],
     epoch: u64,
-    connector_type: String,
-) -> Result<Vec<SplitImpl>> {
-    let mut prev_states: Vec<SplitImpl> = Vec::new();
-
-    for split_impl in stream_source_splits {
-        let mut prev_state = state_store
-            .restore_states(split_impl.id())
-            .await
-            .map_err(|e| RwError::from(InternalError(e.to_string())))?
-            .iter()
-            .filter(|(e, _)| e == &epoch)
-            .map(|(_, s)| {
-                SplitImpl::restore_from_bytes(connector_type.clone(), s)
-                    .map_err(|e| RwError::from(InternalError(e.to_string())))
-            })
-            .collect::<Result<Vec<SplitImpl>>>()?;
-        if prev_state.is_empty() {
-            prev_states.push(split_impl.clone());
-            continue;
-        }
-        prev_states.push(prev_state.pop().unwrap());
+    _connector_type: String,
+) -> Result<ConnectorStateV2> {
+    let mut state = state_store
+        .restore_states(stream_source_splits[0].id())
+        .await
+        .map_err(|e| RwError::from(InternalError(e.to_string())))?
+        .iter()
+        .filter(|(e, _)| e == &epoch)
+        .map(|(_, s)| {
+            ConnectorState::restore_from_bytes(s)
+                .map_err(|e| RwError::from(InternalError(e.to_string())))
+        })
+        .collect::<Result<Vec<ConnectorState>>>()?;
+    if state.len() == 1 {
+        Ok(ConnectorStateV2::State(state.pop().unwrap()))
+    } else if state.is_empty() {
+        Ok(ConnectorStateV2::Splits(stream_source_splits.to_vec()))
+    } else {
+        Err(RwError::from(InternalError(format!(
+            "expected load one state from epoch {:?}, got {:?}: {:?}",
+            epoch,
+            state.len(),
+            state
+        ))))
     }
-    Ok(prev_states)
 }
 
 #[async_trait]
@@ -334,9 +345,9 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                     _ => "".to_string(),
                 };
 
-                let mut states = self.stream_source_splits.clone();
+                let mut states = ConnectorStateV2::Splits(self.stream_source_splits.clone());
                 if !connector_type.is_empty() {
-                    states = filter_prev_states(
+                    states = try_recover_from_state_store(
                         &self.state_store,
                         &self.stream_source_splits,
                         epoch_prev,
@@ -378,13 +389,22 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                 match stream.as_mut().next().await {
                     // This branch will be preferred.
                     Some(Either::Left(message)) => {
-
+                        let epoch_prev = if let Message::Barrier(barrier) = message.clone()? {
+                            barrier.epoch.prev
+                        } else {
+                            unreachable!()
+                        };
+                        let state_cache = self.state_cache.take().unwrap();
+                        self.state_store
+                            .take_snapshot(vec![state_cache], epoch_prev)
+                            .await
+                            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
                         message
-                    },
+                    }
 
                     // If there's barrier, this branch will be deferred.
                     Some(Either::Right(chunk)) => {
-                        let (mut chunk, mut split_offset_mapping) = chunk?;
+                        let (mut chunk, _split_offset_mapping) = chunk?;
                         // Refill row id only if not a table source.
                         // Note(eric): Currently, rows from external sources are filled with row_ids
                         // here, but rows from tables (by insert statements)
@@ -400,7 +420,13 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                             _ => "".to_string(),
                         };
                         if !connector_type.is_empty() {
-
+                            // TODO how to get identifier for the state (with one or more split),
+                            // the identifier should be consistent with ConnectorStateV2::Split for
+                            // indexing & how to represent start offset for one or more splits
+                            //
+                            // self.state_cache = Some(ConnectorState {
+                            //     identifier
+                            // });
                         }
 
                         self.metrics
@@ -447,6 +473,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
+    use bytes::Bytes;
 
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
@@ -463,29 +490,53 @@ mod tests {
     use crate::executor::{Barrier, Epoch, Mutation, SourceExecutor};
 
     #[tokio::test]
-    async fn test_filter_prev_states() -> anyhow::Result<()> {
+    async fn test_try_recover_from_state_store() -> anyhow::Result<()> {
         let state_store =
             SourceStateHandler::new(Keyspace::executor_root(MemoryStateStore::new(), 0x2333));
         let source_split =
             SplitImpl::Kafka(KafkaSplit::new(0, Some(1), None, "demo_topic".to_string()));
         let stream_source_splits = vec![source_split.clone()];
-        let filtered_state =
-            filter_prev_states(&state_store, &stream_source_splits, 1, "kafka".to_string()).await?;
-        assert_eq!(filtered_state.len(), 1);
-        assert_eq!(filtered_state[0].to_string()?, source_split.to_string()?);
+        // get nothing from state store
+        let filtered_state = try_recover_from_state_store(
+            &state_store,
+            &stream_source_splits,
+            1,
+            "kafka".to_string(),
+        )
+        .await?;
+        let store_splits = if let ConnectorStateV2::Splits(store_splits) = filtered_state {
+            store_splits
+        } else {
+            panic!()
+        };
+        assert_eq!(store_splits.len(), 1);
+        assert_eq!(store_splits[0].to_string()?, source_split.to_string()?);
 
-        let state = KafkaSplit::new(0, Some(1), None, "demo_topic".to_string());
+        // let state = KafkaSplit::new(0, Some(1), None, "demo_topic".to_string());
+        let state = ConnectorState{
+            identifier: Bytes::from("0"),
+            start_offset: "233".to_string(),
+            end_offset: "".to_string() 
+        };
         state_store.take_snapshot(vec![state.clone()], 1).await?;
 
         let prev_state =
             SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "demo_topic".to_string()));
         let prev_state_vec = vec![prev_state];
 
+        // load state from state store
         let filtered_state =
-            filter_prev_states(&state_store, &prev_state_vec, 1, "kafka".to_string()).await?;
+            try_recover_from_state_store(&state_store, &prev_state_vec, 1, "kafka".to_string())
+                .await?;
+        println!("{:?}", filtered_state);
+        let store_splits = if let ConnectorStateV2::State(connector_state) = filtered_state {
+            connector_state
+        } else {
+            panic!()
+        };
 
         assert_eq!(
-            filtered_state[0].to_string().unwrap(),
+            store_splits.to_string().unwrap(),
             state.to_string().unwrap()
         );
 
