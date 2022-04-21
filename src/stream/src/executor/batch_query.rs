@@ -17,6 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -54,13 +55,22 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .get_distribution_keys()
             .iter()
             .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-        
+            .collect_vec();
+
+        let parallel_unit_id = node.get_parallel_unit_id() as u32;
+        let mut hash_mapping = node.get_hash_mapping().iter().map(|id| *id as u32).collect_vec();
+        // TODO: remove this when we deprecate Java frontend;
+        if hash_mapping.is_empty() {
+            hash_mapping = vec![0; VIRTUAL_NODE_COUNT];
+            assert_eq!(parallel_unit_id, 0);
+        }
         let executor = BatchQueryExecutor::new_from_v1(
             table,
             params.pk_indices,
             params.op_info,
             key_indices,
+            parallel_unit_id,
+            hash_mapping,
         );
 
         Ok(executor.boxed())

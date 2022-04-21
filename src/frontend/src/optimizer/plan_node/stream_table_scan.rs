@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
@@ -104,7 +105,8 @@ impl StreamTableScan {
             /// So this will be filled in fragmenter.
             distribution_keys: vec![],
             // Will fill when resolving chain node.
-            parallel_info: None,
+            hash_mapping: vec![0; VIRTUAL_NODE_COUNT],
+            parallel_unit_id: 0,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();

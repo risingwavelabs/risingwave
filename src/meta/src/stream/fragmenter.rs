@@ -124,7 +124,7 @@ where
         ctx.distribution_keys = self.distribution_keys.clone();
 
         // resolve upstream table infos
-        assert!(!self.dependent_table_ids.is_empty()); // should depend on at least one mview.
+
         let info = self.fragment_manager.get_build_graph_info(&self.dependent_table_ids).await?;
         self.stream_graph.fill_info(info);
 

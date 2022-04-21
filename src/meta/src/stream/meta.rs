@@ -360,7 +360,7 @@ where
         for table_id in table_ids {
             match map.get(&table_id) {
                 Some(table_fragment) => {
-                    info.insert(table_id.clone(), table_fragment.parallel_unit_actor_id());
+                    info.insert(table_id.clone(), table_fragment.parallel_unit_sink_actor_id());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

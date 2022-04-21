@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
@@ -34,9 +35,12 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    #[allow(dead_code)]
+    // #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+
+    parallel_unit_id: u32,
+    hash_mapping: Vec<u32>,
 
 }
 
@@ -51,12 +55,16 @@ where
         batch_size: usize,
         info: ExecutorInfo,
         key_indices: Vec<usize>,
+        parallel_unit_id: u32,
+        hash_mapping: Vec<u32>,
     ) -> Self {
         Self {
             table,
             batch_size,
             info,
             key_indices,
+            parallel_unit_id,
+            hash_mapping,
         }
     }
 
@@ -87,7 +95,7 @@ where
     /// Now we use hash as a workaround for supporting parallelized chain.
     fn filter_chunk(&self, data_chunk: DataChunk) -> Option<DataChunk> {
         let hash_values = data_chunk
-            .get_hash_values(self.info.pk_indices.as_ref(), CRC32FastBuilder)
+            .get_hash_values(self.key_indices.as_ref(), CRC32FastBuilder)
             .unwrap();
         let n = data_chunk.cardinality();
         let (columns, _visibility) = data_chunk.into_parts();
@@ -95,7 +103,7 @@ where
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         for hv in &hash_values {
             new_visibility.append(
-                (hv.0 % self.parallel_info.degree as u64) == self.parallel_info.index as u64,
+                self.hash_mapping[(hv.0 % VIRTUAL_NODE_COUNT as u64) as usize] == self.parallel_unit_id,
             );
         }
         let new_visibility = new_visibility.finish();
@@ -158,6 +166,8 @@ mod test {
             test_batch_size,
             info,
             vec![],
+            0,
+            vec![0; VIRTUAL_NODE_COUNT],
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);

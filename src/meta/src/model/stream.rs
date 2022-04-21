@@ -284,9 +284,10 @@ impl TableFragments {
         actor_map
     }
 
-    pub fn parallel_unit_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
-        self.actor_status.iter().map(|(actor_id, actor_status)| {
-            (actor_status.get_parallel_unit().unwrap().id, *actor_id)
+    pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
+        let sink_actor_ids = self.sink_actor_ids();
+        sink_actor_ids.iter().map(|actor_id| {
+            (self.actor_status[actor_id].get_parallel_unit().unwrap().id, *actor_id)
         }).collect()
     }
 }

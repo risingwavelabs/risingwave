@@ -21,6 +21,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
@@ -423,16 +424,19 @@ impl StreamGraphBuilder {
                 .or_insert(vec![])
                 .push(actor);
 
-            // for up_id in dispatch_upstreams {
-            //     match ctx.dispatches.entry(up_id) {
-            //         Entry::Occupied(mut o) => {
-            //             o.get_mut().push(actor_id.as_global_id());
-            //         }
-            //         Entry::Vacant(v) => {
-            //             v.insert(vec![actor_id.as_global_id()]);
-            //         }
-            //     }
-            // }
+            if ctx.is_legacy_frontend {
+                for up_id in dispatch_upstreams {
+                    match ctx.dispatches.entry(up_id) {
+                        Entry::Occupied(mut o) => {
+                            o.get_mut().push(actor_id.as_global_id());
+                        }
+                        Entry::Vacant(v) => {
+                            v.insert(vec![actor_id.as_global_id()]);
+                        }
+                    }
+                }
+            }
+
         }
         for actor_ids in ctx.upstream_node_actors.values_mut() {
             actor_ids.sort_unstable();
@@ -538,22 +542,24 @@ impl StreamGraphBuilder {
                 }.into_iter(),
             );
 
-            // dispatch_upstreams.extend(upstream_actor_ids.iter());
-            let chain_upstream_table_node_actors = self.table_node_actors.get(&table_id).unwrap();
-            let chain_upstream_node_actors = chain_upstream_table_node_actors
-                .iter()
-                .flat_map(|(node_id, actor_ids)| {
-                    actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
-                })
-                .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
-                .into_group_map();
-            for (node_id, actor_ids) in chain_upstream_node_actors {
-                match ctx.upstream_node_actors.entry(node_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().extend(actor_ids.iter());
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(actor_ids);
+            if ctx.is_legacy_frontend {
+                dispatch_upstreams.extend(upstream_actor_ids.iter());
+                let chain_upstream_table_node_actors = self.table_node_actors.get(&table_id).unwrap();
+                let chain_upstream_node_actors = chain_upstream_table_node_actors
+                    .iter()
+                    .flat_map(|(node_id, actor_ids)| {
+                        actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                    })
+                    .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
+                    .into_group_map();
+                for (node_id, actor_ids) in chain_upstream_node_actors {
+                    match ctx.upstream_node_actors.entry(node_id) {
+                        Entry::Occupied(mut o) => {
+                            o.get_mut().extend(actor_ids.iter());
+                        }
+                        Entry::Vacant(v) => {
+                            v.insert(actor_ids);
+                        }
                     }
                 }
             }
@@ -580,7 +586,11 @@ impl StreamGraphBuilder {
                     input: vec![],
                     pk_indices: stream_node.pk_indices.clone(),
                     node: Some(Node::MergeNode(MergeNode {
-                        upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
+                        upstream_actor_id: if ctx.is_legacy_frontend {
+                            Vec::from_iter(upstream_actor_ids.into_iter())
+                        } else {
+                            vec![]
+                        },
                         fields: chain_node.upstream_fields.clone(),
                     })),
                     fields: chain_node.upstream_fields.clone(),
@@ -589,24 +599,6 @@ impl StreamGraphBuilder {
                 },
                 batch_plan_node,
             ];
-            // {
-            //     let chain_merge_upstream_ref = if let Some(Node::MergeNode(ref mut node)) = chain_input[0].node {
-            //         &mut node.upstream_actor_id
-            //     } else {
-            //         unreachable!("chain_input[0].node should be a MergeNode");
-            //     };
-            //     match ctx.chain_merge_upstream_refs.entry(table_id) {
-            //         Entry::Occupied(mut o) => {
-            //             o.get_mut().insert(actor_id, chain_merge_upstream_ref);
-            //         }
-            //         Entry::Vacant(v) => {
-            //             let mut map = BTreeMap::new();
-            //             map.insert(actor_id, chain_merge_upstream_ref);
-            //             v.insert(map);
-            //         }
-            //     };
-            // }
-
 
             Ok(StreamNode {
                 input: chain_input,
@@ -620,48 +612,4 @@ impl StreamGraphBuilder {
             unreachable!()
         }
     }
-
-    // /// maintain a `<fragment_id, hashset<upstream_actor_id>>` mapping
-    // /// For each actor beginning with chain, we will assign *one* upstream table sink actor
-    // /// to this actor. (assert chain actor's parallel degree == upstream parallel degree).
-    // fn assign_upstream_for_chain(
-    //     &self,
-    //     table_id: TableId,
-    //     ctx: &mut CreateMaterializedViewContext,
-    //     fragment_id: LocalFragmentId,
-    // ) -> Result<(HashSet<ActorId>, ParallelUnitId)> {
-    //     let remaining = match ctx
-    //         .chain_upstream_assignment
-    //         .entry(fragment_id.as_global_id())
-    //     {
-    //         Entry::Vacant(v) => {
-    //             let mut upstream_actor_ids = match ctx.table_sink_map.entry(table_id) {
-    //                 Entry::Vacant(v) => {
-    //                     let actor_ids = self.table_sink_actor_ids.get(&table_id).unwrap().clone();
-    //                     v.insert(actor_ids).clone()
-    //                 }
-    //                 Entry::Occupied(o) => o.get().clone(),
-    //             };
-    //             upstream_actor_ids.dedup();
-    //             v.insert(upstream_actor_ids)
-    //         }
-    //         Entry::Occupied(o) => o.into_mut(),
-    //     };
-    //
-    //     // choose one upstream from remaining.
-    //     assert!(!remaining.is_empty());
-    //
-    //     // TODO: remove this when we deprecate Java frontend.
-    //     let (assigned_upstreams, parallel_index) = if ctx.is_legacy_frontend {
-    //         (HashSet::<ActorId>::from_iter(remaining.iter().cloned()), 0)
-    //     } else {
-    //         let upstream_id = remaining.pop().unwrap();
-    //         (
-    //             HashSet::<ActorId>::from([upstream_id]),
-    //             remaining.len() as u32,
-    //         )
-    //     };
-    //
-    //     Ok((assigned_upstreams, parallel_index))
-    // }
 }
