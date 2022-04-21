@@ -17,8 +17,8 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 
 use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
+use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -100,8 +100,12 @@ impl PlanTreeNodeUnary for LogicalTopN {
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "LogicalTopN {{ order: {} limit: {}, offset: {} }}",
+            &self.order, &self.limit, &self.offset,
+        )
     }
 }
 
@@ -145,13 +149,18 @@ impl ColPrunable for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchTopN::new(new_logical).into()
     }
 }
 
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        let input = self
+            .input()
+            .to_stream_with_dist_required(&Distribution::Single);
+        StreamTopN::new(self.clone_with_input(input)).into()
     }
 
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
