@@ -30,7 +30,7 @@ use risingwave_source::SourceManagerRef;
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-/// [`InsertExecutor`] implements table insertion with values from its child executor.
+/// [`InsertExecutor2`] implements table insertion with values from its child executor.
 pub struct InsertExecutor2 {
     /// Target table id.
     table_id: TableId,
