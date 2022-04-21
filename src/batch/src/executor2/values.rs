@@ -231,12 +231,12 @@ mod tests {
 
         let fields = vec![Field::unnamed(DataType::Int32)];
 
-        let values_executor = Box::new(ValuesExecutor2 {
-            rows: rows.into_iter(),
-            schema: Schema { fields },
-            identity: "ValuesExecutor2".to_string(),
-            chunk_size: 3,
-        });
+        let values_executor = Box::new(ValuesExecutor2::new(
+            rows,
+            Schema { fields },
+            "ValuesExecutor2".to_string(),
+            3,
+        ));
         let mut stream = values_executor.execute();
         assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 3);
         assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 1);
@@ -246,12 +246,12 @@ mod tests {
     // Handle the possible case of ValuesNode([[]])
     #[tokio::test]
     async fn test_no_column_values_executor() {
-        let values_executor = Box::new(ValuesExecutor2 {
-            rows: vec![vec![]].into_iter(),
-            schema: Schema::default(),
-            identity: "ValuesExecutor2".to_string(),
-            chunk_size: 1024,
-        });
+        let values_executor = Box::new(ValuesExecutor2::new(
+            vec![vec![]],
+            Schema::default(),
+            "ValuesExecutor2".to_string(),
+            1024,
+        ));
         let mut stream = values_executor.execute();
 
         let result = stream.next().await.unwrap().unwrap();
