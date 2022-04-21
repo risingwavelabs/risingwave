@@ -25,7 +25,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
 use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -244,7 +244,7 @@ impl<S: StateStore> LookupExecutor<S> {
     /// messages until there's one.
     ///
     /// If we can use `async_stream` to write this part, things could be easier.
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
         let input = if self.arrangement.use_current_epoch {
             stream_lookup_arrange_this_epoch(
