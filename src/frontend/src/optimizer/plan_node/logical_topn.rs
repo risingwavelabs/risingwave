@@ -50,6 +50,24 @@ impl LogicalTopN {
     pub fn create(input: PlanRef, limit: usize, offset: usize, order: Order) -> PlanRef {
         Self::new(input, limit, offset, order).into()
     }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// `topn_order` returns the order of the TopN operator. This naming is because `order()`
+    /// already exists and it was designed to return the operator's physical property order.
+    ///
+    /// Note that `order()` and `topn_order()` may differ. For streaming query, `order()` which
+    /// implies the output ordering of an operator, is never guaranteed; while `topn_order()` must
+    /// be non-null because it's a critical information for TopN operators to work
+    pub fn topn_order(&self) -> &Order {
+        &self.order
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalTopN {

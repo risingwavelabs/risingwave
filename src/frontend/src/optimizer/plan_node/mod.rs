@@ -220,6 +220,7 @@ mod batch_project;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_topn;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
@@ -254,6 +255,7 @@ pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_topn::BatchTopN;
 pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
@@ -321,6 +323,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
+            ,{ Batch, TopN }
             ,{ Stream, Project }
             ,{ Stream, Filter }
             ,{ Stream, TableScan }
@@ -372,6 +375,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Values }
             ,{ Batch, Limit }
             ,{ Batch, Sort }
+            ,{ Batch, TopN }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }
             ,{ Batch, Delete }
