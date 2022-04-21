@@ -138,6 +138,7 @@ impl ColumnDesc {
         descs
     }
 
+    /// Find `column_desc` in `field_descs` by name.
     pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
         for (index, col) in self.field_descs.iter().enumerate() {
             if col.name == *name {
