@@ -145,6 +145,12 @@ impl Executor2 for TopNExecutor2 {
 impl TopNExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?;
+            self.top_n_heap.fit(Arc::new(data_chunk));
+        }
+
         if let Some(chunk) = self.top_n_heap.dump() {
             yield chunk
         }
@@ -193,7 +199,7 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let mut top_n_executor = Box::new(TopNExecutor2::new(
+        let top_n_executor = Box::new(TopNExecutor2::new(
             Box::new(mock_executor),
             order_pairs,
             2usize,
@@ -204,12 +210,16 @@ mod tests {
         assert_eq!(fields[1].data_type, DataType::Int32);
 
         let mut stream = top_n_executor.execute();
-        let res = stream.next().await.unwrap().unwrap();
+        let res = stream.next().await;
 
-        assert_eq!(res.cardinality(), 2);
-        let col0 = res.column_at(0);
-        assert_eq!(col0.array().as_int32().value_at(0), Some(3));
-        assert_eq!(col0.array().as_int32().value_at(1), Some(2));
+        assert!(matches!(res, Some(_)));
+        if let Some(res) = res {
+            let res = res.unwrap();
+            assert_eq!(res.cardinality(), 2);
+            let col0 = res.column_at(0);
+            assert_eq!(col0.array().as_int32().value_at(0), Some(3));
+            assert_eq!(col0.array().as_int32().value_at(1), Some(2));
+        }
 
         let res = stream.next().await;
         assert!(matches!(res, None));
