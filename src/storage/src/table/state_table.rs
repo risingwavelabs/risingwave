@@ -56,7 +56,7 @@ impl<S: StateStore> StateTable<S> {
             match res {
                 RowOp::Insert(row) => Ok(Some(row)),
                 RowOp::Delete(_) => Ok(None),
-                RowOp::Update(row) => Ok(Some(row)),
+                RowOp::Update((_, new_row)) => Ok(Some(new_row)),
             }
         } else {
             self.cell_based_table.get_row(pk, epoch).await

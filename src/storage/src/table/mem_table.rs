@@ -23,20 +23,7 @@ use crate::error::StorageResult;
 pub enum RowOp {
     Insert(Row),
     Delete(Row),
-    Update(Row),
-}
-impl RowOp {
-    pub fn is_insert(&self) -> bool {
-        matches!(self, Self::Insert(_))
-    }
-
-    pub fn is_delete(&self) -> bool {
-        matches!(self, Self::Delete(_))
-    }
-
-    pub fn is_update(&self) -> bool {
-        matches!(self, Self::Delete(_))
-    }
+    Update((Row, Row)),
 }
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
@@ -75,8 +62,9 @@ impl MemTable {
                 e.insert(RowOp::Insert(value));
             }
             Entry::Occupied(mut e) => match e.get() {
-                RowOp::Delete(_) => {
-                    e.insert(RowOp::Update(value));
+                RowOp::Delete(old_value) => {
+                    let old_val = old_value.clone();
+                    e.insert(RowOp::Update((old_val, value)));
                 }
                 _ => {
                     panic!(
@@ -96,19 +84,22 @@ impl MemTable {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Delete(old_value));
             }
-            Entry::Occupied(mut e) => {
-                if e.get().is_insert() {
+            Entry::Occupied(mut e) => match e.get() {
+                RowOp::Insert(_) => {
                     e.remove();
-                } else if e.get().is_update() {
-                    e.insert(RowOp::Update(old_value));
-                } else {
+                }
+                RowOp::Delete(_) => {
                     panic!(
                         "invalid flush status: double delete {:?} -> {:?}",
                         e.key(),
                         old_value
                     );
                 }
-            }
+                RowOp::Update((old_value, _new_value)) => {
+                    let old_val = old_value.clone();
+                    e.insert(RowOp::Delete(old_val));
+                }
+            },
         }
         Ok(())
     }
