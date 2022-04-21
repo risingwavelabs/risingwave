@@ -154,7 +154,7 @@ For more information, refer to `README.md` under `src/risedevtool`.
 To start an all-in-one process from IDE or command line, you may also use
 
 ```shell
-cargo run --bin risingwave --features all-in-one -- playground
+cargo run --bin risingwave -- playground
 ```
 
 Then, connect to the playground instance via

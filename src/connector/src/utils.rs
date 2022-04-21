@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Properties(pub HashMap<String, String>);
 
 impl Properties {

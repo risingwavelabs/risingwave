@@ -61,11 +61,16 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     /// The column descriptors of columns in arrangement
     pub col_descs: Vec<ColumnDesc>,
 
-    /// Order rules of the arrangement (used for lookup)
+    /// Order rules of the arrangement (only join key is needed, pk should not be included, used
+    /// for lookup)
     pub order_rules: Vec<OrderPair>,
 
     /// Key indices for the join
-    pub join_key_indices: Vec<usize>,
+    ///
+    /// The key indices of the arrange side won't be used for the lookup process, but we still
+    /// record it here in case anyone would use it in the future.
+    #[allow(dead_code)]
+    pub key_indices: Vec<usize>,
 
     /// Keyspace for the arrangement
     pub keyspace: Keyspace<S>,

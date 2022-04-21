@@ -91,6 +91,10 @@ impl Schema {
         &self.fields
     }
 
+    pub fn into_fields(self) -> Vec<Field> {
+        self.fields
+    }
+
     /// Create array builders for all fields in this schema.
     pub fn create_array_builders(&self, capacity: usize) -> Result<Vec<ArrayBuilderImpl>> {
         self.fields
@@ -179,6 +183,14 @@ impl Index<usize> for Schema {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.fields[index]
+    }
+}
+
+impl FromIterator<Field> for Schema {
+    fn from_iter<I: IntoIterator<Item = Field>>(iter: I) -> Self {
+        Schema {
+            fields: iter.into_iter().collect::<Vec<_>>(),
+        }
     }
 }
 

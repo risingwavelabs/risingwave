@@ -19,6 +19,7 @@ env_scripts = [
 #!@duckscript
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
+is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -29,11 +30,14 @@ else
   set_env RISEDEV_BUILD_TARGET_DIR ""
   set_env RISEDEV_RUSTFLAGS ""
 end
+
+if ${is_all_in_one_enabled}
+  set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
+else
+  set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
+end
 '''
 ]
-
-[env]
-RISEDEV_CARGO_BUILD_FEATURES = { value = "all-in-one", condition = { env_set = ["ENABLE_ALL_IN_ONE"] } }
 
 [config]
 skip_core_tasks = true
@@ -204,15 +208,14 @@ script = '''
 #!@shell
 
 set -e
-echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd and risedev$(tput sgr0) crates."
+echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
 
 export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="$RUSTFLAGS"
 set -xe
-cargo build -p risingwave_cmd -p risedev \
+cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
-            ${RISEDEV_CARGO_BUILD_EXTRA_ARGS} \
-            --features=${RISEDEV_CARGO_BUILD_FEATURES}
+            ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
 [tasks.clean]
@@ -311,7 +314,7 @@ echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --features=all-in-one --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
 [tasks.d]

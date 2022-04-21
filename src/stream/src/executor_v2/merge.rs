@@ -231,9 +231,9 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::executor::{Barrier, Executor, Mutation};
+    use crate::executor::{Barrier, ExecutorV1, Mutation};
     use crate::executor_v2::merge::RemoteInput;
-    use crate::executor_v2::Executor as ExecutorV2;
+    use crate::executor_v2::Executor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -278,7 +278,7 @@ mod tests {
             handles.push(handle);
         }
 
-        let mut merger = Box::new(merger).v1();
+        let mut merger = merger.boxed().v1();
         for epoch in epochs {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {

@@ -224,7 +224,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
@@ -272,6 +272,13 @@ jobs:
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e test, streaming, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
@@ -340,7 +347,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
@@ -388,6 +395,13 @@ jobs:
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e test, streaming, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
@@ -469,7 +483,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
       - name: Download sqllogictest
         run: |
           wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
@@ -564,7 +578,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -595,7 +609,7 @@ jobs:
           cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cargo build --profile dev --features=all-in-one
+          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile dev
       - name: Compress RisingWave debug info
         run: |
           objcopy --compress-debug-sections=zlib-gnu target/debug/risingwave
@@ -632,7 +646,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -663,7 +677,7 @@ jobs:
           cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cargo build --profile release --features=all-in-one
+          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile release
       - name: Compress RisingWave debug info
         run: |
           objcopy --compress-debug-sections=zlib-gnu target/release/risingwave

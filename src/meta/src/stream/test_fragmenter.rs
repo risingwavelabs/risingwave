@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
@@ -259,11 +258,11 @@ async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
+    let parallel_degree = 4;
     let fragmenter = StreamFragmenter::new(
         env.id_gen_manager_ref(),
         fragment_manager,
-        hash_mapping,
+        parallel_degree,
         false,
     );
 

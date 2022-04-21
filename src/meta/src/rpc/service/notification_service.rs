@@ -97,7 +97,7 @@ where
                     status: None,
                     operation: Operation::Snapshot as i32,
                     info: Some(Info::FeSnapshot(meta_snapshot)),
-                    version: self.env.epoch_generator().generate().into_inner(),
+                    version: self.env.notification_manager().current_version().await,
                 }))
                 .unwrap();
                 self.env
