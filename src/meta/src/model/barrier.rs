@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 
-use crate::manager::INVALID_EPOCH;
 use crate::storage;
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
 /// persistently to meta store. Add more states when needed.
 pub struct BarrierManagerState {
-    pub prev_epoch: u64,
+    pub prev_epoch: Epoch,
 }
 
 impl BarrierManagerState {
@@ -34,10 +34,10 @@ impl BarrierManagerState {
             .await
         {
             Ok(byte_vec) => BarrierManagerState {
-                prev_epoch: u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()),
+                prev_epoch: u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
             },
             Err(storage::Error::ItemNotFound(_)) => BarrierManagerState {
-                prev_epoch: INVALID_EPOCH,
+                prev_epoch: INVALID_EPOCH.into(),
             },
             Err(e) => panic!("{:?}", e),
         }
@@ -51,7 +51,7 @@ impl BarrierManagerState {
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 b"barrier_manager_state".to_vec(),
-                self.prev_epoch.to_be_bytes().to_vec(),
+                self.prev_epoch.0.to_be_bytes().to_vec(),
             )
             .await
             .map_err(Into::into)
