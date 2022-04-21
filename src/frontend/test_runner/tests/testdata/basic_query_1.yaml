@@ -50,6 +50,26 @@
           StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     create table t (v1 int, v2 int);
+    delete from t;
+  batch_plan: |
+    BatchDelete { table: t }
+      BatchScan { table: t, columns: [_row_id#0, v1, v2] }
+- sql: |
+    create table t (v1 int, v2 int);
+    select v1 from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamExchange { dist: HashShard([1]) }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+- sql: select 1
+  batch_plan: |
+    BatchProject { exprs: [1:Int32], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   batch_plan: |
     BatchInsert { table: t }
