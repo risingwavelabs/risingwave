@@ -42,6 +42,23 @@ echo "$HEADER" > ../workflows/main.yml
 yq ea '. as $item ireduce ({}; . * $item )' template.yml main-override.yml "${jobs_main[@]}" | yq eval '... comments=""' - >> ../workflows/main.yml
 echo "$HEADER" >> ../workflows/main.yml
 
+# Generate workflow for main cronjob
+# TODO add connector specific jobs below
+
+jobs_main_cron=(
+   "jobs/frontend-check.yml"
+   "jobs/e2e-risedev-dev.gen.yml"
+   "jobs/e2e-source.yml"
+   "jobs/compute-node-build-dev.gen.yml"
+   "jobs/compute-node-test.yml"
+   "jobs/misc-check.yml"
+)
+
+echo "$HEADER" > ../workflows/main-cron.yml
+# shellcheck disable=SC2016
+yq ea '. as $item ireduce ({}; . * $item )' template.yml main-cron.yml "${jobs_main_cron[@]}" | yq eval '... comments=""' - >> ../workflows/main-cron.yml
+echo "$HEADER" >> ../workflows/main-cron.yml
+
 # Generate workflow for pull requests
 
 jobs_pr=(

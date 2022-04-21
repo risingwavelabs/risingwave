@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use super::error::TracedStreamExecutorError;
+use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
@@ -72,7 +72,7 @@ impl ChainExecutor {
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let mut upstream = self.upstream.execute();
 
