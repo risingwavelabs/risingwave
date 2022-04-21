@@ -42,7 +42,7 @@ where
 /// Works in a reversed way as `compress_data`.
 pub fn decompress_data<T>(original_indices: &[u64], data: &[T]) -> Vec<T>
 where
-    T: Clone + Copy,
+    T: Copy,
 {
     match original_indices.last() {
         Some(last_idx) => {
