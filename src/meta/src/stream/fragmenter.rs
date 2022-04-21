@@ -139,7 +139,6 @@ where
             .id_gen_manager
             .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
             .await? as _;
-        log::info!("{} Table ids should be allocated", table_ids_cnt);
 
         let stream_graph = self.stream_graph.build(
             ctx,
