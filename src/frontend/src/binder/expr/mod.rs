@@ -133,6 +133,7 @@ impl Binder {
         for elem in list {
             bound_expr_list.push(self.bind_expr(elem)?);
         }
+        align_types(bound_expr_list.iter_mut())?;
         let in_expr =
             FunctionCall::new_with_return_type(ExprType::In, bound_expr_list, DataType::Boolean);
         if negated {
