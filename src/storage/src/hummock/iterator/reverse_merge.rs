@@ -61,21 +61,15 @@ mod test {
         let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table0.id, table0.id, 1, Box::new(table0))
-                    .unwrap(),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table1.id, table1.id, 1, Box::new(table1))
-                    .unwrap(),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
             )),
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table2.id, table2.id, 1, Box::new(table2))
-                    .unwrap(),
+                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
                 sstable_store,
             )),
         ];
@@ -130,21 +124,15 @@ mod test {
         let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table0.id, table0.id, 1, Box::new(table0))
-                    .unwrap(),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table1.id, table1.id, 1, Box::new(table1))
-                    .unwrap(),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
             )),
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table2.id, table2.id, 1, Box::new(table2))
-                    .unwrap(),
+                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
                 sstable_store,
             )),
         ];
@@ -213,15 +201,11 @@ mod test {
         let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table1.id, table1.id, 1, Box::new(table1))
-                    .unwrap(),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
             )),
             Box::new(ReverseSSTableIterator::new(
-                cache
-                    .insert(table0.id, table0.id, 1, Box::new(table0))
-                    .unwrap(),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store,
             )),
         ];

@@ -161,5 +161,5 @@ pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
 }
 
 pub fn create_small_table_cache() -> Arc<LruCache<u64, Box<Sstable>>> {
-    Arc::new(LruCache::new(1, 4, 4, false))
+    Arc::new(LruCache::new(1, 4, 4))
 }

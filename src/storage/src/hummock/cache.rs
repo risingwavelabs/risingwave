@@ -229,14 +229,13 @@ pub struct LruCacheShard<K: PartialEq + Default, T> {
     lru_usage: usize,
     usage: usize,
     capacity: usize,
-    strict_capacity_limit: bool,
 }
 
 unsafe impl<K: PartialEq + Default, T> Send for LruCacheShard<K, T> {}
 unsafe impl<K: PartialEq + Default, T> Sync for LruCacheShard<K, T> {}
 
 impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
-    fn new(capacity: usize, object_capacity: usize, strict_capacity_limit: bool) -> Self {
+    fn new(capacity: usize, object_capacity: usize) -> Self {
         let mut lru = Box::new(LruHandle::new(K::default(), None));
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
@@ -249,7 +248,6 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
             lru_usage: 0,
             usage: 0,
             object_pool,
-            strict_capacity_limit,
             lru,
             table: LruHandleTable::new(),
         }
@@ -318,24 +316,16 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
         handle.flags = 0;
         handle.set_in_cache(true);
         self.evict_from_lru(charge, last_reference_list);
-        if self.usage + charge > self.capacity && self.strict_capacity_limit {
-            handle.set_in_cache(false);
-            let data = handle.value.take().unwrap();
-            last_reference_list.push(data);
-            self.recyle_handle_object(handle);
-            null_mut()
-        } else {
-            let ptr = Box::into_raw(handle);
-            let old = self.table.insert(hash, ptr);
-            if !old.is_null() {
-                if let Some(data) = self.remove_cache_handle(old) {
-                    last_reference_list.push(data);
-                }
+        let ptr = Box::into_raw(handle);
+        let old = self.table.insert(hash, ptr);
+        if !old.is_null() {
+            if let Some(data) = self.remove_cache_handle(old) {
+                last_reference_list.push(data);
             }
-            self.usage += charge;
-            (*ptr).add_ref();
-            ptr
         }
+        self.usage += charge;
+        (*ptr).add_ref();
+        ptr
     }
 
     unsafe fn release(&mut self, e: *mut LruHandle<K, T>) -> Option<T> {
@@ -403,22 +393,13 @@ pub struct LruCache<K: PartialEq + Default, T> {
 }
 
 impl<K: PartialEq + Default, T> LruCache<K, T> {
-    pub fn new(
-        num_shard_bits: usize,
-        capacity: usize,
-        object_cache: usize,
-        strict_capacity_limit: bool,
-    ) -> Self {
+    pub fn new(num_shard_bits: usize, capacity: usize, object_cache: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
         let per_shard_object = object_cache / num_shards;
         for _ in 0..num_shards {
-            shards.push(Mutex::new(LruCacheShard::new(
-                per_shard,
-                per_shard_object,
-                strict_capacity_limit,
-            )));
+            shards.push(Mutex::new(LruCacheShard::new(per_shard, per_shard_object)));
         }
         Self { shards }
     }
@@ -458,18 +439,15 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
         hash: u64,
         charge: usize,
         value: T,
-    ) -> Option<CachableEntry<K, T>> {
+    ) -> CachableEntry<K, T> {
         let mut to_delete = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CachableEntry::<K, T> {
-                    cache: self.clone(),
-                    handle: ptr,
-                })
+            debug_assert!(!ptr.is_null());
+            CachableEntry::<K, T> {
+                cache: self.clone(),
+                handle: ptr,
             }
         };
         to_delete.clear();
@@ -562,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16, false));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 1);
         assert_eq!(cache.shard(10), 2);
@@ -570,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16, false));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
         let seed = 10244021u64;
         let mut rng = SmallRng::seed_from_u64(seed);
         for _ in 0..100000 {
@@ -615,7 +593,7 @@ mod tests {
     }
 
     fn create_cache(capacity: usize) -> LruCacheShard<String, String> {
-        LruCacheShard::new(capacity, capacity, false)
+        LruCacheShard::new(capacity, capacity)
     }
 
     fn lookup(cache: &mut LruCacheShard<String, String>, key: &str) -> bool {

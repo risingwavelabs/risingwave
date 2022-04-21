@@ -58,7 +58,6 @@ impl SstableStore {
             DEFAULT_META_CACHE_SHARD_BITS,
             meta_cache_capacity,
             DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY,
-            false,
         ));
         Self {
             path,
@@ -188,8 +187,7 @@ impl SstableStore {
         let sst = Box::new(Sstable { id: sst_id, meta });
         let handle = self
             .meta_cache
-            .insert(sst_id, sst_id, sst.encoded_size(), sst)
-            .unwrap();
+            .insert(sst_id, sst_id, sst.encoded_size(), sst);
         for sender in que {
             let _ = sender.send(handle.clone());
         }

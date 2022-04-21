@@ -178,7 +178,7 @@ mod tests {
         assert!(table.meta.block_metas.len() > 10);
 
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(table)).unwrap();
+        let handle = cache.insert(0, 0, 1, Box::new(table));
 
         let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
         let mut cnt = 0;
@@ -206,7 +206,7 @@ mod tests {
         // path.
         assert!(table.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(table)).unwrap();
+        let handle = cache.insert(0, 0, 1, Box::new(table));
 
         let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();

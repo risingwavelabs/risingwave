@@ -75,7 +75,7 @@ pub struct BlockCache {
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
-        let cache = LruCache::new(CACHE_SHARD_BITS, capacity, DEFAULT_OBJECT_POOL_SIZE, false);
+        let cache = LruCache::new(CACHE_SHARD_BITS, capacity, DEFAULT_OBJECT_POOL_SIZE);
         let mut wait_request_queue = vec![];
         let wait_request_queue_size = 1 << CACHE_SHARD_BITS;
         for _ in 0..wait_request_queue_size {
@@ -136,7 +136,7 @@ impl BlockCache {
 
         // If this request failed, other request on the same block will get result of Cancel.
         let block = ret?;
-        let handle = self.inner.insert(key, h, block.len(), block).unwrap();
+        let handle = self.inner.insert(key, h, block.len(), block);
         drop(request_que);
         for sender in que {
             let _ = sender.send(handle.clone());

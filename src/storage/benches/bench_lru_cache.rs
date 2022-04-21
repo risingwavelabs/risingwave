@@ -81,7 +81,7 @@ pub struct LruCacheImpl {
 impl LruCacheImpl {
     pub fn new(capacity: usize) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(3, capacity, 1024, false)),
+            inner: Arc::new(LruCache::new(3, capacity, 1024)),
         }
     }
 }

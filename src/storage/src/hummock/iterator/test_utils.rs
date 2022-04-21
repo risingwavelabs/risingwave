@@ -156,9 +156,7 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 sstable_store.clone(),
                 key_count,
             ));
-            let handle = cache
-                .insert(table.id, table.id, 1, Box::new(table))
-                .unwrap();
+            let handle = cache.insert(table.id, table.id, 1, Box::new(table));
             Box::new(SSTableIterator::new(handle, sstable_store.clone()))
                 as BoxedForwardHummockIterator
         })
