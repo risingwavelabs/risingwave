@@ -166,7 +166,13 @@ impl ColPrunable for LogicalHopWindow {
                 proj_map.put(new_hop.schema().len() - 2, None);
                 LogicalProject::with_mapping(new_hop.into(), proj_map)
             }
-            (false, false) => unreachable!(),
+            (false, false) => {
+                let proj_map = ColIndexMapping::identity_or_none(
+                    new_hop.schema().len(),
+                    new_hop.schema().len() - 2,
+                );
+                LogicalProject::with_mapping(new_hop.into(), proj_map)
+            }
         }
     }
 }
