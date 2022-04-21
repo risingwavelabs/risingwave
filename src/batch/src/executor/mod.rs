@@ -35,7 +35,6 @@ use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
 pub use crate::executor::delete::DeleteExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
-pub use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
@@ -43,7 +42,7 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
-use crate::executor2::{BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2};
+use crate::executor2::{BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2,InsertExecutor2};
 use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
@@ -56,7 +55,6 @@ mod fuse;
 mod generate_series;
 mod generic_exchange;
 mod hash_agg;
-mod insert;
 mod join;
 mod limit;
 mod merge_sort_exchange;
@@ -191,7 +189,7 @@ impl<'a> ExecutorBuilder<'a> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
-            NodeBody::Insert => InsertExecutor,
+            NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
@@ -220,7 +218,7 @@ impl<'a> ExecutorBuilder<'a> {
         let real_executor = build_executor2! { self,
             NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
-            NodeBody::Insert => InsertExecutor,
+            NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,

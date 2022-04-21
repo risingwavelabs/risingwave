@@ -13,14 +13,18 @@
 // limitations under the License.
 
 pub mod executor_wrapper;
+
+mod insert;
 mod filter;
-pub use filter::*;
 mod trace;
+pub use insert::*;
+pub use filter::*;
+pub use trace::*;
 use futures::stream::BoxStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-pub use trace::*;
+
 
 use crate::executor::executor2_wrapper::Executor2Wrapper;
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
