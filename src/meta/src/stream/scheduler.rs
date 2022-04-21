@@ -94,7 +94,7 @@ impl ScheduledLocations {
     }
 
     /// Find a placement location that is on the same node of given actor ids.
-    pub fn ensure_placement_rule(&self, actor_ids: &[ActorId]) -> Result<ParallelUnit> {
+    pub fn schedule_colocate_with(&self, actor_ids: &[ActorId]) -> Result<ParallelUnit> {
         let mut result_location = None;
         for actor_id in actor_ids {
             let location = self.actor_locations.get(actor_id);
@@ -151,7 +151,7 @@ where
             let actor = &fragment.actors[0];
 
             if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
-                let parallel_unit = locations.ensure_placement_rule(&actor.upstream_actor_id)?;
+                let parallel_unit = locations.schedule_colocate_with(&actor.upstream_actor_id)?;
                 locations
                     .actor_locations
                     .insert(fragment.actors[0].actor_id, parallel_unit);
@@ -182,7 +182,7 @@ where
             for (idx, actor) in fragment.actors.iter().enumerate() {
                 if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
                     let parallel_unit =
-                        locations.ensure_placement_rule(&actor.upstream_actor_id)?;
+                        locations.schedule_colocate_with(&actor.upstream_actor_id)?;
                     locations
                         .actor_locations
                         .insert(actor.actor_id, parallel_unit);
