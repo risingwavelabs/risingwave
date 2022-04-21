@@ -48,7 +48,7 @@ where
         Some(last_idx) => {
             let mut original_data = Vec::with_capacity(*last_idx as usize + 1);
             original_indices
-                .into_iter()
+                .iter()
                 .zip_eq(data)
                 .for_each(|(&idx, &x)| {
                     original_data.resize(idx as usize + 1, x);
