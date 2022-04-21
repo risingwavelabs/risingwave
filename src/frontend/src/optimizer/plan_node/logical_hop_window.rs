@@ -143,8 +143,8 @@ impl ColPrunable for LogicalHopWindow {
         let require_win_start = required_cols.contains(self.window_start_col_idx());
         let require_win_end = required_cols.contains(self.window_end_col_idx());
 
-        let o2l = self.o2i_col_mapping();
-        let input_required_cols = o2l.rewrite_bitset(required_cols);
+        let o2i = self.o2i_col_mapping();
+        let input_required_cols = o2i.rewrite_bitset(required_cols);
         let input = self.input.prune_col(&input_required_cols);
         let input_change = ColIndexMapping::with_remaining_columns(&input_required_cols);
         let (new_hop, _) = self.rewrite_with_input(input, input_change);
