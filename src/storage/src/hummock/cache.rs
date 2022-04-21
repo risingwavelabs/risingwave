@@ -425,10 +425,10 @@ impl<K: Eq + Default + Hash, T> LruCache<K, T> {
         }
     }
 
-    pub fn lookup_for_request(self: &Arc<Self>, hash: u64, key: &K) -> LookupResult<K, T> {
+    pub fn lookup_for_request(self: &Arc<Self>, hash: u64, key: K) -> LookupResult<K, T> {
         let mut shard = self.shards[self.shard(hash)].lock();
         unsafe {
-            let ptr = shard.lookup(hash, key);
+            let ptr = shard.lookup(hash, &key);
             if !ptr.is_null() {
                 return LookupResult::Cached(CachableEntry {
                     cache: self.clone(),
@@ -440,6 +440,7 @@ impl<K: Eq + Default + Hash, T> LruCache<K, T> {
                 que.push(tx);
                 return LookupResult::WaitPendingRequest(recv);
             }
+            shard.write_request.insert(key, vec![]);
             LookupResult::Miss
         }
     }
@@ -471,15 +472,13 @@ impl<K: Eq + Default + Hash, T> LruCache<K, T> {
             let pending_request = shard.write_request.remove(&key);
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
             debug_assert!(!ptr.is_null());
-            if shard.write_request.is_empty() {
-                if let Some(que) = pending_request {
-                    for sender in que {
-                        (*ptr).add_ref();
-                        let _ = sender.send(CachableEntry {
-                            cache: self.clone(),
-                            handle: ptr,
-                        });
-                    }
+            if let Some(que) = pending_request {
+                for sender in que {
+                    (*ptr).add_ref();
+                    let _ = sender.send(CachableEntry {
+                        cache: self.clone(),
+                        handle: ptr,
+                    });
                 }
             }
             CachableEntry {

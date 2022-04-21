@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -101,7 +100,7 @@ impl BlockCache {
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
-        match self.inner.lookup_for_request(h, &key) {
+        match self.inner.lookup_for_request(h, key) {
             LookupResult::Cached(entry) => Ok(BlockHolder::from_cached_block(entry)),
             LookupResult::WaitPendingRequest(recv) => {
                 let entry = recv.await.map_err(HummockError::other)?;

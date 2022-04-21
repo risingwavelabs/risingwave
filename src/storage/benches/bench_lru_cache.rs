@@ -101,7 +101,7 @@ impl CacheBase for LruCacheImpl {
         sst_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
         let h = hasher.finish();
-        match self.inner.lookup_for_request(h, &key) {
+        match self.inner.lookup_for_request(h, key) {
             LookupResult::Cached(entry) => {
                 let block = entry.value().clone();
                 Ok(block)
