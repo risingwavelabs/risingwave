@@ -46,7 +46,7 @@ pub struct TableFragments {
     pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
 }
 
 impl MetadataModel for TableFragments {

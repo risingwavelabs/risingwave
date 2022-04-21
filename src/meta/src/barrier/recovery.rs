@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::iter::Map;
 use std::time::Duration;
 
@@ -21,7 +21,8 @@ use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::data::barrier::Mutation;
+use risingwave_pb::data::{AddMutation, Epoch as ProstEpoch};
 use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
@@ -104,7 +105,13 @@ where
                 &info,
                 &prev_epoch,
                 &new_epoch,
-                Command::checkpoint(),
+                Command::checkpoint(Some(Mutation::Add(AddMutation {
+                    actors: HashMap::default(),
+                    row_id_step_info: self
+                        .fragment_manager
+                        .get_all_source_row_id_step_info()
+                        .await,
+                }))),
             );
 
             match self.inject_barrier(&command_ctx).await {

@@ -20,6 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
+use risingwave_pb::data::RowIdStepInfo;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::StreamActor;
@@ -321,6 +322,19 @@ where
                 table_id
             )))),
         }
+    }
+
+    pub async fn get_all_source_row_id_step_info(&self) -> HashMap<ActorId, RowIdStepInfo> {
+        let map = &self.core.read().await.table_fragments;
+        map.values()
+            .filter(|table_fragment| {
+                table_fragment
+                    .actor_status
+                    .values()
+                    .all(|s| s.state == ActorState::Running as i32)
+            })
+            .flat_map(|table_fragment| table_fragment.source_row_id_step_info())
+            .collect()
     }
 
     // TODO(bugen): remove this.

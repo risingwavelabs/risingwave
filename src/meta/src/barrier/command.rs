@@ -64,8 +64,8 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn checkpoint() -> Self {
-        Self::Plain(Mutation::Nothing(NothingMutation {}))
+    pub fn checkpoint(mutation: Option<Mutation>) -> Self {
+        Self::Plain(mutation.unwrap_or(Mutation::Nothing(NothingMutation {})))
     }
 
     pub fn creating_table_id(&self) -> Option<TableId> {
