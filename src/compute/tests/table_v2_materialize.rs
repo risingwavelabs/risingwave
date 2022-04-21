@@ -18,17 +18,10 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
-<<<<<<< impl_delete_executor2
-    CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
+    CreateTableExecutor, Executor as BatchExecutor, RowSeqScanExecutor,
 };
 use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
-use risingwave_batch::executor2::{DeleteExecutor2, Executor2};
-=======
-    CreateTableExecutor, , Executor as BatchExecutor, RowSeqScanExecutor,
-};
-use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
-use risingwave_batch::executor2::{Executor2, InsertExecutor2};
->>>>>>> main
+use risingwave_batch::executor2::{DeleteExecutor2, Executor2, InsertExecutor2};
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
@@ -60,7 +53,7 @@ struct SingleChunkExecutor {
 impl SingleChunkExecutor {
     pub fn new(chunk: DataChunk, schema: Schema) -> Self {
         Self {
-            chunk: Some(chunk),d
+            chunk: Some(chunk),
             schema,
             identity: "SingleChunkExecutor".to_string(),
         }
