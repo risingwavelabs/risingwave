@@ -54,11 +54,11 @@ pub trait Expr: Into<ExprImpl> {
     /// Serialize the expression
     fn to_protobuf(&self) -> ExprNode;
 
-    /// Get the indexs of expr to find `column_desc`
-    /// For atomic `column_desc` will only return a single usize,
-    /// and for nested `column_desc` will return a list of usize.
-    /// Only `InputRef`, `FunctionCall` and `AggCall` have indexs.
-    fn get_indexs(&self) -> Option<Vec<usize>>;
+    /// Get the field indexs of expr to find `field_descs` in `column_desc`.
+    /// For atomic `column_desc` will return a single usize or just `None`.
+    /// For nested `column_desc` will return a list of usize.
+    /// Only `InputRef`, `FunctionCall` and `AggCall` will return field indexs.
+    fn get_field_indexs(&self) -> Option<Vec<usize>>;
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
@@ -212,14 +212,14 @@ impl Expr for ExprImpl {
         }
     }
 
-    fn get_indexs(&self) -> Option<Vec<usize>> {
+    fn get_field_indexs(&self) -> Option<Vec<usize>> {
         match self {
-            ExprImpl::InputRef(e) => e.get_indexs(),
-            ExprImpl::Literal(e) => e.get_indexs(),
-            ExprImpl::FunctionCall(e) => e.get_indexs(),
-            ExprImpl::AggCall(e) => e.get_indexs(),
-            ExprImpl::Subquery(e) => e.get_indexs(),
-            ExprImpl::CorrelatedInputRef(e) => e.get_indexs(),
+            ExprImpl::InputRef(e) => e.get_field_indexs(),
+            ExprImpl::Literal(e) => e.get_field_indexs(),
+            ExprImpl::FunctionCall(e) => e.get_field_indexs(),
+            ExprImpl::AggCall(e) => e.get_field_indexs(),
+            ExprImpl::Subquery(e) => e.get_field_indexs(),
+            ExprImpl::CorrelatedInputRef(e) => e.get_field_indexs(),
         }
     }
 }

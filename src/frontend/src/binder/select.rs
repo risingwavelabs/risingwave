@@ -98,23 +98,26 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        // Get indexs from `select_item` have index and get the column_desc according to it to form
-        // field. If `select_item` not have indexs, use `alias` and `data_type` to form
+        // Get indexs from `select_item` to find the `field_descs` step by index.
+        // If `select_item` not have indexs, use `alias` and `data_type` to form
         // field.
         let fields = select_items
             .iter()
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                match s.get_indexs() {
+                match s.get_field_indexs() {
                     Some(index) => {
                         let desc = Self::get_desc(
                             &index[1..],
                             (self.context.columns[index[0]]).desc.clone(),
                         )?;
-                        let mut field: Field = (&desc).into();
-                        field.name = name;
-                        field.data_type = s.return_type();
+                        let field = Field::with_struct(
+                            s.return_type(),
+                            name,
+                            desc.field_descs.iter().map(|f| f.into()).collect_vec(),
+                            desc.type_name,
+                        );
                         Ok(field)
                     }
                     None => Ok(Field::with_name(s.return_type(), name)),
@@ -321,7 +324,7 @@ impl Binder {
         ))
     }
 
-    /// Bind field in recursive way, each field in the binding path will store as `input_ref` in
+    /// Bind field in recursive way, each field in the binding path will store as `literal` in
     /// exprs and return.
     pub fn bind_field(idents: &[Ident], desc: ColumnDesc) -> Result<(ColumnDesc, Vec<ExprImpl>)> {
         match idents.get(0) {

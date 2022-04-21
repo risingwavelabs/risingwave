@@ -134,7 +134,7 @@ impl Expr for InputRef {
         }
     }
 
-    fn get_indexs(&self) -> Option<Vec<usize>> {
+    fn get_field_indexs(&self) -> Option<Vec<usize>> {
         Some(vec![self.index])
     }
 }

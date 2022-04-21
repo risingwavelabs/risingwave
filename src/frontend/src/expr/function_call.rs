@@ -191,7 +191,9 @@ impl Expr for FunctionCall {
     /// so concat the index of each inputs.
     /// The first of inputs must be `InputRef` and following must be `Literal` which contains i32
     /// value.
-    fn get_indexs(&self) -> Option<Vec<usize>> {
+    /// Only check the first input of `Aggcall` because if we use nested column
+    /// now it must be appear at first index.
+    fn get_field_indexs(&self) -> Option<Vec<usize>> {
         if ExprType::Field == self.func_type {
             if let ExprImpl::InputRef(input) = &self.inputs[0] {
                 let mut indexs = vec![input.index()];
@@ -214,7 +216,7 @@ impl Expr for FunctionCall {
             unreachable!()
         } else {
             match self.inputs.get(0) {
-                Some(expr) => expr.get_indexs(),
+                Some(expr) => expr.get_field_indexs(),
                 None => None,
             }
         }

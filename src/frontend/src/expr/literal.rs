@@ -71,7 +71,7 @@ impl Expr for Literal {
         }
     }
 
-    fn get_indexs(&self) -> Option<Vec<usize>> {
+    fn get_field_indexs(&self) -> Option<Vec<usize>> {
         None
     }
 }

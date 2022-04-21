@@ -128,9 +128,11 @@ impl Expr for AggCall {
         )
     }
 
-    fn get_indexs(&self) -> Option<Vec<usize>> {
+    /// Only check the first input of `Aggcall` because if we use nested column
+    /// now it must be appear at first index.
+    fn get_field_indexs(&self) -> Option<Vec<usize>> {
         match self.inputs.get(0) {
-            Some(expr) => expr.get_indexs(),
+            Some(expr) => expr.get_field_indexs(),
             None => None,
         }
     }
