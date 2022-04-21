@@ -15,12 +15,24 @@
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
 use std::ptr::null_mut;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use spin::Mutex;
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
+
+#[cfg(debug_assertions)]
+const IN_LRU: u8 = 2;
+#[cfg(debug_assertions)]
+const REVERSE_IN_LRU: u8 = !IN_LRU;
+
+pub trait LruKey: PartialEq + Send + Sync {}
+impl<T: PartialEq + Send + Sync> LruKey for T {}
+
+pub trait LruValue: Send + Sync {}
+impl<T: Send + Sync> LruValue for T {}
 
 /// An entry is a variable length heap-allocated structure.
 /// Entries are referenced by cache and/or by any external entity.
@@ -48,33 +60,36 @@ const REVERSE_IN_CACHE: u8 = !IN_CACHE;
 /// that any successful `LruCacheShard::lookup/LruCacheShard::insert` have a
 /// matching `LruCache::release` (to move into state 2) or `LruCacheShard::erase`
 /// (to move into state 3).
-pub struct LruHandle<K: PartialEq + Default, T> {
-    // next element in the linked-list of hash bucket, only used by hash-table.
+pub struct LruHandle<K: LruKey, T: LruValue> {
+    /// next element in the linked-list of hash bucket, only used by hash-table.
     next_hash: *mut LruHandle<K, T>,
 
-    // next element in LRU linked list
+    /// next element in LRU linked list
     next: *mut LruHandle<K, T>,
 
-    // prev element in LRU linked list
+    /// prev element in LRU linked list
     prev: *mut LruHandle<K, T>,
 
-    key: K,
+    /// When the handle is on-use, the fields is `Some(...)`, while the handle is cleared up and
+    /// recycled, the field is `None`.
+    kv: Option<(K, T)>,
     hash: u64,
-    value: Option<T>,
     charge: usize,
+
+    /// The count for external references. If `refs > 0`, the handle is not in the lru cache, and
+    /// when `refs == 0`, the handle must either be in LRU cache or has been recycled.
     refs: u32,
     flags: u8,
 }
 
-impl<K: PartialEq + Default, T> Default for LruHandle<K, T> {
+impl<K: LruKey, T: LruValue> Default for LruHandle<K, T> {
     fn default() -> Self {
         Self {
             next_hash: null_mut(),
             next: null_mut(),
             prev: null_mut(),
-            key: K::default(),
+            kv: None,
             hash: 0,
-            value: None,
             charge: 0,
             refs: 0,
             flags: 0,
@@ -82,21 +97,30 @@ impl<K: PartialEq + Default, T> Default for LruHandle<K, T> {
     }
 }
 
-impl<K: PartialEq + Default, T> LruHandle<K, T> {
-    pub fn new(key: K, value: Option<T>) -> Self {
-        Self {
-            key,
-            hash: 0,
-            value,
-            next_hash: null_mut(),
-            prev: null_mut(),
-            next: null_mut(),
-            charge: 0,
-            flags: 0,
-            refs: 0,
-        }
+impl<K: LruKey, T: LruValue> LruHandle<K, T> {
+    pub fn new(key: K, value: T, hash: u64, charge: usize) -> Self {
+        let mut ret = Self::default();
+        ret.init(key, value, hash, charge);
+        ret
     }
 
+    pub fn init(&mut self, key: K, value: T, hash: u64, charge: usize) {
+        self.next_hash = null_mut();
+        self.prev = null_mut();
+        self.next = null_mut();
+        self.kv = Some((key, value));
+        self.hash = hash;
+        self.charge = charge;
+        self.flags = 0;
+        self.refs = 0;
+    }
+
+    /// Set the `in_cache` bit in the flag
+    ///
+    /// Since only `in_cache` reflects whether the handle is present in the hash table, this method
+    /// should only be called in the method of hash table. Whenever the handle enters the hash
+    /// table, we should call `set_in_cache(true)`, and whenever the handle leaves the hash table,
+    /// we should call `set_in_cache(false)`
     fn set_in_cache(&mut self, in_cache: bool) {
         if in_cache {
             self.flags |= IN_CACHE;
@@ -110,6 +134,7 @@ impl<K: PartialEq + Default, T> LruHandle<K, T> {
     }
 
     fn unref(&mut self) -> bool {
+        debug_assert!(self.refs > 0);
         self.refs -= 1;
         self.refs == 0
     }
@@ -118,19 +143,51 @@ impl<K: PartialEq + Default, T> LruHandle<K, T> {
         self.refs > 0
     }
 
+    /// Test whether the handle is in cache. `in cache` is equivalent to that the handle is in the
+    /// hash table.
     fn is_in_cache(&self) -> bool {
         (self.flags & IN_CACHE) > 0
     }
+
+    fn get_key(&self) -> &K {
+        &self.kv.as_ref().unwrap().0
+    }
+
+    fn get_value(&self) -> &T {
+        &self.kv.as_ref().unwrap().1
+    }
+
+    fn is_same_key(&self, key: &K) -> bool {
+        self.kv.as_ref().unwrap().0.eq(key)
+    }
+
+    fn take_kv(&mut self) -> (K, T) {
+        self.kv.take().unwrap()
+    }
+
+    #[cfg(debug_assertions)]
+    fn is_in_lru(&self) -> bool {
+        (self.flags & IN_LRU) > 0
+    }
+
+    #[cfg(debug_assertions)]
+    fn set_in_lru(&mut self, in_lru: bool) {
+        if in_lru {
+            self.flags |= IN_LRU;
+        } else {
+            self.flags &= REVERSE_IN_LRU;
+        }
+    }
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for LruHandle<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Send for LruHandle<K, T> {}
 
-pub struct LruHandleTable<K: PartialEq + Default, T> {
+pub struct LruHandleTable<K: LruKey, T: LruValue> {
     list: Vec<*mut LruHandle<K, T>>,
     elems: usize,
 }
 
-impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
+impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     fn new() -> Self {
         Self {
             list: vec![null_mut(); 16],
@@ -138,6 +195,7 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
         }
     }
 
+    // A util method that is only used internally in this struct.
     unsafe fn find_pointer(
         &self,
         idx: usize,
@@ -145,7 +203,7 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     ) -> (*mut LruHandle<K, T>, *mut LruHandle<K, T>) {
         let mut ptr = self.list[idx];
         let mut prev = null_mut();
-        while !ptr.is_null() && !(*ptr).key.eq(key) {
+        while !ptr.is_null() && !(*ptr).is_same_key(key) {
             prev = ptr;
             ptr = (*ptr).next_hash;
         }
@@ -153,11 +211,14 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     }
 
     unsafe fn remove(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
+        debug_assert!(self.list.len().is_power_of_two());
         let idx = (hash as usize) & (self.list.len() - 1);
         let (mut prev, ptr) = self.find_pointer(idx, key);
         if ptr.is_null() {
             return null_mut();
         }
+        debug_assert!((*ptr).is_in_cache());
+        (*ptr).set_in_cache(false);
         if prev.is_null() {
             self.list[idx] = (*ptr).next_hash;
         } else {
@@ -167,10 +228,15 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
         ptr
     }
 
+    /// Insert a handle into the hash table. Return the handle of the previous value if the key
+    /// exists.
     unsafe fn insert(&mut self, hash: u64, h: *mut LruHandle<K, T>) -> *mut LruHandle<K, T> {
+        debug_assert!(!h.is_null());
+        debug_assert!(!(*h).is_in_cache());
+        (*h).set_in_cache(true);
         debug_assert!(self.list.len().is_power_of_two());
         let idx = (hash as usize) & (self.list.len() - 1);
-        let (mut prev, ptr) = self.find_pointer(idx, &(*h).key);
+        let (mut prev, ptr) = self.find_pointer(idx, (*h).get_key());
         if prev.is_null() {
             self.list[idx] = h;
         } else {
@@ -178,13 +244,16 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
         }
 
         if !ptr.is_null() {
-            debug_assert!((*ptr).key.eq(&(*h).key));
+            debug_assert!((*ptr).is_same_key((*h).get_key()));
+            debug_assert!((*ptr).is_in_cache());
+            // The handle to be removed is set not in cache.
+            (*ptr).set_in_cache(false);
             (*h).next_hash = (*ptr).next_hash;
             return ptr;
-        } else {
-            (*h).next_hash = ptr;
-            debug_assert!(ptr.is_null());
         }
+
+        (*h).next_hash = ptr;
+
         self.elems += 1;
         if self.elems > self.list.len() {
             self.resize();
@@ -193,6 +262,7 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     }
 
     unsafe fn lookup(&self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
+        debug_assert!(self.list.len().is_power_of_two());
         let idx = (hash as usize) & (self.list.len() - 1);
         let (_, ptr) = self.find_pointer(idx, key);
         ptr
@@ -222,22 +292,25 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     }
 }
 
-pub struct LruCacheShard<K: PartialEq + Default, T> {
+pub struct LruCacheShard<K: LruKey, T: LruValue> {
+    /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
+    /// cache handles that are not used externally.
     lru: Box<LruHandle<K, T>>,
     table: LruHandleTable<K, T>,
+    // TODO: may want to use an atomic object linked list shared by all shards.
     object_pool: Vec<Box<LruHandle<K, T>>>,
-    lru_usage: usize,
-    usage: usize,
+    lru_usage: Arc<AtomicUsize>,
+    usage: Arc<AtomicUsize>,
     capacity: usize,
     strict_capacity_limit: bool,
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for LruCacheShard<K, T> {}
-unsafe impl<K: PartialEq + Default, T> Sync for LruCacheShard<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Send for LruCacheShard<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Sync for LruCacheShard<K, T> {}
 
-impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
+impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize, strict_capacity_limit: bool) -> Self {
-        let mut lru = Box::new(LruHandle::new(K::default(), None));
+        let mut lru = Box::new(LruHandle::default());
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
         let mut object_pool = Vec::with_capacity(object_capacity);
@@ -246,8 +319,8 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
         }
         Self {
             capacity,
-            lru_usage: 0,
-            usage: 0,
+            lru_usage: Arc::new(AtomicUsize::new(0)),
+            usage: Arc::new(AtomicUsize::new(0)),
             object_pool,
             strict_capacity_limit,
             lru,
@@ -256,47 +329,76 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
     }
 
     unsafe fn lru_remove(&mut self, e: *mut LruHandle<K, T>) {
+        debug_assert!(!e.is_null());
+        #[cfg(debug_assertions)]
+        {
+            assert!((*e).is_in_lru());
+            (*e).set_in_lru(false);
+        }
+
         (*(*e).next).prev = (*e).prev;
         (*(*e).prev).next = (*e).next;
         (*e).prev = null_mut();
         (*e).next = null_mut();
-        self.lru_usage -= (*e).charge;
+        self.lru_usage.fetch_sub((*e).charge, Ordering::Relaxed);
     }
 
     // insert entry in the end of the linked-list
     unsafe fn lru_insert(&mut self, e: *mut LruHandle<K, T>) {
+        debug_assert!(!e.is_null());
+        #[cfg(debug_assertions)]
+        {
+            assert!(!(*e).is_in_lru());
+            (*e).set_in_lru(true);
+        }
+
         (*e).next = self.lru.as_mut();
         (*e).prev = self.lru.prev;
         (*(*e).prev).next = e;
         (*(*e).next).prev = e;
-        self.lru_usage += (*e).charge;
+        self.lru_usage.fetch_add((*e).charge, Ordering::Relaxed);
     }
 
     unsafe fn evict_from_lru(&mut self, charge: usize, last_reference_list: &mut Vec<T>) {
-        while self.usage + charge > self.capacity && !std::ptr::eq(self.lru.next, self.lru.as_mut())
+        // TODO: may want to optimize by only loading at the beginning and storing at the end for
+        // only once.
+        while self.usage.load(Ordering::Relaxed) + charge > self.capacity
+            && !std::ptr::eq(self.lru.next, self.lru.as_mut())
         {
             let old_ptr = self.lru.next;
-            self.table.remove((*old_ptr).hash, &(*old_ptr).key);
-            assert!((*old_ptr).is_in_cache());
+            self.table.remove((*old_ptr).hash, (*old_ptr).get_key());
             self.lru_remove(old_ptr);
-            (*old_ptr).set_in_cache(false);
-            self.usage -= (*old_ptr).charge;
-            let mut node = Box::from_raw(old_ptr);
-            let data = node.value.take().unwrap();
-            last_reference_list.push(data);
-            self.recyle_handle_object(node);
+            let value = self.clear_handle(old_ptr);
+            last_reference_list.push(value);
         }
     }
 
-    fn recyle_handle_object(&mut self, mut node: Box<LruHandle<K, T>>) {
+    /// Clear a currently used handle and recycle it if possible
+    unsafe fn clear_handle(&mut self, h: *mut LruHandle<K, T>) -> T {
+        debug_assert!(!h.is_null());
+        debug_assert!((*h).kv.is_some());
+        #[cfg(debug_assertions)]
+        assert!(!(*h).is_in_lru());
+        debug_assert!(!(*h).is_in_cache());
+        debug_assert!(!(*h).has_refs());
+        self.usage.fetch_sub((*h).charge, Ordering::Relaxed);
+        let value = (*h).take_kv().1;
+        self.try_recycle_handle_object(h);
+        value
+    }
+
+    unsafe fn try_recycle_handle_object(&mut self, h: *mut LruHandle<K, T>) {
         if self.object_pool.len() < self.object_pool.capacity() {
+            let mut node = Box::from_raw(h);
             node.next_hash = null_mut();
             node.next = null_mut();
             node.prev = null_mut();
+            node.kv.take();
             self.object_pool.push(node);
         }
     }
 
+    /// insert a new key value in the cache. The handle for the new key value is returned.
     unsafe fn insert(
         &mut self,
         key: K,
@@ -305,66 +407,68 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
         value: T,
         last_reference_list: &mut Vec<T>,
     ) -> *mut LruHandle<K, T> {
-        let mut handle = if let Some(mut h) = self.object_pool.pop() {
-            h.key = key;
-            h.value = Some(value);
+        self.evict_from_lru(charge, last_reference_list);
+        if self.usage.load(Ordering::Relaxed) + charge > self.capacity && self.strict_capacity_limit
+        {
+            return null_mut();
+        }
+
+        let handle = if let Some(mut h) = self.object_pool.pop() {
+            h.init(key, value, hash, charge);
             h
         } else {
-            Box::new(LruHandle::new(key, Some(value)))
+            Box::new(LruHandle::new(key, value, hash, charge))
         };
-        handle.charge = charge;
-        handle.hash = hash;
-        handle.refs = 0;
-        handle.flags = 0;
-        handle.set_in_cache(true);
-        self.evict_from_lru(charge, last_reference_list);
-        if self.usage + charge > self.capacity && self.strict_capacity_limit {
-            handle.set_in_cache(false);
-            let data = handle.value.take().unwrap();
-            last_reference_list.push(data);
-            self.recyle_handle_object(handle);
-            null_mut()
-        } else {
-            let ptr = Box::into_raw(handle);
-            let old = self.table.insert(hash, ptr);
-            if !old.is_null() {
-                let data = self.remove_cache_handle(old).unwrap();
+
+        let ptr = Box::into_raw(handle);
+        let old = self.table.insert(hash, ptr);
+        if !old.is_null() {
+            if let Some(data) = self.try_remove_cache_handle(old) {
                 last_reference_list.push(data);
             }
-            self.usage += charge;
-            (*ptr).add_ref();
-            ptr
         }
+        self.usage.fetch_add(charge, Ordering::Relaxed);
+        (*ptr).add_ref();
+        ptr
     }
 
-    unsafe fn release(&mut self, e: *mut LruHandle<K, T>) -> Option<T> {
-        if e.is_null() {
+    /// Release the usage on a handle.
+    ///
+    /// Return: `Some(value)` if the handle is released, and `None` if the value is still in use.
+    unsafe fn release(&mut self, h: *mut LruHandle<K, T>) -> Option<T> {
+        debug_assert!(!h.is_null());
+        // The handle should not be in lru before calling this method.
+        #[cfg(debug_assertions)]
+        assert!(!(*h).is_in_lru());
+        let last_reference = (*h).unref();
+        // If the handle is still referenced by someone else, do nothing and return.
+        if !last_reference {
             return None;
         }
-        let last_reference = (*e).unref();
-        if last_reference && (*e).is_in_cache() {
-            if self.usage > self.capacity {
-                self.table.remove((*e).hash, &(*e).key);
-                (*e).set_in_cache(false);
-            } else {
-                self.lru_insert(e);
-                return None;
-            }
+
+        // Keep the handle in lru list if it is still in the cache and the cache is not over-sized.
+        if (*h).is_in_cache() && self.usage.load(Ordering::Relaxed) <= self.capacity {
+            self.lru_insert(h);
+            return None;
         }
-        if last_reference {
-            let mut node = Box::from_raw(e);
-            self.usage -= node.charge;
-            let data = node.value.take().unwrap();
-            self.recyle_handle_object(node);
-            Some(data)
-        } else {
-            None
-        }
+
+        // Remove the handle from table.
+        self.table.remove((*h).hash, (*h).get_key());
+
+        // Since the released handle was previously used externally, it must not be in LRU, and we
+        // don't need to remove it from lru.
+        #[cfg(debug_assertions)]
+        assert!(!(*h).is_in_lru());
+
+        let data = self.clear_handle(h);
+        Some(data)
     }
 
     unsafe fn lookup(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
         let e = self.table.lookup(hash, key);
         if !e.is_null() {
+            // If the handle previously has not ref, it must exist in the lru. And therefore we are
+            // safe to remove it from lru.
             if !(*e).has_refs() {
                 self.lru_remove(e);
             }
@@ -373,51 +477,59 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
         e
     }
 
+    /// Erase a key from the cache.
     unsafe fn erase(&mut self, hash: u64, key: &K) -> Option<T> {
         let h = self.table.remove(hash, key);
         if !h.is_null() {
-            self.remove_cache_handle(h)
+            self.try_remove_cache_handle(h)
         } else {
             None
         }
     }
 
-    unsafe fn remove_cache_handle(&mut self, h: *mut LruHandle<K, T>) -> Option<T> {
-        (*h).set_in_cache(false);
+    /// Try removing the handle from the cache if the handle is not used externally any more.
+    ///
+    /// This method can only be called on the handle that just removed from the hash table.
+    unsafe fn try_remove_cache_handle(&mut self, h: *mut LruHandle<K, T>) -> Option<T> {
+        debug_assert!(!h.is_null());
         if !(*h).has_refs() {
+            // Since the handle is just removed from the hash table, it should either be in lru or
+            // referenced externally. Since we have checked that it is not referenced externally, it
+            // must be in the LRU, and therefore we are safe to call `lru_remove`.
             self.lru_remove(h);
-            let mut node = Box::from_raw(h);
-            node.set_in_cache(false);
-            self.usage -= node.charge;
-            let data = node.value.take();
-            self.recyle_handle_object(node);
-            return data;
+            let data = self.clear_handle(h);
+            return Some(data);
         }
         None
     }
 }
 
-pub struct LruCache<K: PartialEq + Default, T> {
+pub struct LruCache<K: LruKey, T: LruValue> {
     num_shard_bits: usize,
     shards: Vec<Mutex<LruCacheShard<K, T>>>,
+    shard_usages: Vec<Arc<AtomicUsize>>,
+    shard_lru_usages: Vec<Arc<AtomicUsize>>,
 }
 
-impl<K: PartialEq + Default, T> LruCache<K, T> {
+impl<K: LruKey, T: LruValue> LruCache<K, T> {
     pub fn new(num_shard_bits: usize, capacity: usize, object_cache: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
         let per_shard_object = object_cache / num_shards;
+        let mut shard_usages = Vec::with_capacity(num_shards);
+        let mut shard_lru_usages = Vec::with_capacity(num_shards);
         for _ in 0..num_shards {
-            shards.push(Mutex::new(LruCacheShard::new(
-                per_shard,
-                per_shard_object,
-                false,
-            )));
+            let shard = LruCacheShard::new(per_shard, per_shard_object, false);
+            shard_usages.push(shard.usage.clone());
+            shard_lru_usages.push(shard.lru_usage.clone());
+            shards.push(Mutex::new(shard));
         }
         Self {
             num_shard_bits,
             shards,
+            shard_usages,
+            shard_lru_usages,
         }
     }
 
@@ -437,6 +549,7 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
     }
 
     unsafe fn release(&self, handle: *mut LruHandle<K, T>) {
+        debug_assert!(!handle.is_null());
         let data = {
             let mut shard = self.shards[self.shard((*handle).hash)].lock();
             shard.release(handle)
@@ -478,7 +591,17 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
     }
 
     pub fn get_memory_usage(&self) -> usize {
-        self.shards.iter().map(|shard| shard.lock().usage).sum()
+        self.shard_usages
+            .iter()
+            .map(|x| x.load(Ordering::Relaxed))
+            .sum()
+    }
+
+    pub fn get_lru_usage(&self) -> usize {
+        self.shard_lru_usages
+            .iter()
+            .map(|x| x.load(Ordering::Relaxed))
+            .sum()
     }
 
     fn shard(&self, hash: u64) -> usize {
@@ -490,21 +613,21 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
     }
 }
 
-pub struct CachableEntry<K: PartialEq + Default, T> {
+pub struct CachableEntry<K: LruKey, T: LruValue> {
     cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for CachableEntry<K, T> {}
-unsafe impl<K: PartialEq + Default, T> Sync for CachableEntry<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Send for CachableEntry<K, T> {}
+unsafe impl<K: LruKey, T: LruValue> Sync for CachableEntry<K, T> {}
 
-impl<K: PartialEq + Default, T> CachableEntry<K, T> {
+impl<K: LruKey, T: LruValue> CachableEntry<K, T> {
     pub fn value(&self) -> &T {
-        unsafe { (*self.handle).value.as_ref().unwrap() }
+        unsafe { (*self.handle).get_value() }
     }
 }
 
-impl<K: PartialEq + Default, T> Drop for CachableEntry<K, T> {
+impl<K: LruKey, T: LruValue> Drop for CachableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);
@@ -522,7 +645,7 @@ mod tests {
     use rand::{RngCore, SeedableRng};
 
     use super::*;
-    use crate::hummock::cache::{LruHandle, IN_CACHE};
+    use crate::hummock::cache::LruHandle;
     use crate::hummock::LruCache;
 
     pub struct Block {
@@ -532,13 +655,7 @@ mod tests {
 
     #[test]
     fn test_cache_handle_basic() {
-        println!("not in cache: {}, in cache {}", REVERSE_IN_CACHE, IN_CACHE);
-        println!(
-            "cache shard size: {}, cache size {}",
-            std::mem::size_of::<Mutex<LruCacheShard<u32, String>>>(),
-            std::mem::size_of::<LruCache<String, String>>()
-        );
-        let mut h = Box::new(LruHandle::new(1, Some(2)));
+        let mut h = Box::new(LruHandle::new(1, 2, 0, 0));
         h.set_in_cache(true);
         assert!(h.is_in_cache());
         h.set_in_cache(false);
@@ -589,11 +706,11 @@ mod tests {
             for k in keys {
                 lru = (*lru).next;
                 assert!(
-                    (*lru).key.eq(k),
+                    (*lru).is_same_key(&k.to_string()),
                     "compare failed: {} vs {}, get value: {:?}",
-                    (*lru).key,
+                    (*lru).get_key(),
                     k,
-                    (*lru).value
+                    (*lru).get_value()
                 );
             }
         }
@@ -608,7 +725,7 @@ mod tests {
             let h = cache.lookup(0, &key.to_string());
             let exist = !h.is_null();
             if exist {
-                assert!((*h).key.eq(key));
+                assert!((*h).is_same_key(&key.to_string()));
                 cache.release(h);
             }
             exist
@@ -661,16 +778,16 @@ mod tests {
     }
 
     #[test]
-    fn test_refrence_and_usage() {
+    fn test_reference_and_usage() {
         let mut cache = create_cache(5);
         insert(&mut cache, "k1", "a");
-        assert_eq!(cache.usage, 1);
+        assert_eq!(cache.usage.load(Ordering::Relaxed), 1);
         insert(&mut cache, "k0", "aa");
-        assert_eq!(cache.usage, 3);
+        assert_eq!(cache.usage.load(Ordering::Relaxed), 3);
         insert(&mut cache, "k1", "aa");
-        assert_eq!(cache.usage, 4);
+        assert_eq!(cache.usage.load(Ordering::Relaxed), 4);
         insert(&mut cache, "k2", "aa");
-        assert_eq!(cache.usage, 4);
+        assert_eq!(cache.usage.load(Ordering::Relaxed), 4);
         let mut free_list = vec![];
         validate_lru_list(&mut cache, vec!["k1", "k2"]);
         unsafe {
@@ -680,20 +797,68 @@ mod tests {
             assert!(!h2.is_null());
 
             let h3 = cache.insert("k3".to_string(), 0, 2, "bb".to_string(), &mut free_list);
-            assert_eq!(cache.usage, 6);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 6);
             assert!(!h3.is_null());
             let h4 = cache.lookup(0, &"k1".to_string());
             assert!(!h4.is_null());
 
             cache.release(h1);
-            assert_eq!(cache.usage, 6);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 6);
             cache.release(h4);
-            assert_eq!(cache.usage, 4);
+            assert_eq!(cache.usage.load(Ordering::Relaxed), 4);
 
             cache.release(h3);
             cache.release(h2);
 
             validate_lru_list(&mut cache, vec!["k3", "k2"]);
+        }
+    }
+
+    #[test]
+    fn test_update_referenced_key() {
+        unsafe {
+            let mut to_delete = vec![];
+            let mut cache = create_cache(5);
+            let insert_handle = cache.insert(
+                "key".to_string(),
+                0,
+                1,
+                "old_value".to_string(),
+                &mut to_delete,
+            );
+            let old_entry = cache.lookup(0, &"key".to_string());
+            assert!(!old_entry.is_null());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).refs, 2);
+            cache.release(insert_handle);
+            assert_eq!((*old_entry).refs, 1);
+            let insert_handle = cache.insert(
+                "key".to_string(),
+                0,
+                1,
+                "new_value".to_string(),
+                &mut to_delete,
+            );
+            assert!(!(*old_entry).is_in_cache());
+            let new_entry = cache.lookup(0, &"key".to_string());
+            assert!(!new_entry.is_null());
+            assert_eq!((*new_entry).get_value(), &"new_value".to_string());
+            assert_eq!((*new_entry).refs, 2);
+            cache.release(insert_handle);
+            assert_eq!((*new_entry).refs, 1);
+
+            assert!(!old_entry.is_null());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).refs, 1);
+
+            cache.release(new_entry);
+
+            // assert old value unchanged.
+            assert!(!old_entry.is_null());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).refs, 1);
+
+            cache.release(old_entry);
         }
     }
 }
