@@ -40,7 +40,7 @@ pub struct BatchQueryExecutor<S: StateStore> {
 
     /// Which parallel unit this actor belongs to
     parallel_unit_id: u32,
-    
+
     /// Consistent hash mapping for filtering data.
     hash_mapping: Vec<u32>,
 }
