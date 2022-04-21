@@ -206,7 +206,7 @@ where
                             r#type: DispatcherType::NoShuffle.into(),
                             column_indices: vec![],
                         };
-
+                        let append_only = child_node.append_only;
                         StreamNode {
                             pk_indices: child_node.pk_indices.clone(),
                             fields: child_node.fields.clone(),
@@ -216,6 +216,7 @@ where
                             operator_id: self.gen_operator_id() as u64,
                             input: vec![child_node],
                             identity: "Exchange (NoShuffle)".to_string(),
+                            append_only,
                         }
                     } else {
                         self.rewrite_stream_node_inner(child_node, true)?

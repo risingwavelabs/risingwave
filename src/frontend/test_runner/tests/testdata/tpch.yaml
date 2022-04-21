@@ -167,7 +167,7 @@
           p_partkey
     limit 100;
   optimized_logical_plan: |
-    LogicalLimit { limit: 100, offset: 0 }
+    LogicalTopN { order: [$0 DESC, $2 ASC, $1 ASC, $3 ASC], limit: 100, offset: 0 }
       LogicalProject { exprs: [$5, $2, $8, $0, $1, $3, $4, $6], expr_alias: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment] }
         LogicalFilter { predicate: ($7 = $9) }
           LogicalProject { exprs: [$1, $3, $12, $13, $15, $16, $17, $22, $26, $33], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
@@ -724,7 +724,7 @@
       revenue desc
     limit 20;
   optimized_logical_plan: |
-    LogicalLimit { limit: 20, offset: 0 }
+    LogicalTopN { order: [$2 DESC], limit: 20, offset: 0 }
       LogicalProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6], expr_alias: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment] }
         LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
           LogicalProject { exprs: [$0, $1, $5, $4, $10, $2, $6, ($7 * (1.00:Decimal - $8))], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
