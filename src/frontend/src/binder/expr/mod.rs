@@ -275,19 +275,14 @@ impl Binder {
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
         let mut inputs = Vec::new();
-        let results_expr: Vec<ExprImpl> = results
+        let mut results_expr: Vec<ExprImpl> = results
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .collect::<Result<_>>()?;
-        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
-        let mut return_type = results_expr.get(0).unwrap().return_type();
-        for i in 1..results_expr.len() {
-            return_type =
-                least_restrictive(return_type, results_expr.get(i).unwrap().return_type())?;
-        }
-        if let Some(expr) = &else_result_expr {
-            return_type = least_restrictive(return_type, expr.return_type())?;
-        }
+        let mut else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
+
+        let return_type = align_types(results_expr.iter_mut().chain(else_result_expr.iter_mut()))?;
+
         for (condition, result) in zip_eq(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
@@ -298,11 +293,10 @@ impl Binder {
                 None => condition,
             };
             inputs.push(self.bind_expr(condition)?);
-            // `cast_implicit` always ok because `return_type` is from `least_restrictive`.
-            inputs.push(result.cast_implicit(return_type.clone()).unwrap());
+            inputs.push(result);
         }
         if let Some(expr) = else_result_expr {
-            inputs.push(expr.cast_implicit(return_type.clone()).unwrap());
+            inputs.push(expr);
         }
         Ok(FunctionCall::new_with_return_type(
             ExprType::Case,
@@ -362,4 +356,29 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
     };
     Ok(data_type)
+}
+
+pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<DataType> {
+    use std::mem::swap;
+
+    use itertools::Itertools as _;
+
+    let exprs = exprs.collect_vec();
+    let mut ret_type = None;
+    for e in &exprs {
+        if e.is_null() {
+            continue;
+        }
+        ret_type = match ret_type {
+            None => Some(e.return_type()),
+            Some(t) => Some(least_restrictive(t, e.return_type())?),
+        };
+    }
+    let ret_type = ret_type.unwrap_or(DataType::Varchar);
+    for e in exprs {
+        let mut dummy = ExprImpl::literal_bool(false);
+        swap(&mut dummy, e);
+        *e = dummy.cast_implicit(ret_type.clone())?;
+    }
+    Ok(ret_type)
 }
