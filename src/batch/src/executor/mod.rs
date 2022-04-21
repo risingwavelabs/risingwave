@@ -28,7 +28,6 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::PlanNode;
 pub use row_seq_scan::*;
 use sort_agg::*;
-use top_n::*;
 
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
@@ -43,7 +42,8 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2, ValuesExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TopNExecutor2, TraceExecutor2,
+    ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -68,7 +68,6 @@ mod row_seq_scan;
 mod sort_agg;
 mod stream_scan;
 pub mod test_utils;
-mod top_n;
 mod trace;
 
 /// `Executor` is an operator in the query execution.
@@ -201,7 +200,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
-            NodeBody::TopN => TopNExecutor,
+            NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor,
             NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
@@ -230,7 +229,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
-            NodeBody::TopN => TopNExecutor,
+            NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor,
             NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,

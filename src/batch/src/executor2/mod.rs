@@ -17,11 +17,13 @@ mod filter;
 pub use filter::*;
 mod values;
 pub use values::*;
+mod top_n;
 mod trace;
 use futures::stream::BoxStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+pub use top_n::*;
 pub use trace::*;
 
 use crate::executor::executor2_wrapper::Executor2Wrapper;
