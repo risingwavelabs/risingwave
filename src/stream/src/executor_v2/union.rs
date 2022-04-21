@@ -24,7 +24,6 @@ use risingwave_storage::StateStore;
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message, PkIndicesRef, StreamExecutorResult};
 use crate::executor::{AlignedMessage, BarrierAligner, ExecutorBuilder, PkIndices};
-use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -97,15 +96,15 @@ impl Executor for BarrierAlignerWrapper {
 }
 
 impl BarrierAlignerWrapper {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         loop {
             match self.0.next().await {
                 AlignedMessage::Left(x) => {
-                    yield Message::Chunk(x.map_err(StreamExecutorError::InputError)?)
+                    yield Message::Chunk(x.map_err(StreamExecutorError::input_error)?)
                 }
                 AlignedMessage::Right(x) => {
-                    yield Message::Chunk(x.map_err(StreamExecutorError::InputError)?)
+                    yield Message::Chunk(x.map_err(StreamExecutorError::input_error)?)
                 }
                 AlignedMessage::Barrier(x) => yield Message::Barrier(x),
             }
@@ -139,7 +138,7 @@ fn build_align_executor(mut inputs: Vec<BoxedExecutor>) -> StreamExecutorResult<
 }
 
 impl UnionExecutor {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let executor = build_align_executor(self.inputs)?;
         let stream = executor.execute();

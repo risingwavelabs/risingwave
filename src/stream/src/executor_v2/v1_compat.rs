@@ -27,7 +27,7 @@ use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
+use super::error::StreamExecutorError;
 use super::filter::SimpleFilterExecutor;
 use super::project::SimpleProjectExecutor;
 use super::{
@@ -150,7 +150,7 @@ impl Executor for ExecutorV1AsV2 {
 }
 
 impl ExecutorV1AsV2 {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         loop {
             let msg = self.0.next().await;

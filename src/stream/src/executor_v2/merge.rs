@@ -25,9 +25,9 @@ use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 use tracing_futures::Instrument;
 
+use super::error::StreamExecutorError;
 use super::{Executor, Message, PkIndicesRef};
 use crate::executor::PkIndices;
-use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::UpDownActorIds;
 
@@ -81,9 +81,6 @@ impl RemoteInput {
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
-    /// Number of inputs.
-    num_inputs: usize,
-
     /// Upstream channels.
     upstreams: Vec<Receiver<Message>>,
 
@@ -91,16 +88,6 @@ pub struct MergeExecutor {
     actor_id: u32,
 
     info: ExecutorInfo,
-}
-
-impl std::fmt::Debug for MergeExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MergeExecutor")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
-            .field("num_inputs", &self.num_inputs)
-            .finish()
-    }
 }
 
 impl MergeExecutor {
@@ -111,7 +98,6 @@ impl MergeExecutor {
         inputs: Vec<Receiver<Message>>,
     ) -> Self {
         Self {
-            num_inputs: inputs.len(),
             upstreams: inputs,
             actor_id,
             info: ExecutorInfo {
@@ -143,7 +129,7 @@ impl Executor for MergeExecutor {
 }
 
 impl MergeExecutor {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let mut upstreams = self.upstreams;
 
@@ -181,6 +167,12 @@ impl MergeExecutor {
                     Message::Barrier(barrier) => {
                         // Align the barrier.
                         if let Some(current_barrier) = current_barrier.as_ref() {
+                            if &barrier != current_barrier {
+                                return Err(StreamExecutorError::align_barrier(
+                                    current_barrier.clone(),
+                                    barrier,
+                                ));
+                            }
                             assert_eq!(&barrier, current_barrier);
                         } else {
                             current_barrier = Some(barrier);
