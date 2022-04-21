@@ -347,7 +347,7 @@ macro_rules! impl_convert {
                     pub fn [<into_ $suffix_name>](self) -> $array {
                         match self {
                             Self::$variant_name(array) => array,
-                            other_array =>    panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                            other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
                         }
                     }
                 }

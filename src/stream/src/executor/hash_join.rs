@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_expr::expr::RowExpression;
+use risingwave_expr::expr::{build_from_prost, RowExpression};
+use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
@@ -78,9 +82,9 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<S: StateStore> {
+struct JoinSide<K: HashKey, S: StateStore> {
     /// Store all data from a one side stream
-    ht: JoinHashMap<S>,
+    ht: JoinHashMap<K, S>,
     /// Indices of the join key columns
     key_indices: Vec<usize>,
     /// The primary key indices of this side, used for state store
@@ -93,7 +97,7 @@ struct JoinSide<S: StateStore> {
     keyspace: Keyspace<S>,
 }
 
-impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
+impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("key_indices", &self.key_indices)
@@ -104,7 +108,7 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
     }
 }
 
-impl<S: StateStore> JoinSide<S> {
+impl<K: HashKey, S: StateStore> JoinSide<K, S> {
     fn is_dirty(&self) -> bool {
         self.ht.values().any(|state| state.is_dirty())
     }
@@ -120,23 +124,135 @@ impl<S: StateStore> JoinSide<S> {
     }
 }
 
+struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
+
+struct HashJoinExecutorDispatcherArgs<S: StateStore> {
+    source_l: Box<dyn Executor>,
+    source_r: Box<dyn Executor>,
+    params_l: JoinParams,
+    params_r: JoinParams,
+    pk_indices: PkIndices,
+    keyspace: Keyspace<S>,
+    executor_id: u64,
+    cond: Option<RowExpression>,
+    op_info: String,
+    key_indices: Vec<usize>,
+}
+
+impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
+    for HashJoinExecutorDispatcher<S, T>
+{
+    type Input = HashJoinExecutorDispatcherArgs<S>;
+    type Output = Result<Box<dyn Executor>>;
+
+    fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
+        Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
+            args.source_l,
+            args.source_r,
+            args.params_l,
+            args.params_r,
+            args.pk_indices,
+            args.keyspace,
+            args.executor_id,
+            args.cond,
+            args.op_info,
+            args.key_indices,
+        )))
+    }
+}
+
 pub struct HashJoinExecutorBuilder {}
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(
-        params: ExecutorParams,
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
-        stream.create_hash_join_node(params, node, store)
+
+        let source_r = params.input.remove(1);
+        let source_l = params.input.remove(0);
+        let params_l = JoinParams::new(
+            node.get_left_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+        );
+        let params_r = JoinParams::new(
+            node.get_right_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+        );
+
+        let condition = match node.get_condition() {
+            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
+            Err(_) => None,
+        };
+        trace!("Join non-equi condition: {:?}", condition);
+
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
+
+        macro_rules! impl_create_hash_join_executor {
+            ([], $( { $join_type_proto:ident, $join_type:ident } ),*) => {
+                fn create_hash_join_executor<S: StateStore>(
+                    typ: JoinTypeProto, kind: HashKeyKind,
+                    args: HashJoinExecutorDispatcherArgs<S>,
+                ) -> Result<Box<dyn Executor>> {
+                    match typ {
+                        $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
+                        _ => todo!("Join type {:?} not implemented", typ),
+                    }
+                }
+            }
+        }
+
+        macro_rules! for_all_join_types {
+            ($macro:ident $(, $x:tt)*) => {
+                $macro! {
+                    [$($x),*],
+                    { Inner, Inner },
+                    { LeftOuter, LeftOuter },
+                    { RightOuter, RightOuter },
+                    { FullOuter, FullOuter }
+                }
+            };
+        }
+
+        let keys = key_indices
+            .iter()
+            .map(|idx| source_l.schema().fields[*idx].data_type())
+            .collect_vec();
+        let kind = calc_hash_key_kind(&keys);
+
+        let args = HashJoinExecutorDispatcherArgs {
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            pk_indices: params.pk_indices,
+            keyspace: Keyspace::shared_executor_root(store, params.operator_id),
+            executor_id: params.executor_id,
+            cond: condition,
+            op_info: params.op_info,
+            key_indices,
+        };
+
+        for_all_join_types! { impl_create_hash_join_executor };
+        let join_type_proto = node.get_join_type()?;
+        create_hash_join_executor(join_type_proto, kind, args)
     }
 }
 
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
+pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
     /// the data types of the formed new columns
@@ -146,9 +262,9 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     /// The primary key indices of the schema
     pk_indices: PkIndices,
     /// The parameters of the left join executor
-    side_l: JoinSide<S>,
+    side_l: JoinSide<K, S>,
     /// The parameters of the right join executor
-    side_r: JoinSide<S>,
+    side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
     cond: Option<RowExpression>,
     /// Debug info for the left executor
@@ -169,7 +285,9 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     key_indices: Vec<usize>,
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
+    for HashJoinExecutor<K, S, T>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashJoinExecutor")
             .field("join_type", &T)
@@ -185,7 +303,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
 }
 
 #[async_trait]
-impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<K, S, T> {
     async fn next(&mut self) -> Result<Message> {
         let msg = self.aligner.next().await;
         if let Some(barrier) = self.try_init_executor(&msg) {
@@ -238,7 +356,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 }
 
 #[allow(clippy::too_many_arguments)]
-impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
     pub fn new(
         input_l: Box<dyn Executor>,
         input_r: Box<dyn Executor>,
@@ -281,6 +399,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             .iter()
             .map(|field| field.data_type.clone())
             .collect_vec();
+
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
 
@@ -296,6 +415,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 ht: JoinHashMap::new(
                     1 << 16,
                     pk_indices_l.clone(),
+                    params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
                     ks_l.clone(),
                 ), // TODO: decide the target cap
@@ -309,6 +429,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 ht: JoinHashMap::new(
                     1 << 16,
                     pk_indices_r.clone(),
+                    params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
                     ks_r.clone(),
                 ), // TODO: decide the target cap
@@ -350,18 +471,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     /// the data the hash table and match the coming
     /// data chunk with the executor state
     async fn hash_eq_match<'a>(
-        key: &Row,
-        ht: &'a mut JoinHashMap<S>,
+        key: &K,
+        ht: &'a mut JoinHashMap<K, S>,
     ) -> Option<&'a mut HashValueType<S>> {
         ht.get_mut(key).await
-    }
-
-    fn hash_key_from_row_ref(row: &RowRef, key_indices: &[usize]) -> HashKeyType {
-        let key = key_indices
-            .iter()
-            .map(|idx| row[*idx].to_owned_datum())
-            .collect_vec();
-        Row(key)
     }
 
     fn row_from_row_ref(row: &RowRef) -> Row {
@@ -445,15 +558,16 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             side_match.start_pos,
         )?;
 
-        for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
-            let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
+        let keys = K::build(&side_update.key_indices, &data_chunk)?;
+        for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
+            let key = &keys[idx];
             let value = Self::row_from_row_ref(&row);
             let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
-            let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht).await;
+            let matched_rows = Self::hash_eq_match(key, &mut side_match.ht).await;
             if let Some(matched_rows) = matched_rows {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        let entry_value = side_update.ht.get_or_init_without_cache(&key).await?;
+                        let entry_value = side_update.ht.get_or_init_without_cache(key).await?;
                         let mut degree = 0;
                         for matched_row in matched_rows.values_mut(epoch).await {
                             // TODO(yuhao-su): We should find a better way to eval the
@@ -504,7 +618,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                         entry_value.insert(pk, JoinRow::new(value, degree));
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
+                        if let Some(v) = side_update.ht.get_mut_without_cached(key).await? {
                             // remove the row by it's primary key
                             v.remove(pk);
 
@@ -563,11 +677,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 // should handle this!
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        let state = side_update.ht.get_or_init_without_cache(&key).await?;
+                        let state = side_update.ht.get_or_init_without_cache(key).await?;
                         state.insert(pk, JoinRow::new(value, 0));
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
+                        if let Some(v) = side_update.ht.get_mut_without_cached(key).await? {
                             v.remove(pk);
                         }
                     }
@@ -585,7 +699,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutor for HashJoinExecutor<S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> StatefulExecutor
+    for HashJoinExecutor<K, S, T>
+{
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }
@@ -601,6 +717,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
+    use risingwave_common::hash::Key64;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::{InputRefExpression, RowExpression};
     use risingwave_pb::expr::expr_node::Type;
@@ -679,12 +796,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             None,
@@ -883,12 +1000,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             None,
@@ -1129,12 +1246,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::LeftOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::LeftOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             None,
@@ -1379,12 +1496,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::RightOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::RightOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             None,
@@ -1579,12 +1696,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::FullOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::FullOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             None,
@@ -1834,12 +1951,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::FullOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::FullOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             cond,
@@ -2089,12 +2206,12 @@ mod tests {
 
         let cond = create_cond();
 
-        let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
+        let mut hash_join = HashJoinExecutor::<Key64, _, { JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             keyspace,
             1,
             cond,
