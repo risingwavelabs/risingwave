@@ -82,6 +82,19 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated int32 distribution_keys = 5;
+  // Whether to use delta join for this hash join node.
+  // TODO: remove this in the future when we have a separate DeltaHashJoin node.
+  bool is_delta_join = 6;
+  // Used for internal table states.
+  plan.TableRefId left_table_ref_id = 7;
+  plan.TableRefId right_table_ref_id = 8;
+}
+
+message HopWindowNode {
+  // TODO: Use concrete types.
+  expr.ExprNode time_col = 1;
+  expr.ExprNode window_slide = 2;
+  expr.ExprNode window_size = 3;
 }
 
 message MergeNode {
@@ -164,6 +177,7 @@ message StreamNode {
     TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
     TopNNode top_n_node = 12;
+    HopWindowNode hop_window_node = 23;
     MergeNode merge_node = 13;
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;
@@ -177,6 +191,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
+  bool append_only = 24;
   string identity = 18;
   // The schema of the plan node
   repeated plan.Field fields = 19;

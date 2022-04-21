@@ -249,6 +249,16 @@ impl StreamChunk {
         }
         table.to_string()
     }
+
+    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// the chunk contains column `[a, b, c]`, then the output will be
+    /// `[c, b, a]`.
+    pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
+        Self {
+            ops: self.ops,
+            data: self.data.reorder_columns(column_mapping),
+        }
+    }
 }
 
 impl fmt::Debug for StreamChunk {

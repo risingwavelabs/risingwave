@@ -119,8 +119,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::DatabaseV2(database.to_owned()))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -141,8 +140,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Delete, &Info::DatabaseV2(database))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -162,8 +160,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::SchemaV2(schema.to_owned()))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -184,8 +181,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Delete, &Info::SchemaV2(schema))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -223,8 +219,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -263,8 +258,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -299,8 +293,7 @@ where
                         .env
                         .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::TableV2(table))
-                        .await
-                        .into_inner();
+                        .await;
 
                     Ok(version)
                 }
@@ -337,8 +330,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -371,8 +363,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
+                .await;
 
             Ok(version)
         } else {
@@ -404,8 +395,7 @@ where
                         .env
                         .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::Source(source))
-                        .await
-                        .into_inner();
+                        .await;
 
                     Ok(version)
                 }
@@ -473,8 +463,7 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
+                .await;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -573,8 +562,7 @@ where
                     .env
                     .notification_manager()
                     .notify_frontend(Operation::Delete, &Info::Source(source))
-                    .await
-                    .into_inner();
+                    .await;
                 Ok(version)
             }
 

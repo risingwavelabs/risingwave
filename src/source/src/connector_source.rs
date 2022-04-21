@@ -108,10 +108,6 @@ impl SourceChunkBuilder for ConnectorStreamReader {}
 
 #[async_trait]
 impl StreamSourceReader for ConnectorStreamReader {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     async fn next(&mut self) -> Result<StreamChunk> {
         match self.reader.next().await.to_rw_result()? {
             None => Ok(StreamChunk::default()),

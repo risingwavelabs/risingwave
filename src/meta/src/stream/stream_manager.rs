@@ -58,7 +58,8 @@ pub struct CreateMaterializedViewContext {
     pub hash_mapping: Vec<ParallelUnitId>,
     /// Distribution key of materialize node in current mview.
     pub distribution_keys: Vec<i32>,
-
+    /// Used for allocating internal table ids.
+    pub next_local_table_id: u32,
     /// TODO: remove this when we deprecate Java frontend.
     pub is_legacy_frontend: bool,
 }
@@ -244,8 +245,11 @@ where
         let mut locations = ScheduledLocations::new();
         locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
+        let topological_order = table_fragments.generate_topological_order();
+
         // Schedule each fragment(actors) to nodes.
-        for fragment in table_fragments.fragments() {
+        for fragment_id in topological_order {
+            let fragment = table_fragments.fragments.get(&fragment_id).unwrap();
             self.scheduler
                 .schedule(fragment.clone(), &mut locations)
                 .await?;

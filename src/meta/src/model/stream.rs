@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -302,5 +302,86 @@ impl TableFragments {
                 )
             })
             .collect()
+    }
+
+    /// Generate toplogical order of fragments. If `index(a) < index(b)` in vec, then a is the
+    /// downstream of b.
+    pub fn generate_topological_order(&self) -> Vec<FragmentId> {
+        let mut actionable_fragment_id = VecDeque::new();
+
+        // If downstream_edges[x][y] exists, then there's an edge from x to y.
+        let mut downstream_edges: HashMap<u32, HashSet<u32>> = HashMap::new();
+
+        // Counts how many upstreams are there for a given fragment
+        let mut upstream_cnts: HashMap<u32, usize> = HashMap::new();
+
+        let mut result = vec![];
+
+        let mut actor_to_fragment_mapping = HashMap::new();
+
+        // Firstly, record actor -> fragment mapping
+        for (fragment_id, fragment) in &self.fragments {
+            for actor in &fragment.actors {
+                let ret = actor_to_fragment_mapping.insert(actor.actor_id, *fragment_id);
+                assert!(ret.is_none(), "duplicated actor id found");
+            }
+        }
+
+        // Then, generate the DAG of fragments
+        for (fragment_id, fragment) in &self.fragments {
+            for upstream_actor in &fragment.actors {
+                for dispatcher in &upstream_actor.dispatcher {
+                    for downstream_actor in &dispatcher.downstream_actor_id {
+                        let downstream_fragment_id =
+                            actor_to_fragment_mapping.get(downstream_actor).unwrap();
+
+                        let did_not_have = downstream_edges
+                            .entry(*fragment_id)
+                            .or_default()
+                            .insert(*downstream_fragment_id);
+
+                        if did_not_have {
+                            *upstream_cnts.entry(*downstream_fragment_id).or_default() += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Find actionable fragments
+        for fragment_id in self.fragments.keys() {
+            if upstream_cnts.get(fragment_id).is_none() {
+                actionable_fragment_id.push_back(*fragment_id);
+            }
+        }
+
+        // After that, we can generate topological order
+        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
+            result.push(fragment_id);
+
+            // Find if we can process more fragments
+            if let Some(downstreams) = downstream_edges.get(&fragment_id) {
+                for downstream_id in downstreams.iter() {
+                    let cnt = upstream_cnts
+                        .get_mut(downstream_id)
+                        .expect("the downstream should exist");
+
+                    *cnt -= 1;
+                    if *cnt == 0 {
+                        upstream_cnts.remove(downstream_id);
+                        actionable_fragment_id.push_back(*downstream_id);
+                    }
+                }
+            }
+        }
+
+        if !upstream_cnts.is_empty() {
+            // There are fragments that are not processed yet.
+            panic!("not a DAG");
+        }
+
+        assert_eq!(result.len(), self.fragments.len());
+
+        result
     }
 }

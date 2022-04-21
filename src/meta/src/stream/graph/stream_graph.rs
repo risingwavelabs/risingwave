@@ -21,8 +21,10 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::ProstFieldNotFound;
 
 use crate::cluster::WorkerId;
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
@@ -388,6 +390,8 @@ impl StreamGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,
+        table_id_offset: u32,
+        table_id_len: u32,
     ) -> Result<HashMap<LocalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
 
@@ -410,6 +414,8 @@ impl StreamGraphBuilder {
                 &mut dispatch_upstreams,
                 actor.get_nodes()?,
                 &mut upstream_actors,
+                table_id_offset,
+                table_id_len,
             )?);
 
             graph
@@ -450,6 +456,8 @@ impl StreamGraphBuilder {
         dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
+        table_id_offset: u32,
+        table_id_len: u32,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
@@ -458,6 +466,24 @@ impl StreamGraphBuilder {
             Node::ChainNode(_) => self.resolve_chain_node(ctx, dispatch_upstreams, stream_node),
             _ => {
                 let mut new_stream_node = stream_node.clone();
+                if let Node::HashJoinNode(node) = new_stream_node
+                    .node
+                    .as_mut()
+                    .ok_or(ProstFieldNotFound("prost stream node field not found"))?
+                {
+                    let left_table_id = (ctx.next_local_table_id + table_id_offset) as u64;
+                    let right_table_id = left_table_id + 1;
+                    node.left_table_ref_id = Some(TableRefId {
+                        table_id: left_table_id as i32,
+                        ..Default::default()
+                    });
+                    node.right_table_ref_id = Some(TableRefId {
+                        table_id: right_table_id as i32,
+                        ..Default::default()
+                    });
+                    ctx.next_local_table_id += 2;
+                }
+                assert!(ctx.next_local_table_id <= table_id_len);
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
                         Node::ExchangeNode(_) => {
@@ -474,6 +500,7 @@ impl StreamGraphBuilder {
                                 fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
+                                append_only: input.append_only,
                             };
                         }
                         Node::ChainNode(_) => {
@@ -486,6 +513,8 @@ impl StreamGraphBuilder {
                                 dispatch_upstreams,
                                 input,
                                 upstream_actor_id,
+                                table_id_offset,
+                                table_id_len,
                             )?;
                         }
                     }
@@ -573,6 +602,7 @@ impl StreamGraphBuilder {
                     fields: chain_node.upstream_fields.clone(),
                     operator_id: merge_node.operator_id,
                     identity: "MergeExecutor".to_string(),
+                    append_only: stream_node.append_only,
                 },
                 batch_plan_node,
             ];
@@ -584,6 +614,7 @@ impl StreamGraphBuilder {
                 operator_id: stream_node.operator_id,
                 identity: "ChainExecutor".to_string(),
                 fields: chain_node.upstream_fields.clone(),
+                append_only: stream_node.append_only,
             })
         } else {
             unreachable!()

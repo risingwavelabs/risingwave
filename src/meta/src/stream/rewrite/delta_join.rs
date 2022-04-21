@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::plan::Field;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -38,6 +39,7 @@ where
                 strategy: Some(Self::dispatch_no_shuffle()),
             })),
             input: vec![],
+            append_only: upstream.append_only,
         }
     }
 
@@ -82,6 +84,7 @@ where
                         strategy: Some(strategy.clone()),
                     })),
                     operator_id,
+                    append_only: upstream.append_only,
                 };
 
                 let child_fragment = self.build_and_add_fragment(upstream)?;
@@ -113,6 +116,7 @@ where
                 arrange_key_indexes,
             })),
             input: vec![exchange_node.clone()],
+            append_only: exchange_node.append_only,
         }
     }
 
@@ -139,6 +143,7 @@ where
                 exchange_node_arrangement.clone(),
                 exchange_node_stream.clone(),
             ],
+            append_only: exchange_node_stream.append_only,
         }
     }
 
@@ -180,6 +185,9 @@ where
         let exchange_a1l0 = self.build_exchange_for_delta_join(&node.input[1]);
         let exchange_a1l1 = self.build_exchange_for_delta_join(&node.input[1]);
 
+        let i0_length = node.input[0].fields.len();
+        let i1_length = node.input[1].fields.len();
+
         let (link_i1a1, input_1_frag, exchange_i1a1) =
             self.build_input_with_exchange(node.input.remove(1))?;
 
@@ -207,32 +215,35 @@ where
         );
 
         let lookup_0 = self.build_lookup_for_delta_join(
-            (&exchange_a0l0, &exchange_a1l0),
+            (&exchange_a1l0, &exchange_a0l0),
             (node.fields.clone(), node.pk_indices.clone()),
             LookupNode {
-                arrange_key: hash_join_node.left_key.clone(),
                 stream_key: hash_join_node.right_key.clone(),
+                arrange_key: hash_join_node.left_key.clone(),
                 use_current_epoch: false,
                 // will be filled later in StreamFragment::seal
                 arrange_fragment_id: u32::MAX,
                 arrange_local_fragment_id: arrange_0_frag.fragment_id.as_local_id(),
                 arrange_operator_id: arrange_0_frag.node.unwrap().operator_id,
-                column_mapping: vec![], // TODO: fill column mapping
+                column_mapping: (i1_length..i1_length + i0_length)
+                    .chain(0..i1_length)
+                    .map(|x| x as _)
+                    .collect_vec(),
             },
         );
 
         let lookup_1 = self.build_lookup_for_delta_join(
-            (&exchange_a1l1, &exchange_a0l1),
+            (&exchange_a0l1, &exchange_a1l1),
             (node.fields.clone(), node.pk_indices.clone()),
             LookupNode {
-                arrange_key: hash_join_node.right_key.clone(),
                 stream_key: hash_join_node.left_key.clone(),
+                arrange_key: hash_join_node.right_key.clone(),
                 use_current_epoch: true,
                 // will be filled later in StreamFragment::seal
                 arrange_fragment_id: u32::MAX,
                 arrange_local_fragment_id: arrange_1_frag.fragment_id.as_local_id(),
                 arrange_operator_id: arrange_1_frag.node.unwrap().operator_id,
-                column_mapping: vec![], // TODO: fill column mapping
+                column_mapping: (0..i0_length + i1_length).map(|x| x as _).collect_vec(),
             },
         );
 
@@ -289,6 +300,7 @@ where
             pk_indices: node.pk_indices.clone(),
             node: Some(Node::UnionNode(UnionNode {})),
             input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
+            append_only: node.append_only,
         };
 
         self.fragment_graph.add_edge(

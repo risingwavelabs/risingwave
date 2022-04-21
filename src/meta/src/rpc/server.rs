@@ -38,9 +38,7 @@ use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{
-    CatalogManager, MemEpochGenerator, MetaOpts, MetaSrvEnv, StoredCatalogManager,
-};
+use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, StoredCatalogManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -115,8 +113,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     opts: MetaOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let epoch_generator = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), epoch_generator.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -196,7 +193,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
-    let epoch_srv = EpochServiceImpl::new(epoch_generator.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager);
     let ddl_srv = DdlServiceImpl::<S>::new(
@@ -249,12 +245,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-            .add_service(EpochServiceServer::new(epoch_srv))
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
             .add_service(CatalogServiceServer::new(catalog_srv))
             .add_service(ClusterServiceServer::new(cluster_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
+            .add_service(EpochServiceServer::new(EpochServiceImpl::default()))
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .serve_with_incoming_shutdown(

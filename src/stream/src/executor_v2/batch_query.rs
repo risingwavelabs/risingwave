@@ -22,7 +22,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
+use super::error::StreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};
 use crate::executor_v2::BoxedMessageStream;
 
@@ -67,7 +67,7 @@ where
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
         let mut iter = self.table.iter(epoch).await?;
 
