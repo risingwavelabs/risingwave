@@ -64,12 +64,12 @@ impl HummockStorage {
         if reversed {
             for batch in shared_buffer {
                 overlapped_backward_iters
-                    .push(Box::new(batch.backward_into_iter()) as BoxedBackwardHummockIterator)
+                    .push(Box::new(batch.into_backward_iter()) as BoxedBackwardHummockIterator)
             }
         } else {
             for batch in shared_buffer {
                 overlapped_forward_iters
-                    .push(Box::new(batch.forward_into_iter()) as BoxedForwardHummockIterator)
+                    .push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator)
             }
         }
 

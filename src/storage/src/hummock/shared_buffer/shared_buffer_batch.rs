@@ -71,11 +71,11 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn forward_into_iter(self) -> SharedBufferBatchIterator<Forward> {
+    pub fn into_forward_iter(self) -> SharedBufferBatchIterator<Forward> {
         SharedBufferBatchIterator::<Forward>::new(self.inner)
     }
 
-    pub fn backward_into_iter(self) -> SharedBufferBatchIterator<Backward> {
+    pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
         SharedBufferBatchIterator::<Backward>::new(self.inner)
     }
 
@@ -268,7 +268,7 @@ mod tests {
         );
 
         // Forward iterator
-        let mut iter = shared_buffer_batch.clone().forward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.rewind().await.unwrap();
         let mut output = vec![];
         while iter.is_valid() {
@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(output, shared_buffer_items);
 
         // Backward iterator
-        let mut reverse_iter = shared_buffer_batch.clone().backward_into_iter();
+        let mut reverse_iter = shared_buffer_batch.clone().into_backward_iter();
         reverse_iter.rewind().await.unwrap();
         let mut output = vec![];
         while reverse_iter.is_valid() {
@@ -313,7 +313,7 @@ mod tests {
             SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return
-        let mut iter = shared_buffer_batch.clone().forward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(0, epoch))
             .await
             .unwrap();
@@ -326,14 +326,14 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to a key > the last key, expect no items to return
-        let mut iter = shared_buffer_batch.clone().forward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(4, epoch))
             .await
             .unwrap();
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with current epoch, expect last two items to return
-        let mut iter = shared_buffer_batch.clone().forward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch))
             .await
             .unwrap();
@@ -346,7 +346,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
-        let mut iter = shared_buffer_batch.clone().forward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch + 1))
             .await
             .unwrap();
@@ -359,7 +359,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with old epoch, expect last item to return
-        let mut iter = shared_buffer_batch.clone().forward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch - 1))
             .await
             .unwrap();
@@ -371,14 +371,14 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to a key < 1st key, expect no items to return
-        let mut iter = shared_buffer_batch.clone().backward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(0, epoch))
             .await
             .unwrap();
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to a key > the last key, expect all items to return
-        let mut iter = shared_buffer_batch.clone().backward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(4, epoch))
             .await
             .unwrap();
@@ -391,7 +391,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with current epoch, expect first two items to return
-        let mut iter = shared_buffer_batch.clone().backward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch))
             .await
             .unwrap();
@@ -404,7 +404,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
-        let mut iter = shared_buffer_batch.clone().backward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch + 1))
             .await
             .unwrap();
@@ -416,7 +416,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
-        let mut iter = shared_buffer_batch.clone().backward_into_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch - 1))
             .await
             .unwrap();
