@@ -125,7 +125,7 @@ impl From<StorageError> for StreamExecutorError {
     }
 }
 
-/// Always convert [`TracedStreamExecutorError`] to stream error of `RwResult`.
+/// Always convert [`StreamExecutorError`] to stream error variant of [`RwError`].
 impl From<StreamExecutorError> for RwError {
     fn from(h: StreamExecutorError) -> Self {
         ErrorCode::StreamError(h.into()).into()
