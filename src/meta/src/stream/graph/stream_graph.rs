@@ -518,6 +518,7 @@ where
                                 fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
+                                append_only: input.append_only,
                             };
                         }
                         Node::ChainNode(_) => {
@@ -610,6 +611,7 @@ where
                     fields: chain_node.upstream_fields.clone(),
                     operator_id: merge_node.operator_id,
                     identity: "MergeExecutor".to_string(),
+                    append_only: stream_node.append_only,
                 },
                 batch_plan_node,
             ];
@@ -621,6 +623,7 @@ where
                 operator_id: stream_node.operator_id,
                 identity: "ChainExecutor".to_string(),
                 fields: chain_node.upstream_fields.clone(),
+                append_only: stream_node.append_only,
             })
         } else {
             unreachable!()
