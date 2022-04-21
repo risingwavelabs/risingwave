@@ -25,7 +25,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
 use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -34,14 +34,10 @@ use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDO
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
-    ///
-    /// `MaterializeExecutor`
     pub arrangement: Box<dyn Executor>,
 
     /// The side for stream. It can be any stream, but it will generally be a
     /// `MaterializeExecutor`.
-    ///
-    /// `MaterializeExecutor`
     pub stream: Box<dyn Executor>,
 
     /// The keyspace for arrangement. [`LookupExecutor`] will use this keyspace to read the state
@@ -54,23 +50,22 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// `MaterializeExecutor`. For example, if we already have a table with 3 columns: `a, b,
     /// _row_id`, and we create an arrangement with join key `a` on it. `arrangement_col_descs`
     /// should contain all 3 columns.
-    ///
-    /// `MaterializeExecutor`
     pub arrangement_col_descs: Vec<ColumnDesc>,
 
-    /// Should be the same as [`OrderPair`] in the arrangement.
+    /// Should only contain [`OrderPair`] for arrange in the arrangement.
     ///
     /// Still using the above `a, b, _row_id` example. If we create an arrangement with join key
-    /// `a`, there will be two elements in `arrangement_order_rules`.
+    /// `a`, there will be 3 elements in `arrangement_col_descs`, and only 1 element in
+    /// `arrangement_order_rules`.
     ///
-    /// * The first element is the order rule for `a`, which is the join key. Join keys should
+    /// * The only element is the order rule for `a`, which is the join key. Join keys should
     ///   always come first.
-    /// * The second element is the original primary key for the MV.
     ///
-    /// These two parts now compose the arrange keys for the arrangement.
+    /// For the MV pks, they will only be contained in `arrangement_col_descs`, without being part
+    /// of this `arrangement_order_rules`.
     pub arrangement_order_rules: Vec<OrderPair>,
 
-    /// Primary key indices of the lookup result.
+    /// Primary key indices of the lookup result (after reordering).
     ///
     /// [`LookupExecutor`] will lookup a row from the stream using the join key in the arrangement.
     /// Therefore, the output of the [`LookupExecutor`] will be:
@@ -79,9 +74,19 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// | stream columns | arrangement columns |
     /// ```
     ///
+    /// ... and will be reordered by `output_column_reorder_idx`.
+    ///
     /// The optimizer should select pk with pk of the stream columns, and pk of the original
     /// materialized view (upstream of arrangement).
     pub pk_indices: PkIndices,
+
+    /// Schema of the lookup result (after reordering).
+    pub schema: Schema,
+
+    /// By default, the output of [`LookupExecutor`] is `stream columns + arrangement columns`.
+    /// The executor will do a reorder of columns before producing output, so that data can be
+    /// consistent among A lookup B and B lookup A.
+    pub column_mapping: Vec<usize>,
 
     /// Whether to use the current epoch of the arrangement to lookup.
     ///
@@ -112,16 +117,20 @@ impl<S: StateStore> LookupExecutor<S> {
             use_current_epoch,
             stream_join_key_indices,
             arrange_join_key_indices,
+            schema: output_schema,
+            column_mapping,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
 
-        // output schema: | arrange | stream |
-        let schema_fields = arrangement
+        // internal output schema: | stream | arrange |
+        // will be rewritten using `column_mapping`.
+
+        let schema_fields = stream
             .schema()
             .fields
             .iter()
-            .chain(stream.schema().fields.iter())
+            .chain(arrangement.schema().fields.iter())
             .cloned()
             .collect_vec();
 
@@ -129,36 +138,36 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let schema = Schema::new(schema_fields);
 
-        let output_data_types = schema.data_types();
+        let chunk_data_types = schema.data_types();
         let arrangement_datatypes = arrangement.schema().data_types();
         let stream_datatypes = stream.schema().data_types();
 
         let arrangement_pk_indices = arrangement.pk_indices().to_vec();
         let stream_pk_indices = stream.pk_indices().to_vec();
 
-        let arrangement_order_types = arrangement_order_rules
-            .iter()
-            .map(|x| x.order_type)
-            .collect_vec();
-
-        // check if arrange join key is the prefix of the ordered pairs
+        // check if arrange join key is exactly the same as order rules
         {
             let mut arrange_join_key_indices = arrange_join_key_indices.clone();
             arrange_join_key_indices.sort_unstable();
-            assert!(
-                arrange_join_key_indices
-                    .iter()
-                    .enumerate()
-                    .all(|(idx, pos)| idx == *pos),
-                "invalid join key"
+            let mut arrangement_order_types_indices = arrangement_order_rules
+                .iter()
+                .map(|x| x.column_idx)
+                .collect_vec();
+            arrangement_order_types_indices.sort_unstable();
+            assert_eq!(
+                arrange_join_key_indices,
+                &arrangement_order_types_indices[0..arrange_join_key_indices.len()],
+                "invalid join key: arrange_join_key_indices = {:?}, order_rules: {:?}",
+                arrange_join_key_indices,
+                arrangement_order_rules
             );
         }
 
         // compute the arrange keys used for the lookup
-        let arrangement_order_types = arrange_join_key_indices
+        let arrangement_order_types = arrangement_order_rules
             .iter()
-            .map(|idx| arrangement_order_types[*idx])
-            .collect_vec();
+            .map(|x| x.order_type)
+            .collect();
 
         // check whether join keys are of the same length.
         assert_eq!(
@@ -166,9 +175,43 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices.len()
         );
 
+        // check whether output column mapping is valid.
+        assert_eq!(
+            column_mapping.len(),
+            output_column_length,
+            "column mapping mismatched"
+        );
+
+        // resolve mapping from join keys in stream row -> joins keys for arrangement.
+        let key_indices_mapping = arrangement_order_rules
+            .iter()
+            .map(|x| x.column_idx) // the required column idx in this position
+            .map(|x| {
+                arrange_join_key_indices
+                    .iter()
+                    .position(|y| *y == x)
+                    .unwrap()
+            }) // the position of the item in join keys
+            .map(|x| stream_join_key_indices[x]) // the actual column idx in stream
+            .collect_vec();
+
+        // check the inferred schema is really the same as the output schema of the lookup executor.
+        assert_eq!(
+            output_schema
+                .fields
+                .iter()
+                .map(|x| x.data_type())
+                .collect_vec(),
+            column_mapping
+                .iter()
+                .map(|x| schema.fields[*x].data_type())
+                .collect_vec(),
+            "mismatched output schema"
+        );
+
         Self {
-            output_data_types,
-            schema,
+            chunk_data_types,
+            schema: output_schema,
             pk_indices,
             last_barrier: None,
             stream_executor: Some(stream),
@@ -181,14 +224,18 @@ impl<S: StateStore> LookupExecutor<S> {
             arrangement: ArrangeJoinSide {
                 pk_indices: arrangement_pk_indices,
                 col_types: arrangement_datatypes,
+                // special thing about this pair of serializer and deserializer: the serializer only
+                // serializes join key, while the deserializer will take join key + pk into account.
                 deserializer: CellBasedRowDeserializer::new(arrangement_col_descs.clone()),
-                col_descs: arrangement_col_descs,
                 serializer: OrderedRowSerializer::new(arrangement_order_types),
+                col_descs: arrangement_col_descs,
                 order_rules: arrangement_order_rules,
-                join_key_indices: arrange_join_key_indices,
+                key_indices: arrange_join_key_indices,
                 keyspace: arrangement_keyspace,
                 use_current_epoch,
             },
+            column_mapping,
+            key_indices_mapping,
         }
     }
 
@@ -197,7 +244,7 @@ impl<S: StateStore> LookupExecutor<S> {
     /// messages until there's one.
     ///
     /// If we can use `async_stream` to write this part, things could be easier.
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
         let input = if self.arrangement.use_current_epoch {
             stream_lookup_arrange_this_epoch(
@@ -242,7 +289,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
                     let mut builder = StreamChunkBuilder::new(
                         PROCESSING_WINDOW_SIZE,
-                        &self.output_data_types,
+                        &self.chunk_data_types,
                         0,
                         self.stream.col_types.len(),
                     )
@@ -258,14 +305,14 @@ impl<S: StateStore> LookupExecutor<S> {
                                 .append_row_with_limit(*op, &row, &matched_row)
                                 .map_err(StreamExecutorError::eval_error)?
                             {
-                                yield Message::Chunk(chunk);
+                                yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
                     if let Some(chunk) = builder.take().map_err(StreamExecutorError::eval_error)? {
-                        yield Message::Chunk(chunk);
+                        yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
                     }
                 }
             }
@@ -279,14 +326,17 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.
-    async fn lookup_one_row(&mut self, row: &RowRef<'_>, lookup_epoch: u64) -> Result<Vec<Row>> {
+    async fn lookup_one_row(
+        &mut self,
+        stream_row: &RowRef<'_>,
+        lookup_epoch: u64,
+    ) -> Result<Vec<Row>> {
         // TODO: add a cache for arrangement in an upstream executor
 
         // Serialize join key to a state store key.
         let key_prefix = {
-            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", row.row_by_indices(&self.arrangement.join_key_indices));
-
-            let row = row.datum_refs_by_indices(&self.arrangement.join_key_indices);
+            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", stream_row.row_by_indices(&self.stream.key_indices));
+            let row = stream_row.datum_refs_by_indices(&self.key_indices_mapping);
             let mut key_prefix = vec![];
             self.arrangement
                 .serializer

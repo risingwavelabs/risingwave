@@ -202,7 +202,9 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into()])?;
+        let mut reader = source
+            .stream_reader(TableV2ReaderContext, vec![0.into(), 1.into()])
+            .await?;
 
         // Delete
         let mut delete_executor =
@@ -223,7 +225,6 @@ mod tests {
         });
 
         // Read
-        reader.open().await?;
         let chunk = reader.next().await?;
 
         assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);

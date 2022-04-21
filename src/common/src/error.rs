@@ -129,6 +129,10 @@ pub enum ErrorCode {
     UnknownError(String),
 }
 
+pub fn internal_error(msg: impl Into<String>) -> RwError {
+    ErrorCode::InternalError(msg.into()).into()
+}
+
 #[derive(Clone)]
 pub struct RwError {
     inner: Arc<ErrorCode>,

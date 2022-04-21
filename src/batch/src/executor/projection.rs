@@ -115,8 +115,9 @@ mod tests {
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
+    use crate::executor::executor2_wrapper::Executor2Wrapper;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::values::ValuesExecutor;
+    use crate::executor2::{Executor2, ValuesExecutor2};
     use crate::*;
 
     #[tokio::test]
@@ -169,16 +170,16 @@ mod tests {
     async fn test_project_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
 
-        let values_executor = ValuesExecutor::new(
+        let values_executor2: Box<dyn Executor2> = Box::new(ValuesExecutor2::new(
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
             1024,
-        );
+        ));
 
         let mut proj_executor = ProjectionExecutor {
             expr: vec![Box::new(literal)],
-            child: Box::new(values_executor),
+            child: Box::new(Executor2Wrapper::from(values_executor2)),
             schema: schema_unnamed!(DataType::Int32),
             identity: "ProjectionExecutor".to_string(),
         };

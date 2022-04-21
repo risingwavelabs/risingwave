@@ -16,11 +16,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::{StreamClients, StreamClientsRef};
-#[cfg(any(test, feature = "test"))]
-use crate::manager::MemEpochGenerator;
 use crate::manager::{
-    EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
-    NotificationManager, NotificationManagerRef,
+    IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
 };
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
@@ -38,9 +35,6 @@ where
 
     /// meta store.
     meta_store: Arc<S>,
-
-    /// epoch generator.
-    epoch_generator: EpochGeneratorRef,
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
@@ -62,20 +56,15 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        opts: MetaOpts,
-        meta_store: Arc<S>,
-        epoch_generator: EpochGeneratorRef,
-    ) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
-        let notification_manager = Arc::new(NotificationManager::new(epoch_generator.clone()));
+        let notification_manager = Arc::new(NotificationManager::new());
 
         Self {
             id_gen_manager,
             meta_store,
-            epoch_generator,
             notification_manager,
             stream_clients,
             opts: opts.into(),
@@ -96,14 +85,6 @@ where
 
     pub fn id_gen_manager(&self) -> &IdGeneratorManager<S> {
         self.id_gen_manager.deref()
-    }
-
-    pub fn epoch_generator_ref(&self) -> EpochGeneratorRef {
-        self.epoch_generator.clone()
-    }
-
-    pub fn epoch_generator(&self) -> &dyn EpochGenerator {
-        self.epoch_generator.deref()
     }
 
     pub fn notification_manager_ref(&self) -> NotificationManagerRef {
@@ -130,14 +111,12 @@ impl MetaSrvEnv<MemStore> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let epoch_generator = Arc::new(MemEpochGenerator::new());
-        let notification_manager = Arc::new(NotificationManager::new(epoch_generator.clone()));
+        let notification_manager = Arc::new(NotificationManager::new());
         let stream_clients = Arc::new(StreamClients::default());
 
         Self {
             id_gen_manager,
             meta_store,
-            epoch_generator,
             notification_manager,
             stream_clients,
             opts: MetaOpts::default().into(),

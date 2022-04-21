@@ -25,7 +25,7 @@ use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::Message;
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{Barrier, Executor, MessageStream};
 
 /// Join side of Lookup Executor's stream
@@ -61,11 +61,16 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     /// The column descriptors of columns in arrangement
     pub col_descs: Vec<ColumnDesc>,
 
-    /// Order rules of the arrangement (used for lookup)
+    /// Order rules of the arrangement (only join key is needed, pk should not be included, used
+    /// for lookup)
     pub order_rules: Vec<OrderPair>,
 
     /// Key indices for the join
-    pub join_key_indices: Vec<usize>,
+    ///
+    /// The key indices of the arrange side won't be used for the lookup process, but we still
+    /// record it here in case anyone would use it in the future.
+    #[allow(dead_code)]
+    pub key_indices: Vec<usize>,
 
     /// Keyspace for the arrangement
     pub keyspace: Keyspace<S>,
@@ -97,7 +102,7 @@ pub enum ArrangeMessage {
 
 pub type BarrierAlignedMessage = Either<Message, Message>;
 
-#[try_stream(ok = Message, error = TracedStreamExecutorError)]
+#[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Barrier) {
     #[for_await]
     for item in stream {
@@ -121,7 +126,7 @@ fn prefer_right(_: &mut ()) -> PollNext {
 
 /// A biased barrier aligner which prefers message from the right side. Barrier message will be
 /// available for both left and right side, instead of being combined.
-#[try_stream(ok = BarrierAlignedMessage, error = TracedStreamExecutorError)]
+#[try_stream(ok = BarrierAlignedMessage, error = StreamExecutorError)]
 pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) {
     let mut left = Box::pin(left);
     let mut right = Box::pin(right);
@@ -188,7 +193,7 @@ pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) 
 /// * `[Msg`] Arrangement (batch)
 /// * `[Do`] replicate batch with epoch `[2`]
 /// * Barrier (prev = `[2`], current = `[3`])
-#[try_stream(ok = ArrangeMessage, error = TracedStreamExecutorError)]
+#[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
 pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
@@ -226,7 +231,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
 /// * `[Msg`] Stream (key = a)
 /// * `[Do`] lookup `a` in arrangement of epoch `[2`] (current epoch)
 /// * Barrier (prev = `[2`], current = `[3`])
-#[try_stream(ok = ArrangeMessage, error = TracedStreamExecutorError)]
+#[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
 pub async fn stream_lookup_arrange_this_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,

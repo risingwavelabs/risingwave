@@ -12,23 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::epoch_service_server::EpochService;
 use risingwave_pb::meta::{GetEpochRequest, GetEpochResponse};
 use tonic::{Request, Response, Status};
 
-use crate::manager::EpochGeneratorRef;
+#[derive(Clone, Default)]
+pub struct EpochServiceImpl;
 
-#[derive(Clone)]
-pub struct EpochServiceImpl {
-    epoch_generator: EpochGeneratorRef,
-}
-
-impl EpochServiceImpl {
-    pub fn new(epoch_generator: EpochGeneratorRef) -> Self {
-        EpochServiceImpl { epoch_generator }
-    }
-}
-
+// TODO: remove EpochService when Java frontend deprecated.
 #[async_trait::async_trait]
 impl EpochService for EpochServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
@@ -39,7 +31,7 @@ impl EpochService for EpochServiceImpl {
         let _req = request.into_inner();
         Ok(Response::new(GetEpochResponse {
             status: None,
-            epoch: self.epoch_generator.generate().into_inner(),
+            epoch: Epoch::now().0,
         }))
     }
 }

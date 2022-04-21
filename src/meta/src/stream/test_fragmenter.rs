@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
@@ -146,6 +145,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
+        ..Default::default()
     };
 
     // filter node
@@ -168,6 +168,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 2,
         identity: "FilterExecutor".to_string(),
+        ..Default::default()
     };
 
     // simple agg node
@@ -181,6 +182,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 3,
         identity: "GlobalSimpleAggExecutor".to_string(),
+        ..Default::default()
     };
 
     // exchange node
@@ -196,6 +198,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
+        ..Default::default()
     };
 
     // agg node
@@ -209,6 +212,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 5,
         identity: "GlobalSimpleAggExecutor".to_string(),
+        ..Default::default()
     };
 
     // project node
@@ -235,6 +239,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![1, 2],
         operator_id: 6,
         identity: "ProjectExecutor".to_string(),
+        ..Default::default()
     };
 
     // mview node
@@ -251,6 +256,7 @@ fn make_stream_node() -> StreamNode {
         fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
+        ..Default::default()
     }
 }
 
@@ -259,11 +265,11 @@ async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
+    let parallel_degree = 4;
     let fragmenter = StreamFragmenter::new(
         env.id_gen_manager_ref(),
         fragment_manager,
-        hash_mapping,
+        parallel_degree,
         false,
     );
 

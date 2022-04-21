@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
@@ -88,8 +89,8 @@ pub struct CommandContext<'a, S> {
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
     pub info: &'a BarrierActorInfo,
 
-    pub prev_epoch: u64,
-    pub curr_epoch: u64,
+    pub prev_epoch: &'a Epoch,
+    pub curr_epoch: &'a Epoch,
 
     command: Command,
 }
@@ -99,8 +100,8 @@ impl<'a, S> CommandContext<'a, S> {
         fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
-        prev_epoch: u64,
-        curr_epoch: u64,
+        prev_epoch: &'a Epoch,
+        curr_epoch: &'a Epoch,
         command: Command,
     ) -> Self {
         Self {
