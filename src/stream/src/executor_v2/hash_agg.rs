@@ -35,7 +35,7 @@ use crate::executor::{pk_input_arrays, PkDataTypes, PkIndicesRef};
 use crate::executor_v2::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggState,
 };
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
@@ -293,7 +293,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
-    #[try_stream(ok = StreamChunk, error = TracedStreamExecutorError)]
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn flush_data<'a>(
         &HashAggExecutorExtra::<S> {
             ref key_indices,
@@ -384,7 +384,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let HashAggExecutor { input, extra, .. } = self;
 

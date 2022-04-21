@@ -97,7 +97,7 @@ jobs:
       # please double check whether there is performance degradation. Only increase the timeout
       # if the degradation is reasonable or to be fixed soon.
 
-      - name: e2e test, streaming, Rust frontend, 3 node
+      - name: e2e, ci-3cn-1fe, streaming
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
@@ -106,16 +106,16 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
-      - name: e2e test, streaming, Rust frontend, 1 node
+      - name: e2e, ci-3cn-1fe, delta join
         timeout-minutes: 2
         run: |
-          ~/cargo-make/makers ci-start ci-1cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
+          ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
-      - name: e2e test w/ Rust frontend ci-3node, batch, distributed
+      - name: e2e, ci-3cn-1fe, batch distributed
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
@@ -125,7 +125,7 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
-      - name: e2e test streaming 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+      - name: e2e test streaming 3-node (legacy frontend)
         timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
@@ -134,7 +134,7 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
-      - name: e2e test batch 3-node
+      - name: e2e test batch 3-node (legacy frontend)
         timeout-minutes: 2
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node

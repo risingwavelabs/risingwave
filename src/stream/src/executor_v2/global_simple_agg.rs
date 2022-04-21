@@ -28,7 +28,7 @@ use crate::executor::{pk_input_array_refs, PkIndicesRef};
 use crate::executor_v2::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_agg_state, AggCall, AggState,
 };
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, Message, PkIndices};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
@@ -222,7 +222,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(Some(chunk))
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let SimpleAggExecutor {
             input,
