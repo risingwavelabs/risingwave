@@ -15,17 +15,6 @@
       StreamExchange { dist: HashShard([1]) }
         StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
-    values(cast(1 as bigint));
-  batch_plan: |
-    BatchValues { rows: [[1:Int32::Int64]] }
-- sql: |
-    values(not true);
-  batch_plan: |
-    BatchValues { rows: [[Not(true:Boolean)]] }
-- sql: |
-    values(must_be_unimplemented_func(1));
-  binder_error: 'Feature is not yet implemented: unsupported function: "must_be_unimplemented_func", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
-- sql: |
     values(sum(1));
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
 - sql: |
