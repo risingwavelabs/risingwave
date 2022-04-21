@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
@@ -112,15 +113,18 @@ impl StreamSourceReader for ConnectorStreamReader {
         Ok(())
     }
 
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)> {
+        let mut split_offset_mapping: HashMap<String, String> = HashMap::new();
         match self.reader.next().await.to_rw_result()? {
-            None => Ok(StreamChunk::default()),
+            None => Ok((StreamChunk::default(), split_offset_mapping)),
             Some(batch) => {
                 let mut events = Vec::with_capacity(batch.len());
 
                 for msg in batch {
                     if let Some(content) = msg.payload {
                         events.push(self.parser.parse(content.as_ref(), &self.columns)?);
+                        
+                        *split_offset_mapping.entry(msg.split_id).or_insert("".to_string()) = msg.offset;
                     }
                 }
                 let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
@@ -130,11 +134,11 @@ impl StreamSourceReader for ConnectorStreamReader {
                     rows.extend(event.rows);
                     ops.extend(event.ops);
                 }
-                Ok(StreamChunk::new(
+                Ok((StreamChunk::new(
                     ops,
                     Self::build_columns(&self.columns, rows.as_ref())?,
                     None,
-                ))
+                ), split_offset_mapping))
             }
         }
     }

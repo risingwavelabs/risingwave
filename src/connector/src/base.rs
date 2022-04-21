@@ -33,7 +33,7 @@ use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
 use crate::utils::AnyhowProperties;
 use crate::{kafka, kinesis, pulsar, Properties};
 
-pub const UPSTREAM_SOURCE_KEY: &str = "connector";
+const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
 const PULSAR_SOURCE: &str = "pulsar";

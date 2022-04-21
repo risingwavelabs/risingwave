@@ -30,6 +30,7 @@
 #![feature(mutex_unlock)]
 
 use std::fmt::Debug;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
@@ -84,7 +85,7 @@ impl StreamSourceReader for SourceStreamReaderImpl {
         }
     }
 
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)> {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await,
             SourceStreamReaderImpl::Connector(c) => c.next().await,
@@ -141,5 +142,5 @@ pub trait StreamSourceReader: Send + Sync + 'static {
 
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunk>;
+    async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)>;
 }

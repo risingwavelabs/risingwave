@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -54,7 +55,7 @@ struct SourceReader {
 
 /// `SourceReader` will be turned into this stream type.
 type ReaderStream =
-    Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<StreamChunk>>> + Send>>;
+    Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<(StreamChunk, HashMap<String, String>)>>> + Send>>;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -230,7 +231,7 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl SourceReader {
-    #[try_stream(ok = StreamChunk, error = RwError)]
+    #[try_stream(ok = (StreamChunk, HashMap<String, String>), error = RwError)]
     async fn stream_reader(mut stream_reader: Box<dyn StreamSourceReader>) {
         loop {
             match stream_reader.next().await {
@@ -264,7 +265,7 @@ impl SourceReader {
         PollNext::Left
     }
 
-    pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunk>>> {
+    pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<(StreamChunk, HashMap<String, String>)>>> {
         let stream_reader = Self::stream_reader(self.stream_reader.unwrap());
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
         select_with_strategy(
@@ -376,11 +377,14 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
             Some(stream) => {
                 match stream.as_mut().next().await {
                     // This branch will be preferred.
-                    Some(Either::Left(message)) => message,
+                    Some(Either::Left(message)) => {
+
+                        message
+                    },
 
                     // If there's barrier, this branch will be deferred.
                     Some(Either::Right(chunk)) => {
-                        let mut chunk = chunk?;
+                        let (mut chunk, mut split_offset_mapping) = chunk?;
                         // Refill row id only if not a table source.
                         // Note(eric): Currently, rows from external sources are filled with row_ids
                         // here, but rows from tables (by insert statements)
@@ -389,6 +393,14 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                         // TODO: in the future, we may add row_id column here for TableV2 as well
                         if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                             chunk = self.refill_row_id_column(chunk);
+                        }
+
+                        let connector_type = match self.source_desc.source.as_ref() {
+                            SourceImpl::Connector(source) => source.config.get_connector_type()?,
+                            _ => "".to_string(),
+                        };
+                        if !connector_type.is_empty() {
+
                         }
 
                         self.metrics

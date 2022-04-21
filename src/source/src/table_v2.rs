@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 use std::sync::RwLock;
 
 use async_trait::async_trait;
@@ -130,7 +131,7 @@ impl StreamSourceReader for TableV2StreamReader {
         Ok(())
     }
 
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)> {
         let (chunk, notifier) = self
             .rx
             .recv()
@@ -152,7 +153,7 @@ impl StreamSourceReader for TableV2StreamReader {
         // Notify about that we've taken the chunk.
         notifier.send(chunk.cardinality()).ok();
 
-        Ok(chunk)
+        Ok((chunk, HashMap::new()))
     }
 }
 
@@ -236,7 +237,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.0.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }
