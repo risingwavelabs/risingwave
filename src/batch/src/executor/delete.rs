@@ -225,7 +225,6 @@ mod tests {
         });
 
         // Read
-        reader.open().await?;
         let chunk = reader.next().await?;
 
         assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);

@@ -18,7 +18,7 @@ env:
   RUST_TOOLCHAIN: nightly-2022-04-09
   CACHE_KEY_SUFFIX: v20220412
   CARGO_TERM_COLOR: always
-  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
+  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
@@ -224,21 +224,21 @@ jobs:
         run: |
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
-      - name: e2e test, streaming, Rust frontend, 3 node
+      - name: e2e, ci-3cn-1fe, streaming
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test, streaming, Rust frontend, 1 node
+      - name: e2e, ci-3cn-1fe, delta join
         timeout-minutes: 2
         run: |
-          ~/cargo-make/makers ci-start ci-1cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming_1node/**/*.slt'
+          ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test w/ Rust frontend ci-3node, batch, distributed
+      - name: e2e, ci-3cn-1fe, batch distributed
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
@@ -246,14 +246,14 @@ jobs:
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node
+      - name: e2e test streaming 3-node (legacy frontend)
         timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test batch 3-node
+      - name: e2e test batch 3-node (legacy frontend)
         timeout-minutes: 2
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
