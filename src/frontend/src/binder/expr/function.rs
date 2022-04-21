@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -76,10 +76,7 @@ impl Binder {
                     .into())
                 }
             };
-            Ok(FunctionCall::new_or_else(function_type, inputs, |args| {
-                Self::err_unsupported_func(&function_name, args)
-            })?
-            .into())
+            Ok(FunctionCall::new(function_type, inputs)?.into())
         } else {
             Err(ErrorCode::NotImplemented(
                 format!("unsupported function: {:?}", f.name),
@@ -87,18 +84,6 @@ impl Binder {
             )
             .into())
         }
-    }
-
-    fn err_unsupported_func(function_name: &str, inputs: &[ExprImpl]) -> RwError {
-        let args = inputs
-            .iter()
-            .map(|i| format!("{:?}", i.return_type()))
-            .join(",");
-        ErrorCode::NotImplemented(
-            format!("function {}({}) doesn't exist", function_name, args),
-            112.into(),
-        )
-        .into()
     }
 
     /// Rewrite the arguments to be consistent with the `round` signature:

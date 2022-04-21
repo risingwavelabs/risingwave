@@ -102,23 +102,12 @@ impl Binder {
     }
 
     pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
-        Ok(FunctionCall::new_or_else(
+        Ok(FunctionCall::new(
             ExprType::Extract,
             vec![
                 self.bind_string(field.to_string())?.into(),
                 self.bind_expr(expr)?,
             ],
-            |inputs| {
-                ErrorCode::NotImplemented(
-                    format!(
-                        "function extract({} from {:?}) doesn't exist",
-                        field,
-                        inputs[1].return_type()
-                    ),
-                    112.into(),
-                )
-                .into()
-            },
         )?
         .into())
     }
