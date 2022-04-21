@@ -17,6 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::optimizer::property::Distribution;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -28,11 +29,17 @@ pub struct StreamTopN {
 impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
+        let dist = match logical.input().distribution() {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+        let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.input().distribution().clone(),
-            logical.input().order().clone(),
+            logical.base.pk_indices.to_vec(),
+            dist,
+            false,
         );
         StreamTopN { base, logical }
     }
