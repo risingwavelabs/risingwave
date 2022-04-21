@@ -47,12 +47,9 @@ where
     match original_indices.last() {
         Some(last_idx) => {
             let mut original_data = Vec::with_capacity(*last_idx as usize + 1);
-            original_indices
-                .iter()
-                .zip_eq(data)
-                .for_each(|(&idx, &x)| {
-                    original_data.resize(idx as usize + 1, x);
-                });
+            original_indices.iter().zip_eq(data).for_each(|(&idx, &x)| {
+                original_data.resize(idx as usize + 1, x);
+            });
             original_data
         }
         None => Vec::new(),
