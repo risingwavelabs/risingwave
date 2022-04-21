@@ -330,7 +330,7 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
 
                 let connector_type = match self.source_desc.source.as_ref() {
                     SourceImpl::Connector(source) => source.config.get_connector_type()?,
-                    _ => "".to_string()
+                    _ => "".to_string(),
                 };
 
                 let mut states = self.stream_source_splits.clone();
