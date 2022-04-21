@@ -16,6 +16,8 @@ pub mod executor_wrapper;
 mod filter;
 pub use filter::*;
 mod delete;
+mod values;
+pub use values::*;
 mod trace;
 pub use delete::*;
 use futures::stream::BoxStream;

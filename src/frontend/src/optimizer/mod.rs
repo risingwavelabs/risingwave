@@ -132,6 +132,7 @@ impl PlanRoot {
                 FilterJoinRule::create(),
                 FilterProjectRule::create(),
                 FilterAggRule::create(),
+                FilterMergeRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)

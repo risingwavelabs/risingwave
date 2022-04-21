@@ -102,8 +102,7 @@
             LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
-                LogicalFilter { predicate: always }
-                  LogicalScan { table: t2, columns: [x, y] }
+                LogicalScan { table: t2, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -127,8 +126,7 @@
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
                 LogicalProject { exprs: [1:Int32, $0], expr_alias: [1,  ] }
-                  LogicalFilter { predicate: always }
-                    LogicalScan { table: t2, columns: [y] }
+                  LogicalScan { table: t2, columns: [y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -152,5 +150,4 @@
               LogicalJoin { type: LeftOuter, on: ($2 = $4) }
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
                 LogicalProject { exprs: [1:Int32, $0], expr_alias: [1,  ] }
-                  LogicalFilter { predicate: always }
-                    LogicalScan { table: t2, columns: [y] }
+                  LogicalScan { table: t2, columns: [y] }

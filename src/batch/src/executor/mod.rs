@@ -40,10 +40,9 @@ use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
 use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
-use crate::executor::values::ValuesExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, TraceExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2, ValuesExecutor2,DeleteExecutor2
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -69,7 +68,6 @@ mod stream_scan;
 pub mod test_utils;
 mod top_n;
 mod trace;
-mod values;
 
 /// `Executor` is an operator in the query execution.
 #[async_trait::async_trait]
@@ -203,7 +201,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::SourceScan => StreamScanExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::Limit => LimitExecutor,
-            NodeBody::Values => ValuesExecutor,
+            NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutorBuilder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
@@ -232,7 +230,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::SourceScan => StreamScanExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::Limit => LimitExecutor,
-            NodeBody::Values => ValuesExecutor,
+            NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutorBuilder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,

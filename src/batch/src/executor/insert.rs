@@ -275,7 +275,6 @@ mod tests {
         });
 
         // Read
-        reader.open().await?;
         let chunk = reader.next().await?;
 
         assert_eq!(
