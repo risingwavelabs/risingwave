@@ -165,7 +165,7 @@ impl StreamTableScan {
             } else {
                 "".into()
             },
-            append_only: false, // TODO
+            append_only: self.append_only(),
         }
     }
 }
