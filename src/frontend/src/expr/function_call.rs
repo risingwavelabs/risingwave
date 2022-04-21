@@ -90,7 +90,11 @@ impl FunctionCall {
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
         )?; // should be derived from inputs
-        Ok(Self::new_with_return_type(func_type, inputs, return_type))
+        Ok(Self {
+            func_type,
+            return_type,
+            inputs,
+        })
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
@@ -117,7 +121,7 @@ impl FunctionCall {
     }
 
     /// used for expressions like cast
-    pub fn new_with_return_type(
+    pub fn new_unchecked(
         func_type: ExprType,
         inputs: Vec<ExprImpl>,
         return_type: DataType,

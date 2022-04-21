@@ -123,15 +123,12 @@ impl Binder {
             bound_expr_list.push(self.bind_expr(elem)?);
         }
         align_types(bound_expr_list.iter_mut())?;
-        let in_expr =
-            FunctionCall::new_with_return_type(ExprType::In, bound_expr_list, DataType::Boolean);
+        let in_expr = FunctionCall::new_unchecked(ExprType::In, bound_expr_list, DataType::Boolean);
         if negated {
-            Ok(FunctionCall::new_with_return_type(
-                ExprType::Not,
-                vec![in_expr.into()],
-                DataType::Boolean,
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
+                    .into(),
             )
-            .into())
         } else {
             Ok(in_expr.into())
         }
@@ -184,11 +181,7 @@ impl Binder {
             }
             None => ExprType::Trim,
         };
-        Ok(FunctionCall::new_with_return_type(
-            func_type,
-            inputs,
-            DataType::Varchar,
-        ))
+        FunctionCall::new(func_type, inputs)
     }
 
     /// Bind `expr (not) between low and high`
@@ -205,41 +198,22 @@ impl Binder {
 
         let func_call = if negated {
             // negated = true: expr < low or expr > high
-            FunctionCall::new_with_return_type(
+            FunctionCall::new_unchecked(
                 ExprType::Or,
                 vec![
-                    FunctionCall::new_with_return_type(
-                        ExprType::LessThan,
-                        vec![expr.clone(), low],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new_with_return_type(
-                        ExprType::GreaterThan,
-                        vec![expr, high],
-                        DataType::Boolean,
-                    )
-                    .into(),
+                    FunctionCall::new(ExprType::LessThan, vec![expr.clone(), low])?.into(),
+                    FunctionCall::new(ExprType::GreaterThan, vec![expr, high])?.into(),
                 ],
                 DataType::Boolean,
             )
         } else {
             // negated = false: expr >= low and expr <= high
-            FunctionCall::new_with_return_type(
+            FunctionCall::new_unchecked(
                 ExprType::And,
                 vec![
-                    FunctionCall::new_with_return_type(
-                        ExprType::GreaterThanOrEqual,
-                        vec![expr.clone(), low],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new_with_return_type(
-                        ExprType::LessThanOrEqual,
-                        vec![expr, high],
-                        DataType::Boolean,
-                    )
-                    .into(),
+                    FunctionCall::new(ExprType::GreaterThanOrEqual, vec![expr.clone(), low])?
+                        .into(),
+                    FunctionCall::new(ExprType::LessThanOrEqual, vec![expr, high])?.into(),
                 ],
                 DataType::Boolean,
             )
@@ -279,7 +253,7 @@ impl Binder {
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
-        Ok(FunctionCall::new_with_return_type(
+        Ok(FunctionCall::new_unchecked(
             ExprType::Case,
             inputs,
             return_type,
