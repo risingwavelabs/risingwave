@@ -17,20 +17,17 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use futures::channel::oneshot::{channel, Sender};
 use futures::Future;
-use spin::Mutex;
 
-use super::cache::{CachableEntry, LruCache};
+use super::cache::{CachableEntry, LookupResult, LruCache};
 use super::{Block, HummockError, HummockResult};
-pub type BlockCacheEntry = CachableEntry<(u64, u64), Box<Block>>;
 
 const CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const DEFAULT_OBJECT_POOL_SIZE: usize = 1024; // we only need a small object pool because when the cache reach the limit of capacity, it will
                                               // always release some object after insert a new block.
 
 enum BlockEntry {
-    Cache(BlockCacheEntry),
+    Cache(CachableEntry<(u64, u64), Box<Block>>),
     Owned(Box<Block>),
 }
 
@@ -48,7 +45,7 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_cached_block(entry: BlockCacheEntry) -> Self {
+    pub fn from_cached_block(entry: CachableEntry<(u64, u64), Box<Block>>) -> Self {
         let ptr = entry.value().as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
@@ -66,24 +63,15 @@ impl AsRef<Block> for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
-type RequestQueue = Vec<Sender<BlockCacheEntry>>;
-
 pub struct BlockCache {
     inner: Arc<LruCache<(u64, u64), Box<Block>>>,
-    wait_request_queue: Vec<Mutex<HashMap<(u64, u64), RequestQueue>>>,
 }
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
         let cache = LruCache::new(CACHE_SHARD_BITS, capacity, DEFAULT_OBJECT_POOL_SIZE);
-        let mut wait_request_queue = vec![];
-        let wait_request_queue_size = 1 << CACHE_SHARD_BITS;
-        for _ in 0..wait_request_queue_size {
-            wait_request_queue.push(Mutex::new(HashMap::default()));
-        }
         Self {
             inner: Arc::new(cache),
-            wait_request_queue,
         }
     }
 
@@ -113,35 +101,23 @@ impl BlockCache {
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
-        if let Some(e) = self.inner.lookup(h, &key) {
-            return Ok(BlockHolder::from_cached_block(e));
-        }
-        {
-            let mut request_que =
-                self.wait_request_queue[h as usize % (self.wait_request_queue.len())].lock();
-            if let Some(que) = request_que.get_mut(&key) {
-                let (tx, rc) = channel();
-                que.push(tx);
-                drop(request_que);
-                let entry = rc.await.map_err(HummockError::other)?;
-                return Ok(BlockHolder::from_cached_block(entry));
+        match self.inner.lookup_for_request(h, &key) {
+            LookupResult::Cached(entry) => Ok(BlockHolder::from_cached_block(entry)),
+            LookupResult::WaitPendingRequest(recv) => {
+                let entry = recv.await.map_err(HummockError::other)?;
+                Ok(BlockHolder::from_cached_block(entry))
             }
-            request_que.insert(key, vec![]);
+            LookupResult::Miss => match f.await {
+                Ok(block) => {
+                    let entry = self.inner.insert(key, h, block.len(), block);
+                    Ok(BlockHolder::from_cached_block(entry))
+                }
+                Err(e) => {
+                    self.inner.clear_pending_request(&key, h);
+                    Err(e)
+                }
+            },
         }
-
-        let ret = f.await;
-        let mut request_que =
-            self.wait_request_queue[h as usize % (self.wait_request_queue.len())].lock();
-        let que = request_que.remove(&key).unwrap();
-
-        // If this request failed, other request on the same block will get result of Cancel.
-        let block = ret?;
-        let handle = self.inner.insert(key, h, block.len(), block);
-        drop(request_que);
-        for sender in que {
-            let _ = sender.send(handle.clone());
-        }
-        Ok(BlockHolder::from_cached_block(handle))
     }
 
     fn hash(sst_id: u64, block_idx: u64) -> u64 {

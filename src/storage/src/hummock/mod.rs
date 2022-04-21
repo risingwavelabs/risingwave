@@ -48,7 +48,7 @@ pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
-pub use cache::{CachableEntry, LruCache};
+pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
 use value::*;
 

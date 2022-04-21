@@ -14,9 +14,12 @@
 
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::ptr::null_mut;
 use std::sync::Arc;
 
+use futures::channel::oneshot::{channel, Receiver, Sender};
 use spin::Mutex;
 
 const IN_CACHE: u8 = 1;
@@ -48,7 +51,7 @@ const REVERSE_IN_CACHE: u8 = !IN_CACHE;
 /// that any successful `LruCacheShard::lookup/LruCacheShard::insert` have a
 /// matching `LruCache::release` (to move into state 2) or `LruCacheShard::erase`
 /// (to move into state 3).
-pub struct LruHandle<K: PartialEq + Default, T> {
+pub struct LruHandle<K: Eq + Default, T> {
     // next element in the linked-list of hash bucket, only used by hash-table.
     next_hash: *mut LruHandle<K, T>,
 
@@ -66,7 +69,7 @@ pub struct LruHandle<K: PartialEq + Default, T> {
     flags: u8,
 }
 
-impl<K: PartialEq + Default, T> Default for LruHandle<K, T> {
+impl<K: Eq + Default, T> Default for LruHandle<K, T> {
     fn default() -> Self {
         Self {
             next_hash: null_mut(),
@@ -82,7 +85,7 @@ impl<K: PartialEq + Default, T> Default for LruHandle<K, T> {
     }
 }
 
-impl<K: PartialEq + Default, T> LruHandle<K, T> {
+impl<K: Eq + Default, T> LruHandle<K, T> {
     pub fn new(key: K, value: Option<T>) -> Self {
         Self {
             key,
@@ -123,14 +126,14 @@ impl<K: PartialEq + Default, T> LruHandle<K, T> {
     }
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for LruHandle<K, T> {}
+unsafe impl<K: Eq + Default, T> Send for LruHandle<K, T> {}
 
-pub struct LruHandleTable<K: PartialEq + Default, T> {
+pub struct LruHandleTable<K: Eq + Default, T> {
     list: Vec<*mut LruHandle<K, T>>,
     elems: usize,
 }
 
-impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
+impl<K: Eq + Default, T> LruHandleTable<K, T> {
     fn new() -> Self {
         Self {
             list: vec![null_mut(); 16],
@@ -222,19 +225,21 @@ impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     }
 }
 
-pub struct LruCacheShard<K: PartialEq + Default, T> {
+type RequestQueue<K, T> = Vec<Sender<CachableEntry<K, T>>>;
+pub struct LruCacheShard<K: Eq + Default + Hash, T> {
     lru: Box<LruHandle<K, T>>,
     table: LruHandleTable<K, T>,
     object_pool: Vec<Box<LruHandle<K, T>>>,
+    write_request: HashMap<K, RequestQueue<K, T>>,
     lru_usage: usize,
     usage: usize,
     capacity: usize,
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for LruCacheShard<K, T> {}
-unsafe impl<K: PartialEq + Default, T> Sync for LruCacheShard<K, T> {}
+unsafe impl<K: Eq + Default + Hash, T> Send for LruCacheShard<K, T> {}
+unsafe impl<K: Eq + Default + Hash, T> Sync for LruCacheShard<K, T> {}
 
-impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
+impl<K: Eq + Default + Hash, T> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize) -> Self {
         let mut lru = Box::new(LruHandle::new(K::default(), None));
         lru.prev = lru.as_mut();
@@ -250,6 +255,7 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
             object_pool,
             lru,
             table: LruHandleTable::new(),
+            write_request: HashMap::with_capacity(16),
         }
     }
 
@@ -388,11 +394,11 @@ impl<K: PartialEq + Default, T> LruCacheShard<K, T> {
     }
 }
 
-pub struct LruCache<K: PartialEq + Default, T> {
+pub struct LruCache<K: Eq + Default + Hash, T> {
     shards: Vec<Mutex<LruCacheShard<K, T>>>,
 }
 
-impl<K: PartialEq + Default, T> LruCache<K, T> {
+impl<K: Eq + Default + Hash, T> LruCache<K, T> {
     pub fn new(num_shard_bits: usize, capacity: usize, object_cache: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
@@ -416,6 +422,25 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
                 handle: ptr,
             };
             Some(entry)
+        }
+    }
+
+    pub fn lookup_for_request(self: &Arc<Self>, hash: u64, key: &K) -> LookupResult<K, T> {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        unsafe {
+            let ptr = shard.lookup(hash, key);
+            if !ptr.is_null() {
+                return LookupResult::Cached(CachableEntry {
+                    cache: self.clone(),
+                    handle: ptr,
+                });
+            }
+            if let Some(que) = shard.write_request.get_mut(&key) {
+                let (tx, recv) = channel();
+                que.push(tx);
+                return LookupResult::WaitPendingRequest(recv);
+            }
+            LookupResult::Miss
         }
     }
 
@@ -443,15 +468,32 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
         let mut to_delete = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
+            let pending_request = shard.write_request.remove(&key);
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
             debug_assert!(!ptr.is_null());
-            CachableEntry::<K, T> {
+            if shard.write_request.is_empty() {
+                if let Some(que) = pending_request {
+                    for sender in que {
+                        (*ptr).add_ref();
+                        let _ = sender.send(CachableEntry {
+                            cache: self.clone(),
+                            handle: ptr,
+                        });
+                    }
+                }
+            }
+            CachableEntry {
                 cache: self.clone(),
                 handle: ptr,
             }
         };
         to_delete.clear();
         handle
+    }
+
+    pub fn clear_pending_request(&self, key: &K, hash: u64) {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        shard.write_request.remove(key);
     }
 
     pub fn erase(&self, hash: u64, key: &K) {
@@ -471,21 +513,27 @@ impl<K: PartialEq + Default, T> LruCache<K, T> {
     }
 }
 
-pub struct CachableEntry<K: PartialEq + Default, T> {
+pub struct CachableEntry<K: Eq + Default + Hash, T> {
     cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for CachableEntry<K, T> {}
-unsafe impl<K: PartialEq + Default, T> Sync for CachableEntry<K, T> {}
+pub enum LookupResult<K: Eq + Default + Hash, T> {
+    Cached(CachableEntry<K, T>),
+    Miss,
+    WaitPendingRequest(Receiver<CachableEntry<K, T>>),
+}
 
-impl<K: PartialEq + Default, T> CachableEntry<K, T> {
+unsafe impl<K: Eq + Default + Hash, T> Send for CachableEntry<K, T> {}
+unsafe impl<K: Eq + Default + Hash, T> Sync for CachableEntry<K, T> {}
+
+impl<K: Eq + Default + Hash, T> CachableEntry<K, T> {
     pub fn value(&self) -> &T {
         unsafe { (*self.handle).value.as_ref().unwrap() }
     }
 }
 
-impl<K: PartialEq + Default, T> Clone for CachableEntry<K, T> {
+impl<K: Eq + Default + Hash, T> Clone for CachableEntry<K, T> {
     fn clone(&self) -> Self {
         unsafe {
             self.cache.add_ref(self.handle);
@@ -497,7 +545,7 @@ impl<K: PartialEq + Default, T> Clone for CachableEntry<K, T> {
     }
 }
 
-impl<K: PartialEq + Default, T> Drop for CachableEntry<K, T> {
+impl<K: Eq + Default + Hash, T> Drop for CachableEntry<K, T> {
     fn drop(&mut self) {
         unsafe {
             self.cache.release(self.handle);
