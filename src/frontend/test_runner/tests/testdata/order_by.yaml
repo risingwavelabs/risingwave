@@ -5,6 +5,10 @@
     BatchExchange { order: [$0 DESC], dist: Single }
       BatchSort { order: [$0 DESC] }
         BatchScan { table: t, columns: [v1, v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [v1, _row_id#0] }
+      StreamExchange { dist: HashShard([2]) }
+        StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
@@ -50,6 +54,11 @@
     BatchTopN { order: [$0 DESC] limit: 5, offset: 0 }
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [v1, v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [v1] }
+      StreamTopN { order: [$0 DESC] limit: 5, offset: 0 }
+        StreamExchange { dist: Single }
+          StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5 offset 7;
@@ -57,3 +66,8 @@
     BatchTopN { order: [$0 DESC] limit: 5, offset: 7 }
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [v1, v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [v1] }
+      StreamTopN { order: [$0 DESC] limit: 5, offset: 7 }
+        StreamExchange { dist: Single }
+          StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }

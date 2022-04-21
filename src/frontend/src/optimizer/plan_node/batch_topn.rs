@@ -34,7 +34,8 @@ impl BatchTopN {
             ctx,
             logical.schema().clone(),
             logical.input().distribution().clone(),
-            logical.input().order().clone(),
+            // BatchTopN outputs data in the order of specified order
+            logical.topn_order().clone(),
         );
         BatchTopN { base, logical }
     }

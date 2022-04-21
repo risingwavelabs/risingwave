@@ -149,14 +149,25 @@ impl ColPrunable for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> PlanRef {
+        self.to_batch_with_order_required(Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
         let new_input = self.input().to_batch();
         let new_logical = self.clone_with_input(new_input);
-        BatchTopN::new(new_logical).into()
+        let ret = BatchTopN::new(new_logical).into();
+
+        if self.topn_order().satisfies(required_order) {
+            ret
+        } else {
+            required_order.enforce(ret)
+        }
     }
 }
 
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
+        // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()
             .to_stream_with_dist_required(&Distribution::Single);
