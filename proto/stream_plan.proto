@@ -6,7 +6,6 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
-import "common.proto";
 import "expr.proto";
 import "plan.proto";
 
