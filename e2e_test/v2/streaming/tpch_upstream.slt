@@ -1,14 +1,5 @@
 include ../../tpch/create_tables.slt.part
 
-include ../../tpch/insert_customer.slt.part
-include ../../tpch/insert_lineitem.slt.part
-include ../../tpch/insert_nation.slt.part
-include ../../tpch/insert_orders.slt.part
-include ../../tpch/insert_part.slt.part
-include ../../tpch/insert_partsupp.slt.part
-include ../../tpch/insert_region.slt.part
-include ../../tpch/insert_supplier.slt.part
-
 include ../../streaming/tpch/views/q1.slt.part
 # include ../../streaming/tpch/views/q3.slt.part # TopN pk mismatch
 # include ../../streaming/tpch/views/q4.slt.part # LeftSemi
@@ -23,6 +14,18 @@ include ../../streaming/tpch/views/q13.slt.part
 include ../../streaming/tpch/views/q14.slt.part
 include ../../streaming/tpch/views/q17.slt.part
 include ../../streaming/tpch/views/q19.slt.part
+
+include ../../tpch/insert_customer.slt.part
+include ../../tpch/insert_lineitem.slt.part
+include ../../tpch/insert_nation.slt.part
+include ../../tpch/insert_orders.slt.part
+include ../../tpch/insert_part.slt.part
+include ../../tpch/insert_partsupp.slt.part
+include ../../tpch/insert_region.slt.part
+include ../../tpch/insert_supplier.slt.part
+
+statement ok
+flush;
 
 include ../../streaming/tpch/q1.slt.part
 # include ../../streaming/tpch/q3.slt.part

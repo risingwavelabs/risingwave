@@ -15,9 +15,10 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
@@ -33,22 +34,19 @@ impl Order {
     }
 
     /// Convert into protobuf.
-    pub fn to_protobuf(&self) -> Vec<(InputRefExpr, ProstOrderType)> {
+    pub fn to_protobuf(&self, schema: &Schema) -> Vec<ColumnOrder> {
         self.field_order
             .iter()
-            .map(FieldOrder::to_protobuf)
+            .map(|f| {
+                let (input_ref, order_type) = f.to_protobuf();
+                let data_type = schema.fields[f.index].data_type.to_protobuf();
+                ColumnOrder {
+                    order_type: order_type as i32,
+                    input_ref: Some(input_ref),
+                    return_type: Some(data_type),
+                }
+            })
             .collect_vec()
-    }
-
-    /// Convert into the format of vec of ids and vec of orders.
-    pub fn to_protobuf_id_and_order(&self) -> (Vec<i32>, Vec<ProstOrderType>) {
-        (
-            self.field_order.iter().map(|x| x.index as i32).collect(),
-            self.field_order
-                .iter()
-                .map(|x| x.direct.to_protobuf())
-                .collect(),
-        )
     }
 }
 

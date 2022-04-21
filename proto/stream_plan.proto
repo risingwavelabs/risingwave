@@ -85,6 +85,9 @@ message HashJoinNode {
   // Whether to use delta join for this hash join node.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
   bool is_delta_join = 6;
+  // Used for internal table states.
+  plan.TableRefId left_table_ref_id = 7;
+  plan.TableRefId right_table_ref_id = 8;
 }
 
 message HopWindowNode {
@@ -193,6 +196,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
+  bool append_only = 24;
   string identity = 18;
   // The schema of the plan node
   repeated plan.Field fields = 19;

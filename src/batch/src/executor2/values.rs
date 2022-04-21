@@ -15,26 +15,28 @@
 use std::sync::Arc;
 use std::vec;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
 /// `ValuesExecutor` implements Values executor.
-pub(super) struct ValuesExecutor {
+pub struct ValuesExecutor2 {
     rows: vec::IntoIter<Vec<BoxedExpression>>,
     schema: Schema,
     identity: String,
     chunk_size: usize,
 }
 
-impl ValuesExecutor {
+impl ValuesExecutor2 {
     pub(crate) fn new(
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,
@@ -50,57 +52,7 @@ impl ValuesExecutor {
     }
 }
 
-#[async_trait::async_trait]
-impl Executor for ValuesExecutor {
-    async fn open(&mut self) -> Result<()> {
-        trace!("Values executor init");
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.rows.is_empty() {
-            return Ok(None);
-        }
-
-        let cardinality = self.rows.len();
-        ensure!(cardinality > 0);
-
-        if self.schema.fields.is_empty() {
-            let cardinality = self.rows.len();
-            self.rows = vec![].into_iter();
-            return Ok(Some(DataChunk::new_dummy(cardinality)));
-        }
-
-        let one_row_array = I32Array::from_slice(&[Some(1)])?;
-        // We need a one row chunk rather than an empty chunk because constant expression's eval
-        // result is same size as input chunk cardinality.
-        let one_row_chunk = DataChunk::builder()
-            .columns(vec![Column::new(Arc::new(one_row_array.into()))])
-            .build();
-
-        let chunk_size = self.chunk_size.min(self.rows.len());
-        let mut array_builders = self.schema.create_array_builders(chunk_size)?;
-        for row in self.rows.by_ref().take(chunk_size) {
-            for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
-                let out = expr.eval(&one_row_chunk)?;
-                builder.append_array(&out)?;
-            }
-        }
-
-        let columns = array_builders
-            .into_iter()
-            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .collect::<Result<Vec<Column>>>()?;
-
-        let chunk = DataChunk::builder().columns(columns).build();
-
-        Ok(Some(chunk))
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
+impl Executor2 for ValuesExecutor2 {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -108,10 +60,57 @@ impl Executor for ValuesExecutor {
     fn identity(&self) -> &str {
         &self.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
 }
 
-impl BoxedExecutorBuilder for ValuesExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl ValuesExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
+        if !self.rows.is_empty() {
+            let cardinality = self.rows.len();
+            ensure!(cardinality > 0);
+
+            if self.schema.fields.is_empty() {
+                let cardinality = self.rows.len();
+                self.rows = vec![].into_iter();
+                yield DataChunk::new_dummy(cardinality);
+            } else {
+                while !self.rows.is_empty() {
+                    let one_row_array = I32Array::from_slice(&[Some(1)])?;
+                    // We need a one row chunk rather than an empty chunk because constant
+                    // expression's eval result is same size as input chunk
+                    // cardinality.
+                    let one_row_chunk = DataChunk::builder()
+                        .columns(vec![Column::new(Arc::new(one_row_array.into()))])
+                        .build();
+
+                    let chunk_size = self.chunk_size.min(self.rows.len());
+                    let mut array_builders = self.schema.create_array_builders(chunk_size)?;
+                    for row in self.rows.by_ref().take(chunk_size) {
+                        for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
+                            let out = expr.eval(&one_row_chunk)?;
+                            builder.append_array(&out)?;
+                        }
+                    }
+
+                    let columns = array_builders
+                        .into_iter()
+                        .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
+                        .collect::<Result<Vec<Column>>>()?;
+
+                    let chunk = DataChunk::builder().columns(columns).build();
+
+                    yield chunk
+                }
+            }
+        }
+    }
+}
+impl BoxedExecutor2Builder for ValuesExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let value_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Values
@@ -133,26 +132,25 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(
-            Self::new(
-                rows,
-                Schema { fields },
-                source.plan_node().get_identity().clone(),
-                DEFAULT_CHUNK_BUFFER_SIZE,
-            )
-            .fuse(),
-        ))
+        Ok(Box::new(Self {
+            rows: rows.into_iter(),
+            schema: Schema { fields },
+            identity: source.plan_node().get_identity().clone(),
+            chunk_size: DEFAULT_CHUNK_BUFFER_SIZE,
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::stream::StreamExt;
     use risingwave_common::array;
     use risingwave_common::array::{I16Array, I32Array, I64Array};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::expr::LiteralExpression;
+    use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
 
-    use super::*;
+    use crate::executor2::{Executor2, ValuesExecutor2};
 
     #[tokio::test]
     async fn test_values_executor() {
@@ -175,34 +173,36 @@ mod tests {
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
-        let mut values_executor = ValuesExecutor::new(
-            vec![exprs],
-            Schema { fields },
-            "ValuesExecutor".to_string(),
-            1024,
-        );
-        values_executor.open().await.unwrap();
+
+        let values_executor = Box::new(ValuesExecutor2 {
+            rows: vec![exprs].into_iter(),
+            schema: Schema { fields },
+            identity: "ValuesExecutor2".to_string(),
+            chunk_size: 1024,
+        });
 
         let fields = &values_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int16);
         assert_eq!(fields[1].data_type, DataType::Int32);
         assert_eq!(fields[2].data_type, DataType::Int64);
 
-        values_executor.open().await.unwrap();
-        let result = values_executor.next().await.unwrap().unwrap();
-        values_executor.close().await.unwrap();
-        assert_eq!(
-            *result.column_at(0).array(),
-            array! {I16Array, [Some(1_i16)]}.into()
-        );
-        assert_eq!(
-            *result.column_at(1).array(),
-            array! {I32Array, [Some(2)]}.into()
-        );
-        assert_eq!(
-            *result.column_at(2).array(),
-            array! {I64Array, [Some(3)]}.into()
-        );
+        let mut stream = values_executor.execute();
+        let result = stream.next().await.unwrap();
+
+        if let Ok(result) = result {
+            assert_eq!(
+                *result.column_at(0).array(),
+                array! {I16Array, [Some(1_i16)]}.into()
+            );
+            assert_eq!(
+                *result.column_at(1).array(),
+                array! {I32Array, [Some(2)]}.into()
+            );
+            assert_eq!(
+                *result.column_at(2).array(),
+                array! {I64Array, [Some(3)]}.into()
+            );
+        }
     }
 
     #[tokio::test]
@@ -230,35 +230,34 @@ mod tests {
         .collect::<Vec<_>>();
 
         let fields = vec![Field::unnamed(DataType::Int32)];
-        let mut values_executor =
-            ValuesExecutor::new(rows, Schema { fields }, "ValuesExecutor".to_string(), 3);
 
-        assert_eq!(
-            values_executor.next().await.unwrap().unwrap().cardinality(),
-            3
-        );
-        assert_eq!(
-            values_executor.next().await.unwrap().unwrap().cardinality(),
-            1
-        );
-        assert!(values_executor.next().await.unwrap().is_none());
+        let values_executor = Box::new(ValuesExecutor2::new(
+            rows,
+            Schema { fields },
+            "ValuesExecutor2".to_string(),
+            3,
+        ));
+        let mut stream = values_executor.execute();
+        assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 3);
+        assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 1);
+        assert!(stream.next().await.is_none());
     }
 
     // Handle the possible case of ValuesNode([[]])
     #[tokio::test]
     async fn test_no_column_values_executor() {
-        let mut values_executor = ValuesExecutor::new(
-            vec![vec![]], // One single row with no column.
+        let values_executor = Box::new(ValuesExecutor2::new(
+            vec![vec![]],
             Schema::default(),
-            "ValuesExecutor".to_string(),
+            "ValuesExecutor2".to_string(),
             1024,
-        );
-        values_executor.open().await.unwrap();
+        ));
+        let mut stream = values_executor.execute();
 
-        let result = values_executor.next().await.unwrap().unwrap();
+        let result = stream.next().await.unwrap().unwrap();
         assert_eq!(result.cardinality(), 1);
         assert_eq!(result.dimension(), 0);
 
-        assert!(values_executor.next().await.unwrap().is_none());
+        assert!(stream.next().await.is_none());
     }
 }
