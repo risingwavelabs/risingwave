@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -190,6 +191,7 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
+        let mut update_delete_keys = HashSet::new();
         for (pk, cell_values, op) in rows {
             let arrange_key_buf =
                 serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?;
@@ -213,10 +215,42 @@ impl<S: StateStore> CellBasedTable<S> {
                     for (key, value) in bytes {
                         if let Some(val) = value {
                             local.put(key, StorageValue::new_default_put(val))
-                        };
+                        }
                     }
                 }
-                _ => {}
+                Op::UpdateDelete => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, value) in bytes {
+                        if value.is_some() {
+                            update_delete_keys.insert(key);
+                        }
+                    }
+                }
+                Op::UpdateInsert => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .map_err(err)?;
+                    let mut update_insert_keys = HashSet::new();
+                    for (key, _) in bytes.clone() {
+                        update_insert_keys.insert(key);
+                    }
+                    for delete_key in &update_delete_keys {
+                        if !update_insert_keys.contains(delete_key) {
+                            local.delete(delete_key);
+                        }
+                    }
+                    for (key, value) in bytes {
+                        if let Some(val) = value {
+                            local.put(key, StorageValue::new_default_put(val))
+                        }
+                    }
+                    update_delete_keys.clear();
+                    update_insert_keys.clear();
+                }
             }
         }
         batch.ingest(epoch).await?;
