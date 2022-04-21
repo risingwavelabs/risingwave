@@ -32,7 +32,6 @@ use sort_agg::*;
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-pub use crate::executor::delete::DeleteExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
@@ -41,14 +40,13 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, InsertExecutor2, TopNExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, InsertExecutor2,TopNExecutor2,
     TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
 mod create_table;
-mod delete;
 mod drop_stream;
 mod drop_table;
 pub mod executor2_wrapper;
@@ -189,7 +187,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor2,
-            NodeBody::Delete => DeleteExecutor,
+            NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
@@ -218,7 +216,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor2,
-            NodeBody::Delete => DeleteExecutor,
+            NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
