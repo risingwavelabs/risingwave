@@ -16,6 +16,9 @@ pub mod executor_wrapper;
 
 mod filter;
 mod insert;
+pub use filter::*;
+mod values;
+pub use values::*;
 mod trace;
 pub use filter::*;
 use futures::stream::BoxStream;
