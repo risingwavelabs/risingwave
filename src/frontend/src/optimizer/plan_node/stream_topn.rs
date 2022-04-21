@@ -42,7 +42,7 @@ impl fmt::Display for StreamTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamTopN {{ order: {} limit: {}, offset: {} }}",
+            "StreamTopN {{ order: {}, limit: {}, offset: {} }}",
             self.logical.topn_order(),
             self.logical.limit(),
             self.logical.offset(),

@@ -103,7 +103,7 @@ impl fmt::Display for LogicalTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalTopN {{ order: {} limit: {}, offset: {} }}",
+            "LogicalTopN {{ order: {}, limit: {}, offset: {} }}",
             &self.order, &self.limit, &self.offset,
         )
     }

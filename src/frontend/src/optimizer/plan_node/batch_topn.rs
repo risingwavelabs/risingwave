@@ -45,7 +45,7 @@ impl fmt::Display for BatchTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BatchTopN {{ order: {} limit: {}, offset: {} }}",
+            "BatchTopN {{ order: {}, limit: {}, offset: {} }}",
             self.logical.topn_order(),
             self.logical.limit(),
             self.logical.offset(),
