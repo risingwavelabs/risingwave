@@ -128,8 +128,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn ExecutorV1>> {
         // Get table id and used as keyspace prefix.
-        let left_table_id = node.get_table_ids()[0];
-        let right_table_id = node.get_table_ids()[1];
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
         let source_r = Box::new(params.input.remove(1).v1());
         let source_l = Box::new(params.input.remove(0).v1());
@@ -157,6 +155,9 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
+
+        let left_table_id = TableId::from(&node.left_table_ref_id);
+        let right_table_id = TableId::from(&node.right_table_ref_id);
         macro_rules! impl_create_hash_join_executor {
             ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
                 |typ| match typ {
@@ -170,8 +171,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                         condition,
                         params.op_info,
                         key_indices,
-                        Keyspace::table_root(store.clone(), &TableId::new(left_table_id as u32)),
-                        Keyspace::table_root(store.clone(), &TableId::new(right_table_id as u32)),
+                        Keyspace::table_root(store.clone(), &left_table_id),
+                        Keyspace::table_root(store.clone(), &right_table_id),
                     )) as Box<dyn ExecutorV1>, )*
                     _ => todo!("Join type {:?} not implemented", typ),
                 }

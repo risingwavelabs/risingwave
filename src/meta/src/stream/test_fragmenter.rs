@@ -145,7 +145,6 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
-        table_ids: vec![],
     };
 
     // filter node
@@ -168,7 +167,6 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 2,
         identity: "FilterExecutor".to_string(),
-        table_ids: vec![],
     };
 
     // simple agg node
@@ -182,7 +180,6 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 3,
         identity: "GlobalSimpleAggExecutor".to_string(),
-        table_ids: vec![],
     };
 
     // exchange node
@@ -198,7 +195,6 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
-        table_ids: vec![],
     };
 
     // agg node
@@ -212,7 +208,6 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 5,
         identity: "GlobalSimpleAggExecutor".to_string(),
-        table_ids: vec![],
     };
 
     // project node
@@ -239,7 +234,6 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![1, 2],
         operator_id: 6,
         identity: "ProjectExecutor".to_string(),
-        table_ids: vec![],
     };
 
     // mview node
@@ -256,7 +250,6 @@ fn make_stream_node() -> StreamNode {
         fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
-        table_ids: vec![],
     }
 }
 

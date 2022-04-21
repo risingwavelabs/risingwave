@@ -39,7 +39,6 @@ where
                 strategy: Some(Self::dispatch_no_shuffle()),
             })),
             input: vec![],
-            table_ids: vec![],
         }
     }
 
@@ -84,7 +83,6 @@ where
                         strategy: Some(strategy.clone()),
                     })),
                     operator_id,
-                    table_ids: vec![],
                 };
 
                 let child_fragment = self.build_and_add_fragment(upstream)?;
@@ -116,7 +114,6 @@ where
                 arrange_key_indexes,
             })),
             input: vec![exchange_node.clone()],
-            table_ids: vec![],
         }
     }
 
@@ -143,7 +140,6 @@ where
                 exchange_node_arrangement.clone(),
                 exchange_node_stream.clone(),
             ],
-            table_ids: vec![],
         }
     }
 
@@ -300,7 +296,6 @@ where
             pk_indices: node.pk_indices.clone(),
             node: Some(Node::UnionNode(UnionNode {})),
             input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
-            table_ids: vec![],
         };
 
         self.fragment_graph.add_edge(

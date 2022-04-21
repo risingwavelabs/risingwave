@@ -127,8 +127,6 @@ impl StreamTableScan {
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
-                    // Internal table ids are allocated by meta.
-                    table_ids: vec![],
                 },
             ],
             node: Some(ProstStreamNode::ChainNode(ChainNode {
@@ -166,8 +164,6 @@ impl StreamTableScan {
             } else {
                 "".into()
             },
-            // Internal table ids are allocated by meta.
-            table_ids: vec![],
         }
     }
 }

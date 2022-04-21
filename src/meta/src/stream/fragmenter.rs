@@ -217,7 +217,6 @@ where
                             operator_id: self.gen_operator_id() as u64,
                             input: vec![child_node],
                             identity: "Exchange (NoShuffle)".to_string(),
-                            table_ids: vec![],
                         }
                     } else {
                         self.rewrite_stream_node_inner(child_node, true)?

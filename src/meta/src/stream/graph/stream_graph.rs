@@ -21,10 +21,12 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     BatchParallelInfo, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
+use risingwave_pb::ProstFieldNotFound;
 
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
@@ -482,10 +484,21 @@ where
             ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                if let Node::HashJoinNode(_) = new_stream_node.get_node()? {
+                if let Node::HashJoinNode(node) = new_stream_node
+                    .node
+                    .as_mut()
+                    .ok_or(ProstFieldNotFound("prost stream node field not found"))?
+                {
                     let left_table_id = (ctx.next_local_table_id + table_id_offset) as u64;
                     let right_table_id = left_table_id + 1;
-                    new_stream_node.table_ids = vec![left_table_id, right_table_id];
+                    node.left_table_ref_id = Some(TableRefId {
+                        table_id: left_table_id as i32,
+                        ..Default::default()
+                    });
+                    node.right_table_ref_id = Some(TableRefId {
+                        table_id: right_table_id as i32,
+                        ..Default::default()
+                    });
                     ctx.next_local_table_id += 2;
                 }
                 assert!(ctx.next_local_table_id <= table_id_len);
@@ -505,7 +518,6 @@ where
                                 fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
-                                table_ids: vec![]
                             };
                         }
                         Node::ChainNode(_) => {
@@ -598,7 +610,6 @@ where
                     fields: chain_node.upstream_fields.clone(),
                     operator_id: merge_node.operator_id,
                     identity: "MergeExecutor".to_string(),
-                    table_ids: vec![],
                 },
                 batch_plan_node,
             ];
@@ -610,7 +621,6 @@ where
                 operator_id: stream_node.operator_id,
                 identity: "ChainExecutor".to_string(),
                 fields: chain_node.upstream_fields.clone(),
-                table_ids: vec![],
             })
         } else {
             unreachable!()
