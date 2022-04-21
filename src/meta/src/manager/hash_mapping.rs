@@ -95,14 +95,19 @@ where
         })
     }
 
-    pub async fn build_table_mapping(&self, table_id: TableId, _strategy: HashMappingStrategy) -> Result<()> {
+    pub async fn build_table_mapping(
+        &self,
+        table_id: TableId,
+        _strategy: HashMappingStrategy,
+    ) -> Result<()> {
         let mut core = self.core.lock().await;
         // Currently, all tables share the default mapping.
         core.build_table_mapping(table_id, HashMappingStrategy::Default)
             .await
     }
 
-    /// Modifies hash mappings for all operators according to strategies when a node enters the cluster.
+    /// Modifies hash mappings for all operators according to strategies when a node enters the
+    /// cluster.
     pub async fn add_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
         assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
@@ -119,7 +124,8 @@ where
         }
     }
 
-    /// Modifies hash mappings for all operators according to strategies when a node leaves the cluster.
+    /// Modifies hash mappings for all operators according to strategies when a node leaves the
+    /// cluster.
     pub async fn delete_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
         assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
@@ -194,11 +200,10 @@ where
         Ok(())
     }
 
-    /// Called when the first compute node is added to the cluster. There should be nothing in hash mapping manager at this time, since user is not allowed to do computations without a compute node.
-    async fn add_mapping_from_empty(
-        &mut self,
-        parallel_units: &[ParallelUnit],
-    ) -> Result<()> {
+    /// Called when the first compute node is added to the cluster. There should be nothing in hash
+    /// mapping manager at this time, since user is not allowed to do computations without a compute
+    /// node.
+    async fn add_mapping_from_empty(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
         assert!(self.operator_strategies.is_empty());
         assert!(self.mapping_infos.is_empty());
 
@@ -361,18 +366,32 @@ where
                 parallel_units.iter().for_each(|parallel_unit| {
                     // Delete parallel unit from owner mapping
                     let parallel_unit_id = parallel_unit.id;
-                    let owned_vnodes = hash_mapping_info.owner_mapping.remove(&parallel_unit_id).unwrap();
+                    let owned_vnodes = hash_mapping_info
+                        .owner_mapping
+                        .remove(&parallel_unit_id)
+                        .unwrap();
 
                     // Delete parallel unit from load balancer
                     let owned_vnode_count = owned_vnodes.len();
-                    hash_mapping_info.load_balancer
+                    hash_mapping_info
+                        .load_balancer
                         .get_mut(&owned_vnode_count)
                         .unwrap_or_else(|| {
-                            panic!("expect parallel units that own {} virtual nodes but got nothing", owned_vnode_count);
+                            panic!(
+                                "expect parallel units that own {} virtual nodes but got nothing",
+                                owned_vnode_count
+                            );
                         })
-                        .retain(|&candidate_parallel_unit_id| candidate_parallel_unit_id != parallel_unit_id);
+                        .retain(|&candidate_parallel_unit_id| {
+                            candidate_parallel_unit_id != parallel_unit_id
+                        });
 
-                    if hash_mapping_info.load_balancer.get(&owned_vnode_count).unwrap().is_empty() {
+                    if hash_mapping_info
+                        .load_balancer
+                        .get(&owned_vnode_count)
+                        .unwrap()
+                        .is_empty()
+                    {
                         hash_mapping_info.load_balancer.remove(&owned_vnode_count);
                     }
 
