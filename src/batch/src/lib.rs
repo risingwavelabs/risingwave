@@ -33,6 +33,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
+#![feature(assert_matches)]
 
 pub mod execution;
 pub mod executor;

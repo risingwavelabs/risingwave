@@ -16,6 +16,7 @@ use drop_stream::*;
 use drop_table::*;
 use generic_exchange::*;
 use hash_agg::*;
+use limit::*;
 use merge_sort_exchange::*;
 use order_by::*;
 use projection::*;
@@ -40,8 +41,8 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, InsertExecutor2,
-    LimitExecutor2, TraceExecutor2, ValuesExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, DeleteExecutor2, HashAggExecutor2Builder,
+    InsertExecutor2, LimitExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -53,7 +54,6 @@ pub mod executor2_wrapper;
 mod fuse;
 mod generate_series;
 mod generic_exchange;
-mod hash_agg;
 mod join;
 mod merge_sort_exchange;
 pub mod monitor;
@@ -111,7 +111,7 @@ pub trait BoxedExecutorBuilder {
 
 pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
-    task_id: &'a TaskId,
+    pub task_id: &'a TaskId,
     env: BatchEnvironment,
     epoch: u64,
 }
@@ -203,7 +203,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::HashJoin => HashJoinExecutorBuilder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::DropSource => DropStreamExecutor,
-            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;
@@ -232,7 +232,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::HashJoin => HashJoinExecutorBuilder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::DropSource => DropStreamExecutor,
-            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;

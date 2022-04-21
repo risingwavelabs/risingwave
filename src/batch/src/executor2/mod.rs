@@ -20,6 +20,8 @@ pub use filter::*;
 mod delete;
 mod values;
 pub use values::*;
+mod hash_agg;
+pub use hash_agg::*;
 mod limit;
 pub use limit::*;
 mod trace;
