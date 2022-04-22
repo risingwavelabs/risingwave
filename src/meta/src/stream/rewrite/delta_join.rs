@@ -39,6 +39,7 @@ where
                 strategy: Some(Self::dispatch_no_shuffle()),
             })),
             input: vec![],
+            append_only: upstream.append_only,
         }
     }
 
@@ -83,6 +84,7 @@ where
                         strategy: Some(strategy.clone()),
                     })),
                     operator_id,
+                    append_only: upstream.append_only,
                 };
 
                 let child_fragment = self.build_and_add_fragment(upstream)?;
@@ -114,6 +116,7 @@ where
                 arrange_key_indexes,
             })),
             input: vec![exchange_node.clone()],
+            append_only: exchange_node.append_only,
         }
     }
 
@@ -140,6 +143,7 @@ where
                 exchange_node_arrangement.clone(),
                 exchange_node_stream.clone(),
             ],
+            append_only: exchange_node_stream.append_only,
         }
     }
 
@@ -296,6 +300,7 @@ where
             pk_indices: node.pk_indices.clone(),
             node: Some(Node::UnionNode(UnionNode {})),
             input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
+            append_only: node.append_only,
         };
 
         self.fragment_graph.add_edge(

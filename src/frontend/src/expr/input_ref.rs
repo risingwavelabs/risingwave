@@ -122,7 +122,7 @@ impl Expr for InputRef {
         self.data_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {

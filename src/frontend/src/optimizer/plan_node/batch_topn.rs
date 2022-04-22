@@ -15,45 +15,45 @@
 use std::fmt;
 
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::FilterNode;
+use risingwave_pb::plan::TopNNode;
 
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::PlanBase;
-use crate::utils::Condition;
+use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::property::{Distribution, Order};
 
-/// `BatchFilter` implements [`super::LogicalFilter`]
+/// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
-pub struct BatchFilter {
+pub struct BatchTopN {
     pub base: PlanBase,
-    logical: LogicalFilter,
+    logical: LogicalTopN,
 }
 
-impl BatchFilter {
-    pub fn new(logical: LogicalFilter) -> Self {
+impl BatchTopN {
+    pub fn new(logical: LogicalTopN) -> Self {
         let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
             logical.input().distribution().clone(),
-            logical.input().order().clone(),
+            // BatchTopN outputs data in the order of specified order
+            logical.topn_order().clone(),
         );
-        BatchFilter { base, logical }
-    }
-
-    pub fn predicate(&self) -> &Condition {
-        self.logical.predicate()
+        BatchTopN { base, logical }
     }
 }
 
-impl fmt::Display for BatchFilter {
+impl fmt::Display for BatchTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BatchFilter {{ predicate: {} }}", self.predicate())
+        write!(
+            f,
+            "BatchTopN {{ order: {}, limit: {}, offset: {} }}",
+            self.logical.topn_order(),
+            self.logical.limit(),
+            self.logical.offset(),
+        )
     }
 }
 
-impl PlanTreeNodeUnary for BatchFilter {
+impl PlanTreeNodeUnary for BatchTopN {
     fn input(&self) -> PlanRef {
         self.logical.input()
     }
@@ -63,21 +63,23 @@ impl PlanTreeNodeUnary for BatchFilter {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchFilter }
+impl_plan_tree_node_for_unary! {BatchTopN}
 
-impl ToDistributedBatch for BatchFilter {
+impl ToDistributedBatch for BatchTopN {
     fn to_distributed(&self) -> PlanRef {
-        let new_input = self.input().to_distributed();
+        let new_input = self
+            .input()
+            .to_distributed_with_required(Order::any(), &Distribution::Single);
         self.clone_with_input(new_input).into()
     }
 }
 
-impl ToBatchProst for BatchFilter {
+impl ToBatchProst for BatchTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::Filter(FilterNode {
-            search_condition: Some(
-                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
-            ),
+        let column_orders = self.logical.topn_order().to_protobuf(&self.base.schema);
+        NodeBody::TopN(TopNNode {
+            limit: self.logical.limit() as u32,
+            column_orders,
         })
     }
 }

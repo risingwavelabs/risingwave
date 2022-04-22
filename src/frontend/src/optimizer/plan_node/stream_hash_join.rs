@@ -159,7 +159,7 @@ impl ToStreamProst for StreamHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_protobuf()),
+                .map(|x| x.to_expr_proto()),
             distribution_keys: self
                 .base
                 .dist
@@ -168,6 +168,7 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as i32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            ..Default::default()
         })
     }
 }

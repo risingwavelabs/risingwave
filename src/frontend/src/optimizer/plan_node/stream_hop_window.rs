@@ -73,9 +73,9 @@ impl ToStreamProst for StreamHopWindow {
             Literal::new(Some(interval.to_scalar_value()), DataType::Interval)
         };
         ProstStreamNode::HopWindowNode(HopWindowNode {
-            time_col: Some(self.logical.time_col.to_protobuf()),
-            window_slide: Some(interval_to_literal(self.logical.window_slide).to_protobuf()),
-            window_size: Some(interval_to_literal(self.logical.window_size).to_protobuf()),
+            time_col: Some(self.logical.time_col.to_expr_proto()),
+            window_slide: Some(interval_to_literal(self.logical.window_slide).to_expr_proto()),
+            window_size: Some(interval_to_literal(self.logical.window_size).to_expr_proto()),
         })
     }
 }
