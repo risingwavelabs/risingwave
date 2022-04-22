@@ -38,7 +38,7 @@ select v4, v1, v3, v5 from iii_index;
 # TODO: support drop index
 
 statement ok
-drop materialized view iii_index_t1;
+drop materialized view iii_index;
 
 statement ok
 drop materialized view iii_mv1;
