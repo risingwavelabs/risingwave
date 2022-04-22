@@ -150,8 +150,6 @@ impl Executor2 for TopNExecutor2 {
 impl TopNExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let data_types = self.child.schema().data_types();
-
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
@@ -159,14 +157,9 @@ impl TopNExecutor2 {
         }
 
         if let Some(data_chunk) = self.top_n_heap.dump() {
-            let rows = data_chunk.rows().collect::<Vec<_>>();
-            let mut chunks = rows.chunks(self.chunk_size);
-            for chunk in chunks.by_ref() {
-                let rows = chunk
-                    .iter()
-                    .map(|rowref| rowref.to_owned_row())
-                    .collect::<Vec<_>>();
-                let ret_chunk = DataChunk::from_rows(&rows, &data_types)?;
+            let data_chunk = [Arc::new(data_chunk)];
+            let batch_chunks = DataChunk::rechunk(&data_chunk, DEFAULT_CHUNK_BUFFER_SIZE)?;
+            for ret_chunk in batch_chunks {
                 yield ret_chunk
             }
         }
