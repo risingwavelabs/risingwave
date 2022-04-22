@@ -93,7 +93,6 @@ message HashJoinNode {
 }
 
 message HopWindowNode {
-  // TODO: Use concrete types.
   expr.InputRefExpr time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
