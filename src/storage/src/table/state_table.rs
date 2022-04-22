@@ -14,7 +14,7 @@
 #![allow(dead_code)]
 use std::sync::Arc;
 
-use risingwave_common::array::{Op, Row};
+use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -81,20 +81,9 @@ impl<S: StateStore> StateTable<S> {
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mut rows = Vec::new();
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        for (pk, row_op) in mem_table {
-            match row_op {
-                RowOp::Insert(row) => rows.push((Op::Insert, pk, row)),
-                RowOp::Delete(row) => rows.push((Op::Delete, pk, row)),
-                RowOp::Update((old_row, new_row)) => {
-                    rows.push((Op::UpdateDelete, pk.clone(), old_row));
-                    rows.push((Op::UpdateInsert, pk, new_row));
-                }
-            }
-        }
         self.cell_based_table
-            .batch_write_rows(rows, new_epoch)
+            .batch_write_rows(mem_table, new_epoch)
             .await?;
         Ok(())
     }

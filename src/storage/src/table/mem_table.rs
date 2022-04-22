@@ -61,11 +61,14 @@ impl MemTable {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Insert(value));
             }
-            Entry::Occupied(mut e) => match e.get() {
-                RowOp::Delete(old_value) => {
-                    let old_val = old_value.clone();
-                    e.insert(RowOp::Update((old_val, value)));
+            Entry::Occupied(mut e) => match e.get_mut() {
+                x @ RowOp::Delete(_) => {
+                    if let RowOp::Delete(ref mut old_value) = x {
+                        let old_val = std::mem::take(old_value);
+                        e.insert(RowOp::Update((old_val, value)));
+                    }
                 }
+
                 _ => {
                     panic!(
                         "invalid flush status: double insert {:?} -> {:?}",
@@ -84,7 +87,7 @@ impl MemTable {
             Entry::Vacant(e) => {
                 e.insert(RowOp::Delete(old_value));
             }
-            Entry::Occupied(mut e) => match e.get() {
+            Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Insert(_) => {
                     e.remove();
                 }
@@ -95,9 +98,11 @@ impl MemTable {
                         old_value
                     );
                 }
-                RowOp::Update((old_value, _new_value)) => {
-                    let old_val = old_value.clone();
-                    e.insert(RowOp::Delete(old_val));
+                x @ RowOp::Update(_) => {
+                    if let RowOp::Update(ref mut value) = x {
+                        let (old_val, _) = std::mem::take(value);
+                        e.insert(RowOp::Delete(old_val));
+                    }
                 }
             },
         }

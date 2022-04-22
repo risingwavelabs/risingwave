@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Op, Row};
+use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::next_key;
 
+use super::mem_table::RowOp;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
@@ -186,70 +187,54 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows(
         &mut self,
-        rows: Vec<(Op, Row, Row)>,
+        buffer: BTreeMap<Row, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let mut update_delete_keys = HashSet::new();
+        // let mut update_delete_keys = HashSet::new();
         let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
-        for (op, pk, cell_values) in rows {
+        for (pk, row_op) in buffer {
             let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
-            match op {
-                Op::Delete => {
+            match row_op {
+                RowOp::Insert(row) => {
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
+                        .serialize(&arrange_key_buf, row, &self.column_ids)
                         .unwrap();
                     for (key, value) in bytes {
-                        if value.is_some() {
+                        local.put(key, StorageValue::new_default_put(value))
+                    }
+                }
+                RowOp::Delete(old_value) => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_value, &self.column_ids)
+                        .unwrap();
+                    for (key, _) in bytes {
+                        local.delete(key);
+                    }
+                }
+                RowOp::Update((old_row, new_row)) => {
+                    let old_bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .unwrap();
+                    let new_bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, new_row, &self.column_ids)
+                        .unwrap();
+                    let mut put_keys = Vec::new();
+
+                    for (key, value) in new_bytes {
+                        local.put(key.clone(), StorageValue::new_default_put(value));
+                        put_keys.push(key);
+                    }
+                    for (key, _) in old_bytes {
+                        if !put_keys.contains(&key) {
                             local.delete(key);
                         }
                     }
-                }
-                Op::Insert => {
-                    let bytes = self
-                        .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                        .unwrap();
-                    for (key, value) in bytes {
-                        if let Some(val) = value {
-                            local.put(key, StorageValue::new_default_put(val))
-                        }
-                    }
-                }
-                Op::UpdateDelete => {
-                    let bytes = self
-                        .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                        .unwrap();
-                    for (key, value) in bytes {
-                        if value.is_some() {
-                            update_delete_keys.insert(key);
-                        }
-                    }
-                }
-                Op::UpdateInsert => {
-                    let bytes = self
-                        .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                        .unwrap();
-                    let mut update_insert_keys = HashSet::new();
-                    for (key, _) in bytes.clone() {
-                        update_insert_keys.insert(key);
-                    }
-                    for delete_key in &update_delete_keys {
-                        if !update_insert_keys.contains(delete_key) {
-                            local.delete(delete_key);
-                        }
-                    }
-                    for (key, value) in bytes {
-                        if let Some(val) = value {
-                            local.put(key, StorageValue::new_default_put(val))
-                        }
-                    }
-                    update_delete_keys.clear();
-                    update_insert_keys.clear();
                 }
             }
         }
