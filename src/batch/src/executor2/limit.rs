@@ -32,10 +32,6 @@ pub struct LimitExecutor2 {
     limit: usize,
     /// offset parameter
     offset: usize,
-    /// the number of rows have been skipped due to offset
-    skipped: usize,
-    /// the number of rows have been returned as execute result
-    returned: usize,
     /// Identity string of the executor
     identity: String,
 }
@@ -56,8 +52,6 @@ impl BoxedExecutor2Builder for LimitExecutor2 {
                 child,
                 limit,
                 offset,
-                skipped: 0,
-                returned: 0,
                 identity: source.plan_node().get_identity().clone(),
             }));
         }
@@ -67,20 +61,26 @@ impl BoxedExecutor2Builder for LimitExecutor2 {
 
 impl LimitExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
+    async fn do_execute(self: Box<Self>) {
+        // the number of rows have been skipped due to offset
+        let mut skipped = 0;
+        // the number of rows have been returned as execute result
+        let mut returned = 0;
+
         #[for_await]
         for data_chunk in self.child.execute() {
-            if self.returned == self.limit {
+            if returned == self.limit {
                 break;
             }
             let data_chunk = data_chunk?;
             let cardinality = data_chunk.cardinality();
-            if cardinality + self.skipped <= self.offset {
-                self.skipped += cardinality;
+            if cardinality + skipped <= self.offset {
+                skipped += cardinality;
                 continue;
             }
-            if self.skipped == self.offset && cardinality + self.returned <= self.limit {
-                self.returned += cardinality;
+
+            if skipped == self.offset && cardinality + returned <= self.limit {
+                returned += cardinality;
                 yield data_chunk;
                 continue;
             }
@@ -89,11 +89,11 @@ impl LimitExecutor2 {
             if let Some(old_vis) = data_chunk.visibility() {
                 new_vis = old_vis.iter().collect_vec();
                 for vis in new_vis.iter_mut().filter(|x| **x) {
-                    if self.skipped < self.offset {
-                        self.skipped += 1;
+                    if skipped < self.offset {
+                        skipped += 1;
                         *vis = false;
-                    } else if self.returned < self.limit {
-                        self.returned += 1;
+                    } else if returned < self.limit {
+                        returned += 1;
                     } else {
                         *vis = false;
                     }
@@ -101,11 +101,11 @@ impl LimitExecutor2 {
             } else {
                 let chunk_size = data_chunk.capacity();
                 new_vis = vec![false; chunk_size];
-                let l = self.offset - self.skipped;
-                let r = min(l + self.limit - self.returned, chunk_size);
+                let l = self.offset - skipped;
+                let r = min(l + self.limit - returned, chunk_size);
                 new_vis[l..r].fill(true);
-                self.returned += r - l;
-                self.skipped += l;
+                returned += r - l;
+                skipped += l;
             }
             yield data_chunk.with_visibility(new_vis.try_into()?).compact()?;
         }
@@ -174,8 +174,6 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            skipped: 0,
-            returned: 0,
             identity: "LimitExecutor2".to_string(),
         });
         let fields = &limit_executor.schema().fields;
@@ -311,8 +309,6 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            skipped: 0,
-            returned: 0,
             identity: "LimitExecutor2".to_string(),
         });
 
