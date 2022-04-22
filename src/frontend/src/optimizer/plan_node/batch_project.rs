@@ -103,7 +103,7 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(Expr::to_protobuf)
+            .map(Expr::to_expr_proto)
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
     }

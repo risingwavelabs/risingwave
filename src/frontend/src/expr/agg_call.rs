@@ -118,7 +118,7 @@ impl Expr for AggCall {
         self.return_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         // This function is always called on the physical planning step, where
         // `ExprImpl::AggCall` must have been rewritten to aggregate operators.
 

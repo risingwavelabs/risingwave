@@ -133,7 +133,7 @@ impl Binder {
         match idents.get(0) {
             Some(ident) => {
                 let (field, field_index) = desc.field(&ident.value)?;
-                let expr = FunctionCall::new_with_return_type(
+                let expr = FunctionCall::new_unchecked(
                     ExprType::Field,
                     vec![
                         expr,
@@ -166,7 +166,7 @@ impl Binder {
                     .iter()
                     .enumerate()
                     .map(|(i, f)| {
-                        FunctionCall::new_with_return_type(
+                        FunctionCall::new_unchecked(
                             ExprType::Field,
                             vec![
                                 expr.clone(),

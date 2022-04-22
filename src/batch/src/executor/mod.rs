@@ -16,7 +16,6 @@ use drop_stream::*;
 use drop_table::*;
 use generic_exchange::*;
 use hash_agg::*;
-use limit::*;
 use merge_sort_exchange::*;
 use order_by::*;
 use projection::*;
@@ -42,7 +41,7 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, InsertExecutor2,
-    TraceExecutor2, ValuesExecutor2,
+    LimitExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -56,7 +55,6 @@ mod generate_series;
 mod generic_exchange;
 mod hash_agg;
 mod join;
-mod limit;
 mod merge_sort_exchange;
 pub mod monitor;
 mod order_by;
@@ -199,7 +197,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
             NodeBody::TopN => TopNExecutor,
-            NodeBody::Limit => LimitExecutor,
+            NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutorBuilder,
@@ -228,7 +226,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
             NodeBody::TopN => TopNExecutor,
-            NodeBody::Limit => LimitExecutor,
+            NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutorBuilder,

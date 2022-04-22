@@ -35,7 +35,9 @@ pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
-use crate::executor_v2::{BoxedExecutor, Executor, LookupExecutorBuilder, UnionExecutorBuilder};
+use crate::executor_v2::{
+    BoxedExecutor, Executor, HopWindowExecutorBuilder, LookupExecutorBuilder, UnionExecutorBuilder,
+};
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
@@ -481,7 +483,7 @@ pub trait ExecutorBuilder {
 
 #[macro_export]
 macro_rules! build_executor {
-    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),*) => {
+    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node().unwrap() {
             $(
                 $proto_type_name(..) => {
@@ -517,6 +519,7 @@ pub fn create_executor(
         Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
         Node::HashAggNode => HashAggExecutorBuilder,
         Node::HashJoinNode => HashJoinExecutorBuilder,
+        Node::HopWindowNode => HopWindowExecutorBuilder,
         Node::ChainNode => ChainExecutorBuilder,
         Node::BatchPlanNode => BatchQueryExecutorBuilder,
         Node::MergeNode => MergeExecutorBuilder,
@@ -524,7 +527,7 @@ pub fn create_executor(
         Node::FilterNode => FilterExecutorBuilder,
         Node::ArrangeNode => ArrangeExecutorBuilder,
         Node::LookupNode => LookupExecutorBuilder,
-        Node::UnionNode => UnionExecutorBuilder
+        Node::UnionNode => UnionExecutorBuilder,
     }
 }
 

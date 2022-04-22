@@ -118,7 +118,7 @@ impl ExprRewriter for BooleanConstantFolding {
                 _ => {}
             }
         }
-        FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+        FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
 }
 
@@ -178,7 +178,7 @@ impl ExprRewriter for NotPushDown {
                 .into_iter()
                 .map(|expr| self.rewrite_expr(expr))
                 .collect();
-            FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+            FunctionCall::new_unchecked(func_type, inputs, ret).into()
         } else {
             // func_type == Type::Not here
 
@@ -223,7 +223,7 @@ impl ExprRewriter for NotPushDown {
                                 .unwrap()
                                 .into())
                         }
-                        _ => Err(FunctionCall::new_with_return_type(func_type, inputs, ret).into()),
+                        _ => Err(FunctionCall::new_unchecked(func_type, inputs, ret).into()),
                     }
                 }
                 _ => Err(input),

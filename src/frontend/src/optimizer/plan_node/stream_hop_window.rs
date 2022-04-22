@@ -14,12 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::types::{DataType, IntervalUnit, Scalar};
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::expr::{Expr, InputRefDisplay, Literal};
+use crate::expr::InputRefDisplay;
 
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone)]
@@ -69,13 +68,10 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 
 impl ToStreamProst for StreamHopWindow {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        let interval_to_literal = |interval: IntervalUnit| {
-            Literal::new(Some(interval.to_scalar_value()), DataType::Interval)
-        };
         ProstStreamNode::HopWindowNode(HopWindowNode {
-            time_col: Some(self.logical.time_col.to_protobuf()),
-            window_slide: Some(interval_to_literal(self.logical.window_slide).to_protobuf()),
-            window_size: Some(interval_to_literal(self.logical.window_size).to_protobuf()),
+            time_col: Some(self.logical.time_col.to_proto()),
+            window_slide: Some(self.logical.window_slide.into()),
+            window_size: Some(self.logical.window_size.into()),
         })
     }
 }
