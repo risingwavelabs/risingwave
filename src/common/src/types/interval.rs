@@ -178,14 +178,14 @@ impl IntervalUnit {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<IntervalUnitProto> for IntervalUnit {
     fn into(self) -> IntervalUnitProto {
-        let proto = IntervalUnitProto {
+        IntervalUnitProto {
             months: self.months,
             days: self.days,
             ms: self.ms,
-        };
-        proto
+        }
     }
 }
 
