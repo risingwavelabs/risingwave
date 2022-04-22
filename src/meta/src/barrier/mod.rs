@@ -75,7 +75,7 @@ impl ScheduledBarriers {
         // If no command scheduled, create periodic checkpoint barrier by default.
         buffer
             .pop_front()
-            .unwrap_or_else(|| (Command::checkpoint(None), Default::default()))
+            .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
     }
 
     /// Wait for at least one scheduled barrier in the buffer.
@@ -107,10 +107,7 @@ impl ScheduledBarriers {
             Some((_, notifiers)) => notifiers.extend(new_notifiers),
             None => {
                 // If no command scheduled, create periodic checkpoint barrier by default.
-                buffer.push_back((
-                    Command::checkpoint(None),
-                    new_notifiers.into_iter().collect(),
-                ));
+                buffer.push_back((Command::checkpoint(), new_notifiers.into_iter().collect()));
                 if buffer.len() == 1 {
                     self.changed_tx.send(()).ok();
                 }

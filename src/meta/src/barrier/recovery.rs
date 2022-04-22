@@ -105,13 +105,13 @@ where
                 &info,
                 &prev_epoch,
                 &new_epoch,
-                Command::checkpoint(Some(Mutation::Add(AddMutation {
+                Command::plain_with(Mutation::Add(AddMutation {
                     actors: HashMap::default(),
                     row_id_step_info: self
                         .fragment_manager
                         .get_all_source_row_id_step_info()
                         .await,
-                }))),
+                })),
             );
 
             match self.inject_barrier(&command_ctx).await {
