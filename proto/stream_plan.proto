@@ -11,7 +11,8 @@ import "plan.proto";
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint32 hash_mapping = 1;
+  repeated uint64 original_indices = 1;
+  repeated uint32 data = 2;
 }
 
 // todo: StreamSourceNode or TableSourceNode
