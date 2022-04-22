@@ -49,7 +49,7 @@
     BatchValues { rows: [[RoundDigit(42.4382:Decimal, 0:Int32)]] }
 - sql: |
     values(round('abc'));
-  binder_error: 'Feature is not yet implemented: function round(Varchar) doesn''t exist, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: RoundDigit[Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
@@ -60,7 +60,7 @@
     BatchValues { rows: [[Not(Like('Postgres':Varchar, 'Post%':Varchar))]] }
 - sql: |
     values(1 not like 1.23);
-  binder_error: 'Feature is not yet implemented: Int32 NotLike Decimal, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: Like[Int32, Decimal], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |

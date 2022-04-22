@@ -235,7 +235,7 @@ impl ExprRewriter for ExprHandler {
                 .into_iter()
                 .map(|expr| self.rewrite_expr(expr))
                 .collect();
-            FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+            FunctionCall::new_unchecked(func_type, inputs, ret).into()
         }
     }
 
