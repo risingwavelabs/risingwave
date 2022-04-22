@@ -169,14 +169,14 @@ impl Expr for FunctionCall {
         self.return_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
             expr_type: self.get_expr_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: self.inputs().iter().map(Expr::to_protobuf).collect(),
+                children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
             })),
         }
     }
