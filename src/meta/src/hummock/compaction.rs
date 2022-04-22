@@ -99,6 +99,7 @@ impl CompactStatus {
         };
 
         let num_levels = self.level_handlers.len();
+        let level_expect_size = (0..num_levels).map(|x| 16 << (2 * x)).collect_vec();
         let mut idle_levels = Vec::with_capacity(num_levels - 1);
         let mut last_level_idle = true;
         for (level_handler_idx, level_handler) in self.level_handlers[..num_levels - 1]
@@ -120,11 +121,22 @@ impl CompactStatus {
                 }
             }
         }
-        let (select_level, _must_l0_to_l0) = if idle_levels.is_empty() {
+        let (select_level, must_l0_to_l0) = if idle_levels.is_empty() {
             (0, true)
         } else {
             (*idle_levels.last().unwrap() as u32, false)
         };
+
+        let l0_idle_sst_num = {
+            let l0 = match self.level_handlers.first().unwrap() {
+                LevelHandler::Overlapping(l_0, _) => l_0,
+                LevelHandler::Nonoverlapping(l_0, _) => l_0,
+            };
+            levels.first().unwrap().table_infos.len() - l0.len()
+        };
+        if must_l0_to_l0 && l0_idle_sst_num <= *level_expect_size.first().unwrap() {
+            return None;
+        }
 
         enum SearchResult {
             Found(Vec<u64>, Vec<u64>, Vec<KeyRange>),
