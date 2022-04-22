@@ -62,6 +62,7 @@ mod projection;
 mod row_seq_scan;
 mod sort_agg;
 mod stream_scan;
+#[cfg(test)]
 pub mod test_utils;
 mod top_n;
 mod trace;

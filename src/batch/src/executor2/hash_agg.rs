@@ -238,7 +238,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
                 }
                 if !has_next {
                     self.result = None;
-                    break;  // exit loop
+                    break; // exit loop
                 }
 
                 let columns = group_builders
