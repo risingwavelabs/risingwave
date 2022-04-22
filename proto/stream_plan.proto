@@ -15,6 +15,12 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
+// Hash mapping for compute node. Stores mapping from virtual node to parallel unit id.
+message ParallelUnitMapping {
+  repeated uint64 original_indices = 1;
+  repeated uint32 data = 2;
+}
+
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
@@ -134,8 +140,8 @@ message BatchPlanNode {
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
   // TODO: make hash_mapping more compact. (e.g. store ranges)
-  repeated int32 hash_mapping = 4;
-  int32 parallel_unit_id = 5;
+  ParallelUnitMapping hash_mapping = 4;
+  uint32 parallel_unit_id = 5;
 }
 
 // Special node for shared state. ArrangeNode will produce a special Materialize executor,

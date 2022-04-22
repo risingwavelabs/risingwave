@@ -15,7 +15,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -38,11 +38,8 @@ pub struct BatchQueryExecutor<S: StateStore> {
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
 
-    /// Which parallel unit this actor belongs to
-    parallel_unit_id: u32,
-
-    /// Consistent hash mapping for filtering data.
-    hash_mapping: Vec<u32>,
+    /// vnode bitmap used to filter data belong to this parallel unit.
+    hash_filter: Bitmap,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -56,16 +53,14 @@ where
         batch_size: usize,
         info: ExecutorInfo,
         key_indices: Vec<usize>,
-        parallel_unit_id: u32,
-        hash_mapping: Vec<u32>,
+        hash_filter: Bitmap,
     ) -> Self {
         Self {
             table,
             batch_size,
             info,
             key_indices,
-            parallel_unit_id,
-            hash_mapping,
+            hash_filter,
         }
     }
 
@@ -104,8 +99,9 @@ where
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         for hv in &hash_values {
             new_visibility.append(
-                self.hash_mapping[(hv.0 % VIRTUAL_NODE_COUNT as u64) as usize]
-                    == self.parallel_unit_id,
+                self.hash_filter
+                    .is_set((hv.0 % VIRTUAL_NODE_COUNT as u64) as usize)
+                    .unwrap_or(false),
             );
         }
         let new_visibility = new_visibility.finish();
@@ -163,13 +159,19 @@ mod test {
             pk_indices: vec![0, 1],
             identity: "BatchQuery".to_owned(),
         };
+        let hash_filter = {
+            let mut builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
+            for i in 0..VIRTUAL_NODE_COUNT {
+                builder.append(true);
+            }
+            builder.finish()
+        };
         let executor = Box::new(BatchQueryExecutor::new(
             table,
             test_batch_size,
             info,
             vec![],
-            0,
-            vec![0; VIRTUAL_NODE_COUNT],
+            hash_filter,
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);

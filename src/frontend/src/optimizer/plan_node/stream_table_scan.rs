@@ -104,7 +104,7 @@ impl StreamTableScan {
             /// So this will be filled in meta.
             distribution_keys: vec![],
             // Will fill when resolving chain node.
-            hash_mapping: vec![],
+            hash_mapping: None,
             parallel_unit_id: 0,
         };
 

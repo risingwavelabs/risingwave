@@ -29,7 +29,9 @@ use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{ActorMapping, DispatcherType, StreamNode, StreamSourceState};
+use risingwave_pb::stream_plan::{
+    ActorMapping, DispatcherType, ParallelUnitMapping, StreamNode, StreamSourceState,
+};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -169,9 +171,12 @@ where
             if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
                 // TODO: we can also insert distribution keys here, make fragmenter
                 // even simpler.
-                batch_query.hash_mapping =
-                    ctx.hash_mapping.iter().map(|id| *id as i32).collect_vec();
-                batch_query.parallel_unit_id = parallel_unit_id as i32;
+                let (original_indices, data) = compress_data(&ctx.hash_mapping);
+                batch_query.hash_mapping = Some(ParallelUnitMapping {
+                    original_indices,
+                    data,
+                });
+                batch_query.parallel_unit_id = parallel_unit_id;
             } else {
                 unreachable!("chain's input[1] should always be batch query");
             }

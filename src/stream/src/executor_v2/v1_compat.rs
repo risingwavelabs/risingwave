@@ -17,6 +17,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnId;
 pub use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -325,8 +326,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         _op_info: String,
         key_indices: Vec<usize>,
-        parallel_unit_id: u32,
-        hash_mapping: Vec<u32>,
+        hash_filter: Bitmap,
     ) -> Self {
         let schema = table.schema().clone();
         let info = ExecutorInfo {
@@ -340,8 +340,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             Self::DEFAULT_BATCH_SIZE,
             info,
             key_indices,
-            parallel_unit_id,
-            hash_mapping,
+            hash_filter,
         )
     }
 }
