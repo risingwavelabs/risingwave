@@ -433,7 +433,7 @@ impl Debug for SourceExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -447,7 +447,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::executor::{Barrier, Epoch, Mutation, SourceExecutor};
+    use crate::executor::{AddMutation, Barrier, Epoch, Mutation, SourceExecutor};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
@@ -481,7 +481,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table_columns, false)?;
+        source_manager.create_table_source(&table_id, table_columns, true)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -551,10 +551,16 @@ mod tests {
         };
 
         barrier_sender
-            .send(Message::Barrier(Barrier {
-                epoch: Epoch::new_test_epoch(1),
-                ..Barrier::default()
-            }))
+            .send(Message::Barrier(
+                Barrier {
+                    epoch: Epoch::new_test_epoch(1),
+                    ..Barrier::default()
+                }
+                .with_mutation(Mutation::AddOutput(AddMutation {
+                    actors: Default::default(),
+                    row_id_steps: HashMap::from_iter([(1, RowIdStepInfo { offset: 0, step: 1 })]),
+                })),
+            ))
             .unwrap();
 
         // Write 1st chunk
@@ -564,6 +570,10 @@ mod tests {
             match source_executor.next().await.unwrap() {
                 Message::Chunk(chunk) => {
                     assert_eq!(3, chunk.columns().len());
+                    assert_ne!(
+                        rowid_arr1.iter().collect_vec(),
+                        chunk.column_at(0).array_ref().iter().collect_vec(),
+                    );
                     assert_eq!(
                         col1_arr1.iter().collect_vec(),
                         chunk.column_at(1).array_ref().iter().collect_vec(),
@@ -585,6 +595,10 @@ mod tests {
 
         if let Message::Chunk(chunk) = source_executor.next().await.unwrap() {
             assert_eq!(3, chunk.columns().len());
+            assert_ne!(
+                rowid_arr2.iter().collect_vec(),
+                chunk.column_at(0).array_ref().iter().collect_vec(),
+            );
             assert_eq!(
                 col1_arr2.iter().collect_vec(),
                 chunk.column_at(1).array_ref().iter().collect_vec()
@@ -633,7 +647,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table_columns, false)?;
+        source_manager.create_table_source(&table_id, table_columns, true)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -681,6 +695,20 @@ mod tests {
         )
         .unwrap();
 
+        // init source executor.
+        barrier_sender
+            .send(Message::Barrier(
+                Barrier {
+                    epoch: Epoch::new_test_epoch(1),
+                    ..Barrier::default()
+                }
+                .with_mutation(Mutation::AddOutput(AddMutation {
+                    actors: Default::default(),
+                    row_id_steps: HashMap::from_iter([(1, RowIdStepInfo { offset: 0, step: 1 })]),
+                })),
+            ))
+            .unwrap();
+
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
             tokio::spawn(async move {
@@ -693,7 +721,7 @@ mod tests {
 
         barrier_sender
             .send(Message::Barrier(
-                Barrier::new_test_barrier(1).with_mutation(Mutation::Stop(HashSet::default())),
+                Barrier::new_test_barrier(2).with_mutation(Mutation::Stop(HashSet::default())),
             ))
             .unwrap();
 

@@ -233,7 +233,7 @@ mod tests {
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec(), false)?;
+        source_manager.create_table_source(&table_id, table_columns.to_vec(), true)?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
@@ -248,7 +248,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             0,
-            false,
+            true,
         ));
         let handle = tokio::spawn(async move {
             let fields = &insert_executor.schema().fields;
@@ -271,8 +271,15 @@ mod tests {
         // Read
         let chunk = reader.next().await?;
 
+        // Row id column
+        assert!(chunk.columns()[0]
+            .array()
+            .as_int64()
+            .iter()
+            .all(|x| x.is_none()));
+
         assert_eq!(
-            chunk.columns()[0]
+            chunk.columns()[1]
                 .array()
                 .as_int64()
                 .iter()
@@ -281,22 +288,12 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-        );
-
-        // Row id column
-        assert_eq!(
             chunk.columns()[2]
                 .array()
                 .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
         // There's nothing in store since `TableSourceV2` has no side effect.
