@@ -47,4 +47,4 @@ services:
     container_name: redpanda_container
     network_mode: host
     image: docker.vectorized.io/vectorized/redpanda:latest
-    command: redpanda start --smp 1 --reserve-memory 0M --overprovisioned --node-id 0
+    command: redpanda start --smp 1 --reserve-memory 0M --overprovisioned --node-id 0 --kafka-addr PLAINTEXT://0.0.0.0:9092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:9092
