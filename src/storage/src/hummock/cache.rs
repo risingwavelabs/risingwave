@@ -395,8 +395,8 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     ///
     /// The handle should already cleared its kv.
     unsafe fn try_recycle_handle_object(&mut self, h: *mut LruHandle<K, T>) {
+        let mut node = Box::from_raw(h);
         if self.object_pool.len() < self.object_pool.capacity() {
-            let mut node = Box::from_raw(h);
             node.next_hash = null_mut();
             node.next = null_mut();
             node.prev = null_mut();
