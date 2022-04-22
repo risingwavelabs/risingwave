@@ -59,7 +59,7 @@ pub enum Command {
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
-        dispatches: HashMap<ActorId, Vec<ActorInfo>>,
+        dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
     },
 }
 
@@ -132,11 +132,13 @@ where
             Command::CreateMaterializedView { dispatches, .. } => {
                 let mutations = dispatches
                     .iter()
-                    .map(|(&up_actor_id, down_actor_infos)| DispatcherMutation {
-                        actor_id: up_actor_id,
-                        dispatcher_id: todo!(),
-                        info: down_actor_infos.to_vec(),
-                    })
+                    .map(
+                        |(&(up_actor_id, dispatcher_id), down_actor_infos)| DispatcherMutation {
+                            actor_id: up_actor_id,
+                            dispatcher_id,
+                            info: down_actor_infos.to_vec(),
+                        },
+                    )
                     .collect();
                 Mutation::Add(AddMutation { mutations })
             }
@@ -197,16 +199,20 @@ where
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
-                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(upstream_actor_id, downstream_actor_infos)| {
-                            (
-                                (*upstream_actor_id),
-                                downstream_actor_infos
-                                    .iter()
-                                    .map(|info| info.actor_id)
-                                    .collect(),
-                            )
+                        .filter(|((upstream_actor_id, _), _)| {
+                            actors.contains(upstream_actor_id)
                         })
+                        .map(
+                            |((upstream_actor_id, _), downstream_actor_infos)| {
+                                (
+                                    *upstream_actor_id,
+                                    downstream_actor_infos
+                                        .iter()
+                                        .map(|info| info.actor_id)
+                                        .collect(),
+                                )
+                            },
+                        )
                         .collect::<HashMap<ActorId, Vec<ActorId>>>();
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }

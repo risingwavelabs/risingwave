@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -40,7 +39,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -50,7 +49,7 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
-    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
@@ -141,9 +140,9 @@ where
             };
 
             // fill upstream node-actor info for later use
-            let upstream_table_node_actors = tables_node_actors.get(&table_id).unwrap();
-
-            let chain_upstream_node_actors = upstream_table_node_actors
+            let chain_upstream_node_actors = tables_node_actors
+                .get(&table_id)
+                .unwrap()
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {
                     actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
@@ -151,14 +150,10 @@ where
                 .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
                 .into_group_map();
             for (node_id, actor_ids) in chain_upstream_node_actors {
-                match ctx.upstream_node_actors.entry(node_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().extend(actor_ids.iter());
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(actor_ids);
-                    }
-                }
+                ctx.upstream_node_actors
+                    .entry(node_id)
+                    .or_insert(Vec::new())
+                    .extend(actor_ids.iter());
             }
 
             // deal with merge and batch query node, setting upstream infos.
@@ -183,14 +178,10 @@ where
             }
 
             // finally, we should also build dispatcher infos here.
-            match ctx.dispatches.entry(*upstream_actor_id) {
-                Entry::Occupied(mut o) => {
-                    o.get_mut().push(actor_id);
-                }
-                Entry::Vacant(v) => {
-                    v.insert(vec![actor_id]);
-                }
-            };
+            ctx.dispatches
+                .entry((*upstream_actor_id, stream_node.get_operator_id()))
+                .or_insert(Vec::new())
+                .push(actor_id);
         } else {
             // otherwise, recursively deal with input nodes
             for input in &mut stream_node.input {
@@ -455,6 +446,11 @@ where
             })
             .collect::<HashMap<_, _>>();
 
+        let up_id_to_down_info = dispatches
+            .iter()
+            .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info.clone()))
+            .collect::<HashMap<_, _>>();
+
         let mut node_hanging_channels = ctx
             .upstream_node_actors
             .iter()
@@ -464,7 +460,7 @@ where
                     up_ids
                         .iter()
                         .flat_map(|up_id| {
-                            dispatches
+                            up_id_to_down_info
                                 .get(up_id)
                                 .expect("expected dispatches info")
                                 .iter()
