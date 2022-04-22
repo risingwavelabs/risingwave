@@ -70,7 +70,7 @@ impl Op {
 pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
@@ -86,6 +86,75 @@ impl StreamChunk {
 
         let data = DataChunk::new(columns, visibility);
         StreamChunk { ops, data }
+    }
+
+    /// Parse a chunk from string.
+    ///
+    /// # Format
+    ///
+    /// The first line is a header indicating the column types.
+    /// The following lines indicate rows within the chunk.
+    /// Each line starts with an operation followed by values.
+    /// NULL values are represented as `.`.
+    ///
+    /// # Example
+    /// ```
+    /// use risingwave_common::array::StreamChunk;
+    /// let chunk = StreamChunk::from_str(
+    ///     "  I I I I
+    ///     U- 2 5 . .
+    ///     U+ 2 5 2 6
+    ///     +  . . 4 8
+    ///     -  . . 3 4",
+    /// );
+    /// //  ^ operations:
+    /// //    +: Insert
+    /// //    -: Delete
+    /// //    U+: UpdateInsert
+    /// //    U-: UpdateDelete
+    /// ```
+    pub fn from_str(s: &str) -> Self {
+        use crate::types::ScalarImpl;
+
+        let mut lines = s.split('\n');
+        let mut ops = vec![];
+        // initialize array builders from the first line
+        let header = lines.next().unwrap().trim();
+        let mut array_builders = header
+            .split_ascii_whitespace()
+            .map(|c| match c {
+                "I" => DataType::Int64,
+                _ => todo!("unsupported type: {c:?}"),
+            })
+            .map(|ty| ty.create_array_builder(1))
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        for mut line in lines {
+            line = line.trim();
+            let mut token = line.split_ascii_whitespace();
+            let op = match token.next().expect("missing operation") {
+                "+" => Op::Insert,
+                "-" => Op::Delete,
+                "U+" => Op::UpdateInsert,
+                "U-" => Op::UpdateDelete,
+                t => panic!("invalid op: {t:?}"),
+            };
+            ops.push(op);
+            for (val_str, builder) in token.zip_eq(array_builders.iter_mut()) {
+                let datum = match val_str {
+                    "." => None,
+                    s => Some(ScalarImpl::Int64(s.parse().expect("invalid number"))),
+                };
+                builder
+                    .append_datum(&datum)
+                    .expect("failed to append datum");
+            }
+        }
+        let columns = array_builders
+            .into_iter()
+            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .collect();
+        StreamChunk::new(ops, columns, None)
     }
 
     /// Build a `StreamChunk` from rows.

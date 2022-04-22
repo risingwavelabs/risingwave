@@ -22,7 +22,7 @@ use crate::error::Result;
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Column {
     array: ArrayRef,
 }
