@@ -76,7 +76,7 @@ use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{
     Actors as MutationActors, AddMutation as ProstAddMutation, Barrier as ProstBarrier,
-    Epoch as ProstEpoch, NothingMutation, RowIdStepInfo, StopMutation,
+    Epoch as ProstEpoch, NothingMutation, RowIdGenRule, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use risingwave_pb::stream_plan;
@@ -95,7 +95,7 @@ pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Se
 #[derive(Debug, Clone, PartialEq)]
 pub struct AddMutation {
     pub actors: HashMap<ActorId, Vec<ActorInfo>>,
-    pub row_id_steps: HashMap<ActorId, RowIdStepInfo>,
+    pub row_gen_rule: HashMap<ActorId, RowIdGenRule>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -194,10 +194,10 @@ impl Barrier {
         )
     }
 
-    pub fn get_row_id_step_info(&self, actor_id: ActorId) -> Option<RowIdStepInfo> {
+    pub fn get_row_id_gen_rule(&self, actor_id: ActorId) -> Option<RowIdGenRule> {
         self.mutation.as_ref().and_then(|mutation| {
             if let Mutation::AddOutput(mutation) = mutation.as_ref() {
-                mutation.row_id_steps.get(&actor_id).cloned()
+                mutation.row_gen_rule.get(&actor_id).cloned()
             } else {
                 None
             }
@@ -264,7 +264,7 @@ impl Barrier {
                             )
                         })
                         .collect(),
-                    row_id_step_info: adds.row_id_steps.clone(),
+                    row_id_gen_rule: adds.row_gen_rule.clone(),
                 })),
             },
             span: vec![],
@@ -294,7 +294,7 @@ impl Barrier {
                         .iter()
                         .map(|(&id, actors)| (id, actors.get_info().clone()))
                         .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
-                    row_id_steps: adds.row_id_step_info.clone(),
+                    row_gen_rule: adds.row_id_gen_rule.clone(),
                 })
                 .into(),
             ),

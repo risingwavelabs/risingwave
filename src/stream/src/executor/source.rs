@@ -29,7 +29,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::SplitImpl;
-use risingwave_pb::data::RowIdStepInfo;
+use risingwave_pb::data::RowIdGenRule;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
@@ -60,8 +60,8 @@ struct RowIdGenerator {
     current_row_id: u64,
     /// The current epoch.
     epoch: Epoch,
-    /// row id step info.
-    step_info: RowIdStepInfo,
+    /// row id generator rule.
+    rule: RowIdGenRule,
 }
 
 impl RowIdGenerator {
@@ -69,9 +69,9 @@ impl RowIdGenerator {
         Self {
             current_row_id: 0,
             epoch: barrier.epoch,
-            step_info: barrier
-                .get_row_id_step_info(actor_id)
-                .expect("Row id step info"),
+            rule: barrier
+                .get_row_id_gen_rule(actor_id)
+                .expect("Row id gen rule"),
         }
     }
 
@@ -82,9 +82,8 @@ impl RowIdGenerator {
     }
 
     fn next_row_id(&mut self) -> i64 {
-        let row_id = (self.epoch.curr << 22)
-            + self.current_row_id * self.step_info.step
-            + self.step_info.offset;
+        let row_id =
+            (self.epoch.curr << 22) + self.current_row_id * self.rule.step + self.rule.offset;
         self.current_row_id += 1;
         row_id as i64
     }
@@ -562,7 +561,7 @@ mod tests {
                 }
                 .with_mutation(Mutation::AddOutput(AddMutation {
                     actors: Default::default(),
-                    row_id_steps: HashMap::from_iter([(1, RowIdStepInfo { offset: 0, step: 1 })]),
+                    row_gen_rule: HashMap::from_iter([(1, RowIdGenRule { offset: 0, step: 1 })]),
                 })),
             ))
             .unwrap();
@@ -708,7 +707,7 @@ mod tests {
                 }
                 .with_mutation(Mutation::AddOutput(AddMutation {
                     actors: Default::default(),
-                    row_id_steps: HashMap::from_iter([(1, RowIdStepInfo { offset: 0, step: 1 })]),
+                    row_gen_rule: HashMap::from_iter([(1, RowIdGenRule { offset: 0, step: 1 })]),
                 })),
             ))
             .unwrap();

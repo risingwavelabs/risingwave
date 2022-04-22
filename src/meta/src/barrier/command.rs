@@ -149,10 +149,10 @@ where
                         )
                     })
                     .collect();
-                let row_id_step_info = table_fragments.source_row_id_step_info();
+                let row_id_gen_rule = table_fragments.source_row_id_gen_rule();
                 Mutation::Add(AddMutation {
                     actors,
-                    row_id_step_info,
+                    row_id_gen_rule,
                 })
             }
         };

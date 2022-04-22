@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::data::RowIdStepInfo;
+use risingwave_pb::data::RowIdGenRule;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
@@ -274,7 +274,7 @@ impl TableFragments {
         actor_map
     }
 
-    pub fn source_row_id_step_info(&self) -> HashMap<ActorId, RowIdStepInfo> {
+    pub fn source_row_id_gen_rule(&self) -> HashMap<ActorId, RowIdGenRule> {
         self.fragments
             .values()
             .filter(|fragment| fragment.fragment_type == FragmentType::Source as i32)
@@ -283,7 +283,7 @@ impl TableFragments {
                 fragment.actors.iter().enumerate().map(move |(idx, actor)| {
                     (
                         actor.actor_id,
-                        RowIdStepInfo {
+                        RowIdGenRule {
                             offset: idx as u64,
                             step,
                         },

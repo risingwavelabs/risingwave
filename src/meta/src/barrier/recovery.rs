@@ -107,10 +107,7 @@ where
                 &new_epoch,
                 Command::plain_with(Mutation::Add(AddMutation {
                     actors: HashMap::default(),
-                    row_id_step_info: self
-                        .fragment_manager
-                        .get_all_source_row_id_step_info()
-                        .await,
+                    row_id_gen_rule: self.fragment_manager.get_all_source_row_id_gen_rule().await,
                 })),
             );
 

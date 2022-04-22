@@ -46,7 +46,7 @@ pub trait SourceManager: Debug + Sync + Send {
         &self,
         table_id: &TableId,
         columns: Vec<ColumnDesc>,
-        frontend_v2: bool,
+        frontend_v2: bool, // TODO: remove this when Java frontend deprecated.
     ) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;

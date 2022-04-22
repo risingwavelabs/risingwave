@@ -148,14 +148,14 @@ message UpdateMutation {
   map<uint32, Actors> actors = 1;
 }
 
-message RowIdStepInfo {
+message RowIdGenRule {
   uint64 offset = 1;
   uint64 step = 2;
 }
 
 message AddMutation {
   map<uint32, Actors> actors = 1;
-  map<uint32, RowIdStepInfo> row_id_step_info = 2;
+  map<uint32, RowIdGenRule> row_id_gen_rule = 2;
 }
 
 message Epoch {

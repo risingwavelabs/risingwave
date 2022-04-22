@@ -991,7 +991,7 @@ mod tests {
                 );
                 AddMutation {
                     actors,
-                    row_id_steps: HashMap::default(),
+                    row_gen_rule: HashMap::default(),
                 }
             })),
         ))
