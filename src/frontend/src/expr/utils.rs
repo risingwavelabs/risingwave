@@ -17,7 +17,7 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
-use crate::expr::ExprType;
+use crate::expr::{AggCall, ExprType};
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
@@ -294,6 +294,7 @@ macro_rules! assert_input_ref {
     };
 }
 pub(crate) use assert_input_ref;
+use risingwave_common::catalog::ColumnDesc;
 
 /// Collect all `InputRef`s' indexes in the expression.
 ///
@@ -328,6 +329,128 @@ impl CollectInputRef {
     /// Returns the collected indexes by the `CollectInputRef`.
     pub fn collect(self) -> FixedBitSet {
         self.input_bits
+    }
+}
+
+/// Collect first index in `InputRef`.
+pub struct GetInputRefIndex {
+    col_id: Option<usize>,
+}
+
+impl ExprVisitor for GetInputRefIndex {
+    fn visit_input_ref(&mut self, expr: &InputRef) {
+        self.col_id = Some(expr.index)
+    }
+
+    fn visit_agg_call(&mut self, agg_call: &AggCall) {
+        match agg_call.inputs().get(0) {
+            Some(input) => {
+                self.visit_expr(input);
+            }
+            None => {}
+        }
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        match func_call.inputs().get(0) {
+            Some(input) => {
+                self.visit_expr(input);
+            }
+            None => {}
+        }
+    }
+}
+
+impl GetInputRefIndex {
+    /// Creates a `GetInputRefIndex` with a default `col_id`.
+    pub fn new() -> Self {
+        GetInputRefIndex { col_id: None }
+    }
+
+    /// Returns the column id by the `GetInputRefIndex`.
+    pub fn collect(self) -> Option<usize> {
+        self.col_id
+    }
+}
+
+impl Default for GetInputRefIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Collect `field_desc` in `column_desc` from expression.
+///
+/// # Panics
+/// Panics if an `Field FunctionCall` not satisfy the first input is `InputRef` and
+/// second input is i32 `Literal`.
+pub struct GetFieldDesc {
+    field_desc: ColumnDesc,
+}
+
+impl ExprVisitor for GetFieldDesc {
+    /// Only check the first input because if we use nested column
+    /// it must be appear at first index.
+    fn visit_agg_call(&mut self, agg_call: &AggCall) {
+        match agg_call.inputs().get(0) {
+            Some(input) => {
+                self.visit_expr(input);
+            }
+            None => {}
+        }
+    }
+
+    /// If `func_type` is `Field` which means this is a nested column,
+    /// we can get the `field_desc` in recursive way.
+    /// The first input must be `InputRef` or `FunctionCall`
+    /// and second input must be `Literal` which contains i32 value.
+    /// Only check the first input because if we use nested column
+    /// it must be appear at first index.
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if ExprType::Field == func_call.get_expr_type() {
+            if let ExprImpl::FunctionCall(function) = &func_call.inputs()[0] {
+                self.visit_function_call(function);
+            }
+            let expr = &func_call.inputs()[1];
+            if let ExprImpl::Literal(literal) = expr {
+                match literal.get_data() {
+                    Some(ScalarImpl::Int32(i)) => {
+                        match self.field_desc.field_descs.get(*i as usize) {
+                            Some(desc) => {
+                                self.field_desc = desc.clone();
+                            }
+                            None => {
+                                panic!("Index out of field_desc bound");
+                            }
+                        }
+                    }
+                    _ => {
+                        unreachable!()
+                    }
+                }
+            } else {
+                unreachable!()
+            }
+        } else {
+            match func_call.inputs().get(0) {
+                Some(input) => {
+                    self.visit_expr(input);
+                }
+                None => {}
+            }
+        }
+    }
+}
+
+impl GetFieldDesc {
+    /// Creates a `GetFieldDesc` with a default `field_desc`.
+    pub fn new(column: ColumnDesc) -> Self {
+        GetFieldDesc { field_desc: column }
+    }
+
+    /// Returns the `field_desc` by the `GetFieldDesc`.
+    pub fn collect(self) -> ColumnDesc {
+        self.field_desc
     }
 }
 

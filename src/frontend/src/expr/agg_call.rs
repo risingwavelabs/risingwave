@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
@@ -127,21 +126,5 @@ impl Expr for AggCall {
             "AggCall {:?} has not been rewritten to physical aggregate operators",
             self
         )
-    }
-
-    fn get_index(&self) -> Option<usize> {
-        match self.inputs.get(0) {
-            Some(expr) => expr.get_index(),
-            None => None,
-        }
-    }
-
-    /// Only check the first input of `Aggcall` because if we use nested column
-    /// it must be appear at first index.
-    fn get_field(&self, column: ColumnDesc) -> Result<ColumnDesc> {
-        match self.inputs.get(0) {
-            Some(expr) => expr.get_field(column),
-            None => Ok(column),
-        }
     }
 }

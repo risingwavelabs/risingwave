@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{Expr as _, ExprImpl, ExprVisitor, GetFieldDesc, GetInputRefIndex, InputRef};
 
 #[derive(Debug)]
 pub struct BoundSelect {
@@ -107,9 +107,14 @@ impl Binder {
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                match s.get_index() {
+                let mut visitor = GetInputRefIndex::new();
+                visitor.visit_expr(s);
+                match visitor.collect() {
                     Some(index) => {
-                        let column = s.get_field(self.context.columns[index].desc.clone())?;
+                        let mut visitor =
+                            GetFieldDesc::new(self.context.columns[index].desc.clone());
+                        visitor.visit_expr(s);
+                        let column = visitor.collect();
                         Ok(Field::with_struct(
                             s.return_type(),
                             name,

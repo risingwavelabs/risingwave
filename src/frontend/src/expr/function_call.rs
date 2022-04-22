@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 
 use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
@@ -185,49 +184,6 @@ impl Expr for FunctionCall {
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: self.inputs().iter().map(Expr::to_protobuf).collect(),
             })),
-        }
-    }
-
-    fn get_index(&self) -> Option<usize> {
-        match self.inputs.get(0) {
-            Some(expr) => expr.get_index(),
-            None => None,
-        }
-    }
-
-    /// If `func_type` is `Field` which means this is a nested column,
-    /// we can get the `field_desc` in recursive way.
-    /// The first input must be `InputRef` or `FunctionCall`
-    /// and second input must be `Literal` which contains i32 value.
-    /// Only check the first input because if we use nested column
-    /// it must be appear at first index.
-    fn get_field(&self, mut column: ColumnDesc) -> Result<ColumnDesc> {
-        if ExprType::Field == self.func_type {
-            if let ExprImpl::FunctionCall(function) = &self.inputs[0] {
-                column = function.get_field(column)?;
-            }
-            let expr = &self.inputs[1];
-            if let ExprImpl::Literal(literal) = expr {
-                match literal.get_data() {
-                    Some(ScalarImpl::Int32(i)) => match column.field_descs.get(*i as usize) {
-                        Some(desc) => Ok(desc.clone()),
-                        None => Err(ErrorCode::InternalError(
-                            "Index out of field_desc bound".to_string(),
-                        )
-                        .into()),
-                    },
-                    _ => {
-                        unreachable!()
-                    }
-                }
-            } else {
-                unreachable!()
-            }
-        } else {
-            match self.inputs.get(0) {
-                Some(expr) => expr.get_field(column),
-                None => Ok(column),
-            }
         }
     }
 }
