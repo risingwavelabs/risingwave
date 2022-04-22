@@ -296,6 +296,8 @@ macro_rules! assert_input_ref {
 pub(crate) use assert_input_ref;
 use risingwave_common::catalog::ColumnDesc;
 
+use crate::binder::bind_context::ColumnBinding;
+
 /// Collect all `InputRef`s' indexes in the expression.
 ///
 /// # Panics
@@ -332,65 +334,19 @@ impl CollectInputRef {
     }
 }
 
-/// Collect first index in `InputRef`.
-pub struct GetInputRefIndex {
-    col_id: Option<usize>,
-}
-
-impl ExprVisitor for GetInputRefIndex {
-    fn visit_input_ref(&mut self, expr: &InputRef) {
-        self.col_id = Some(expr.index)
-    }
-
-    fn visit_agg_call(&mut self, agg_call: &AggCall) {
-        match agg_call.inputs().get(0) {
-            Some(input) => {
-                self.visit_expr(input);
-            }
-            None => {}
-        }
-    }
-
-    fn visit_function_call(&mut self, func_call: &FunctionCall) {
-        match func_call.inputs().get(0) {
-            Some(input) => {
-                self.visit_expr(input);
-            }
-            None => {}
-        }
-    }
-}
-
-impl GetInputRefIndex {
-    /// Creates a `GetInputRefIndex` with a default `col_id`.
-    pub fn new() -> Self {
-        GetInputRefIndex { col_id: None }
-    }
-
-    /// Returns the column id by the `GetInputRefIndex`.
-    pub fn collect(self) -> Option<usize> {
-        self.col_id
-    }
-}
-
-impl Default for GetInputRefIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Collect `field_desc` in `column_desc` from expression.
+/// Collect `field_desc` from bindings and expression.
 ///
 /// # Panics
-/// Panics if an `Field FunctionCall` not satisfy the first input is `InputRef` and
-/// second input is i32 `Literal`.
+/// Panics if `FunctionCall` not satisfy the format `Field{InputRef,Literal(i32)}` or
+/// `Field{Field,Literal(i32)}`.
 pub struct GetFieldDesc {
-    field_desc: ColumnDesc,
+    field_desc: Option<ColumnDesc>,
+    column_bindings: Vec<ColumnBinding>,
 }
 
 impl ExprVisitor for GetFieldDesc {
-    /// Only check the first input because if we use nested column
-    /// it must be appear at first index.
+    /// Only check the first input because now we only accept nested column
+    /// as first index.
     fn visit_agg_call(&mut self, agg_call: &AggCall) {
         match agg_call.inputs().get(0) {
             Some(input) => {
@@ -400,56 +356,63 @@ impl ExprVisitor for GetFieldDesc {
         }
     }
 
-    /// If `func_type` is `Field` which means this is a nested column,
-    /// we can get the `field_desc` in recursive way.
-    /// The first input must be `InputRef` or `FunctionCall`
-    /// and second input must be `Literal` which contains i32 value.
-    /// Only check the first input because if we use nested column
-    /// it must be appear at first index.
+    fn visit_input_ref(&mut self, expr: &InputRef) {
+        self.field_desc = Some(self.column_bindings[expr.index].desc.clone());
+    }
+
+    /// The `func_call` only have two kinds which are `Field{InputRef,Literal(i32)}` or
+    /// `Field{Field,Literal(i32)}`. So we only need to check the first input to get
+    /// `column_desc` from bindings. And then we get the `field_desc` by second input.
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
-        if ExprType::Field == func_call.get_expr_type() {
-            if let ExprImpl::FunctionCall(function) = &func_call.inputs()[0] {
+        match func_call.inputs().get(0) {
+            Some(ExprImpl::FunctionCall(function)) => {
                 self.visit_function_call(function);
             }
-            let expr = &func_call.inputs()[1];
-            if let ExprImpl::Literal(literal) = expr {
-                match literal.get_data() {
-                    Some(ScalarImpl::Int32(i)) => {
-                        match self.field_desc.field_descs.get(*i as usize) {
-                            Some(desc) => {
-                                self.field_desc = desc.clone();
-                            }
-                            None => {
-                                panic!("Index out of field_desc bound");
-                            }
-                        }
-                    }
-                    _ => {
-                        unreachable!()
-                    }
-                }
-            } else {
+            Some(ExprImpl::InputRef(input)) => {
+                self.visit_input_ref(input);
+            }
+            _ => {
                 unreachable!()
             }
-        } else {
-            match func_call.inputs().get(0) {
-                Some(input) => {
-                    self.visit_expr(input);
-                }
-                None => {}
+        }
+        let column = match &self.field_desc {
+            None => {
+                unreachable!()
             }
+            Some(column) => column,
+        };
+        let expr = &func_call.inputs()[1];
+        if let ExprImpl::Literal(literal) = expr {
+            match literal.get_data() {
+                Some(ScalarImpl::Int32(i)) => match column.field_descs.get(*i as usize) {
+                    Some(desc) => {
+                        self.field_desc = Some(desc.clone());
+                    }
+                    None => {
+                        panic!("Index out of field_desc bound");
+                    }
+                },
+                _ => {
+                    unreachable!()
+                }
+            }
+        } else {
+            unreachable!()
         }
     }
 }
 
 impl GetFieldDesc {
-    /// Creates a `GetFieldDesc` with a default `field_desc`.
-    pub fn new(column: ColumnDesc) -> Self {
-        GetFieldDesc { field_desc: column }
+    /// Creates a `GetFieldDesc` with columns.
+    pub fn new(columns: Vec<ColumnBinding>) -> Self {
+        GetFieldDesc {
+            field_desc: None,
+            column_bindings: columns,
+        }
     }
 
     /// Returns the `field_desc` by the `GetFieldDesc`.
-    pub fn collect(self) -> ColumnDesc {
+    pub fn collect(self) -> Option<ColumnDesc> {
         self.field_desc
     }
 }

@@ -18,13 +18,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{Expr as _, ExprImpl, ExprVisitor, GetFieldDesc, GetInputRefIndex, InputRef};
+use crate::expr::{Expr as _, ExprImpl, ExprType, ExprVisitor, GetFieldDesc, InputRef};
 
 #[derive(Debug)]
 pub struct BoundSelect {
@@ -98,32 +99,13 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        // Get index from `select_item` to find the `column_desc` in bindings,
-        // and then get the `field_desc` in expr
-        // If `select_item` not have index, use `alias` and `data_type` to form
-        // field.
+        // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
             .iter()
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                let mut visitor = GetInputRefIndex::new();
-                visitor.visit_expr(s);
-                match visitor.collect() {
-                    Some(index) => {
-                        let mut visitor =
-                            GetFieldDesc::new(self.context.columns[index].desc.clone());
-                        visitor.visit_expr(s);
-                        let column = visitor.collect();
-                        Ok(Field::with_struct(
-                            s.return_type(),
-                            name,
-                            column.field_descs.iter().map(|f| f.into()).collect_vec(),
-                            column.type_name,
-                        ))
-                    }
-                    None => Ok(Field::with_name(s.return_type(), name)),
-                }
+                self.expr_to_field(s, name)
             })
             .collect::<Result<Vec<Field>>>()?;
 
@@ -209,5 +191,59 @@ impl Binder {
                 )
             })
             .unzip()
+    }
+
+    /// Only struct return type need to transfer to Field.
+    /// Now we accept `InputRef`, Field `FunctionCall` and Min and Max `AggCall` to return struct.
+    /// Use `GetFieldDesc Visitor` to find `field_desc`.
+    pub fn expr_to_field(&self, item: &ExprImpl, name: String) -> Result<Field> {
+        let err = Err(ErrorCode::BindError(format!(
+            "Not support this expr type to return struct data_type {:?}",
+            item
+        ))
+        .into());
+        let is_field_select = {
+            if let DataType::Struct { .. } = item.return_type() {
+                match item {
+                    ExprImpl::InputRef(_) => true,
+                    ExprImpl::FunctionCall(function) => match function.get_expr_type() {
+                        ExprType::Field => true,
+                        _ => {
+                            return err;
+                        }
+                    },
+                    ExprImpl::AggCall(agg) => match agg.agg_kind() {
+                        AggKind::Max | AggKind::Min => true,
+                        _ => {
+                            return err;
+                        }
+                    },
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        };
+        if is_field_select {
+            let mut visitor = GetFieldDesc::new(self.context.columns.clone());
+            visitor.visit_expr(item);
+            match visitor.collect() {
+                None => {
+                    return Err(ErrorCode::BindError(format!(
+                        "Not find field_descs for struct return expr {:?}",
+                        item
+                    ))
+                    .into());
+                }
+                Some(column) => Ok(Field::with_struct(
+                    item.return_type(),
+                    name,
+                    column.field_descs.iter().map(|f| f.into()).collect_vec(),
+                    column.type_name,
+                )),
+            }
+        } else {
+            Ok(Field::with_name(item.return_type(), name))
+        }
     }
 }

@@ -18,7 +18,7 @@ use std::fmt::Display;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ColumnBinding {
     pub table_name: String,
     pub index: usize,
