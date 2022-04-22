@@ -66,7 +66,7 @@ impl Binder {
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
-                Ok(self.bind_single_field_column(*field_expr, &idents)?.0)
+                Ok(self.bind_single_field_column(*field_expr, &idents)?)
             }
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(

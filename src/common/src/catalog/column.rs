@@ -88,7 +88,7 @@ impl ColumnDesc {
         }
     }
 
-    pub fn with_named(
+    pub fn with_name(
         column_id: ColumnId,
         data_type: DataType,
         name: impl Into<String>,
