@@ -47,30 +47,23 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
+        let num_columns = bound[0].len();
+        if bound.iter().any(|row| row.len() != num_columns) {
+            return Err(
+                ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
+            );
+        }
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
-                if types.len() != bound[0].len() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "values length mismatched: expected {}, given {}",
-                        types.len(),
-                        bound[0].len(),
-                    ))
-                    .into());
-                }
                 bound = bound
                     .into_iter()
-                    .map(|vec| {
-                        vec.into_iter()
-                            .zip_eq(types.iter().cloned())
-                            .map(|(expr, ty)| expr.cast_assign(ty))
-                            .try_collect()
-                    })
+                    .map(|vec| Self::cast_on_insert(types.clone(), vec))
                     .try_collect()?;
 
                 types
             }
-            None => (0..bound[0].len())
+            None => (0..num_columns)
                 .map(|col_index| align_types(bound.iter_mut().map(|row| &mut row[col_index])))
                 .try_collect()?,
         };
