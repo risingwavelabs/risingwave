@@ -346,7 +346,7 @@ where
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
                     info.upstream_distribution_keys
-                        .insert(*table_id, table_fragment.distribution_keys());
+                        .insert(*table_id, table_fragment.distribution_keys().clone());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

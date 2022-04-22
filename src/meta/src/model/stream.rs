@@ -153,8 +153,8 @@ impl TableFragments {
     }
 
     /// Returns distribution keys.
-    pub fn distribution_keys(&self) -> Vec<i32> {
-        self.distribution_keys.clone()
+    pub fn distribution_keys(&self) -> &Vec<i32> {
+        self.distribution_keys.as_ref()
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {

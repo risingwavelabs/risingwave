@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_recursion::async_recursion;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
@@ -106,6 +107,99 @@ where
         })
     }
 
+    #[async_recursion]
+    async fn resolve_chain_node_inner(
+        &self,
+        stream_node: &mut StreamNode,
+        actor_id: ActorId,
+        locations: &ScheduledLocations,
+        upstream_parallel_unit_info: &HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<()> {
+        // if node is chain node, we insert upstream ids into chain's input(merge)
+        if let Some(Node::ChainNode(ref mut chain)) = stream_node.node {
+            // get upstream table id
+            let table_id = TableId::from(&chain.table_ref_id);
+
+            let (upstream_actor_id, parallel_unit_id) = {
+                // 1. use table id to get upstream parallel_unit->actor_id mapping
+                let upstream_parallel_actor_mapping =
+                    upstream_parallel_unit_info.get(&table_id).unwrap();
+                // 2. use our actor id to get our parallel unit id
+                let parallel_unit_id = locations.actor_locations.get(&actor_id).unwrap().id;
+                // 3. and use our parallel unit id to get upstream actor id
+                (
+                    upstream_parallel_actor_mapping
+                        .get(&parallel_unit_id)
+                        .unwrap(),
+                    parallel_unit_id,
+                )
+            };
+
+            // fill upstream node-actor info for later use
+            let chain_upstream_table_node_actors =
+                self.fragment_manager.table_node_actors(&table_id).await?;
+            let chain_upstream_node_actors = chain_upstream_table_node_actors
+                .iter()
+                .flat_map(|(node_id, actor_ids)| {
+                    actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                })
+                .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
+                .into_group_map();
+            for (node_id, actor_ids) in chain_upstream_node_actors {
+                match ctx.upstream_node_actors.entry(node_id) {
+                    Entry::Occupied(mut o) => {
+                        o.get_mut().extend(actor_ids.iter());
+                    }
+                    Entry::Vacant(v) => {
+                        v.insert(actor_ids);
+                    }
+                }
+            }
+
+            // deal with merge and batch query node, setting upstream infos.
+            let merge_stream_node = &mut stream_node.input[0];
+            if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
+                merge.upstream_actor_id.push(*upstream_actor_id);
+            } else {
+                unreachable!("chain's input[0] should always be merge");
+            }
+            let batch_stream_node = &mut stream_node.input[1];
+            if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
+                // TODO: we can also insert distribution keys here, make fragmenter
+                // even simpler.
+                batch_query.hash_mapping =
+                    ctx.hash_mapping.iter().map(|id| *id as i32).collect_vec();
+                batch_query.parallel_unit_id = parallel_unit_id as i32;
+            } else {
+                unreachable!("chain's input[1] should always be batch query");
+            }
+
+            // finally, we should also build dispatcher infos here.
+            match ctx.dispatches.entry(*upstream_actor_id) {
+                Entry::Occupied(mut o) => {
+                    o.get_mut().push(actor_id);
+                }
+                Entry::Vacant(v) => {
+                    v.insert(vec![actor_id]);
+                }
+            };
+        } else {
+            // otherwise, recursively deal with input nodes
+            for input in &mut stream_node.input {
+                self.resolve_chain_node_inner(
+                    input,
+                    actor_id,
+                    locations,
+                    upstream_parallel_unit_info,
+                    ctx,
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn resolve_chain_node(
         &self,
         table_fragments: &mut TableFragments,
@@ -124,91 +218,15 @@ where
             // chain into the same fragment.
             if fragment.fragment_type == FragmentType::Others as i32 {
                 for actor in &mut fragment.actors {
-                    // BFS through all nodes in actor.
-                    let mut queue: VecDeque<&mut StreamNode> = VecDeque::default();
-                    if let Some(ref mut first_node) = actor.nodes {
-                        queue.push_back(first_node);
-                    } else {
-                        continue;
-                    }
-                    while !queue.is_empty() {
-                        let stream_node = queue.pop_front().unwrap();
-                        // if node is chain node, we insert upstream ids into chain's input(merge)
-                        if let Some(Node::ChainNode(ref mut chain)) = stream_node.node {
-                            // get upstream table id
-                            let table_id = TableId::from(&chain.table_ref_id);
-
-                            let (upstream_actor_id, parallel_unit_id) = {
-                                // 1. use table id to get upstream parallel_unit->actor_id mapping
-                                let upstream_parallel_actor_mapping =
-                                    upstream_parallel_unit_info.get(&table_id).unwrap();
-                                // 2. use our actor id to get our parallel unit id
-                                let parallel_unit_id =
-                                    locations.actor_locations.get(&actor.actor_id).unwrap().id;
-                                // 3. and use our parallel unit id to get upstream actor id
-                                (
-                                    upstream_parallel_actor_mapping
-                                        .get(&parallel_unit_id)
-                                        .unwrap(),
-                                    parallel_unit_id,
-                                )
-                            };
-
-                            let chain_upstream_table_node_actors =
-                                self.fragment_manager.table_node_actors(&table_id).await?;
-                            let chain_upstream_node_actors = chain_upstream_table_node_actors
-                                .iter()
-                                .flat_map(|(node_id, actor_ids)| {
-                                    actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
-                                })
-                                .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
-                                .into_group_map();
-                            for (node_id, actor_ids) in chain_upstream_node_actors {
-                                match ctx.upstream_node_actors.entry(node_id) {
-                                    Entry::Occupied(mut o) => {
-                                        o.get_mut().extend(actor_ids.iter());
-                                    }
-                                    Entry::Vacant(v) => {
-                                        v.insert(actor_ids);
-                                    }
-                                }
-                            }
-
-                            // deal with merge node, insert upstreams here
-                            let merge_stream_node = &mut stream_node.input[0];
-                            if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
-                                merge.upstream_actor_id.push(*upstream_actor_id);
-                            } else {
-                                unreachable!("chain's input[0] should always be merge");
-                            }
-                            let batch_stream_node = &mut stream_node.input[1];
-                            if let Some(Node::BatchPlanNode(ref mut batch_query)) =
-                                batch_stream_node.node
-                            {
-                                // insert hash mapping informations
-                                // TODO: we can also insert distribution keys here, make fragmenter
-                                // simpler.
-                                batch_query.hash_mapping =
-                                    ctx.hash_mapping.iter().map(|id| *id as i32).collect_vec();
-                                batch_query.parallel_unit_id = parallel_unit_id as i32;
-                            } else {
-                                unreachable!("chain's input[1] should always be batch query");
-                            }
-
-                            // finally, we should also build dispatcher infos here.
-                            match ctx.dispatches.entry(*upstream_actor_id) {
-                                Entry::Occupied(mut o) => {
-                                    o.get_mut().push(actor.actor_id);
-                                }
-                                Entry::Vacant(v) => {
-                                    v.insert(vec![actor.actor_id]);
-                                }
-                            };
-                        } else {
-                            for input in &mut stream_node.input {
-                                queue.push_back(input);
-                            }
-                        }
+                    if let Some(ref mut stream_node) = actor.nodes {
+                        self.resolve_chain_node_inner(
+                            stream_node,
+                            actor.actor_id,
+                            locations,
+                            &upstream_parallel_unit_info,
+                            ctx,
+                        )
+                        .await?;
                     }
                 }
             }
