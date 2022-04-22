@@ -65,7 +65,7 @@ fn name_of(ty: &DataType) -> DataTypeName {
     }
 }
 
-/// Infers the return type of a function. Returns `None` if the function with specified data types
+/// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
 pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
     // With our current simplified type system, where all types are nullable and not parameterized

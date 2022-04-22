@@ -85,6 +85,8 @@ impl std::fmt::Debug for FunctionCall {
 }
 
 impl FunctionCall {
+    /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
+    /// `inputs`.
     pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<Self> {
         let return_type = infer_type(
             func_type,
@@ -120,7 +122,8 @@ impl FunctionCall {
         }
     }
 
-    /// used for expressions like cast
+    /// Construct a `FunctionCall` expr directly with the provided `return_type`, bypassing type
+    /// inference. Use with caution.
     pub fn new_unchecked(
         func_type: ExprType,
         inputs: Vec<ExprImpl>,
