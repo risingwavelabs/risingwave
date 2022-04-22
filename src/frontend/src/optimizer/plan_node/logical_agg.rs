@@ -60,11 +60,7 @@ impl PlanAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
-            args: self
-                .inputs
-                .iter()
-                .map(InputRef::to_agg_arg_protobuf)
-                .collect(),
+            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             // TODO: support distinct
             distinct: false,
         }
