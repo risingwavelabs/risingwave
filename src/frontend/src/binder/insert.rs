@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use itertools::Itertools;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Debug)]
 pub struct BoundInsert {
@@ -24,6 +27,8 @@ pub struct BoundInsert {
     pub table_source: BoundTableSource,
 
     pub source: BoundQuery,
+
+    pub cast_exprs: Vec<ExprImpl>,
 }
 
 impl Binder {
@@ -41,7 +46,7 @@ impl Binder {
             .map(|c| c.data_type.clone())
             .collect();
 
-        let source = match source {
+        let (source, cast_exprs) = match source {
             Query {
                 with: None,
                 body: SetExpr::Values(values),
@@ -52,29 +57,61 @@ impl Binder {
             } if order.is_empty() => {
                 let values = self.bind_values(values, Some(expected_types))?;
                 let body = BoundSetExpr::Values(values.into());
-                BoundQuery {
-                    body,
-                    order: vec![],
-                    limit: None,
-                    offset: None,
-                }
+                (
+                    BoundQuery {
+                        body,
+                        order: vec![],
+                        limit: None,
+                        offset: None,
+                    },
+                    vec![],
+                )
             }
             query => {
                 let bound = self.bind_query(query)?;
-                let ts = bound.data_types();
-                if ts == expected_types {
-                    bound
-                } else {
-                    panic!("")
-                }
+                let actual_types = bound.data_types();
+                Self::check_insert_columns_len(expected_types.len(), actual_types.len())?;
+                let cast_exprs = match expected_types == actual_types {
+                    true => vec![],
+                    false => Self::cast_on_insert(
+                        expected_types,
+                        actual_types
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, t)| InputRef::new(i, t).into())
+                            .collect(),
+                    )?,
+                };
+                (bound, cast_exprs)
             }
         };
 
         let insert = BoundInsert {
             table_source,
             source,
+            cast_exprs,
         };
 
         Ok(insert)
+    }
+
+    pub(super) fn cast_on_insert(
+        expected_types: Vec<DataType>,
+        exprs: Vec<ExprImpl>,
+    ) -> Result<Vec<ExprImpl>> {
+        exprs
+            .into_iter()
+            .zip_eq(expected_types)
+            .map(|(e, t)| e.cast_assign(t))
+            .try_collect()
+    }
+
+    fn check_insert_columns_len(target: usize, source: usize) -> Result<()> {
+        let msg = match target.cmp(&source) {
+            std::cmp::Ordering::Less => "",
+            std::cmp::Ordering::Equal => return Ok(()),
+            std::cmp::Ordering::Greater => "",
+        };
+        Err(ErrorCode::BindError(msg.into()).into())
     }
 }

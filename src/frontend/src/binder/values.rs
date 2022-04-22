@@ -60,12 +60,7 @@ impl Binder {
                 }
                 bound = bound
                     .into_iter()
-                    .map(|vec| {
-                        vec.into_iter()
-                            .zip_eq(types.iter().cloned())
-                            .map(|(expr, ty)| expr.cast_assign(ty))
-                            .try_collect()
-                    })
+                    .map(|vec| Self::cast_on_insert(types.clone(), vec))
                     .try_collect()?;
 
                 types
