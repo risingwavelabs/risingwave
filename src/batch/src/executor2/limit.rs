@@ -20,7 +20,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::ExecutorBuilder;
@@ -69,9 +68,6 @@ impl BoxedExecutor2Builder for LimitExecutor2 {
 impl LimitExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut data_chunk_builder =
-            DataChunkBuilder::new_with_default_size(self.child.schema().data_types());
-
         #[for_await]
         for data_chunk in self.child.execute() {
             if self.returned == self.limit {
@@ -112,10 +108,6 @@ impl LimitExecutor2 {
                 self.skipped += l;
             }
             yield data_chunk.with_visibility(new_vis.try_into()?).compact()?;
-        }
-
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
-            yield chunk;
         }
     }
 }
