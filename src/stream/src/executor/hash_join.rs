@@ -474,7 +474,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         key: &K,
         ht: &'a mut JoinHashMap<K, S>,
     ) -> Option<&'a mut HashValueType<S>> {
-        ht.get_mut(key).await
+        if key.has_null() {
+            None
+        } else {
+            ht.get_mut(key).await
+        }
     }
 
     fn row_from_row_ref(row: &RowRef) -> Row {
