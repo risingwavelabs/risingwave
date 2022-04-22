@@ -337,10 +337,7 @@ impl ExecutorV1 for SourceExecutor {
                     .unwrap();
 
                 // todo: use epoch from msg to restore state from state store
-                // TODO: Remove this conditional judgment when Java frontend deprecated.
-                if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_))
-                    || self.source_desc.row_id_index == Some(0)
-                {
+                if self.source_desc.row_id_index.is_some() {
                     let barrier = msg.as_barrier().expect("not barrier msg");
                     self.row_id_generator = Some(RowIdGenerator::new(self.actor_id, barrier));
                 }
@@ -376,10 +373,7 @@ impl ExecutorV1 for SourceExecutor {
                 match stream.as_mut().next().await {
                     // This branch will be preferred.
                     Some(Either::Left(message)) => {
-                        // TODO: Remove this conditional judgment when Java frontend deprecated.
-                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_))
-                            || self.source_desc.row_id_index == Some(0)
-                        {
+                        if self.source_desc.row_id_index.is_some() {
                             let barrier = message
                                 .as_ref()
                                 .unwrap()
@@ -397,10 +391,7 @@ impl ExecutorV1 for SourceExecutor {
                     // If there's barrier, this branch will be deferred.
                     Some(Either::Right(chunk)) => {
                         let mut chunk = chunk?;
-                        // TODO: Remove this conditional judgment when Java frontend deprecated.
-                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_))
-                            || self.source_desc.row_id_index == Some(0)
-                        {
+                        if self.source_desc.row_id_index.is_some() {
                             chunk = self.refill_row_id_column(chunk);
                         }
 
