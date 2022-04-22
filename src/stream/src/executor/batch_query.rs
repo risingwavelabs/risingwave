@@ -60,12 +60,12 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .collect_vec();
 
         let parallel_unit_id = node.get_parallel_unit_id() as u32;
-        let mut hash_filter_builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
         let hash_filter = if let Some(mapping) = &node.hash_mapping {
             generate_hash_filter(mapping, parallel_unit_id)
         } else {
             // TODO: remove this branch once we deprecate Java frontend.
             // manually build bitmap with full of ones
+            let mut hash_filter_builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
             for _ in 0..VIRTUAL_NODE_COUNT {
                 hash_filter_builder.append(true);
             }

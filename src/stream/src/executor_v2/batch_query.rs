@@ -161,7 +161,7 @@ mod test {
         };
         let hash_filter = {
             let mut builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
-            for i in 0..VIRTUAL_NODE_COUNT {
+            for _ in 0..VIRTUAL_NODE_COUNT {
                 builder.append(true);
             }
             builder.finish()

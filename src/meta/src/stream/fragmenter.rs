@@ -119,8 +119,9 @@ where
         self.generate_fragment_graph(stream_node)?;
         // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
 
-        // save distribution key in ctx
+        // save distribution key and dependent table ids in ctx
         ctx.distribution_keys = self.distribution_keys.clone();
+        ctx.dependent_table_ids = self.dependent_table_ids.clone();
 
         // resolve upstream table infos first
         // TODO: this info is only used by `resolve_chain_node`. We can move that logic to

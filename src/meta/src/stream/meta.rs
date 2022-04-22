@@ -361,15 +361,39 @@ where
 
     pub async fn get_sink_parallel_unit_ids(
         &self,
-        table_ids: Vec<TableId>,
+        table_ids: &HashSet<TableId>,
     ) -> Result<HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>> {
         let map = &self.core.read().await.table_fragments;
         let mut info: HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>> = HashMap::new();
 
         for table_id in table_ids {
-            match map.get(&table_id) {
+            match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.insert(table_id, table_fragment.parallel_unit_sink_actor_id());
+                    info.insert(*table_id, table_fragment.parallel_unit_sink_actor_id());
+                }
+                None => {
+                    return Err(RwError::from(InternalError(format!(
+                        "table_fragment not exist: id={}",
+                        table_id
+                    ))));
+                }
+            }
+        }
+
+        Ok(info)
+    }
+
+    pub async fn get_tables_node_actors(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> Result<HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>> = HashMap::new();
+
+        for table_id in table_ids {
+            match map.get(table_id) {
+                Some(table_fragment) => {
+                    info.insert(*table_id, table_fragment.node_actor_ids());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

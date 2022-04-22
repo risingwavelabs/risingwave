@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use async_recursion::async_recursion;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
@@ -56,6 +55,8 @@ pub struct CreateMaterializedViewContext {
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
+    /// Dependent table ids
+    pub dependent_table_ids: HashSet<TableId>,
     /// Temporary source info used during `create_materialized_source`
     pub affiliated_source: Option<Source>,
     /// Consistent hash mapping, used in hash dispatcher.
@@ -110,13 +111,13 @@ where
         })
     }
 
-    #[async_recursion]
-    async fn resolve_chain_node_inner(
+    fn resolve_chain_node_inner(
         &self,
         stream_node: &mut StreamNode,
         actor_id: ActorId,
         locations: &ScheduledLocations,
         upstream_parallel_unit_info: &HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
+        tables_node_actors: &HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<()> {
         // if node is chain node, we insert upstream ids into chain's input(merge)
@@ -140,9 +141,9 @@ where
             };
 
             // fill upstream node-actor info for later use
-            let chain_upstream_table_node_actors =
-                self.fragment_manager.table_node_actors(&table_id).await?;
-            let chain_upstream_node_actors = chain_upstream_table_node_actors
+            let upstream_table_node_actors = tables_node_actors.get(&table_id).unwrap();
+
+            let chain_upstream_node_actors = upstream_table_node_actors
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {
                     actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
@@ -198,9 +199,9 @@ where
                     actor_id,
                     locations,
                     upstream_parallel_unit_info,
+                    tables_node_actors,
                     ctx,
-                )
-                .await?;
+                )?;
             }
         }
         Ok(())
@@ -214,7 +215,12 @@ where
     ) -> Result<()> {
         let upstream_parallel_unit_info = self
             .fragment_manager
-            .get_sink_parallel_unit_ids(ctx.table_sink_map.keys().cloned().collect_vec())
+            .get_sink_parallel_unit_ids(&ctx.dependent_table_ids)
+            .await?;
+
+        let tables_node_actors = self
+            .fragment_manager
+            .get_tables_node_actors(&ctx.dependent_table_ids)
             .await?;
 
         for fragment in table_fragments.fragments.values_mut() {
@@ -230,9 +236,9 @@ where
                             actor.actor_id,
                             locations,
                             &upstream_parallel_unit_info,
+                            &tables_node_actors,
                             ctx,
-                        )
-                        .await?;
+                        )?;
                     }
                 }
             }
