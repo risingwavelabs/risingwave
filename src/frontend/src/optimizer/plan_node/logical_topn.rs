@@ -14,9 +14,7 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
-
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
@@ -110,16 +108,14 @@ impl fmt::Display for LogicalTopN {
 }
 
 impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
+    fn prune_col(&self, required_cols: Vec<usize>) -> PlanRef {
         let mut input_required_cols = required_cols.clone();
         self.order
             .field_order
             .iter()
-            .for_each(|fo| input_required_cols.insert(fo.index));
+            .for_each(|fo| input_required_cols.push(fo.index));
 
-        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let mapping = ColIndexMapping::with_remaining_columns(input_required_cols.clone());
         let new_order = Order {
             field_order: self
                 .order
@@ -131,17 +127,17 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
-        let new_input = self.input.prune_col(required_cols);
+        let new_input = self.input.prune_col(required_cols.clone());
         let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
 
-        if *required_cols == input_required_cols {
+        if required_cols == input_required_cols {
             top_n
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(top_n.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            let mut remaining_columns = Vec::new();
+            remaining_columns.extend(required_cols.iter().map(|i| mapping.map(*i)));
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(remaining_columns),
             )
         }
     }

@@ -103,7 +103,7 @@ impl StreamMaterialize {
         input: PlanRef,
         mv_name: String,
         user_order_by: Order,
-        user_cols: FixedBitSet,
+        user_cols: &[usize],
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
         let input = match input.distribution() {
@@ -123,7 +123,7 @@ impl StreamMaterialize {
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
                 column_desc: ColumnDesc::from_field_without_column_id(field),
-                is_hidden: !user_cols.contains(i),
+                is_hidden: !user_cols.contains(&i),
             })
             .collect_vec();
 

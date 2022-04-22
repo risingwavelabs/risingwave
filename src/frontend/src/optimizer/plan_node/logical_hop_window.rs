@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit};
 
@@ -121,7 +120,7 @@ impl fmt::Display for LogicalHopWindow {
 }
 
 impl ColPrunable for LogicalHopWindow {
-    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
+    fn prune_col(&self, _required_cols: std::vec::Vec<usize>) -> PlanRef {
         unimplemented!("LogicalHopWindow::prune_col")
     }
 }

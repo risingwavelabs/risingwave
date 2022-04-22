@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -99,10 +98,7 @@ pub(crate) fn gen_create_index_plan(
             table_desc,
             context,
         ));
-        let mut required_cols = FixedBitSet::with_capacity(scan_node.schema().len());
-        required_cols.toggle_range(..);
-        required_cols.toggle(0);
-
+        let required_cols: Vec<_> = (1..scan_node.schema().len()).collect();
         PlanRoot::new(
             scan_node.into(),
             Distribution::AnyShard,

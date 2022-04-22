@@ -33,7 +33,6 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
-use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -61,17 +60,6 @@ pub trait PlanNode:
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
     fn convention(&self) -> Convention;
-
-    // TODO: find a better place declear this func
-    fn must_contain_columns(&self, required_cols: &FixedBitSet) {
-        // Having equal length also implies:
-        // required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len()))
-        assert_eq!(
-            required_cols.len(),
-            self.plan_base().schema.fields().len(),
-            "required cols capacity != columns available",
-        );
-    }
 }
 
 impl_downcast!(PlanNode);

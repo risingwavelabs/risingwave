@@ -92,14 +92,14 @@ impl Condition {
     #[must_use]
     /// Split the condition expressions into 3 groups: left, right and others
     pub fn split(self, left_col_num: usize, right_col_num: usize) -> (Self, Self, Self) {
-        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
-        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+        let left_columns: Vec<_> = (0..left_col_num).collect();
+        let right_columns: Vec<_> = (left_col_num..left_col_num + right_col_num).collect();
 
         self.group_by::<_, 3>(|expr| {
-            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
-            if input_bits.is_subset(&left_bit_map) {
+            let inputs = expr.collect_input_refs(left_col_num + right_col_num);
+            if inputs.iter().all(|input| left_columns.contains(input)) {
                 0
-            } else if input_bits.is_subset(&right_bit_map) {
+            } else if inputs.iter().all(|input| right_columns.contains(input)) {
                 1
             } else {
                 2
@@ -128,7 +128,13 @@ impl Condition {
         let (mut eq_keys, mut others) = (vec![], vec![]);
         self.conjunctions.into_iter().for_each(|expr| {
             let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
-            if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
+            if input_bits
+                .iter()
+                .all(|input| !left_bit_map.contains(*input))
+                || input_bits
+                    .iter()
+                    .all(|input| !right_bit_map.contains(*input))
+            {
                 others.push(expr)
             } else {
                 let mut is_eq_cond = false;
@@ -161,10 +167,10 @@ impl Condition {
     #[must_use]
     /// Split the condition expressions into 2 groups: those referencing `columns` and others which
     /// are disjoint with columns.
-    pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
+    pub fn split_disjoint(self, columns: &[usize]) -> (Self, Self) {
         self.group_by::<_, 2>(|expr| {
             let input_bits = expr.collect_input_refs(columns.len());
-            if input_bits.is_disjoint(columns) {
+            if input_bits.iter().all(|input| !columns.contains(input)) {
                 1
             } else {
                 0

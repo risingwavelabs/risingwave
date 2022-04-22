@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -83,11 +82,12 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
-        let mut all_cols = FixedBitSet::with_capacity(self.input.schema().len());
-        all_cols.insert_range(..);
-        self.clone_with_input(self.input.prune_col(&all_cols))
-            .into()
+    fn prune_col(&self, _required_cols: Vec<usize>) -> PlanRef {
+        self.clone_with_input(
+            self.input
+                .prune_col((0..self.input.schema().len()).collect()),
+        )
+        .into()
     }
 }
 

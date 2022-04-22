@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
@@ -24,8 +23,8 @@ use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
-    StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHashAgg,
+    StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
@@ -457,27 +456,24 @@ impl fmt::Display for LogicalAgg {
 }
 
 impl ColPrunable for LogicalAgg {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
-        let mut child_required_cols =
-            FixedBitSet::with_capacity(self.input.schema().fields().len());
+    fn prune_col(&self, required_cols: Vec<usize>) -> PlanRef {
+        let mut child_required_cols = Vec::new();
         child_required_cols.extend(self.group_keys.iter().cloned());
 
         // Do not prune the group keys.
         let mut group_keys = self.group_keys.clone();
         let (mut agg_calls, agg_call_alias): (Vec<_>, Vec<_>) = required_cols
-            .ones()
-            .filter(|&index| index >= self.group_keys.len())
+            .iter()
+            .filter(|index| **index >= self.group_keys.len())
             .map(|index| {
-                let index = index - self.group_keys.len();
+                let index = *index - self.group_keys.len();
                 let agg_call = self.agg_calls[index].clone();
                 child_required_cols.extend(agg_call.inputs.iter().map(|x| x.index()));
                 (agg_call, self.agg_call_alias[index].clone())
             })
             .multiunzip();
 
-        let mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
+        let mapping = ColIndexMapping::with_remaining_columns(child_required_cols.clone());
         agg_calls.iter_mut().for_each(|agg_call| {
             agg_call
                 .inputs
@@ -490,22 +486,26 @@ impl ColPrunable for LogicalAgg {
             agg_calls,
             agg_call_alias,
             group_keys,
-            self.input.prune_col(&child_required_cols),
+            self.input.prune_col(child_required_cols),
         );
 
-        if FixedBitSet::from_iter(0..self.group_keys.len()).is_subset(required_cols) {
+        if self
+            .group_keys
+            .iter()
+            .all(|key| required_cols.contains(key))
+        {
             agg.into()
         } else {
             // Some group key columns are not needed
-            let mut required_cols_new = FixedBitSet::with_capacity(agg.schema().fields().len());
+            let mut required_cols_new = Vec::new();
             required_cols
-                .ones()
-                .filter(|&i| i < agg.group_keys.len())
-                .for_each(|i| required_cols_new.insert(i));
+                .iter()
+                .filter(|i| **i < agg.group_keys.len())
+                .for_each(|i| required_cols_new.push(*i));
             required_cols_new.extend(agg.group_keys.len()..agg.schema().fields().len());
             LogicalProject::with_mapping(
                 agg.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols_new),
+                ColIndexMapping::with_remaining_columns(required_cols_new),
             )
         }
     }
@@ -748,9 +748,8 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(2);
-        required_cols.extend(vec![0, 1]);
-        let plan = agg.prune_col(&required_cols);
+        let required_cols = vec![0, 1];
+        let plan = agg.prune_col(required_cols);
 
         // Check the result
         let agg_new = plan.as_logical_agg().unwrap();
@@ -807,9 +806,8 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(2);
-        required_cols.extend(vec![1]);
-        let plan = agg.prune_col(&required_cols);
+        let required_cols = vec![1];
+        let plan = agg.prune_col(required_cols);
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -881,9 +879,8 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(4);
-        required_cols.extend(vec![0, 3]);
-        let plan = agg.prune_col(&required_cols);
+        let required_cols = vec![0, 3];
+        let plan = agg.prune_col(required_cols);
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

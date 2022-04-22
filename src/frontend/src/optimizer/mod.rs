@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod plan_node;
+use std::cmp::max;
+
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -21,7 +23,6 @@ mod plan_rewriter;
 mod plan_visitor;
 mod rule;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
@@ -47,7 +48,7 @@ pub struct PlanRoot {
     plan: PlanRef,
     required_dist: Distribution,
     required_order: Order,
-    out_fields: FixedBitSet,
+    out_fields: Vec<usize>,
     schema: Schema,
 }
 
@@ -56,15 +57,13 @@ impl PlanRoot {
         plan: PlanRef,
         required_dist: Distribution,
         required_order: Order,
-        out_fields: FixedBitSet,
+        out_fields: Vec<usize>,
     ) -> Self {
         let input_schema = plan.schema();
-        assert_eq!(input_schema.fields().len(), out_fields.len());
-
         let schema = Schema {
             fields: out_fields
-                .ones()
-                .map(|i| input_schema.fields()[i].clone())
+                .iter()
+                .map(|i| input_schema.fields()[*i].clone())
                 .collect(),
         };
         Self {
@@ -94,16 +93,16 @@ impl PlanRoot {
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
     pub fn as_subplan(self) -> PlanRef {
-        if self.out_fields.count_ones(..) == self.out_fields.len() {
+        if self.out_fields.len() == *self.out_fields.iter().reduce(max).unwrap() {
             return self.plan;
         }
         let (exprs, expr_aliases) = self
             .out_fields
-            .ones()
+            .iter()
             .zip_eq(self.schema.fields)
             .map(|(index, field)| {
                 (
-                    InputRef::new(index, field.data_type).into(),
+                    InputRef::new(*index, field.data_type).into(),
                     Some(field.name),
                 )
             })
@@ -139,7 +138,7 @@ impl PlanRoot {
         };
 
         // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
+        plan = plan.prune_col(self.out_fields.clone());
 
         plan = {
             let rules = vec![
@@ -191,7 +190,7 @@ impl PlanRoot {
                 self.required_order = out_col_change
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
-                self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
+                self.out_fields = out_col_change.rewrite_map(&self.out_fields);
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)
             }
@@ -205,7 +204,7 @@ impl PlanRoot {
             stream_plan,
             mv_name,
             self.required_order.clone(),
-            self.out_fields.clone(),
+            &self.out_fields,
         )
     }
 
@@ -237,7 +236,7 @@ mod tests {
             ctx,
         )
         .into();
-        let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
+        let out_fields = vec![0];
         let root = PlanRoot::new(
             values,
             Distribution::any().clone(),

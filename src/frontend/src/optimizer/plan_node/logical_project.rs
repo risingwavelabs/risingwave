@@ -15,13 +15,12 @@
 use std::fmt;
 use std::string::String;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamProject,
-    ToBatch, ToStream,
+    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{
     as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
@@ -240,37 +239,29 @@ impl fmt::Display for LogicalProject {
 }
 
 impl ColPrunable for LogicalProject {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        // Check.
-        self.must_contain_columns(required_cols);
-
+    fn prune_col(&self, required_cols: Vec<usize>) -> PlanRef {
         // Record each InputRef's index.
         let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
-        required_cols.ones().for_each(|id| {
-            visitor.visit_expr(&self.exprs[id]);
+        required_cols.iter().for_each(|id| {
+            visitor.visit_expr(&self.exprs[*id]);
         });
 
-        let child_required_cols = visitor.collect();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
+        let child_required_cols: Vec<_> = visitor.into();
+        let mut mapping = ColIndexMapping::with_remaining_columns(child_required_cols.clone());
 
         // Rewrite each InputRef with new index.
         let (exprs, expr_alias) = required_cols
-            .ones()
+            .iter()
             .map(|id| {
                 (
-                    mapping.rewrite_expr(self.exprs[id].clone()),
-                    self.expr_alias[id].clone(),
+                    mapping.rewrite_expr(self.exprs[*id].clone()),
+                    self.expr_alias[*id].clone(),
                 )
             })
             .unzip();
 
         // Reconstruct the LogicalProject.
-        LogicalProject::new(
-            self.input.prune_col(&child_required_cols),
-            exprs,
-            expr_alias,
-        )
-        .into()
+        LogicalProject::new(self.input.prune_col(child_required_cols), exprs, expr_alias).into()
     }
 }
 
@@ -385,10 +376,8 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(3);
-        required_cols.insert(1);
-        required_cols.insert(2);
-        let plan = project.prune_col(&required_cols);
+        let required_cols = vec![1, 2];
+        let plan = project.prune_col(required_cols);
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

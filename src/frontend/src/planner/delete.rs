@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use super::Planner;
@@ -36,8 +35,7 @@ impl Planner {
         let order = Order::any().clone();
         // For delete, frontend will only schedule one task so do not need this to be single.
         let dist = Distribution::Any;
-        let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
-        out_fields.insert_range(..);
+        let out_fields: Vec<_> = (0..plan.schema().len()).collect();
 
         let root = PlanRoot::new(plan, dist, order, out_fields);
         Ok(root)

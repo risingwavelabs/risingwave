@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
-use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
@@ -89,10 +88,10 @@ impl ExprImpl {
     ///
     /// # Panics
     /// Panics if `input_ref >= input_col_num`.
-    pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
+    pub fn collect_input_refs(&self, input_col_num: usize) -> Vec<usize> {
         let mut visitor = CollectInputRef::with_capacity(input_col_num);
         visitor.visit_expr(self);
-        visitor.collect()
+        visitor.into()
     }
 
     /// Check whether self is NULL.

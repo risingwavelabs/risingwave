@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -92,10 +91,7 @@ pub(crate) fn gen_materialized_source_plan(
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
-        let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
-        required_cols.toggle_range(..);
-        required_cols.toggle(0);
-
+        let required_cols: Vec<_> = (1..source_node.schema().len()).collect();
         PlanRoot::new(
             source_node,
             Distribution::HashShard(vec![0]),

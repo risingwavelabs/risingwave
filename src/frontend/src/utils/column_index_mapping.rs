@@ -15,7 +15,6 @@ use std::cmp::max;
 use std::fmt::Debug;
 use std::vec;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
@@ -136,37 +135,13 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(2), None);
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
-    pub fn with_remaining_columns(cols: &FixedBitSet) -> Self {
+    pub fn with_remaining_columns(mut cols: Vec<usize>) -> Self {
         let mut map = vec![None; cols.len()];
-        for (tar, src) in cols.ones().enumerate() {
-            map[src] = Some(tar);
+        cols.sort_unstable();
+        for (tar, src) in cols.iter().enumerate() {
+            map[*src] = Some(tar);
         }
         Self::new(map)
-    }
-
-    /// Remove the given columns, and maps the remaining columns to a consecutive range starting
-    /// from 0.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use fixedbitset::FixedBitSet;
-    /// # use risingwave_frontend::utils::ColIndexMapping;
-    /// let mut removed_cols = FixedBitSet::with_capacity(5);
-    /// removed_cols.insert(0);
-    /// removed_cols.insert(2);
-    /// removed_cols.insert(4);
-    /// let mapping = ColIndexMapping::with_removed_columns(&removed_cols);
-    /// assert_eq!(mapping.map(1), 0);
-    /// assert_eq!(mapping.map(3), 1);
-    /// assert_eq!(mapping.try_map(0), None);
-    /// assert_eq!(mapping.try_map(2), None);
-    /// assert_eq!(mapping.try_map(4), None);
-    /// ```
-    pub fn with_removed_columns(cols: &FixedBitSet) -> Self {
-        let mut cols = cols.clone();
-        cols.toggle_range(..);
-        Self::with_remaining_columns(&cols)
     }
 
     #[must_use]
@@ -318,12 +293,12 @@ impl ColIndexMapping {
         }
     }
 
-    pub fn rewrite_bitset(&self, bitset: &FixedBitSet) -> FixedBitSet {
+    pub fn rewrite_map(&self, bitset: &[usize]) -> Vec<usize> {
         assert_eq!(bitset.len(), self.source_size());
-        let mut ret = FixedBitSet::with_capacity(self.target_size());
-        for i in bitset.ones() {
-            if let Some(i) = self.try_map(i) {
-                ret.insert(i);
+        let mut ret = Vec::new();
+        for i in bitset {
+            if let Some(i) = self.try_map(*i) {
+                ret.push(i);
             }
         }
         ret
@@ -352,8 +327,6 @@ impl Debug for ColIndexMapping {
 
 #[cfg(test)]
 mod tests {
-    use fixedbitset::FixedBitSet;
-
     use crate::utils::ColIndexMapping;
 
     #[test]
@@ -369,10 +342,8 @@ mod tests {
     #[test]
     fn test_composite() {
         let add_mapping = ColIndexMapping::with_shift_offset(3, 3);
-        let mut remaining_cols = FixedBitSet::with_capacity(6);
-        remaining_cols.insert(3);
-        remaining_cols.insert(5);
-        let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols);
+        let remaining_cols = vec![3, 5];
+        let col_prune_mapping = ColIndexMapping::with_remaining_columns(remaining_cols);
         let composite = add_mapping.composite(&col_prune_mapping);
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);

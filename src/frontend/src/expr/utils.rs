@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
 
@@ -296,38 +295,36 @@ macro_rules! assert_input_ref {
 pub(crate) use assert_input_ref;
 
 /// Collect all `InputRef`s' indexes in the expression.
-///
-/// # Panics
-/// Panics if an `InputRef`'s index is out of bounds of the [`FixedBitSet`].
 pub struct CollectInputRef {
-    /// All `InputRef`s' indexes are inserted into the [`FixedBitSet`].
-    input_bits: FixedBitSet,
+    /// All `InputRef`s' indices are inserted into the [`Vec`].
+    input_columns: Vec<usize>,
 }
 
 impl ExprVisitor for CollectInputRef {
     fn visit_input_ref(&mut self, expr: &InputRef) {
-        self.input_bits.insert(expr.index());
+        self.input_columns.push(expr.index());
     }
 }
 
 impl CollectInputRef {
     /// Creates a `CollectInputRef` with an initial `input_bits`.
-    pub fn new(initial_input_bits: FixedBitSet) -> Self {
+    pub fn new(initial_input_columns: Vec<usize>) -> Self {
         CollectInputRef {
-            input_bits: initial_input_bits,
+            input_columns: initial_input_columns,
         }
     }
 
     /// Creates an empty `CollectInputRef` with the given capacity.
     pub fn with_capacity(capacity: usize) -> Self {
         CollectInputRef {
-            input_bits: FixedBitSet::with_capacity(capacity),
+            input_columns: Vec::with_capacity(capacity),
         }
     }
+}
 
-    /// Returns the collected indexes by the `CollectInputRef`.
-    pub fn collect(self) -> FixedBitSet {
-        self.input_bits
+impl From<CollectInputRef> for Vec<usize> {
+    fn from(s: CollectInputRef) -> Self {
+        s.input_columns
     }
 }
 
