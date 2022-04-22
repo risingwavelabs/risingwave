@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
@@ -35,33 +35,38 @@ impl Binder {
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
 
-        let limit = source.get_limit_value();
-        let offset = source.get_offset_value();
         let expected_types = table_source
             .columns
             .iter()
             .map(|c| c.data_type.clone())
             .collect();
 
-        let source = match source.body {
-            SetExpr::Values(values) => {
+        let source = match source {
+            Query {
+                with: None,
+                body: SetExpr::Values(values),
+                order_by: order,
+                limit: None,
+                offset: None,
+                fetch: None,
+            } if order.is_empty() => {
                 let values = self.bind_values(values, Some(expected_types))?;
                 let body = BoundSetExpr::Values(values.into());
                 BoundQuery {
                     body,
                     order: vec![],
-                    limit,
-                    offset,
+                    limit: None,
+                    offset: None,
                 }
             }
-
-            // TODO: insert type cast for select exprs
-            SetExpr::Select(_) => self.bind_query(source)?,
-
-            _ => {
-                return Err(
-                    ErrorCode::NotImplemented(format!("{:?}", source.body), None.into()).into(),
-                )
+            query => {
+                let bound = self.bind_query(query)?;
+                let ts = bound.data_types();
+                if ts == expected_types {
+                    bound
+                } else {
+                    panic!("")
+                }
             }
         };
 
