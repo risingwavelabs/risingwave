@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::max;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -22,6 +21,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
 };
@@ -35,7 +35,6 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::CompactStatus;
-use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
@@ -542,7 +541,15 @@ where
             }
         }
 
-        let compact_task = compact_status.get_compact_task();
+        let current_version = {
+            let versioning_guard = self.versioning.read().await;
+            versioning_guard
+                .hummock_versions
+                .get(&versioning_guard.current_version_id.id())
+                .unwrap()
+                .clone()
+        };
+        let compact_task = compact_status.get_compact_task(current_version.levels);
         let mut should_commit = false;
         let ret = match compact_task {
             None => Ok(None),
@@ -592,35 +599,7 @@ where
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     pub async fn report_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
-        let output_table_compact_entries: Vec<_> = compact_task
-            .sorted_output_ssts
-            .iter()
-            .map(SSTableStat::from)
-            .collect();
-
-        // Extract info for logging.
-        let compact_task_id = compact_task.task_id;
-        let input_sst_ids = compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|v| {
-                v.level
-                    .as_ref()
-                    .unwrap()
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.id)
-                    .collect_vec()
-            })
-            .collect_vec();
-        let output_sst_ids = compact_task
-            .sorted_output_ssts
-            .iter()
-            .map(|s| s.id)
-            .collect_vec();
-
         let compact_metrics = compact_task.metrics.clone();
-        let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
@@ -631,14 +610,7 @@ where
             return Ok(false);
         }
         compact_task_assignment.remove(&compact_task.task_id);
-        let delete_table_ids = match compact_status
-            .report_compact_task(output_table_compact_entries, compact_task.clone())
-        {
-            None => {
-                panic!("Inconsistent compact status");
-            }
-            Some(delete_table_ids) => delete_table_ids,
-        };
+        compact_status.report_compact_task(&compact_task);
         if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
@@ -652,57 +624,6 @@ where
                 .unwrap()
                 .clone();
             current_version_id.increase();
-            let new_version = HummockVersion {
-                id: current_version_id.id(),
-                levels: compact_status
-                    .level_handlers
-                    .iter()
-                    .map(|level_handler| match level_handler {
-                        LevelHandler::Overlapping(l_n, _) => Level {
-                            level_type: LevelType::Overlapping as i32,
-                            table_infos: l_n
-                                .iter()
-                                .map(
-                                    |SSTableStat {
-                                         table_id,
-                                         key_range,
-                                         ..
-                                     }| {
-                                        SstableInfo {
-                                            id: *table_id,
-                                            key_range: Some(key_range.clone().into()),
-                                        }
-                                    },
-                                )
-                                .collect(),
-                        },
-                        LevelHandler::Nonoverlapping(l_n, _) => Level {
-                            level_type: LevelType::Nonoverlapping as i32,
-                            table_infos: l_n
-                                .iter()
-                                .map(
-                                    |SSTableStat {
-                                         table_id,
-                                         key_range,
-                                         ..
-                                     }| {
-                                        SstableInfo {
-                                            id: *table_id,
-                                            key_range: Some(key_range.clone().into()),
-                                        }
-                                    },
-                                )
-                                .collect(),
-                        },
-                    })
-                    .collect(),
-                uncommitted_epochs: old_version.uncommitted_epochs.clone(),
-                max_committed_epoch: old_version.max_committed_epoch,
-                // update safe epoch of hummock version
-                safe_epoch: max(old_version.safe_epoch, compacted_watermark),
-            };
-
-            hummock_versions.insert(current_version_id.id(), new_version);
 
             let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
                 old_version.id,
@@ -711,9 +632,27 @@ where
                     id: vec![],
                 },
             );
-            version_stale_sstables.id.extend(delete_table_ids);
+            for level in &compact_task.input_ssts {
+                version_stale_sstables.id.extend(
+                    level
+                        .level
+                        .as_ref()
+                        .unwrap()
+                        .table_infos
+                        .iter()
+                        .map(|sst| sst.id)
+                        .collect_vec(),
+                );
+            }
 
-            for sst_id in &output_sst_ids {
+            let new_version = CompactStatus::apply_compact_result(
+                &compact_task,
+                old_version,
+                current_version_id.id(),
+            );
+            hummock_versions.insert(current_version_id.id(), new_version);
+
+            for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
                 match sstable_id_infos.get_mut(sst_id) {
                     None => {
                         return Err(ErrorCode::MetaError(format!(
@@ -738,21 +677,15 @@ where
                 version_stale_sstables,
                 sstable_id_infos
             )?;
-
-            tracing::info!(
-                "Finish hummock compaction task id {}, compact {} SSTs {:?} to {} SSTs {:?}",
-                compact_task_id,
-                input_sst_ids.len(),
-                input_sst_ids,
-                output_sst_ids.len(),
-                output_sst_ids,
-            );
         } else {
             // The compact task is cancelled.
             commit_multi_var!(self, None, compact_status, compact_task_assignment)?;
-
-            tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
+
+        tracing::info!(
+            "Reported compact task. {}",
+            compact_task_to_string(compact_task)
+        );
 
         trigger_sst_stat(&self.metrics, &compaction_guard.compact_status);
         if let Some(compact_task_metrics) = compact_metrics {
@@ -769,8 +702,6 @@ where
     }
 
     pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        let mut compaction_guard = self.compaction.lock().await;
-        let mut compact_status = VarTransaction::new(&mut compaction_guard.compact_status);
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
@@ -816,29 +747,6 @@ where
                     .into())
                 }
             };
-
-            // Update compact status so SSTs are eligible for compaction
-            let stats = uncommitted_epoch
-                .tables
-                .iter()
-                .map(SSTableStat::from)
-                .collect_vec();
-            match compact_status.level_handlers.first_mut().unwrap() {
-                LevelHandler::Overlapping(vec_tier, _) => {
-                    for stat in stats {
-                        let insert_point = vec_tier.partition_point(
-                            |SSTableStat {
-                                 key_range: other_key_range,
-                                 ..
-                             }| { other_key_range <= &stat.key_range },
-                        );
-                        vec_tier.insert(insert_point, stat);
-                    }
-                }
-                LevelHandler::Nonoverlapping(_, _) => {
-                    panic!("L0 must be Tiering.");
-                }
-            }
             // Remove the epoch from uncommitted_epochs
             new_hummock_version.uncommitted_epochs.swap_remove(idx);
         }
@@ -846,18 +754,10 @@ where
         new_hummock_version.max_committed_epoch = epoch;
         new_hummock_version.id = new_version_id;
 
-        let compact_status_copy = compact_status.clone();
         let new_hummock_version_copy = new_hummock_version.clone();
-        commit_multi_var!(
-            self,
-            None,
-            compact_status,
-            new_hummock_version,
-            current_version_id
-        )?;
+        commit_multi_var!(self, None, new_hummock_version, current_version_id)?;
 
         // Update metrics
-        trigger_sst_stat(&self.metrics, &compact_status_copy);
         trigger_commit_stat(&self.metrics, &new_hummock_version_copy);
 
         tracing::trace!("new committed epoch {}", epoch);
@@ -865,7 +765,6 @@ where
         #[cfg(test)]
         {
             drop(versioning_guard);
-            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
@@ -989,12 +888,12 @@ where
             tracing::debug!("Release context {}", *context_id);
             for assignment in compact_task_assignment.values() {
                 if assignment.context_id == *context_id {
-                    to_commit = compact_status.cancel_compact_task(
+                    compact_status.report_compact_task(
                         assignment
                             .compact_task
                             .as_ref()
                             .expect("compact_task shouldn't be None"),
-                    ) || to_commit;
+                    );
                 }
             }
             compact_task_assignment.retain(|_, v| v.context_id != *context_id);
