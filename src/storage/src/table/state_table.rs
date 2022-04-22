@@ -195,7 +195,7 @@ mod tests {
         state_table
             .delete(
                 Row(vec![Some(2_i32.into())]),
-                Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+                Row(vec![Some(2_i32.into()), Some(22_i32.into()), Some(222_i32.into())]),
             )
             .unwrap();
 

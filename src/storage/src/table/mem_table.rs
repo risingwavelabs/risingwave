@@ -88,8 +88,12 @@ impl MemTable {
                 e.insert(RowOp::Delete(old_value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Insert(_) => {
-                    e.remove();
+                x @ RowOp::Insert(_) => {
+                    if let RowOp::Insert(ref mut value) = x {
+                        let original_value = std::mem::take(value);
+                        assert_eq!(original_value, old_value);
+                        e.remove();
+                    }
                 }
                 RowOp::Delete(_) => {
                     panic!(
@@ -101,6 +105,7 @@ impl MemTable {
                 x @ RowOp::Update(_) => {
                     if let RowOp::Update(ref mut value) = x {
                         let (old_val, _) = std::mem::take(value);
+                        assert_eq!(old_val, old_value);
                         e.insert(RowOp::Delete(old_val));
                     }
                 }
