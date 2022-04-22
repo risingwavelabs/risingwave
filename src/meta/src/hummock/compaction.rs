@@ -146,10 +146,13 @@ impl CompactStatus {
         let mut found = SearchResult::NotFound;
         let next_task_id = self.next_compact_task_id;
         let (prior, posterior) = self.level_handlers.split_at_mut(select_level as usize + 1);
-        let target_level = select_level + 1;
+        let expect_target_level = select_level + 1;
+        let mut actual_target_level = expect_target_level;
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
-        let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
+        let is_expect_target_level_leveling =
+            matches!(posterior, LevelHandler::Nonoverlapping(_, _));
+        let mut is_actual_target_level_leveling = is_expect_target_level_leveling;
         let ord_table_id = |x: u64, y: u64| {
             if x == y {
                 Ordering::Equal
@@ -204,12 +207,22 @@ impl CompactStatus {
                             sst_key_range
                         };
 
-                        polysst_candidates.push((
-                            earliest_table_id,
-                            (sst_idx, next_sst_idx),
-                            select_level_inputs,
-                            key_range.clone(),
-                        ));
+                        let mut is_legal_candidate = true;
+                        for SSTableInfo { table_id, .. } in &l_n[sst_idx..next_sst_idx] {
+                            if compacting_ssts_l_n.contains_key(table_id) {
+                                is_legal_candidate = false;
+                                break;
+                            }
+                        }
+
+                        if is_legal_candidate {
+                            polysst_candidates.push((
+                                earliest_table_id,
+                                (sst_idx, next_sst_idx),
+                                select_level_inputs,
+                                key_range.clone(),
+                            ));
+                        }
 
                         sst_idx = next_sst_idx;
                     }
@@ -224,25 +237,15 @@ impl CompactStatus {
                     polysst_candidates.shuffle(&mut rng);
                 }
 
-                for (_, (sst_idx, next_sst_idx), select_level_inputs, key_range) in
-                    polysst_candidates
-                {
-                    let mut is_select_idle = true;
-                    for SSTableInfo { table_id, .. } in &l_n[sst_idx..next_sst_idx] {
-                        if compacting_ssts_l_n.contains_key(table_id) {
-                            is_select_idle = false;
-                            break;
-                        }
-                    }
-
-                    if is_select_idle {
+                if !(select_level == 0 && must_l0_to_l0) {
+                    for (_, _, select_level_inputs, key_range) in &polysst_candidates {
                         let insert_point = compacting_key_ranges_l_n.partition_point(
                             |(ongoing_key_range, _, _)| {
                                 user_key(&ongoing_key_range.right) < user_key(&key_range.left)
                             },
                         );
-                        // if following condition is not satisfied, it may result in two overlapping
-                        // SSTs in target level
+                        // if following condition is not satisfied, it may result in two
+                        // overlapping SSTs in target level
                         if insert_point >= compacting_key_ranges_l_n.len()
                             || user_key(&compacting_key_ranges_l_n[insert_point].0.left)
                                 > user_key(&key_range.right)
@@ -250,7 +253,7 @@ impl CompactStatus {
                             match posterior {
                                 LevelHandler::Overlapping(_, _) => unimplemented!(),
                                 LevelHandler::Nonoverlapping(compacting_ssts_l_n_suc, _) => {
-                                    let l_n_suc = &get_level_ssts(target_level as usize);
+                                    let l_n_suc = &get_level_ssts(actual_target_level as usize);
                                     let mut overlap_all_idle = true;
                                     let overlap_begin = l_n_suc.partition_point(|table_status| {
                                         user_key(&table_status.key_range.right)
@@ -275,7 +278,7 @@ impl CompactStatus {
                                         compacting_key_ranges_l_n.insert(
                                             insert_point,
                                             (
-                                                key_range,
+                                                key_range.clone(),
                                                 next_task_id,
                                                 select_level_inputs.len() as u64,
                                             ),
@@ -304,7 +307,8 @@ impl CompactStatus {
                                             );
                                             suc_table_ids.push(l_n_suc[overlap_idx].clone().into());
                                             if overlap_idx > overlap_begin {
-                                                // TODO: We do not need to add splits every time. We
+                                                // TODO: We do not need to add splits every
+                                                // time. We
                                                 // can add every K SSTs.
                                                 key_split_append(
                                                     &FullKey::from_user_key_slice(
@@ -321,7 +325,7 @@ impl CompactStatus {
                                         }
 
                                         found = SearchResult::Found(
-                                            select_level_inputs,
+                                            select_level_inputs.clone(),
                                             suc_table_ids,
                                             splits,
                                         );
@@ -329,6 +333,71 @@ impl CompactStatus {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+                if matches!(found, SearchResult::NotFound) && select_level == 0 {
+                    let candidate_len = polysst_candidates.len();
+                    for i in 0..candidate_len {
+                        let mut j = i;
+                        let mut polysst_intervals = vec![];
+                        let mut involved_sst_cnt = 0;
+                        let mut new_key_ranges = compacting_key_ranges_l_n.clone();
+                        loop {
+                            let insert_point =
+                                new_key_ranges.partition_point(|(ongoing_key_range, _, _)| {
+                                    user_key(&ongoing_key_range.right)
+                                        < user_key(&polysst_candidates[j].3.left)
+                                });
+                            if insert_point >= new_key_ranges.len()
+                                || user_key(&new_key_ranges[insert_point].0.left)
+                                    > user_key(&polysst_candidates[j].3.right)
+                            {
+                                polysst_intervals.push(polysst_candidates[j].1);
+                                let polysst_size = polysst_candidates[j].2.len();
+                                involved_sst_cnt += polysst_size;
+                                new_key_ranges.insert(
+                                    insert_point,
+                                    (
+                                        polysst_candidates[j].3.clone(),
+                                        next_task_id,
+                                        polysst_size as u64,
+                                    ),
+                                );
+
+                                if involved_sst_cnt >= 2 {
+                                    *compacting_key_ranges_l_n = new_key_ranges;
+                                    let mut multi_select_level_inputs =
+                                        Vec::with_capacity(involved_sst_cnt);
+                                    polysst_intervals.sort_unstable();
+                                    for (begin_sst_idx, end_sst_idx) in polysst_intervals {
+                                        multi_select_level_inputs.extend(
+                                            l_n.iter()
+                                                .take(end_sst_idx)
+                                                .skip(begin_sst_idx)
+                                                .map(|sst_info| sst_info.into()),
+                                        );
+                                    }
+
+                                    found = SearchResult::Found(
+                                        multi_select_level_inputs,
+                                        vec![],
+                                        vec![KeyRange::new(Bytes::new(), Bytes::new())],
+                                    );
+                                    actual_target_level = select_level;
+                                    is_actual_target_level_leveling = is_select_level_leveling;
+                                    break;
+                                }
+                                j += 1;
+                                if j >= candidate_len {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        if matches!(found, SearchResult::Found(_, _, _)) {
+                            break;
                         }
                     }
                 }
@@ -351,36 +420,37 @@ impl CompactStatus {
                 } else {
                     LevelType::Overlapping as i32
                 };
-                let target_level_type = if is_target_level_leveling {
+                let mut input_ssts = vec![LevelEntry {
+                    level_idx: select_level,
+                    level: Some(Level {
+                        level_type: select_level_type,
+                        table_infos: select_ln_ids,
+                    }),
+                }];
+                let actual_target_level_type = if is_actual_target_level_leveling {
                     LevelType::Nonoverlapping as i32
                 } else {
                     LevelType::Overlapping as i32
                 };
+                if !select_lnsuc_ids.is_empty() {
+                    input_ssts.push(LevelEntry {
+                        level_idx: actual_target_level,
+                        level: Some(Level {
+                            level_type: actual_target_level_type,
+                            table_infos: select_lnsuc_ids,
+                        }),
+                    });
+                }
                 let compact_task = CompactTask {
-                    input_ssts: vec![
-                        LevelEntry {
-                            level_idx: select_level,
-                            level: Some(Level {
-                                level_type: select_level_type,
-                                table_infos: select_ln_ids,
-                            }),
-                        },
-                        LevelEntry {
-                            level_idx: target_level,
-                            level: Some(Level {
-                                level_type: target_level_type,
-                                table_infos: select_lnsuc_ids,
-                            }),
-                        },
-                    ],
+                    input_ssts,
                     splits: splits.iter().map(|v| v.clone().into()).collect_vec(),
                     watermark: HummockEpoch::MAX,
                     sorted_output_ssts: vec![],
                     task_id: next_task_id,
-                    target_level,
-                    is_target_ultimate_and_leveling: target_level as usize
+                    target_level: actual_target_level,
+                    is_target_ultimate_and_leveling: actual_target_level as usize
                         == self.level_handlers.len() - 1
-                        && is_target_level_leveling,
+                        && is_actual_target_level_leveling,
                     metrics: Some(CompactMetrics {
                         read_level_n: Some(TableSetStatistics {
                             level_idx: select_level,
@@ -388,12 +458,12 @@ impl CompactStatus {
                             cnt: 0,
                         }),
                         read_level_nplus1: Some(TableSetStatistics {
-                            level_idx: target_level,
+                            level_idx: actual_target_level,
                             size_gb: 0f64,
                             cnt: 0,
                         }),
                         write: Some(TableSetStatistics {
-                            level_idx: target_level,
+                            level_idx: actual_target_level,
                             size_gb: 0f64,
                             cnt: 0,
                         }),
