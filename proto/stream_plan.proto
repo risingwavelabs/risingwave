@@ -6,6 +6,7 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
+import "data.proto";
 import "expr.proto";
 import "plan.proto";
 
@@ -93,9 +94,9 @@ message HashJoinNode {
 
 message HopWindowNode {
   // TODO: Use concrete types.
-  expr.ExprNode time_col = 1;
-  expr.ExprNode window_slide = 2;
-  expr.ExprNode window_size = 3;
+  expr.InputRefExpr time_col = 1;
+  data.IntervalUnit window_slide = 2;
+  data.IntervalUnit window_size = 3;
 }
 
 message MergeNode {
