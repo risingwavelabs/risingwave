@@ -19,15 +19,62 @@ use futures_async_stream::try_stream;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node;
+use risingwave_pb::stream_plan::{self, stream_node};
+use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-#[allow(unused)]
+pub struct HopWindowExecutorBuilder {}
+
+impl ExecutorBuilder for HopWindowExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
+    ) -> risingwave_common::error::Result<BoxedExecutor> {
+        let ExecutorParams {
+            input,
+            pk_indices,
+            executor_id,
+            ..
+        } = params;
+
+        let input = input.into_iter().next().unwrap();
+        // TODO: reuse the schema deriviation with frontend.
+        let schema = input
+            .schema()
+            .clone()
+            .into_fields()
+            .into_iter()
+            .chain([
+                Field::with_name(DataType::Timestamp, "window_start"),
+                Field::with_name(DataType::Timestamp, "window_end"),
+            ])
+            .collect();
+        let info = ExecutorInfo {
+            schema,
+            identity: format!("HopWindowExecutor {:X}", executor_id),
+            pk_indices,
+        };
+        let Some(stream_node::Node::HopWindowNode(node)) = &node.node else {
+            unreachable!();
+        };
+        let time_col = node.get_time_col()?.column_idx as usize;
+        let window_slide = node.get_window_slide()?.into();
+        let window_size = node.get_window_size()?.into();
+        Ok(HopWindowExecutor::new(input, info, time_col, window_slide, window_size).boxed())
+    }
+}
+
 pub struct HopWindowExecutor {
     pub input: BoxedExecutor,
     pub info: ExecutorInfo,

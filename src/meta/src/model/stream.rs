@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::WorkerId;
+use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::manager::SourceId;
 use crate::model::MetadataModel;
 
@@ -47,6 +47,9 @@ pub struct TableFragments {
 
     /// The status of actors
     pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
+
+    /// distribution key of materialize node
+    distribution_keys: Vec<i32>,
 }
 
 impl MetadataModel for TableFragments {
@@ -62,6 +65,7 @@ impl MetadataModel for TableFragments {
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
+            distribution_keys: self.distribution_keys.clone(),
         }
     }
 
@@ -70,6 +74,7 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
+            distribution_keys: prost.distribution_keys,
         }
     }
 
@@ -79,11 +84,16 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+    pub fn new(
+        table_id: TableId,
+        fragments: BTreeMap<FragmentId, Fragment>,
+        distribution_keys: Vec<i32>,
+    ) -> Self {
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
+            distribution_keys,
         }
     }
 
@@ -141,6 +151,11 @@ impl TableFragments {
     /// Returns sink actor ids.
     pub fn sink_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, FragmentType::Sink)
+    }
+
+    /// Returns distribution keys.
+    pub fn distribution_keys(&self) -> &Vec<i32> {
+        self.distribution_keys.as_ref()
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {
@@ -209,11 +224,11 @@ impl TableFragments {
         table_ids
     }
 
-    /// Returns status of actors group by node id.
-    pub fn node_actors_status(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    /// Returns states of actors group by node id.
+    pub fn node_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.node_id as WorkerId;
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
@@ -225,7 +240,7 @@ impl TableFragments {
     pub fn node_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.node_id as WorkerId;
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
@@ -236,7 +251,10 @@ impl TableFragments {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id].node_id as WorkerId;
+                let node_id = self.actor_status[&actor.actor_id]
+                    .get_parallel_unit()
+                    .unwrap()
+                    .worker_node_id as WorkerId;
                 if !include_inactive
                     && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
                 {
@@ -251,12 +269,12 @@ impl TableFragments {
         actors
     }
 
-    pub fn node_source_actors_status(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    pub fn node_source_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         let source_actor_ids = self.source_actor_ids();
         for &actor_id in &source_actor_ids {
             let actor_status = &self.actor_status[&actor_id];
-            map.entry(actor_status.node_id as WorkerId)
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
         }
@@ -289,6 +307,19 @@ impl TableFragments {
                         },
                     )
                 })
+            })
+            .collect()
+    }
+
+    pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
+        let sink_actor_ids = self.sink_actor_ids();
+        sink_actor_ids
+            .iter()
+            .map(|actor_id| {
+                (
+                    self.actor_status[actor_id].get_parallel_unit().unwrap().id,
+                    *actor_id,
+                )
             })
             .collect()
     }

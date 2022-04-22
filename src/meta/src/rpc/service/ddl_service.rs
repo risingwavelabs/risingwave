@@ -426,7 +426,7 @@ where
             false,
         );
         let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
-        let table_fragments = TableFragments::new(mview_id, graph);
+        let table_fragments = TableFragments::new(mview_id, graph, ctx.distribution_keys.clone());
 
         // Create on compute node.
         self.stream_manager

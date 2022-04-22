@@ -179,9 +179,8 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    /// Optimize and generate a create materialize view plan.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = match self.plan.convention() {
+    fn gen_create_index_stream_plan(&mut self) -> PlanRef {
+        match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream();
@@ -199,13 +198,30 @@ impl PlanRoot {
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
             _ => unreachable!(),
-        };
+        }
+    }
 
+    /// Optimize and generate a create materialize view plan.
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_create_index_stream_plan();
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            false,
+        )
+    }
+
+    /// Optimize and generate a create index plan.
+    pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_create_index_stream_plan();
+        StreamMaterialize::create(
+            stream_plan,
+            mv_name,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            true,
         )
     }
 
