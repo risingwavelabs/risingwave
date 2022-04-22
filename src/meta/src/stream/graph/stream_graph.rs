@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map:: HashMap;
+use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -526,7 +526,7 @@ impl StreamGraphBuilder {
             let upstream_actor_ids = HashSet::<ActorId>::from_iter(
                 ctx.table_sink_map
                     .entry(table_id)
-                    .or_insert(self.table_sink_actor_ids.get(&table_id).unwrap().clone())
+                    .or_insert_with(|| self.table_sink_actor_ids.get(&table_id).unwrap().clone())
                     .clone()
                     .into_iter(),
             );

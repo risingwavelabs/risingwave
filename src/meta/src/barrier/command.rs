@@ -199,20 +199,16 @@ where
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
-                        .filter(|((upstream_actor_id, _), _)| {
-                            actors.contains(upstream_actor_id)
+                        .filter(|((upstream_actor_id, _), _)| actors.contains(upstream_actor_id))
+                        .map(|((upstream_actor_id, _), downstream_actor_infos)| {
+                            (
+                                *upstream_actor_id,
+                                downstream_actor_infos
+                                    .iter()
+                                    .map(|info| info.actor_id)
+                                    .collect(),
+                            )
                         })
-                        .map(
-                            |((upstream_actor_id, _), downstream_actor_infos)| {
-                                (
-                                    *upstream_actor_id,
-                                    downstream_actor_infos
-                                        .iter()
-                                        .map(|info| info.actor_id)
-                                        .collect(),
-                                )
-                            },
-                        )
                         .collect::<HashMap<ActorId, Vec<ActorId>>>();
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }
