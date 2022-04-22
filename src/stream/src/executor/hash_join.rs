@@ -32,6 +32,8 @@ use crate::common::StreamChunkBuilder;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
+pub const JOIN_CACHE_SIZE: usize = 1 << 16;
+
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
@@ -354,7 +356,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             },
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    1 << 16,
+                    JOIN_CACHE_SIZE,
                     pk_indices_l.clone(),
                     col_l_datatypes.clone(),
                     ks_l.clone(),
@@ -367,7 +369,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    1 << 16,
+                    JOIN_CACHE_SIZE,
                     pk_indices_r.clone(),
                     col_r_datatypes.clone(),
                     ks_r.clone(),

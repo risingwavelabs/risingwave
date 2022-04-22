@@ -14,32 +14,30 @@
 
 use std::cmp::min;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::NodeBody;
 
-use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
 /// Limit executor.
-pub(super) struct LimitExecutor {
-    child: BoxedExecutor,
+pub struct LimitExecutor2 {
+    child: BoxedExecutor2,
     /// limit parameter
     limit: usize,
     /// offset parameter
     offset: usize,
-    /// the number of rows have been skipped due to offset
-    skipped: usize,
-    /// the number of rows have been returned as execute result
-    returned: usize,
     /// Identity string of the executor
     identity: String,
 }
 
-impl BoxedExecutorBuilder for LimitExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for LimitExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let limit_node =
@@ -49,89 +47,82 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let offset = limit_node.get_offset() as usize;
 
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
-            return Ok(Box::new(
-                Self {
-                    child,
-                    limit,
-                    offset,
-                    skipped: 0,
-                    returned: 0,
-                    identity: source.plan_node().get_identity().clone(),
-                }
-                .fuse(),
-            ));
+            let child = source.clone_for_plan(child_plan).build2()?;
+            return Ok(Box::new(Self {
+                child,
+                limit,
+                offset,
+                identity: source.plan_node().get_identity().clone(),
+            }));
         }
         Err(InternalError("Limit must have one child".to_string()).into())
     }
 }
-impl LimitExecutor {
-    fn process_chunk(&mut self, chunk: DataChunk) -> Result<DataChunk> {
-        let mut new_vis;
-        if let Some(old_vis) = chunk.visibility() {
-            new_vis = old_vis.iter().collect_vec();
-            for vis in new_vis.iter_mut().filter(|x| **x) {
-                if self.skipped < self.offset {
-                    self.skipped += 1;
-                    *vis = false;
-                } else if self.returned < self.limit {
-                    self.returned += 1;
-                } else {
-                    *vis = false;
-                }
+
+impl LimitExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        // the number of rows have been skipped due to offset
+        let mut skipped = 0;
+        // the number of rows have been returned as execute result
+        let mut returned = 0;
+
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            if returned == self.limit {
+                break;
             }
-        } else {
-            let chunk_size = chunk.capacity();
-            new_vis = vec![false; chunk_size];
-            let l = self.offset - self.skipped;
-            let r = min(l + self.limit - self.returned, chunk_size);
-            new_vis[l..r].fill(true);
-            self.returned += r - l;
-            self.skipped += l;
+            let data_chunk = data_chunk?;
+            let cardinality = data_chunk.cardinality();
+            if cardinality + skipped <= self.offset {
+                skipped += cardinality;
+                continue;
+            }
+
+            if skipped == self.offset && cardinality + returned <= self.limit {
+                returned += cardinality;
+                yield data_chunk;
+                continue;
+            }
+            // process chunk
+            let mut new_vis;
+            if let Some(old_vis) = data_chunk.visibility() {
+                new_vis = old_vis.iter().collect_vec();
+                for vis in new_vis.iter_mut().filter(|x| **x) {
+                    if skipped < self.offset {
+                        skipped += 1;
+                        *vis = false;
+                    } else if returned < self.limit {
+                        returned += 1;
+                    } else {
+                        *vis = false;
+                    }
+                }
+            } else {
+                let chunk_size = data_chunk.capacity();
+                new_vis = vec![false; chunk_size];
+                let l = self.offset - skipped;
+                let r = min(l + self.limit - returned, chunk_size);
+                new_vis[l..r].fill(true);
+                returned += r - l;
+                skipped += l;
+            }
+            yield data_chunk.with_visibility(new_vis.try_into()?).compact()?;
         }
-        let chunk = chunk.with_visibility(new_vis.try_into()?).compact()?;
-        Ok(chunk)
     }
 }
 
-#[async_trait::async_trait]
-impl Executor for LimitExecutor {
-    async fn open(&mut self) -> Result<()> {
-        self.child.open().await?;
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.returned == self.limit {
-            return Ok(None);
-        }
-        while let Some(chunk) = self.child.next().await? {
-            let cardinality = chunk.cardinality();
-            if cardinality + self.skipped <= self.offset {
-                self.skipped += cardinality;
-                continue;
-            }
-            if self.skipped == self.offset && cardinality + self.returned <= self.limit {
-                self.returned += cardinality;
-                return Ok(Some(chunk));
-            }
-            let chunk = self.process_chunk(chunk)?;
-            return Ok(Some(chunk));
-        }
-        Ok(None)
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.child.close().await?;
-        Ok(())
-    }
-
+impl Executor2 for LimitExecutor2 {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
 
     fn identity(&self) -> &str {
         &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
     }
 }
 
@@ -140,6 +131,7 @@ mod tests {
     use std::sync::Arc;
     use std::vec;
 
+    use futures::{pin_mut, StreamExt};
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
@@ -178,18 +170,18 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| mock_executor.add(x));
-        let mut limit_executor = LimitExecutor {
+        let limit_executor = Box::new(LimitExecutor2 {
             child: Box::new(mock_executor),
             limit,
             offset,
-            skipped: 0,
-            returned: 0,
-            identity: "LimitExecutor".to_string(),
-        };
+            identity: "LimitExecutor2".to_string(),
+        });
         let fields = &limit_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
         let mut results = vec![];
-        while let Some(chunk) = limit_executor.next().await.unwrap() {
+        let stream = limit_executor.execute();
+        pin_mut!(stream);
+        while let Some(Ok(chunk)) = stream.next().await {
             results.push(Arc::new(chunk));
         }
         let chunks =
@@ -313,23 +305,21 @@ mod tests {
                 )
             });
 
-        let mut limit_executor = LimitExecutor {
+        let limit_executor = Box::new(LimitExecutor2 {
             child: Box::new(mock_executor),
             limit,
             offset,
-            skipped: 0,
-            returned: 0,
-            identity: "LimitExecutor".to_string(),
-        };
-        limit_executor.open().await.unwrap();
+            identity: "LimitExecutor2".to_string(),
+        });
 
         let mut results = vec![];
-        while let Some(chunk) = limit_executor.next().await.unwrap() {
+        let stream = limit_executor.execute();
+        pin_mut!(stream);
+        while let Some(Ok(chunk)) = stream.next().await {
             results.push(Arc::new(chunk.compact().unwrap()));
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();
-        // let _for_debug = MockLimitIter::new(row_num, limit, offset, visible).collect_vec();
 
         if chunks.is_empty() {
             assert_eq!(
@@ -355,8 +345,6 @@ mod tests {
                     Some(expect as i32)
                 );
             });
-
-        limit_executor.close().await.unwrap();
     }
 
     #[tokio::test]

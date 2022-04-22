@@ -55,7 +55,7 @@ impl Expr for CorrelatedInputRef {
         self.data_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         unreachable!("CorrelatedInputRef {:?} has not been decorrelated", self)
     }
 }

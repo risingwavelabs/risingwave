@@ -84,7 +84,7 @@ impl ToBatchProst for BatchValues {
 }
 
 fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
-    let cells = row.iter().map(Expr::to_protobuf).collect();
+    let cells = row.iter().map(Expr::to_expr_proto).collect();
     ExprTuple { cells }
 }
 

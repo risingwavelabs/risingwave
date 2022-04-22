@@ -143,8 +143,8 @@ message TableFragments {
   }
   // Runtime information of an actor
   message ActorStatus {
-    // Current on which node
-    uint32 node_id = 1;
+    // Current on which parallel unit
+    common.ParallelUnit parallel_unit = 1;
     // Current state
     ActorState state = 2;
   }
@@ -166,6 +166,7 @@ message TableFragments {
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
+  repeated int32 distribution_keys = 4;
 }
 
 // TODO: remove this when dashboard refactored.

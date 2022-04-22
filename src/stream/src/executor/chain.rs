@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{BoxedExecutor, ChainExecutor, Executor};
+use crate::executor_v2::{BoxedExecutor, ChainExecutor, Executor, RearrangedChainExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct ChainExecutorBuilder;
@@ -49,15 +49,26 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // its schema.
         let schema = snapshot.schema().clone();
 
-        let executor = ChainExecutor::new_from_v1(
-            snapshot,
-            mview,
-            notifier,
-            schema,
-            column_idxs,
-            params.op_info,
-        );
-
-        Ok(executor.boxed())
+        if node.disable_rearrange {
+            let executor = ChainExecutor::new_from_v1(
+                snapshot,
+                mview,
+                notifier,
+                schema,
+                column_idxs,
+                params.op_info,
+            );
+            Ok(executor.boxed())
+        } else {
+            let executor = RearrangedChainExecutor::new_from_v1(
+                snapshot,
+                mview,
+                notifier,
+                schema,
+                column_idxs,
+                params.op_info,
+            );
+            Ok(executor.boxed())
+        }
     }
 }
