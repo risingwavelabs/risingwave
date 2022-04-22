@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{mem, vec};
-use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
