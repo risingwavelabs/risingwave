@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::{mem, vec};
+use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -136,14 +137,11 @@ pub(crate) struct HashAggExecutor2<K> {
     group_key_columns: Vec<usize>,
     /// child executor
     child: BoxedExecutor2,
-    /// hash map for each agg groups
-    groups: AggHashMap<K>,
-    /// the aggregated result set
-    result: Option<<AggHashMap<K> as IntoIterator>::IntoIter>,
     /// the data types of key columns
     group_key_types: Vec<DataType>,
     schema: Schema,
     identity: String,
+    _phantom: PhantomData<K>,
 }
 
 impl<K> HashAggExecutor2<K> {
@@ -152,11 +150,10 @@ impl<K> HashAggExecutor2<K> {
             agg_factories: builder.agg_factories,
             group_key_columns: builder.group_key_columns,
             child: builder.child,
-            groups: AggHashMap::<K>::default(),
             group_key_types: builder.group_key_types,
-            result: None,
             schema: builder.schema,
             identity: builder.identity,
+            _phantom: PhantomData,
         }
     }
 }
@@ -177,7 +174,10 @@ impl<K: HashKey + Send + Sync> Executor2 for HashAggExecutor2<K> {
 
 impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
+    async fn do_execute(self: Box<Self>) {
+        // hash map for each agg groups
+        let mut groups = AggHashMap::<K>::default();
+
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
@@ -185,7 +185,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
                 let mut err_flag = Ok(());
-                let states: &mut Vec<BoxedAggState> = self.groups.entry(key).or_insert_with(|| {
+                let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
                     self.agg_factories
                         .iter()
                         .map(AggStateFactory::create_agg_state)
@@ -204,13 +204,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
             }
         }
 
-        assert!(self.result.is_none());
-        self.result = Some(mem::take(&mut self.groups).into_iter());
+        // the aggregated result set
+        let mut result = Some(mem::take(&mut groups).into_iter());
 
         // generate output data chunks
-        if let Some(res) = self.result.as_mut() {
+        if let Some(res) = result.as_mut() {
+            let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
             loop {
-                let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
                 let mut group_builders = self
                     .group_key_types
                     .iter()
@@ -237,7 +237,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
                         .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
                 }
                 if !has_next {
-                    self.result = None;
                     break; // exit loop
                 }
 
