@@ -226,7 +226,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             };
         }
 
-        let keys = key_indices
+        let keys = params_l
+            .key_indices
             .iter()
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
