@@ -14,7 +14,8 @@ import "stream_plan.proto";
 
 // Hash mapping for meta. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-  repeated uint32 hash_mapping = 1;
+  uint32 table_id = 1;
+  repeated uint32 hash_mapping = 2;
 }
 
 // will be deprecated and replaced by catalog.Table and catalog.Source
