@@ -19,7 +19,8 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch, ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamHopWindow,
+    ToBatch, ToStream,
 };
 use crate::expr::InputRef;
 use crate::utils::ColIndexMapping;
@@ -72,6 +73,22 @@ impl LogicalHopWindow {
     ) -> PlanRef {
         Self::new(input, time_col, window_slide, window_size).into()
     }
+
+    pub fn window_start_col_idx(&self) -> usize {
+        self.schema().len() - 2
+    }
+
+    pub fn window_end_col_idx(&self) -> usize {
+        self.schema().len() - 1
+    }
+
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::identity_or_none(self.schema().len(), self.input.schema().len())
+    }
+
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::identity_or_none(self.input.schema().len(), self.schema().len())
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalHopWindow {
@@ -121,8 +138,42 @@ impl fmt::Display for LogicalHopWindow {
 }
 
 impl ColPrunable for LogicalHopWindow {
-    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
-        unimplemented!("LogicalHopWindow::prune_col")
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+        let require_win_start = required_cols.contains(self.window_start_col_idx());
+        let require_win_end = required_cols.contains(self.window_end_col_idx());
+
+        let o2i = self.o2i_col_mapping();
+        let input_required_cols = o2i.rewrite_bitset(required_cols);
+        let input = self.input.prune_col(&input_required_cols);
+        let input_change = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let (new_hop, _) = self.rewrite_with_input(input, input_change);
+        match (require_win_start, require_win_end) {
+            (true, true) => new_hop.into(),
+            (true, false) => {
+                let proj_map = ColIndexMapping::identity_or_none(
+                    new_hop.schema().len(),
+                    new_hop.schema().len() - 1,
+                );
+                LogicalProject::with_mapping(new_hop.into(), proj_map)
+            }
+            (false, true) => {
+                let mut proj_map = ColIndexMapping::identity_or_none(
+                    new_hop.schema().len(),
+                    new_hop.schema().len() - 1,
+                );
+                proj_map.put(new_hop.schema().len() - 1, Some(new_hop.schema().len() - 2));
+                proj_map.put(new_hop.schema().len() - 2, None);
+                LogicalProject::with_mapping(new_hop.into(), proj_map)
+            }
+            (false, false) => {
+                let proj_map = ColIndexMapping::identity_or_none(
+                    new_hop.schema().len(),
+                    new_hop.schema().len() - 2,
+                );
+                LogicalProject::with_mapping(new_hop.into(), proj_map)
+            }
+        }
     }
 }
 
