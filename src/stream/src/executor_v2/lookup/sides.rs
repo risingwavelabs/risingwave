@@ -91,7 +91,7 @@ pub enum ArrangeMessage {
     /// Arrangement sides' update in this epoch. There will be only one arrange batch message
     /// within epoch. Once the executor receives an arrange batch message, it can start doing
     /// joins.
-    ArrangeReady,
+    ArrangeReady(Vec<StreamChunk>),
 
     /// There's a message from stream side.
     Stream(StreamChunk),
@@ -199,6 +199,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
     arrangement: Box<dyn Executor>,
 ) {
     let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
+    let mut arrange_buf = vec![];
 
     while let Some(item) = input.next().await {
         match item? {
@@ -207,14 +208,15 @@ pub async fn stream_lookup_arrange_prev_epoch(
                 // stream side.
                 yield ArrangeMessage::Stream(msg);
             }
-            Either::Right(Message::Chunk(_)) => {
-                // For message from the arrangement side, just ignore it.
+            Either::Right(Message::Chunk(chunk)) => {
+                // For message from the arrangement side, put it in a buf
+                arrange_buf.push(chunk);
             }
             Either::Left(Message::Barrier(barrier)) => {
                 yield ArrangeMessage::Barrier(barrier);
             }
             Either::Right(Message::Barrier(_)) => {
-                yield ArrangeMessage::ArrangeReady;
+                yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
             }
         }
     }
@@ -238,6 +240,7 @@ pub async fn stream_lookup_arrange_this_epoch(
 ) {
     let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
     let mut stream_buf = vec![];
+    let mut arrange_buf = vec![];
 
     enum Status {
         ArrangeReady,
@@ -255,14 +258,15 @@ pub async fn stream_lookup_arrange_this_epoch(
                     // Should wait until arrangement from this epoch is available.
                     stream_buf.push(msg);
                 }
-                Either::Right(Message::Chunk(_)) => {
-                    // For message from the arrangement side, just ignore it.
+                Either::Right(Message::Chunk(chunk)) => {
+                    // For message from the arrangement side, put it in buf.
+                    arrange_buf.push(chunk);
                 }
                 Either::Left(Message::Barrier(barrier)) => {
                     break 'inner Status::StreamReady(barrier);
                 }
                 Either::Right(Message::Barrier(_)) => {
-                    yield ArrangeMessage::ArrangeReady;
+                    yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
                     for msg in std::mem::take(&mut stream_buf) {
                         yield ArrangeMessage::Stream(msg);
                     }
@@ -296,9 +300,11 @@ pub async fn stream_lookup_arrange_this_epoch(
                     .expect("unexpected close of barrier aligner")?
                 {
                     Either::Left(_) => unreachable!(),
-                    Either::Right(Message::Chunk(_)) => {}
+                    Either::Right(Message::Chunk(chunk)) => {
+                        arrange_buf.push(chunk);
+                    }
                     Either::Right(Message::Barrier(_)) => {
-                        yield ArrangeMessage::ArrangeReady;
+                        yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
                         for msg in std::mem::take(&mut stream_buf) {
                             yield ArrangeMessage::Stream(msg);
                         }

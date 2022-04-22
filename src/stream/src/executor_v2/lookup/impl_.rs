@@ -26,6 +26,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
 use crate::executor_v2::error::StreamExecutorError;
+use crate::executor_v2::lookup::cache::LookupCache;
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
 use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -236,6 +237,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
+            lookup_cache: LookupCache::new(),
         }
     }
 
@@ -260,19 +262,44 @@ impl<S: StateStore> LookupExecutor<S> {
             .boxed()
         };
 
+        // If we lookup prev epoch, we always apply arrangement data to cache when receiving stream
+        // side barrier.
+        let mut buffer_arrangement_chunks = vec![];
+
         #[for_await]
         for msg in input {
             let msg = msg.map_err(StreamExecutorError::input_error)?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
+                    self.lookup_cache.flush();
+
+                    for chunk in buffer_arrangement_chunks.drain(..) {
+                        self.lookup_cache
+                            .apply_batch(chunk, &self.arrangement.key_indices)
+                    }
+
                     self.process_barrier(barrier.clone())
                         .await
                         .map_err(StreamExecutorError::eval_error)?;
                     yield Message::Barrier(barrier)
                 }
-                ArrangeMessage::ArrangeReady => {
+                ArrangeMessage::ArrangeReady(arrangement_chunks) => {
                     // The arrangement is ready, and we will receive a bunch of stream messages for
                     // the next poll.
+
+                    // TODO: apply chunk as soon as we receive them, instead of batching.
+
+                    if self.arrangement.use_current_epoch {
+                        // Apply arrangement data instantly if we lookup the current epoch.
+                        for chunk in arrangement_chunks {
+                            self.lookup_cache
+                                .apply_batch(chunk, &self.arrangement.key_indices)
+                        }
+                    } else {
+                        // Otherwise, wait the stream barrier.
+                        assert!(buffer_arrangement_chunks.is_empty());
+                        buffer_arrangement_chunks = arrangement_chunks;
+                    }
                 }
                 ArrangeMessage::Stream(chunk) => {
                     let last_barrier = self
@@ -331,16 +358,20 @@ impl<S: StateStore> LookupExecutor<S> {
         stream_row: &RowRef<'_>,
         lookup_epoch: u64,
     ) -> Result<Vec<Row>> {
-        // TODO: add a cache for arrangement in an upstream executor
+        // stream_row is the row from stream side, we need to transform into the correct order of
+        // the arrangement side.
+        let lookup_row = stream_row.row_by_indices(&self.key_indices_mapping);
+        if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
+            return Ok(result.iter().cloned().collect_vec());
+        }
 
         // Serialize join key to a state store key.
         let key_prefix = {
-            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", stream_row.row_by_indices(&self.stream.key_indices));
-            let row = stream_row.datum_refs_by_indices(&self.key_indices_mapping);
+            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", lookup_row);
             let mut key_prefix = vec![];
             self.arrangement
                 .serializer
-                .serialize_datum_refs(row, &mut key_prefix);
+                .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
             key_prefix
         };
 
@@ -364,6 +395,9 @@ impl<S: StateStore> LookupExecutor<S> {
         if let Some((_, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
+
+        self.lookup_cache
+            .batch_update(lookup_row, all_rows.iter().cloned());
 
         Ok(all_rows)
     }
