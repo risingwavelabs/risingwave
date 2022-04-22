@@ -36,7 +36,7 @@ impl Executor2 for ProjectionExecutor2 {
     }
 
     fn identity(&self) -> &str {
-        "TraceExecutor"
+        &self.identity
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
