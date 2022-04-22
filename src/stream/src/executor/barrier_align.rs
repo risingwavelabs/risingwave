@@ -80,9 +80,9 @@ impl BarrierAligner {
         loop {
             select! {
                 message = self.input_l.next(), if self.state != BarrierWaitState::Right => {
-                match message.unwrap() {
-                    Ok(message) => match message {
-                        Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
+                    match message.unwrap() {
+                        Ok(message) => match message {
+                            Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
                             Message::Barrier(barrier) => {
                                 match self.state {
                                     BarrierWaitState::Left => {

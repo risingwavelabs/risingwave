@@ -22,6 +22,7 @@ use risingwave_common::catalog::Schema;
 pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef};
 
 pub mod aggregation;
+mod barrier_align;
 mod batch_query;
 mod chain;
 mod debug;
