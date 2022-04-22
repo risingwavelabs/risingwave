@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -411,7 +411,6 @@ where
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
             let mut actor = builder.build();
-            let mut dispatch_upstreams = vec![];
             let mut upstream_actors = builder
                 .upstreams
                 .iter()
@@ -420,8 +419,8 @@ where
 
             actor.nodes = Some(self.build_inner(
                 ctx,
-                &mut dispatch_upstreams,
                 actor.get_nodes()?,
+                actor_id,
                 &mut upstream_actors,
                 builder.get_fragment_id(),
                 builder.get_parallel_degree(),
@@ -433,17 +432,6 @@ where
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
                 .push(actor);
-
-            for up_id in dispatch_upstreams {
-                match ctx.dispatches.entry(up_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().push(actor_id.as_global_id());
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(vec![actor_id.as_global_id()]);
-                    }
-                }
-            }
         }
         for actor_ids in ctx.upstream_node_actors.values_mut() {
             actor_ids.sort_unstable();
@@ -463,8 +451,8 @@ where
     pub fn build_inner(
         &self,
         ctx: &mut CreateMaterializedViewContext,
-        dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
+        actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         fragment_id: LocalFragmentId,
         parallel_degree: u32,
@@ -475,13 +463,9 @@ where
             Node::ExchangeNode(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
             }
-            Node::ChainNode(_) => self.resolve_chain_node(
-                ctx,
-                dispatch_upstreams,
-                stream_node,
-                fragment_id,
-                parallel_degree,
-            ),
+            Node::ChainNode(_) => {
+                self.resolve_chain_node(ctx, stream_node, fragment_id, actor_id, parallel_degree)
+            }
             _ => {
                 let mut new_stream_node = stream_node.clone();
                 if let Node::HashJoinNode(node) = new_stream_node
@@ -524,17 +508,17 @@ where
                         Node::ChainNode(_) => {
                             new_stream_node.input[idx] = self.resolve_chain_node(
                                 ctx,
-                                dispatch_upstreams,
                                 input,
                                 fragment_id,
+                                actor_id,
                                 parallel_degree,
                             )?;
                         }
                         _ => {
                             new_stream_node.input[idx] = self.build_inner(
                                 ctx,
-                                dispatch_upstreams,
                                 input,
+                                actor_id,
                                 upstream_actor_id,
                                 fragment_id,
                                 parallel_degree,
@@ -552,9 +536,9 @@ where
     fn resolve_chain_node(
         &self,
         ctx: &mut CreateMaterializedViewContext,
-        dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
         fragment_id: LocalFragmentId,
+        actor_id: LocalActorId,
         parallel_degree: u32,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
@@ -562,29 +546,31 @@ where
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
 
-            let (assigned_upstream, parallel_index) =
+            let (upstream_actors, parallel_index) =
                 self.assign_upstream_for_chain(table_id, ctx, fragment_id)?;
 
-            dispatch_upstreams.extend(assigned_upstream.iter());
-            let chain_upstream_table_node_actors = self
+            for &up_id in &upstream_actors {
+                ctx.dispatches
+                    .entry(up_id)
+                    .or_insert(vec![])
+                    .push(actor_id.as_global_id());
+            }
+
+            let upstream_node_actors = self
                 .fragment_manager
-                .blocking_table_node_actors(&table_id)?;
-            let chain_upstream_node_actors = chain_upstream_table_node_actors
+                .blocking_table_node_actors(&table_id)?
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {
                     actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
                 })
-                .filter(|(_, actor_id)| assigned_upstream.contains(actor_id))
+                .filter(|(_, actor_id)| upstream_actors.contains(actor_id))
                 .into_group_map();
-            for (node_id, actor_ids) in chain_upstream_node_actors {
-                match ctx.upstream_node_actors.entry(node_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().extend(actor_ids.iter());
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(actor_ids);
-                    }
-                }
+
+            for (node_id, actor_ids) in upstream_node_actors {
+                ctx.upstream_node_actors
+                    .entry(node_id)
+                    .or_insert(vec![])
+                    .extend(actor_ids);
             }
 
             let merge_node = &input[0];
@@ -605,7 +591,7 @@ where
                     input: vec![],
                     pk_indices: stream_node.pk_indices.clone(),
                     node: Some(Node::MergeNode(MergeNode {
-                        upstream_actor_id: Vec::from_iter(assigned_upstream.into_iter()),
+                        upstream_actor_id: Vec::from_iter(upstream_actors.into_iter()),
                         fields: chain_node.upstream_fields.clone(),
                     })),
                     fields: chain_node.upstream_fields.clone(),
@@ -631,6 +617,7 @@ where
     }
 
     /// maintain a `<fragment_id, hashset<upstream_actor_id>>` mapping
+    ///
     /// For each actor beginning with chain, we will assign *one* upstream table sink actor
     /// to this actor. (assert chain actor's parallel degree == upstream parallel degree).
     fn assign_upstream_for_chain(
@@ -639,25 +626,21 @@ where
         ctx: &mut CreateMaterializedViewContext,
         fragment_id: LocalFragmentId,
     ) -> Result<(HashSet<ActorId>, u32)> {
-        let remaining = match ctx
+        let remaining = ctx
             .chain_upstream_assignment
             .entry(fragment_id.as_global_id())
-        {
-            Entry::Vacant(v) => {
-                let mut upstream_actor_ids = match ctx.table_sink_map.entry(table_id) {
-                    Entry::Vacant(v) => {
-                        let actor_ids = self
-                            .fragment_manager
-                            .blocking_get_table_sink_actor_ids(&table_id)?;
-                        v.insert(actor_ids).clone()
-                    }
-                    Entry::Occupied(o) => o.get().clone(),
-                };
-                upstream_actor_ids.dedup();
-                v.insert(upstream_actor_ids)
-            }
-            Entry::Occupied(o) => o.into_mut(),
-        };
+            .or_insert({
+                ctx.table_sink_map
+                    .entry(table_id)
+                    .or_insert({
+                        self.fragment_manager
+                            .blocking_get_table_sink_actor_ids(&table_id)?
+                    })
+                    .iter()
+                    .cloned()
+                    .dedup()
+                    .collect()
+            });
 
         // choose one upstream from remaining.
         assert!(!remaining.is_empty());
