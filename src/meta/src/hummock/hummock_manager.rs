@@ -871,11 +871,10 @@ where
 
         self.env
             .notification_manager()
-            .notify_frontend(
+            .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
-                &Info::HummockSnapshot(HummockSnapshot { epoch }),
-            )
-            .await;
+                Info::HummockSnapshot(HummockSnapshot { epoch }),
+            );
 
         Ok(())
     }

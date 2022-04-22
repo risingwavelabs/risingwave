@@ -114,7 +114,7 @@ pub(crate) fn gen_create_index_plan(
             ),
             required_cols,
         )
-        .gen_create_mv_plan(index_name.to_string())?
+        .gen_create_index_plan(index_name.to_string())?
     };
 
     let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;

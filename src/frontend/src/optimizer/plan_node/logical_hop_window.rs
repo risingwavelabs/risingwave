@@ -53,7 +53,8 @@ impl LogicalHopWindow {
                 Field::with_name(DataType::Timestamp, "window_end"),
             ])
             .collect();
-        let pk_indices = input.pk_indices().to_vec();
+        let mut pk_indices = input.pk_indices().to_vec();
+        pk_indices.push(input.schema().len());
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalHopWindow {
             base,
