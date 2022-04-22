@@ -262,22 +262,16 @@ impl<S: StateStore> LookupExecutor<S> {
             .boxed()
         };
 
-        // If we lookup prev epoch, we always apply arrangement data to cache when receiving stream
-        // side barrier.
-        let mut buffer_arrangement_chunks = vec![];
-
         #[for_await]
         for msg in input {
             let msg = msg.map_err(StreamExecutorError::input_error)?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
-                    self.lookup_cache.flush();
-
-                    for chunk in buffer_arrangement_chunks.drain(..) {
-                        self.lookup_cache
-                            .apply_batch(chunk, &self.arrangement.key_indices)
+                    if self.arrangement.use_current_epoch {
+                        // If we are using current epoch, stream barrier should always come after
+                        // arrange barrier. So we flush now.
+                        self.lookup_cache.flush();
                     }
-
                     self.process_barrier(barrier.clone())
                         .await
                         .map_err(StreamExecutorError::eval_error)?;
@@ -289,16 +283,15 @@ impl<S: StateStore> LookupExecutor<S> {
 
                     // TODO: apply chunk as soon as we receive them, instead of batching.
 
-                    if self.arrangement.use_current_epoch {
-                        // Apply arrangement data instantly if we lookup the current epoch.
-                        for chunk in arrangement_chunks {
-                            self.lookup_cache
-                                .apply_batch(chunk, &self.arrangement.key_indices)
-                        }
-                    } else {
-                        // Otherwise, wait the stream barrier.
-                        assert!(buffer_arrangement_chunks.is_empty());
-                        buffer_arrangement_chunks = arrangement_chunks;
+                    for chunk in arrangement_chunks {
+                        self.lookup_cache
+                            .apply_batch(chunk, &self.arrangement.key_indices)
+                    }
+
+                    if !self.arrangement.use_current_epoch {
+                        // If we are using previous epoch, arrange barrier should always come after
+                        // stream barrier. So we flush now.
+                        self.lookup_cache.flush();
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {

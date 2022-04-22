@@ -191,7 +191,9 @@ pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) 
 /// * `[Msg`] Stream (key = a)
 /// * `[Do`] lookup `a` in arrangement of epoch `[1`] (prev epoch)
 /// * `[Msg`] Arrangement (batch)
-/// * `[Do`] replicate batch with epoch `[2`]
+/// * `[Msg`] Stream (key = b)
+/// * `[Do`] lookup `b` in arrangement of epoch `[1`] (prev epoch)
+/// * `[Do`] update cache with epoch `[2`]
 /// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
 pub async fn stream_lookup_arrange_prev_epoch(
@@ -200,25 +202,51 @@ pub async fn stream_lookup_arrange_prev_epoch(
 ) {
     let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
     let mut arrange_buf = vec![];
+    let mut stream_side_end = false;
 
-    while let Some(item) = input.next().await {
-        match item? {
-            Either::Left(Message::Chunk(msg)) => {
-                // As prev epoch is already available, we can directly forward messages from the
-                // stream side.
-                yield ArrangeMessage::Stream(msg);
-            }
-            Either::Right(Message::Chunk(chunk)) => {
-                // For message from the arrangement side, put it in a buf
-                arrange_buf.push(chunk);
-            }
-            Either::Left(Message::Barrier(barrier)) => {
-                yield ArrangeMessage::Barrier(barrier);
-            }
-            Either::Right(Message::Barrier(_)) => {
-                yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
+    loop {
+        while let Some(item) = input.next().await {
+            match item? {
+                Either::Left(Message::Chunk(msg)) => {
+                    // As prev epoch is already available, we can directly forward messages from the
+                    // stream side.
+                    yield ArrangeMessage::Stream(msg);
+                }
+                Either::Right(Message::Chunk(chunk)) => {
+                    // For message from the arrangement side, put it in a buf
+                    arrange_buf.push(chunk);
+                }
+                Either::Left(Message::Barrier(barrier)) => {
+                    yield ArrangeMessage::Barrier(barrier);
+                    stream_side_end = true;
+                }
+                Either::Right(Message::Barrier(_)) => {
+                    if stream_side_end {
+                        yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
+                        stream_side_end = false;
+                    } else {
+                        break;
+                    }
+                }
             }
         }
+
+        loop {
+            match input
+                .next()
+                .await
+                .expect("unexpected close of barrier aligner")?
+            {
+                Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
+                Either::Left(Message::Barrier(b)) => {
+                    yield ArrangeMessage::Barrier(b);
+                    break;
+                }
+                Either::Right(_) => unreachable!(),
+            }
+        }
+
+        yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
     }
 }
 
@@ -229,7 +257,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
 ///
 /// * `[Msg`] Barrier (prev = `[1`], current = `[2`])
 /// * `[Msg`] Arrangement (batch)
-/// * `[Do`] replicate batch with epoch `[2`]
+/// * `[Do`] update cache with epoch `[2`]
 /// * `[Msg`] Stream (key = a)
 /// * `[Do`] lookup `a` in arrangement of epoch `[2`] (current epoch)
 /// * Barrier (prev = `[2`], current = `[3`])
