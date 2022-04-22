@@ -245,7 +245,9 @@ impl DispatchExecutorInner {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
             if !stops.contains(&self.actor_id) {
-                self.single_inner_mut().remove_outputs(stops);
+                for dispatcher in &mut self.dispatchers {
+                    dispatcher.remove_outputs(stops);
+                }
             }
         }
 
