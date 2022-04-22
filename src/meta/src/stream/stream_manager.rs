@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -151,14 +150,10 @@ where
                 .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
                 .into_group_map();
             for (node_id, actor_ids) in chain_upstream_node_actors {
-                match ctx.upstream_node_actors.entry(node_id) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().extend(actor_ids.iter());
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(actor_ids);
-                    }
-                }
+                ctx.upstream_node_actors
+                    .entry(node_id)
+                    .or_default()
+                    .extend(actor_ids.iter());
             }
 
             // deal with merge and batch query node, setting upstream infos.
@@ -183,14 +178,10 @@ where
             }
 
             // finally, we should also build dispatcher infos here.
-            match ctx.dispatches.entry(*upstream_actor_id) {
-                Entry::Occupied(mut o) => {
-                    o.get_mut().push(actor_id);
-                }
-                Entry::Vacant(v) => {
-                    v.insert(vec![actor_id]);
-                }
-            };
+            ctx.dispatches
+                .entry(*upstream_actor_id)
+                .or_default()
+                .push(actor_id);
         } else {
             // otherwise, recursively deal with input nodes
             for input in &mut stream_node.input {
