@@ -22,6 +22,7 @@ use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair};
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -105,7 +106,7 @@ impl BoxedExecutor2Builder for TopNExecutor2 {
                 order_pairs,
                 top_n_node.get_limit() as usize,
                 source.plan_node().get_identity().clone(),
-                1024,
+                DEFAULT_CHUNK_BUFFER_SIZE,
             )));
         }
         Err(InternalError("TopN must have one child".to_string()).into())
@@ -213,7 +214,7 @@ mod tests {
             order_pairs,
             2usize,
             "TopNExecutor2".to_string(),
-            1024,
+            DEFAULT_CHUNK_BUFFER_SIZE,
         ));
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
