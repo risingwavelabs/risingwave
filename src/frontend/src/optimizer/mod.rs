@@ -198,7 +198,7 @@ impl PlanRoot {
             Convention::Stream => self
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
-            _ => panic!(),
+            _ => unreachable!(),
         };
 
         StreamMaterialize::create(

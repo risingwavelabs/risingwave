@@ -65,9 +65,9 @@ fn name_of(ty: &DataType) -> DataTypeName {
     }
 }
 
-/// Infers the return type of a function. Returns `None` if the function with specified data types
+/// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<DataType> {
+pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
     let input_type_names = inputs_type.iter().map(name_of).collect();
@@ -95,13 +95,14 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
 }
 
 /// Infer the return type name without parameters like length or precision.
-fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Option<DataTypeName> {
+fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Result<DataTypeName> {
     FUNC_SIG_MAP
-        .get(&FuncSign {
-            func: func_type,
-            inputs_type,
-        })
+        .get(&FuncSign::new(func_type, inputs_type.clone()))
         .cloned()
+        .ok_or_else(|| {
+            ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 112.into())
+                .into()
+        })
 }
 
 #[derive(PartialEq, Hash)]
@@ -446,7 +447,7 @@ mod tests {
 
     fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataType>) {
         let ret = infer_type(func_type, inputs_type);
-        assert_eq!(ret, None);
+        assert!(ret.is_err());
     }
 
     #[test]

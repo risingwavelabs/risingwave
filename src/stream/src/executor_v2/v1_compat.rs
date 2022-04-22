@@ -32,6 +32,7 @@ use super::project::SimpleProjectExecutor;
 use super::{
     BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
     HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
+    RearrangedChainExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::executor_v2::aggregation::AggCall;
@@ -206,6 +207,27 @@ impl ProjectExecutor {
             input,
             inner: SimpleProjectExecutor::new(info, exprs, executor_id),
         }
+    }
+}
+
+impl RearrangedChainExecutor {
+    pub fn new_from_v1(
+        snapshot: BoxedExecutor,
+        mview: BoxedExecutor,
+        notifier: FinishCreateMviewNotifier,
+        schema: Schema,
+        column_idxs: Vec<usize>,
+        _op_info: String,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: mview.pk_indices().to_owned(),
+            identity: "RearrangedChain".to_owned(),
+        };
+
+        let actor_id = notifier.actor_id;
+
+        Self::new(snapshot, mview, column_idxs, notifier, actor_id, info)
     }
 }
 

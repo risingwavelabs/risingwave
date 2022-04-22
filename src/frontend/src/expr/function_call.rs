@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -85,25 +85,18 @@ impl std::fmt::Debug for FunctionCall {
 }
 
 impl FunctionCall {
-    /// Returns error if the function call is not valid.
-    pub fn new_or_else<F>(func_type: ExprType, inputs: Vec<ExprImpl>, err_f: F) -> Result<Self>
-    where
-        F: FnOnce(&Vec<ExprImpl>) -> RwError,
-    {
-        infer_type(
-            func_type,
-            inputs.iter().map(|expr| expr.return_type()).collect(),
-        )
-        .ok_or_else(|| err_f(&inputs))
-        .map(|return_type| Self::new_with_return_type(func_type, inputs, return_type))
-    }
-
-    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
+    /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
+    /// `inputs`.
+    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<Self> {
         let return_type = infer_type(
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
         )?; // should be derived from inputs
-        Some(Self::new_with_return_type(func_type, inputs, return_type))
+        Ok(Self {
+            func_type,
+            return_type,
+            inputs,
+        })
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
@@ -129,8 +122,9 @@ impl FunctionCall {
         }
     }
 
-    /// used for expressions like cast
-    pub fn new_with_return_type(
+    /// Construct a `FunctionCall` expr directly with the provided `return_type`, bypassing type
+    /// inference. Use with caution.
+    pub fn new_unchecked(
         func_type: ExprType,
         inputs: Vec<ExprImpl>,
         return_type: DataType,

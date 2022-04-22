@@ -23,7 +23,6 @@ pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkI
 
 pub mod aggregation;
 mod batch_query;
-#[allow(dead_code)]
 mod chain;
 mod debug;
 mod filter;
@@ -47,6 +46,7 @@ mod union;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
+pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
@@ -57,7 +57,7 @@ pub use lookup::*;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
-pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
+pub use rearranged_chain::RearrangedChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;

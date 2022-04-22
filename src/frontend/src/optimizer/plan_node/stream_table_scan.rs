@@ -133,6 +133,7 @@ impl StreamTableScan {
                 },
             ],
             node: Some(ProstStreamNode::ChainNode(ChainNode {
+                disable_rearrange: false,
                 table_ref_id: Some(TableRefId {
                     table_id: self.logical.table_desc().table_id.table_id as i32,
                     schema_ref_id: None, // TODO: fill schema ref id
