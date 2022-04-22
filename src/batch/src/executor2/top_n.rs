@@ -105,7 +105,7 @@ impl BoxedExecutor2Builder for TopNExecutor2 {
                 order_pairs,
                 top_n_node.get_limit() as usize,
                 source.plan_node().get_identity().clone(),
-                1024
+                1024,
             )));
         }
         Err(InternalError("TopN must have one child".to_string()).into())
@@ -118,7 +118,7 @@ impl TopNExecutor2 {
         order_pairs: Vec<OrderPair>,
         limit: usize,
         identity: String,
-        chunk_size:usize
+        chunk_size: usize,
     ) -> Self {
         Self {
             top_n_heap: TopNHeap {
@@ -128,7 +128,7 @@ impl TopNExecutor2 {
             },
             child,
             identity,
-            chunk_size
+            chunk_size,
         }
     }
 }
@@ -150,6 +150,8 @@ impl Executor2 for TopNExecutor2 {
 impl TopNExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
+        let data_types = self.child.schema().data_types();
+
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
@@ -158,11 +160,13 @@ impl TopNExecutor2 {
 
         if let Some(data_chunk) = self.top_n_heap.dump() {
             let rows = data_chunk.rows().collect::<Vec<_>>();
-            let mut chunks = rows.chunks(self.chunk_size); 
-            while let Some(chunk) = chunks.next(){
-                let rows = chunk.iter().map(|rowref |rowref.to_owned_row()).collect::<Vec<_>>();
-                let ret_chunk = 
-                DataChunk::from_rows(&rows, &self.child.schema().data_types())?;
+            let mut chunks = rows.chunks(self.chunk_size);
+            for chunk in chunks.by_ref() {
+                let rows = chunk
+                    .iter()
+                    .map(|rowref| rowref.to_owned_row())
+                    .collect::<Vec<_>>();
+                let ret_chunk = DataChunk::from_rows(&rows, &data_types)?;
                 yield ret_chunk
             }
         }
@@ -216,7 +220,7 @@ mod tests {
             order_pairs,
             2usize,
             "TopNExecutor2".to_string(),
-            1024
+            1024,
         ));
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);

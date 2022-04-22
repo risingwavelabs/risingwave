@@ -40,8 +40,8 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, InsertExecutor2,TopNExecutor2,
-    TraceExecutor2, ValuesExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, InsertExecutor2,
+    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
