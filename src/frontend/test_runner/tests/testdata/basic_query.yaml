@@ -101,7 +101,7 @@
 - sql: |
     create table t (v1 real, v2 int, v3 varchar);
     insert into t values (1, 2), (3, 4);
-  binder_error: 'Invalid input syntax: values length mismatched: expected 3, given 2'
+  binder_error: 'Bind error: INSERT has more target columns than expressions'
 - sql: |
     create table t(v1 int);
     insert into t values(NULL);
