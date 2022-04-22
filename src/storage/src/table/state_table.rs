@@ -19,7 +19,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
-use super::mem_table::{MemTable, RowOp};
+use super::mem_table::MemTable;
 use crate::error::StorageResult;
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
@@ -52,14 +52,9 @@ impl<S: StateStore> StateTable<S> {
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let mem_table_res = self.mem_table.get_row(pk).unwrap();
-        if let Some(res) = mem_table_res {
-            match res {
-                RowOp::Insert(row) => Ok(Some(row)),
-                RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, new_row)) => Ok(Some(new_row)),
-            }
-        } else {
-            self.cell_based_table.get_row(pk, epoch).await
+        match mem_table_res {
+            Some(row) => Ok(Some(row.clone())),
+            None => self.cell_based_table.get_row(pk, epoch).await,
         }
     }
 
@@ -195,7 +190,11 @@ mod tests {
         state_table
             .delete(
                 Row(vec![Some(2_i32.into())]),
-                Row(vec![Some(2_i32.into()), Some(22_i32.into()), Some(222_i32.into())]),
+                Row(vec![
+                    Some(2_i32.into()),
+                    Some(22_i32.into()),
+                    Some(222_i32.into()),
+                ]),
             )
             .unwrap();
 
