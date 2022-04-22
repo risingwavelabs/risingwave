@@ -100,7 +100,7 @@ where
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph);
+        let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph, vec![]);
         match self
             .global_stream_manager
             .create_materialized_view(table_fragments, ctx)
