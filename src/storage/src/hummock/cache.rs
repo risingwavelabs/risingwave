@@ -511,6 +511,20 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     }
 }
 
+impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
+    fn drop(&mut self) {
+        // When the shard is dropped, all handles must be in lru, and therefore we only need to free
+        // the handles in lru.
+        while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
+            let handle = self.lru.next;
+            unsafe {
+                self.lru_remove(handle);
+                drop(Box::from_raw(handle));
+            }
+        }
+    }
+}
+
 pub struct LruCache<K: LruKey, T: LruValue> {
     num_shard_bits: usize,
     shards: Vec<Mutex<LruCacheShard<K, T>>>,
