@@ -28,6 +28,8 @@ pub struct BoundInsert {
 
     pub source: BoundQuery,
 
+    /// Used as part of an extra `Project` when the column types of `source` query does not match
+    /// `table_source`. This does not include a simple `VALUE`. See comments in code for details.
     pub cast_exprs: Vec<ExprImpl>,
 }
 
@@ -46,6 +48,28 @@ impl Binder {
             .map(|c| c.data_type.clone())
             .collect();
 
+        // When the column types of `source` query does not match `expected_types`, casting is
+        // needed.
+        //
+        // In PG, when the `source` is a `VALUES` without order / limit / offset, special treatment
+        // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
+        // For example, the following is valid:
+        // ```
+        //   create table t (v1 time);
+        //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
+        // ```
+        // But the followings are not:
+        // ```
+        //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
+        //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
+        // ```
+        // Because `timestamp` can cast to `time` in assignment context, but no casting between them
+        // is allowed implicitly.
+        //
+        // In this case, assignment cast should be used directly in `VALUES`, suppressing its
+        // internal implicit cast.
+        // In other cases, the `source` query is handled on its own and assignment cast is done
+        // afterwards.
         let (source, cast_exprs) = match source {
             Query {
                 with: None,
@@ -94,6 +118,8 @@ impl Binder {
         Ok(insert)
     }
 
+    /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
+    /// you understand the difference of implicit, assignment and explicit cast before reusing it.
     pub(super) fn cast_on_insert(
         expected_types: Vec<DataType>,
         exprs: Vec<ExprImpl>,
