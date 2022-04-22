@@ -46,6 +46,9 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
+// The node will be used for both create mv and create index. When creating mv,
+// `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
+// arrange columns and pk columns, while distribution keys will be arrange columns.
 message MaterializeNode {
   plan.TableRefId table_ref_id = 1;
   plan.TableRefId associated_table_ref_id = 2;
@@ -143,8 +146,8 @@ message BatchPlanNode {
   BatchParallelInfo parallel_info = 4;
 }
 
-// Special node for shared state. ArrangeNode will produce a special Materialize executor,
-// which materializes data for downstream to query.
+// Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
+// produce a special Materialize executor, which materializes data for downstream to query.
 message ArrangeNode {
   // The keys used to group the rows, aka. arrange key.
   repeated int32 arrange_key_indexes = 1;
