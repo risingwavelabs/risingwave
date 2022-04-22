@@ -83,10 +83,11 @@ pub(crate) fn json_parse_value(
             },
             None => Err(RwError::from(InternalError("json parse error".to_string()))),
         },
-        DataType::Char | DataType::Varchar => make_ScalarImpl!(
-            value.and_then(|v| v.as_str()),
-            |v: &str| ScalarImpl::Utf8(v.to_owned_scalar())
-        ),
+        DataType::Varchar => {
+            make_ScalarImpl!(value.and_then(|v| v.as_str()), |v: &str| ScalarImpl::Utf8(
+                v.to_owned_scalar()
+            ))
+        }
         DataType::Date => match value.and_then(|v| v.as_str()) {
             None => Err(RwError::from(InternalError("parse error".to_string()))),
             Some(date_str) => match str_to_date(date_str) {
@@ -94,6 +95,10 @@ pub(crate) fn json_parse_value(
                 Err(e) => Err(e),
             },
         },
-        _ => unimplemented!(),
+        _ => Err(ErrorCode::NotImplemented(
+            "unsupported type for json_parse_value".to_string(),
+            None.into(),
+        )
+        .into()),
     }
 }

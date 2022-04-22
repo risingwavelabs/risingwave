@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -49,7 +49,6 @@ impl Binder {
             let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
-                "like" => ExprType::Like,
                 "upper" => ExprType::Upper,
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
@@ -57,47 +56,26 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
-                "case" => ExprType::Case,
-                "is true" => ExprType::IsTrue,
-                "is not true" => ExprType::IsNotTrue,
-                "is false" => ExprType::IsFalse,
-                "is not false" => ExprType::IsNotFalse,
-                "is null" => ExprType::IsNull,
-                "is not null" => ExprType::IsNotNull,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
                 }
                 _ => {
-                    return Err(ErrorCode::NotImplementedError(format!(
-                        "unsupported function: {:?}",
-                        function_name
-                    ))
+                    return Err(ErrorCode::NotImplemented(
+                        format!("unsupported function: {:?}", function_name),
+                        112.into(),
+                    )
                     .into())
                 }
             };
-            Ok(FunctionCall::new_or_else(function_type, inputs, |args| {
-                Self::err_unsupported_func(&function_name, args)
-            })?
-            .into())
+            Ok(FunctionCall::new(function_type, inputs)?.into())
         } else {
-            Err(
-                ErrorCode::NotImplementedError(format!("unsupported function: {:?}", f.name))
-                    .into(),
+            Err(ErrorCode::NotImplemented(
+                format!("unsupported function: {:?}", f.name),
+                112.into(),
             )
+            .into())
         }
-    }
-
-    fn err_unsupported_func(function_name: &str, inputs: &[ExprImpl]) -> RwError {
-        let args = inputs
-            .iter()
-            .map(|i| format!("{:?}", i.return_type()))
-            .join(",");
-        ErrorCode::NotImplementedError(format!(
-            "function {}({}) doesn't exist",
-            function_name, args
-        ))
-        .into()
     }
 
     /// Rewrite the arguments to be consistent with the `round` signature:
@@ -116,8 +94,14 @@ impl Binder {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();
             vec![
-                input.ensure_type(DataType::Decimal),
-                digits.ensure_type(DataType::Int32),
+                input
+                    .clone()
+                    .cast_implicit(DataType::Decimal)
+                    .unwrap_or(input),
+                digits
+                    .clone()
+                    .cast_implicit(DataType::Int32)
+                    .unwrap_or(digits),
             ]
         } else {
             inputs

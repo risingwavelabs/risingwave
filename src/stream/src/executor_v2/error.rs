@@ -15,66 +15,103 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_storage::hummock::TracedHummockError;
+use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
+use super::Barrier;
+
 #[derive(Error, Debug)]
-pub enum StreamExecutorError {
-    #[error("storage error {0}")]
+enum StreamExecutorErrorInner {
+    #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
         #[source]
-        TracedHummockError,
+        StorageError,
     ),
 
-    #[error("executor v1 error {0}")]
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+
+    #[error("Executor v1 error: {0}")]
     ExecutorV1(RwError),
 
-    #[error("chunk operation error {0}")]
+    #[error("Chunk operation error: {0}")]
     EvalError(RwError),
 
-    #[error("channel `{0}` closed")]
+    #[error("Aggregate state error: {0}")]
+    AggStateError(RwError),
+
+    #[error("Input error: {0}")]
+    InputError(RwError),
+
+    #[error("TopN state error: {0}")]
+    TopNStateError(RwError),
+
+    #[error("Channel `{0}` closed")]
     ChannelClosed(String),
+
+    #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
+    AlignBarrier(Box<Barrier>, Box<Barrier>),
 }
 
 impl StreamExecutorError {
-    pub fn storage(error: TracedHummockError) -> TracedStreamExecutorError {
-        Self::Storage(error).into()
+    pub fn storage(error: impl Into<StorageError>) -> Self {
+        StreamExecutorErrorInner::Storage(error.into()).into()
     }
 
-    pub fn executor_v1(error: impl Into<RwError>) -> TracedStreamExecutorError {
-        Self::ExecutorV1(error.into()).into()
+    pub fn executor_v1(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::ExecutorV1(error.into()).into()
     }
 
-    pub fn eval_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
-        Self::EvalError(error.into()).into()
+    pub fn eval_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::EvalError(error.into()).into()
     }
 
-    pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {
-        Self::ChannelClosed(name.into()).into()
+    pub fn agg_state_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::AggStateError(error.into()).into()
+    }
+
+    pub fn input_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::InputError(error.into()).into()
+    }
+
+    pub fn top_n_state_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::TopNStateError(error.into()).into()
+    }
+
+    pub fn channel_closed(name: impl Into<String>) -> Self {
+        StreamExecutorErrorInner::ChannelClosed(name.into()).into()
+    }
+
+    pub fn align_barrier(expected: Barrier, received: Barrier) -> Self {
+        StreamExecutorErrorInner::AlignBarrier(expected.into(), received.into()).into()
+    }
+
+    pub fn invalid_argument(error: impl Into<String>) -> Self {
+        StreamExecutorErrorInner::InvalidArgument(error.into()).into()
     }
 }
 
 #[derive(Error)]
-#[error("{source}")]
-pub struct TracedStreamExecutorError {
+#[error("{inner}")]
+pub struct StreamExecutorError {
     #[from]
-    source: StreamExecutorError,
+    inner: StreamExecutorErrorInner,
     backtrace: Backtrace,
 }
 
-impl std::fmt::Debug for TracedStreamExecutorError {
+impl std::fmt::Debug for StreamExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;
 
-        write!(f, "{}", self.source)?;
+        write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.source.backtrace() {
+        if let Some(backtrace) = self.inner.backtrace() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
                 f,
-                "  backtrace of `TracedStreamExecutorError`:\n{}",
+                "  backtrace of `StreamExecutorError`:\n{}",
                 self.backtrace
             )?;
         }
@@ -82,14 +119,20 @@ impl std::fmt::Debug for TracedStreamExecutorError {
     }
 }
 
-/// Always convert [`TracedStreamExecutorError`] to internal error of `RwResult`.
-impl From<TracedStreamExecutorError> for RwError {
-    fn from(h: TracedStreamExecutorError) -> Self {
-        ErrorCode::InternalError(h.to_string()).into()
+impl From<StorageError> for StreamExecutorError {
+    fn from(s: StorageError) -> Self {
+        Self::storage(s)
     }
 }
 
-pub type StreamExecutorResult<T> = std::result::Result<T, TracedStreamExecutorError>;
+/// Always convert [`StreamExecutorError`] to stream error variant of [`RwError`].
+impl From<StreamExecutorError> for RwError {
+    fn from(h: StreamExecutorError) -> Self {
+        ErrorCode::StreamError(h.into()).into()
+    }
+}
+
+pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 
 #[cfg(test)]
 mod tests {

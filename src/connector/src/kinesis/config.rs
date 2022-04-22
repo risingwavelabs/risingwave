@@ -19,9 +19,12 @@ use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
+use maplit::hashmap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use serde::{Deserialize, Serialize};
+
+use crate::Properties;
 
 const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
 const KINESIS_STREAM_REGION: &str = "kinesis.stream.region";
@@ -97,22 +100,16 @@ impl AwsConfigInfo {
         Ok(config_loader.load().await)
     }
 
-    pub fn build(properties: &HashMap<String, String>) -> risingwave_common::error::Result<Self> {
-        let stream_name = properties.get(KINESIS_STREAM_NAME).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "Kinesis stream name should be provided.".into(),
-            ))
-        })?;
-        let region = properties.get(KINESIS_STREAM_REGION).ok_or_else(|| {
-            RwError::from(ProtocolError("Kinesis region should be provided.".into()))
-        })?;
+    pub fn build(properties: &Properties) -> risingwave_common::error::Result<Self> {
+        let stream_name = properties.get_kinesis(KINESIS_STREAM_NAME)?;
+        let region = properties.get_kinesis(KINESIS_STREAM_REGION)?;
 
         let mut credentials: Option<AwsCredentials> = None;
         let mut assume_role: Option<AwsAssumeRole> = None;
 
         let (access_key, secret_key) = (
-            properties.get(KINESIS_CREDENTIALS_ACCESS_KEY),
-            properties.get(KINESIS_CREDENTIALS_SECRET_ACCESS_KEY),
+            properties.0.get(KINESIS_CREDENTIALS_ACCESS_KEY),
+            properties.0.get(KINESIS_CREDENTIALS_SECRET_ACCESS_KEY),
         );
         if access_key.is_some() ^ secret_key.is_some() {
             return Err(
@@ -122,23 +119,33 @@ impl AwsConfigInfo {
             credentials = Some(AwsCredentials {
                 access_key_id: access.clone(),
                 secret_access_key: secret.clone(),
-                session_token: properties.get(KINESIS_CREDENTIALS_SESSION_TOKEN).cloned(),
+                session_token: properties.0.get(KINESIS_CREDENTIALS_SESSION_TOKEN).cloned(),
             });
         }
 
-        if let Some(assume_role_arn) = properties.get(KINESIS_ASSUMEROLE_ARN) {
+        if let Some(assume_role_arn) = properties.0.get(KINESIS_ASSUMEROLE_ARN) {
             assume_role = Some(AwsAssumeRole {
                 arn: assume_role_arn.clone(),
-                external_id: properties.get(KINESIS_ASSUMEROLE_EXTERNAL_ID).cloned(),
+                external_id: properties.0.get(KINESIS_ASSUMEROLE_EXTERNAL_ID).cloned(),
             })
         }
 
         Ok(Self {
-            stream_name: stream_name.clone(),
-            region: Some(region.clone()),
-            endpoint: properties.get(KINESIS_ENDPOINT).cloned(),
+            stream_name,
+            region: Some(region),
+            endpoint: properties.0.get(KINESIS_ENDPOINT).cloned(),
             assume_role,
             credentials,
         })
     }
+}
+
+/// This function provides a minimum configuration for testing kinesis
+pub fn kinesis_demo_properties() -> HashMap<String, String> {
+    let properties: HashMap<String, String> = hashmap! {
+    "kinesis.stream.name".to_string() => "kinesis_test_stream".to_string(),
+    "kinesis.stream.region".to_string() => "cn-north-1".to_string(),
+    "connector".to_string() => "kinesis".to_string()};
+
+    properties
 }

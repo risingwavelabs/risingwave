@@ -50,7 +50,7 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<u
         )
         .map_err(|e| InternalError(format!("get_hash_values:{}", e)))?
         .iter_mut()
-        .map(|hash_value| *hash_value as usize % output_count)
+        .map(|hash_value| hash_value.hash_code() as usize % output_count)
         .collect::<Vec<_>>();
     Ok(hash_values)
 }
@@ -88,6 +88,7 @@ fn generate_new_data_chunks(
 
 impl ChanSender for HashShuffleSender {
     type SendFuture<'a> = impl Future<Output = Result<()>>;
+
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
             match chunk {
@@ -130,6 +131,7 @@ impl HashShuffleSender {
 
 impl ChanReceiver for HashShuffleReceiver {
     type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
             match self.receiver.recv().await {

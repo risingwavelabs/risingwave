@@ -118,9 +118,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::DatabaseV2(database.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::DatabaseV2(database.to_owned()))
+                .await;
 
             Ok(version)
         } else {
@@ -140,9 +139,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Delete, &Info::DatabaseV2(database))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Delete, Info::DatabaseV2(database))
+                .await;
 
             Ok(version)
         } else {
@@ -161,9 +159,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::SchemaV2(schema.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::SchemaV2(schema.to_owned()))
+                .await;
 
             Ok(version)
         } else {
@@ -183,9 +180,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Delete, &Info::SchemaV2(schema))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Delete, Info::SchemaV2(schema))
+                .await;
 
             Ok(version)
         } else {
@@ -222,9 +218,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::TableV2(table.to_owned()))
+                .await;
 
             Ok(version)
         } else {
@@ -262,9 +257,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::TableV2(table.to_owned()))
+                .await;
 
             Ok(version)
         } else {
@@ -298,9 +292,8 @@ where
                     let version = self
                         .env
                         .notification_manager()
-                        .notify_frontend(Operation::Delete, &Info::TableV2(table))
-                        .await
-                        .into_inner();
+                        .notify_frontend(Operation::Delete, Info::TableV2(table))
+                        .await;
 
                     Ok(version)
                 }
@@ -336,9 +329,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .await;
 
             Ok(version)
         } else {
@@ -370,9 +362,8 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .await;
 
             Ok(version)
         } else {
@@ -403,9 +394,8 @@ where
                     let version = self
                         .env
                         .notification_manager()
-                        .notify_frontend(Operation::Delete, &Info::Source(source))
-                        .await
-                        .into_inner();
+                        .notify_frontend(Operation::Delete, Info::Source(source))
+                        .await;
 
                     Ok(version)
                 }
@@ -466,15 +456,14 @@ where
 
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::TableV2(mview.to_owned()))
+                .notify_frontend(Operation::Add, Info::TableV2(mview.to_owned()))
                 .await;
             // Currently frontend uses source's version
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .await;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -567,14 +556,13 @@ where
 
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Delete, &Info::TableV2(mview))
+                    .notify_frontend(Operation::Delete, Info::TableV2(mview))
                     .await;
                 let version = self
                     .env
                     .notification_manager()
-                    .notify_frontend(Operation::Delete, &Info::Source(source))
-                    .await
-                    .into_inner();
+                    .notify_frontend(Operation::Delete, Info::Source(source))
+                    .await;
                 Ok(version)
             }
 
@@ -721,6 +709,10 @@ where
     fn drop_source(&mut self, source: &Source) -> bool {
         self.sources
             .remove(&(source.database_id, source.schema_id, source.name.clone()))
+    }
+
+    pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
+        Source::select(self.env.meta_store(), &id).await
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {

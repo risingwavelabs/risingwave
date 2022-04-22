@@ -17,8 +17,10 @@ use std::collections::{HashSet, VecDeque};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::Keyspace;
 
-use super::error::TracedStreamExecutorError;
+use super::error::StreamExecutorError;
 use super::{Barrier, Executor, Message, Mutation, PkIndices, StreamChunk};
 
 pub struct MockSource {
@@ -94,7 +96,7 @@ impl MockSource {
 }
 
 impl MockSource {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let mut epoch = 0;
 
@@ -127,4 +129,8 @@ impl Executor for MockSource {
     fn identity(&self) -> &str {
         "MockSource"
     }
+}
+
+pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
+    Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
 }

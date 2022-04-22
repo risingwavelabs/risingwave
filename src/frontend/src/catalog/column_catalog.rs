@@ -18,6 +18,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
+use super::row_id_column_desc;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
@@ -50,6 +52,22 @@ impl ColumnCatalog {
         ProstColumnCatalog {
             column_desc: Some(self.column_desc.to_protobuf()),
             is_hidden: self.is_hidden,
+        }
+    }
+
+    /// Creates a row ID column (for implicit primary key).
+    pub fn row_id_column() -> Self {
+        Self {
+            column_desc: row_id_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    /// Generate incremental `column_id` for every `column_desc` and `column_desc.field_descs`
+    pub fn generate_increment_id(catalogs: &mut Vec<ColumnCatalog>) {
+        let mut index = 0;
+        for catalog in catalogs {
+            catalog.column_desc.generate_increment_id(&mut index);
         }
     }
 }

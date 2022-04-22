@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::vec;
 
 use itertools::iproduct;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use crate::expr::ExprType;
@@ -31,15 +32,14 @@ enum DataTypeName {
     Int16,
     Int32,
     Int64,
+    Decimal,
     Float32,
     Float64,
-    Decimal,
-    Date,
-    Char,
     Varchar,
-    Time,
+    Date,
     Timestamp,
     Timestampz,
+    Time,
     Interval,
     Struct,
     List,
@@ -47,45 +47,43 @@ enum DataTypeName {
 
 fn name_of(ty: &DataType) -> DataTypeName {
     match ty {
+        DataType::Boolean => DataTypeName::Boolean,
         DataType::Int16 => DataTypeName::Int16,
         DataType::Int32 => DataTypeName::Int32,
         DataType::Int64 => DataTypeName::Int64,
+        DataType::Decimal => DataTypeName::Decimal,
         DataType::Float32 => DataTypeName::Float32,
         DataType::Float64 => DataTypeName::Float64,
-        DataType::Boolean => DataTypeName::Boolean,
-        DataType::Char => DataTypeName::Char,
         DataType::Varchar => DataTypeName::Varchar,
         DataType::Date => DataTypeName::Date,
-        DataType::Time => DataTypeName::Time,
         DataType::Timestamp => DataTypeName::Timestamp,
         DataType::Timestampz => DataTypeName::Timestampz,
-        DataType::Decimal => DataTypeName::Decimal,
+        DataType::Time => DataTypeName::Time,
         DataType::Interval => DataTypeName::Interval,
         DataType::Struct { .. } => DataTypeName::Struct,
         DataType::List { .. } => DataTypeName::List,
     }
 }
 
-/// Infers the return type of a function. Returns `None` if the function with specified data types
+/// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<DataType> {
+pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
     let input_type_names = inputs_type.iter().map(name_of).collect();
     infer_type_name(func_type, input_type_names).map(|type_name| match type_name {
+        DataTypeName::Boolean => DataType::Boolean,
         DataTypeName::Int16 => DataType::Int16,
         DataTypeName::Int32 => DataType::Int32,
         DataTypeName::Int64 => DataType::Int64,
+        DataTypeName::Decimal => DataType::Decimal,
         DataTypeName::Float32 => DataType::Float32,
         DataTypeName::Float64 => DataType::Float64,
-        DataTypeName::Boolean => DataType::Boolean,
-        DataTypeName::Char => DataType::Char,
         DataTypeName::Varchar => DataType::Varchar,
         DataTypeName::Date => DataType::Date,
-        DataTypeName::Time => DataType::Time,
         DataTypeName::Timestamp => DataType::Timestamp,
         DataTypeName::Timestampz => DataType::Timestampz,
-        DataTypeName::Decimal => DataType::Decimal,
+        DataTypeName::Time => DataType::Time,
         DataTypeName::Interval => DataType::Interval,
         DataTypeName::Struct => DataType::Struct {
             fields: Arc::new([]),
@@ -97,13 +95,14 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
 }
 
 /// Infer the return type name without parameters like length or precision.
-fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Option<DataTypeName> {
+fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeName>) -> Result<DataTypeName> {
     FUNC_SIG_MAP
-        .get(&FuncSign {
-            func: func_type,
-            inputs_type,
-        })
+        .get(&FuncSign::new(func_type, inputs_type.clone()))
         .cloned()
+        .ok_or_else(|| {
+            ErrorCode::NotImplemented(format!("{:?}{:?}", func_type, inputs_type), 112.into())
+                .into()
+        })
 }
 
 #[derive(PartialEq, Hash)]
@@ -111,112 +110,94 @@ struct FuncSign {
     func: ExprType,
     inputs_type: Vec<DataTypeName>,
 }
+
 impl Eq for FuncSign {}
+
 #[allow(dead_code)]
 impl FuncSign {
     pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
         FuncSign { func, inputs_type }
     }
-    pub fn new_no_input(func: ExprType) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![],
-        }
-    }
-    pub fn new_unary(func: ExprType, p1: DataTypeName) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![p1],
-        }
-    }
-    pub fn new_binary(func: ExprType, p1: DataTypeName, p2: DataTypeName) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![p1, p2],
-        }
-    }
-    pub fn new_ternary(
-        func: ExprType,
-        p1: DataTypeName,
-        p2: DataTypeName,
-        p3: DataTypeName,
-    ) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![p1, p2, p3],
-        }
-    }
 }
-fn arithmetic_type_derive(t1: DataTypeName, t2: DataTypeName) -> DataTypeName {
-    if t2 as i32 > t1 as i32 {
-        t2
-    } else {
-        t1
-    }
-}
-fn build_unary_funcs(
+
+fn build_binary_cmp_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
-    arg1: &[DataTypeName],
-    ret: DataTypeName,
+    args: &[DataTypeName],
 ) {
-    for (expr, a1) in iproduct!(exprs, arg1) {
-        map.insert(FuncSign::new_unary(*expr, *a1), ret);
+    for (e, lt, rt) in iproduct!(exprs, args, args) {
+        map.insert(FuncSign::new(*e, vec![*lt, *rt]), DataTypeName::Boolean);
     }
 }
-fn build_binary_funcs(
+
+fn build_binary_atm_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
-    arg1: &[DataTypeName],
-    arg2: &[DataTypeName],
-    ret: DataTypeName,
+    args: &[DataTypeName],
 ) {
-    for (expr, a1, a2) in iproduct!(exprs, arg1, arg2) {
-        map.insert(FuncSign::new_binary(*expr, *a1, *a2), ret);
+    for e in exprs {
+        for (li, lt) in args.iter().enumerate() {
+            for (ri, rt) in args.iter().enumerate() {
+                let ret = if li <= ri { rt } else { lt };
+                map.insert(FuncSign::new(*e, vec![*lt, *rt]), *ret);
+            }
+        }
     }
 }
-fn build_ternary_funcs(
+
+fn build_commutative_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    arg1: &[DataTypeName],
-    arg2: &[DataTypeName],
-    arg3: &[DataTypeName],
+    expr: ExprType,
+    arg0: DataTypeName,
+    arg1: DataTypeName,
     ret: DataTypeName,
 ) {
-    for (expr, a1, a2, a3) in iproduct!(exprs, arg1, arg2, arg3) {
-        map.insert(FuncSign::new_ternary(*expr, *a1, *a2, *a3), ret);
-    }
+    map.insert(FuncSign::new(expr, vec![arg0, arg1]), ret);
+    map.insert(FuncSign::new(expr, vec![arg1, arg0]), ret);
 }
+
 fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     use {DataTypeName as T, ExprType as E};
     let mut map = HashMap::new();
-    let num_types = vec![
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Float32,
-        T::Float64,
-        T::Decimal,
-    ];
-    let all_types = vec![
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Float32,
-        T::Float64,
+    let all_types = [
         T::Boolean,
-        T::Char,
-        T::Varchar,
+        T::Int16,
+        T::Int32,
+        T::Int64,
         T::Decimal,
-        T::Time,
-        T::Timestamp,
-        T::Interval,
+        T::Float32,
+        T::Float64,
+        T::Varchar,
         T::Date,
+        T::Timestamp,
         T::Timestampz,
+        T::Time,
+        T::Interval,
     ];
-    let str_types = vec![T::Char, T::Varchar];
-    let atm_exprs = vec![E::Add, E::Subtract, E::Multiply, E::Divide, E::Modulus];
-    let cmp_exprs = vec![
+    let num_types = [
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Decimal,
+        T::Float32,
+        T::Float64,
+    ];
+
+    // logical expressions
+    for e in [E::Not, E::IsTrue, E::IsNotTrue, E::IsFalse, E::IsNotFalse] {
+        map.insert(FuncSign::new(e, vec![T::Boolean]), T::Boolean);
+    }
+    for e in [E::And, E::Or] {
+        map.insert(FuncSign::new(e, vec![T::Boolean, T::Boolean]), T::Boolean);
+    }
+
+    // comparison expressions
+    for e in [E::IsNull, E::IsNotNull] {
+        for t in all_types {
+            map.insert(FuncSign::new(e, vec![t]), T::Boolean);
+        }
+    }
+    let cmp_exprs = &[
         E::Equal,
         E::NotEqual,
         E::LessThan,
@@ -224,113 +205,231 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         E::GreaterThan,
         E::GreaterThanOrEqual,
     ];
-    for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
+    for e in cmp_exprs {
+        for t in [T::Boolean, T::Varchar] {
+            map.insert(FuncSign::new(*e, vec![t, t]), T::Boolean);
+        }
+    }
+
+    // arithmetic expressions
+    for t in num_types {
+        map.insert(FuncSign::new(E::Neg, vec![t]), t);
+    }
+    build_binary_atm_funcs(
+        &mut map,
+        &[E::Add, E::Subtract, E::Multiply, E::Divide],
+        &num_types,
+    );
+    build_binary_atm_funcs(
+        &mut map,
+        &[E::Modulus],
+        &[T::Int16, T::Int32, T::Int64, T::Decimal],
+    );
+    map.insert(
+        FuncSign::new(E::RoundDigit, vec![T::Decimal, T::Int32]),
+        T::Decimal,
+    );
+
+    // temporal expressions
+    for (base, delta) in [
+        (T::Date, T::Int32),
+        (T::Timestamp, T::Interval),
+        (T::Timestampz, T::Interval),
+        (T::Time, T::Interval),
+        (T::Interval, T::Interval),
+    ] {
+        build_commutative_funcs(&mut map, E::Add, base, delta, base);
+        map.insert(FuncSign::new(E::Subtract, vec![base, delta]), base);
+        map.insert(FuncSign::new(E::Subtract, vec![base, base]), delta);
+    }
+
+    // date + interval = timestamp, date - interval = timestamp
+    build_commutative_funcs(&mut map, E::Add, T::Date, T::Interval, T::Timestamp);
+    map.insert(
+        FuncSign::new(E::Subtract, vec![T::Date, T::Interval]),
+        T::Timestamp,
+    );
+    // date + time = timestamp
+    build_commutative_funcs(&mut map, E::Add, T::Date, T::Time, T::Timestamp);
+    // interval * float8 = interval, interval / float8 = interval
+    for t in num_types {
+        build_commutative_funcs(&mut map, E::Multiply, T::Interval, t, T::Interval);
+        map.insert(FuncSign::new(E::Divide, vec![T::Interval, t]), T::Interval);
+    }
+
+    for t in [T::Timestamp, T::Time, T::Date] {
+        map.insert(FuncSign::new(E::Extract, vec![T::Varchar, t]), T::Decimal);
+    }
+    for t in [T::Timestamp, T::Date] {
         map.insert(
-            FuncSign::new_binary(expr, t1, t2),
-            arithmetic_type_derive(t1, t2),
+            FuncSign::new(E::TumbleStart, vec![t, T::Interval]),
+            T::Timestamp,
         );
     }
-    for t in num_types.clone() {
-        map.insert(FuncSign::new_unary(E::Neg, t), t);
+
+    // string expressions
+    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper] {
+        map.insert(FuncSign::new(e, vec![T::Varchar]), T::Varchar);
     }
-    build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
-    build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);
-    build_binary_funcs(
-        &mut map,
-        &cmp_exprs,
-        &[T::Boolean],
-        &[T::Boolean],
+    for e in [E::Trim, E::Ltrim, E::Rtrim] {
+        map.insert(FuncSign::new(e, vec![T::Varchar, T::Varchar]), T::Varchar);
+    }
+    map.insert(
+        FuncSign::new(E::Substr, vec![T::Varchar, T::Int32]),
+        T::Varchar,
+    );
+    map.insert(
+        FuncSign::new(E::Substr, vec![T::Varchar, T::Int32, T::Int32]),
+        T::Varchar,
+    );
+    for e in [E::Replace, E::Translate] {
+        map.insert(
+            FuncSign::new(e, vec![T::Varchar, T::Varchar, T::Varchar]),
+            T::Varchar,
+        );
+    }
+    for e in [E::Length, E::Ascii] {
+        map.insert(FuncSign::new(e, vec![T::Varchar]), T::Int32);
+    }
+    map.insert(
+        FuncSign::new(E::Position, vec![T::Varchar, T::Varchar]),
+        T::Int32,
+    );
+    map.insert(
+        FuncSign::new(E::Like, vec![T::Varchar, T::Varchar]),
         T::Boolean,
     );
 
-    // Date comparisons
-    build_binary_funcs(
-        &mut map,
-        &cmp_exprs,
-        &[T::Date, T::Timestamp],
-        &[T::Date, T::Timestamp],
-        T::Boolean,
-    );
-    // Date minus and plus
-    map.insert(
-        FuncSign::new_binary(E::Add, T::Date, T::Interval),
-        T::Timestamp,
-    );
-    map.insert(
-        FuncSign::new_binary(E::Subtract, T::Date, T::Interval),
-        T::Timestamp,
-    );
-
-    build_binary_funcs(
-        &mut map,
-        &[E::And, E::Or],
-        &[T::Boolean],
-        &[T::Boolean],
-        T::Boolean,
-    );
-    build_unary_funcs(
-        &mut map,
-        &[E::IsTrue, E::IsNotTrue, E::IsFalse, E::IsNotFalse, E::Not],
-        &[T::Boolean],
-        T::Boolean,
-    );
-    build_unary_funcs(
-        &mut map,
-        &[E::IsNull, E::IsNotNull, E::StreamNullByRowCount],
-        &all_types,
-        T::Boolean,
-    );
-    build_binary_funcs(&mut map, &[E::Substr], &str_types, &num_types, T::Varchar);
-    build_ternary_funcs(
-        &mut map,
-        &[E::Substr],
-        &str_types,
-        &num_types,
-        &num_types,
-        T::Varchar,
-    );
-    build_unary_funcs(&mut map, &[E::Length], &str_types, T::Int32);
-    build_unary_funcs(
-        &mut map,
-        &[E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper],
-        &str_types,
-        T::Varchar,
-    );
-    build_binary_funcs(
-        &mut map,
-        &[E::Trim, E::Ltrim, E::Rtrim, E::Position],
-        &str_types,
-        &str_types,
-        T::Varchar,
-    );
-    build_binary_funcs(&mut map, &[E::Like], &str_types, &str_types, T::Boolean);
-    build_ternary_funcs(
-        &mut map,
-        &[E::Replace],
-        &str_types,
-        &str_types,
-        &str_types,
-        T::Varchar,
-    );
-    build_binary_funcs(
-        &mut map,
-        &[E::RoundDigit],
-        &[T::Decimal],
-        &[T::Int32],
-        T::Decimal,
-    );
-    build_binary_funcs(
-        &mut map,
-        &[E::Extract],
-        &[T::Varchar], // Time field, "YEAR", "DAY", etc
-        &[T::Timestamp, T::Time, T::Date],
-        T::Decimal,
-    );
     map
 }
+
 lazy_static::lazy_static! {
     static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
         build_type_derive_map()
+    };
+}
+
+/// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
+/// It is a simplified version of the rule used in
+/// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
+pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
+    if lhs == rhs {
+        Ok(lhs)
+    } else if cast_ok(&lhs, &rhs, &CastContext::Implicit) {
+        Ok(rhs)
+    } else if cast_ok(&rhs, &lhs, &CastContext::Implicit) {
+        Ok(lhs)
+    } else {
+        Err(ErrorCode::BindError(format!("types {:?} and {:?} cannot be matched", lhs, rhs)).into())
+    }
+}
+
+/// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
+/// that allows explicit casts, but not vice versa. See details in
+/// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CastContext {
+    Implicit,
+    Assign,
+    Explicit,
+}
+
+/// Checks whether casting from `source` to `target` is ok in `allows` context.
+pub fn cast_ok(source: &DataType, target: &DataType, allows: &CastContext) -> bool {
+    let k = (name_of(source), name_of(target));
+    matches!(CAST_MAP.get(&k), Some(context) if context <= allows)
+}
+
+fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
+    use DataTypeName as T;
+
+    // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
+    // assign cast operations.
+    // https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
+    let mut m = HashMap::new();
+    insert_cast_seq(
+        &mut m,
+        &[
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+        ],
+    );
+    insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
+    insert_cast_seq(&mut m, &[T::Time, T::Interval]);
+    // Allow explicit cast operation between the same type, for types not included above.
+    // Ideally we should remove all such useless casts. But for now we just forbid them in contexts
+    // that only allow implicit or assign cast operations, and the user can still write them
+    // explicitly.
+    //
+    // Note this is different in PG, where same type cast is used for sizing (e.g. `NUMERIC(18,3)`
+    // to `NUMERIC(20,4)`). Sizing casts are only available for `numeric`, `timestamp`,
+    // `timestamptz`, `time`, `interval` and these are implicit. https://www.postgresql.org/docs/current/typeconv-query.html
+    //
+    // As we do not support size parameters in types, there are no sizing casts.
+    m.insert((T::Boolean, T::Boolean), CastContext::Explicit);
+    m.insert((T::Varchar, T::Varchar), CastContext::Explicit);
+
+    // Casting to and from string type.
+    for t in [
+        T::Boolean,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Decimal,
+        T::Float32,
+        T::Float64,
+        T::Date,
+        T::Timestamp,
+        T::Timestampz,
+        T::Time,
+        T::Interval,
+    ] {
+        m.insert((t, T::Varchar), CastContext::Assign);
+        // Casting from string is explicit-only in PG.
+        // But as we bind string literals to `varchar` rather than `unknown`, allowing them in
+        //  assign context enables this shorter statement:
+        // `insert into t values ('2022-01-01')`
+        // If it was explicit:
+        // `insert into t values ('2022-01-01'::date)`
+        // `insert into t values (date '2022-01-01')`
+        m.insert((T::Varchar, t), CastContext::Assign);
+    }
+
+    // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
+    m.insert((T::Timestamp, T::Time), CastContext::Assign);
+    m.insert((T::Timestampz, T::Time), CastContext::Assign);
+    m.insert((T::Boolean, T::Int32), CastContext::Explicit);
+    m.insert((T::Int32, T::Boolean), CastContext::Explicit);
+    m
+}
+
+fn insert_cast_seq(
+    m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>,
+    types: &[DataTypeName],
+) {
+    for (source_index, source_type) in types.iter().enumerate() {
+        for (target_index, target_type) in types.iter().enumerate() {
+            let cast_context = match source_index.cmp(&target_index) {
+                std::cmp::Ordering::Less => CastContext::Implicit,
+                // See comments in `build_cast_map` for why same type cast is marked as explicit.
+                std::cmp::Ordering::Equal => CastContext::Explicit,
+                std::cmp::Ordering::Greater => CastContext::Assign,
+            };
+            m.insert((*source_type, *target_type), cast_context);
+        }
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref CAST_MAP: HashMap<(DataTypeName, DataTypeName), CastContext> = {
+        build_cast_map()
     };
 }
 #[cfg(test)]
@@ -348,7 +447,7 @@ mod tests {
 
     fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataType>) {
         let ret = infer_type(func_type, inputs_type);
-        assert_eq!(ret, None);
+        assert!(ret.is_err());
     }
 
     #[test]
@@ -359,45 +458,44 @@ mod tests {
             ExprType::Subtract,
             ExprType::Multiply,
             ExprType::Divide,
-            ExprType::Modulus,
         ];
         let num_promote_table = vec![
             (Int16, Int16, Int16),
             (Int16, Int32, Int32),
             (Int16, Int64, Int64),
+            (Int16, Decimal, Decimal),
             (Int16, Float32, Float32),
             (Int16, Float64, Float64),
-            (Int16, Decimal, Decimal),
             (Int32, Int16, Int32),
             (Int32, Int32, Int32),
             (Int32, Int64, Int64),
+            (Int32, Decimal, Decimal),
             (Int32, Float32, Float32),
             (Int32, Float64, Float64),
-            (Int32, Decimal, Decimal),
             (Int64, Int16, Int64),
             (Int64, Int32, Int64),
             (Int64, Int64, Int64),
+            (Int64, Decimal, Decimal),
             (Int64, Float32, Float32),
             (Int64, Float64, Float64),
-            (Int64, Decimal, Decimal),
-            (Float32, Int16, Float32),
-            (Float32, Int32, Float32),
-            (Float32, Int64, Float32),
-            (Float32, Float32, Float32),
-            (Float32, Float64, Float64),
-            (Float32, Decimal, Decimal),
-            (Float64, Int16, Float64),
-            (Float64, Int32, Float64),
-            (Float64, Int64, Float64),
-            (Float64, Float32, Float64),
-            (Float64, Float64, Float64),
-            (Float64, Decimal, Decimal),
             (Decimal, Int16, Decimal),
             (Decimal, Int32, Decimal),
             (Decimal, Int64, Decimal),
-            (Decimal, Float32, Decimal),
-            (Decimal, Float64, Decimal),
             (Decimal, Decimal, Decimal),
+            (Decimal, Float32, Float32),
+            (Decimal, Float64, Float64),
+            (Float32, Int16, Float32),
+            (Float32, Int32, Float32),
+            (Float32, Int64, Float32),
+            (Float32, Decimal, Float32),
+            (Float32, Float32, Float32),
+            (Float32, Float64, Float64),
+            (Float64, Int16, Float64),
+            (Float64, Int32, Float64),
+            (Float64, Int64, Float64),
+            (Float64, Decimal, Float64),
+            (Float64, Float32, Float64),
+            (Float64, Float64, Float64),
         ];
         for (expr, (t1, t2, tr)) in iproduct!(atm_exprs, num_promote_table) {
             test_simple_infer_type(expr, vec![t1, t2], tr);
@@ -434,5 +532,102 @@ mod tests {
         for (expr, num_t) in iproduct!(exprs, num_types) {
             test_infer_type_not_exist(expr, vec![num_t, DataType::Boolean]);
         }
+    }
+
+    fn gen_cast_table(allows: CastContext) -> Vec<String> {
+        use itertools::Itertools as _;
+        use DataType as T;
+        let all_types = &[
+            T::Boolean,
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+            T::Varchar,
+            T::Date,
+            T::Timestamp,
+            T::Timestampz,
+            T::Time,
+            T::Interval,
+        ];
+        all_types
+            .iter()
+            .map(|source| {
+                all_types
+                    .iter()
+                    .map(|target| match cast_ok(source, target, &allows) {
+                        false => ' ',
+                        true => 'T',
+                    })
+                    .collect::<String>()
+            })
+            .collect_vec()
+    }
+
+    #[test]
+    fn test_cast_ok() {
+        // With the help of a script we can obtain the 3 expected cast tables from PG. They are
+        // slightly modified on same-type cast and from-string cast for reasons explained above in
+        // `build_cast_map`.
+
+        let actual = gen_cast_table(CastContext::Implicit);
+        assert_eq!(
+            actual,
+            vec![
+                "             ", // bool
+                "  TTTTT      ",
+                "   TTTT      ",
+                "    TTT      ",
+                "     TT      ",
+                "      T      ",
+                "             ",
+                "             ", // varchar
+                "         TT  ",
+                "          T  ",
+                "             ",
+                "            T",
+                "             ",
+            ]
+        );
+        let actual = gen_cast_table(CastContext::Assign);
+        assert_eq!(
+            actual,
+            vec![
+                "       T     ", // bool
+                "  TTTTTT     ",
+                " T TTTTT     ",
+                " TT TTTT     ",
+                " TTT TTT     ",
+                " TTTT TT     ",
+                " TTTTT T     ",
+                "TTTTTTT TTTTT", // varchar
+                "       T TT  ",
+                "       TT TT ",
+                "       TTT T ",
+                "       T    T",
+                "       T   T ",
+            ]
+        );
+        let actual = gen_cast_table(CastContext::Explicit);
+        assert_eq!(
+            actual,
+            vec![
+                "T T    T     ", // bool
+                " TTTTTTT     ",
+                "TTTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                "TTTTTTTTTTTTT", // varchar
+                "       TTTT  ",
+                "       TTTTT ",
+                "       TTTTT ",
+                "       T   TT",
+                "       T   TT",
+            ]
+        );
     }
 }

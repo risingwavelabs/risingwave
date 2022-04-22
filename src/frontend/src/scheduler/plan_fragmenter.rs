@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
@@ -21,8 +22,9 @@ use risingwave_pb::plan::{ExchangeInfo, Field as FieldProst};
 use uuid::Uuid;
 
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
+use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
@@ -95,6 +97,7 @@ impl BatchPlanFragmenter {
 }
 
 /// Contains the connection info of each stage.
+#[derive(Debug)]
 pub struct Query {
     /// Query id should always be unique.
     pub(crate) query_id: QueryId,
@@ -126,13 +129,22 @@ impl Query {
 }
 
 /// Fragment part of `Query`.
-#[derive(Debug)]
 pub struct QueryStage {
     pub query_id: QueryId,
     pub id: StageId,
     pub root: Arc<ExecutionPlanNode>,
     pub exchange_info: ExchangeInfo,
     pub parallelism: u32,
+}
+
+impl Debug for QueryStage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryStage")
+            .field("id", &self.id)
+            .field("parallelism", &self.parallelism)
+            .field("exchange_info", &self.exchange_info)
+            .finish()
+    }
 }
 
 pub(crate) type QueryStageRef = Arc<QueryStage>;
@@ -144,6 +156,7 @@ struct QueryStageBuilder {
     root: Option<Arc<ExecutionPlanNode>>,
     parallelism: u32,
     parent_parallelism: Option<u32>,
+    exchange_info: ExchangeInfo,
 
     children_stages: Vec<QueryStageRef>,
 }
@@ -155,6 +168,7 @@ impl QueryStageBuilder {
         query_id: QueryId,
         parallelism: u32,
         parent_parallelism: Option<u32>,
+        exchange_info: ExchangeInfo,
     ) -> Self {
         Self {
             query_id,
@@ -163,6 +177,7 @@ impl QueryStageBuilder {
             root: None,
             parallelism,
             parent_parallelism,
+            exchange_info,
             children_stages: vec![],
         }
     }
@@ -172,10 +187,7 @@ impl QueryStageBuilder {
             query_id: self.query_id,
             id: self.id,
             root: self.root.unwrap(),
-            exchange_info: self
-                .plan_root
-                .distribution()
-                .to_prost(self.parent_parallelism.unwrap_or(1)),
+            exchange_info: self.exchange_info,
             parallelism: self.parallelism,
         });
 
@@ -188,6 +200,7 @@ impl QueryStageBuilder {
 }
 
 /// Maintains how each stage are connected.
+#[derive(Debug)]
 pub(crate) struct StageGraph {
     pub(crate) root_stage_id: StageId,
     pub stages: HashMap<StageId, QueryStageRef>,
@@ -277,7 +290,7 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
-        let root_stage = self.new_stage(batch_node.clone(), None);
+        let root_stage = self.new_stage(batch_node.clone(), None, None);
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,
@@ -285,7 +298,12 @@ impl BatchPlanFragmenter {
         })
     }
 
-    fn new_stage(&mut self, root: PlanRef, parent_parallelism: Option<u32>) -> QueryStageRef {
+    fn new_stage(
+        &mut self,
+        root: PlanRef,
+        parent_parallelism: Option<u32>,
+        exchange_info: Option<ExchangeInfo>,
+    ) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
         let parallelism = match parent_parallelism {
@@ -294,12 +312,20 @@ impl BatchPlanFragmenter {
             // Root node.
             None => 1,
         };
+
+        let exchange_info = match exchange_info {
+            Some(info) => info,
+            // Root stage, the exchange info should always be Single
+            None => Distribution::Single.to_prost(1),
+        };
+
         let mut builder = QueryStageBuilder::new(
             root.clone(),
             next_stage_id,
             self.query_id.clone(),
             parallelism as u32,
             parent_parallelism,
+            exchange_info,
         );
 
         self.visit_node(root, &mut builder, None);
@@ -340,7 +366,12 @@ impl BatchPlanFragmenter {
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
-        let child_stage = self.new_stage(node.inputs()[0].clone(), Some(builder.parallelism));
+        let child_exchange_info = Some(node.distribution().to_prost(builder.parallelism));
+        let child_stage = self.new_stage(
+            node.inputs()[0].clone(),
+            Some(builder.parallelism),
+            child_exchange_info,
+        );
         execution_plan_node.stage_id = Some(child_stage.id);
 
         if let Some(parent) = parent_exec_node {
@@ -374,7 +405,7 @@ mod tests {
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, StageId};
-    use crate::scheduler::schedule::WorkerNodeManager;
+    use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::session::OptimizerContext;
     use crate::utils::Condition;
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 
 use crate::session::OptimizerContext;
@@ -21,10 +21,5 @@ pub(super) async fn handle_flush(context: OptimizerContext) -> Result<PgResponse
     let client = context.session_ctx.env().meta_client();
     client.flush().await?;
 
-    Ok(PgResponse::new(
-        pgwire::pg_response::StatementType::FLUSH,
-        0,
-        vec![],
-        vec![],
-    ))
+    Ok(PgResponse::empty_result(StatementType::FLUSH))
 }

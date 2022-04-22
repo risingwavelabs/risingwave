@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::error::Error;
+use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -29,6 +30,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
+use tempfile::{Builder, NamedTempFile};
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
@@ -67,6 +69,15 @@ impl LocalFrontend {
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str()).await
+    }
+
+    pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
+        self.run_sql(sql)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| format!("{:?}", row))
+            .collect()
     }
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
@@ -165,6 +176,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn drop_source(&self, source_id: u32) -> Result<()> {
+        let (database_id, schema_id) = self.drop_id(source_id);
+        self.catalog
+            .write()
+            .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_id(table_id.table_id);
         self.drop_id(table_id.table_id);
@@ -206,9 +225,7 @@ impl MockCatalogWriter {
     fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
         self.id_to_schema_id.write().remove(&id).unwrap()
     }
-}
 
-impl MockCatalogWriter {
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
         self.catalog.write().create_source(source.clone());
@@ -221,7 +238,7 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self) -> Result<u64> {
+    async fn pin_snapshot(&self, _epoch: u64) -> Result<u64> {
         Ok(0)
     }
 
@@ -232,4 +249,38 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
         Ok(())
     }
+}
+pub static PROTO_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
+
+/// Returns the file.
+/// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
+pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
+    let temp_file = Builder::new()
+        .prefix("temp")
+        .suffix(".proto")
+        .rand_bytes(5)
+        .tempfile()
+        .unwrap();
+
+    let mut file = temp_file.as_file();
+    file.write_all(proto_data.as_ref())
+        .expect("writing binary to test file");
+    temp_file
 }

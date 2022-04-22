@@ -60,11 +60,7 @@ impl PlanAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
-            args: self
-                .inputs
-                .iter()
-                .map(InputRef::to_agg_arg_protobuf)
-                .collect(),
+            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             // TODO: support distinct
             distinct: false,
         }
@@ -97,15 +93,15 @@ pub struct LogicalAgg {
 /// `ExprHandler` extracts agg calls and references to group columns from select list, in
 /// preparation for generating a plan like `LogicalProject - LogicalAgg - LogicalProject`.
 struct ExprHandler {
-    // `project` contains all the ExprImpl inside GROUP BY clause (e.g. v1 for group by v1)
-    // followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
+    /// `project` contains all the ExprImpl inside GROUP BY clause (e.g. v1 for group by v1)
+    /// followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
     pub project: Vec<ExprImpl>,
     group_key_len: usize,
-    // When dedup (rewriting AggCall inputs), it is the index into projects.
-    // When rewriting InputRef outside AggCall, where it is required to refer to a group column,
-    // this is the index into LogicalAgg::schema.
-    // This 2 indices happen to be the same because we always put group exprs at the beginning of
-    // schema, and they are at the beginning of projects.
+    /// When dedup (rewriting AggCall inputs), it is the index into projects.
+    /// When rewriting InputRef outside AggCall, where it is required to refer to a group column,
+    /// this is the index into LogicalAgg::schema.
+    /// This 2 indices happen to be the same because we always put group exprs at the beginning of
+    /// schema, and they are at the beginning of projects.
     expr_index: HashMap<ExprImpl, usize>,
     pub agg_calls: Vec<PlanAggCall>,
     pub error: Option<ErrorCode>,
@@ -113,8 +109,6 @@ struct ExprHandler {
 
 impl ExprHandler {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
-        // TODO: support more complicated expression in GROUP BY clause, because we currently
-        // assume the only thing can appear in GROUP BY clause is an input column name.
         let group_key_len = group_exprs.len();
 
         // Please note that we currently don't dedup columns in GROUP BY clause.
@@ -123,12 +117,12 @@ impl ExprHandler {
             .iter()
             .enumerate()
             .try_for_each(|(index, expr)| {
-                if matches!(expr, ExprImpl::InputRef(_)) {
+                if !expr.has_subquery() && !expr.has_agg_call() {
                     expr_index.insert(expr.clone(), index);
                     Ok(())
                 } else {
-                    Err(ErrorCode::NotImplementedError(
-                        "GROUP BY only supported on input column names!".into(),
+                    Err(ErrorCode::InvalidInputSyntax(
+                        "GROUP BY expr should not contain subquery or aggregation function".into(),
                     ))
                 }
             })?;
@@ -144,15 +138,24 @@ impl ExprHandler {
 }
 
 impl ExprRewriter for ExprHandler {
-    // When there is an agg call, there are 3 things to do:
-    // 1. eval its inputs via project;
-    // 2. add a PlanAggCall to agg;
-    // 3. rewrite it as an InputRef to the agg result in select list.
-    //
-    // Note that the rewriter does not traverse into inputs of agg calls.
+    /// When there is an agg call, there are 3 things to do:
+    /// 1. eval its inputs via project;
+    /// 2. add a `PlanAggCall` to agg;
+    /// 3. rewrite it as an `InputRef` to the agg result in select list.
+    ///
+    /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs) = agg_call.decompose();
+
+        for i in &inputs {
+            if i.has_agg_call() {
+                self.error = Some(ErrorCode::InvalidInputSyntax(
+                    "Aggregation calls should not be nested".into(),
+                ));
+                return AggCall::new(agg_kind, inputs).unwrap().into();
+            }
+        }
 
         let mut index = self.project.len();
         let mut input_refs = vec![];
@@ -184,7 +187,8 @@ impl ExprRewriter for ExprHandler {
                 self.group_key_len + self.agg_calls.len() - 1,
                 left_return_type,
             ))
-            .ensure_type(return_type);
+            .cast_implicit(return_type)
+            .unwrap();
 
             let right_return_type =
                 AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()])
@@ -214,7 +218,24 @@ impl ExprRewriter for ExprHandler {
             ))
         }
     }
-    // When there is an InputRef (outside of agg call), it must refers to a group column.
+
+    /// When there is an `FunctionCall` (outside of agg call), it must refers to a group column.
+    /// Or all `InputRef`s appears in it must refer to a group column.
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        let expr = func_call.into();
+        if let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
+            InputRef::new(*index, expr.return_type()).into()
+        } else {
+            let (func_type, inputs, ret) = expr.into_function_call().unwrap().decompose();
+            let inputs = inputs
+                .into_iter()
+                .map(|expr| self.rewrite_expr(expr))
+                .collect();
+            FunctionCall::new_unchecked(func_type, inputs, ret).into()
+        }
+    }
+
+    /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
         if let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
@@ -297,7 +318,7 @@ impl LogicalAgg {
                     .enumerate()
                     .map(|(id, (data_type, alias))| {
                         let name = alias.clone().unwrap_or(format!("agg#{}", id));
-                        Field { data_type, name }
+                        Field::with_name(data_type, name)
                     }),
             )
             .collect();
@@ -333,7 +354,7 @@ impl LogicalAgg {
         let expr_alias = vec![None; expr_handler.project.len()];
         let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
 
-        // This LogicalAgg foucuses on calculating the aggregates and grouping.
+        // This LogicalAgg focuses on calculating the aggregates and grouping.
         let agg_call_alias = vec![None; expr_handler.agg_calls.len()];
         let logical_agg = LogicalAgg::new(
             expr_handler.agg_calls,
@@ -380,6 +401,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             self.agg_calls().to_vec(),
@@ -388,6 +410,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
             input,
         )
     }
+
     #[must_use]
     fn rewrite_with_input(
         &self,
@@ -417,6 +440,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
         (agg, out_col_change)
     }
 }
+
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
@@ -571,18 +595,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let input = Rc::new(values);
@@ -705,18 +720,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],
@@ -773,18 +779,9 @@ mod tests {
         let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],
@@ -848,18 +845,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],

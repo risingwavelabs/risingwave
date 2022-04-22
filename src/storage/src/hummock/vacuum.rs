@@ -15,28 +15,32 @@
 use std::sync::Arc;
 
 use risingwave_pb::hummock::VacuumTask;
+use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
+use super::{HummockError, HummockResult};
 use crate::hummock::SstableStoreRef;
 
-pub struct Vacuum {}
+pub struct Vacuum;
 
 impl Vacuum {
     pub async fn vacuum(
         sstable_store: SstableStoreRef,
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> risingwave_common::error::Result<()> {
+    ) -> HummockResult<()> {
+        let store = sstable_store.store();
         let sst_ids = vacuum_task.sstable_ids;
         for sst_id in &sst_ids {
-            sstable_store
-                .store()
+            // Meta
+            store
                 .delete(sstable_store.get_sst_meta_path(*sst_id).as_str())
-                .await?;
-            sstable_store
-                .store()
+                .await
+                .map_err(HummockError::object_io_error)?;
+            // Data
+            store
                 .delete(sstable_store.get_sst_data_path(*sst_id).as_str())
-                .await?;
+                .await
+                .map_err(HummockError::object_io_error)?;
         }
 
         // TODO: report progress instead of in one go.
@@ -44,7 +48,10 @@ impl Vacuum {
             .report_vacuum_task(VacuumTask {
                 sstable_ids: sst_ids,
             })
-            .await?;
+            .await
+            .map_err(|e| {
+                HummockError::meta_error(format!("failed to report vacuum task: {e:?}"))
+            })?;
 
         Ok(())
     }
@@ -56,26 +63,17 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_meta::hummock::test_utils::setup_compute_env;
+    use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::VacuumTask;
 
-    use crate::hummock::iterator::test_utils::default_builder_opt_for_test;
-    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+    use crate::hummock::iterator::test_utils::{default_builder_opt_for_test, mock_sstable_store};
     use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::hummock::vacuum::Vacuum;
-    use crate::hummock::SstableStore;
-    use crate::monitor::StateStoreMetrics;
-    use crate::object::InMemObjectStore;
 
     #[tokio::test]
     async fn test_vacuum_tracked_data() {
-        let sstable_store = Arc::new(SstableStore::new(
-            Arc::new(InMemObjectStore::new()),
-            String::from("test_dir"),
-            Arc::new(StateStoreMetrics::unused()),
-            64 << 20,
-            64 << 20,
-        ));
-
+        let sstable_store = mock_sstable_store();
         // Put some SSTs to object store
         let sst_ids = (1..10).collect_vec();
         let mut sstables = vec![];
@@ -98,14 +96,14 @@ mod tests {
                 .chain(iter::once(nonexistent_id))
                 .collect_vec(),
         };
-        Vacuum::vacuum(
-            sstable_store,
-            vacuum_task,
-            Arc::new(MockHummockMetaClient::new(Arc::new(
-                MockHummockMetaService::new(),
-            ))),
-        )
-        .await
-        .unwrap();
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+        Vacuum::vacuum(sstable_store, vacuum_task, mock_hummock_meta_client)
+            .await
+            .unwrap();
     }
 }

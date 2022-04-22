@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_common::error::Result;
 
 use super::StateStoreMetrics;
+use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -36,6 +36,7 @@ impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         Self { inner, stats }
     }
+
     pub fn inner(&self) -> &S {
         &self.inner
     }
@@ -48,9 +49,9 @@ where
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
-    ) -> Result<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
+    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
     where
-        I: Future<Output = Result<S::Iter<'a>>>,
+        I: Future<Output = StorageResult<S::Iter<'a>>>,
     {
         let iter = iter.await?;
 
@@ -68,6 +69,7 @@ where
     S: StateStore,
 {
     type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>> where Self: 'a;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
@@ -138,25 +140,18 @@ where
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             if kv_pairs.is_empty() {
-                return Ok(());
+                return Ok(0);
             }
 
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
-
-            let total_size = kv_pairs
-                .iter()
-                .map(|(k, v)| k.len() + v.size())
-                .sum::<usize>();
-
             let timer = self.stats.write_batch_duration.start_timer();
-            self.inner.ingest_batch(kv_pairs, epoch).await?;
+            let batch_size = self.inner.ingest_batch(kv_pairs, epoch).await?;
             timer.observe_duration();
 
-            self.stats.write_batch_size.observe(total_size as _);
-
-            Ok(())
+            self.stats.write_batch_size.observe(batch_size as _);
+            Ok(batch_size)
         }
     }
 
@@ -215,7 +210,10 @@ where
     I: StateStoreIter<Item = (Bytes, Bytes)>,
 {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>> where Self: 'a;
+
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let pair = self.inner.next().await?;

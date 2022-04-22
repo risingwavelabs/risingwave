@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
@@ -36,7 +37,21 @@ impl Expression for InputRefExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx).array())
+        let array = input.column_at(self.idx).array();
+        // TODO(yuhao): This is a workaround to let `InputRefExpression` visibility aware. We should
+        // compact chunks before using expressions.
+        let bitmap = input.visibility();
+        let cardinality = input.cardinality();
+        match bitmap {
+            Some(bitmap) => {
+                if input.cardinality() != input.capacity() {
+                    Ok(Arc::new(array.compact(bitmap, cardinality)?))
+                } else {
+                    Ok(array)
+                }
+            }
+            None => Ok(array),
+        }
     }
 }
 
@@ -63,7 +78,7 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
                 idx: input_ref_node.column_idx as usize,
             })
         } else {
-            Err(RwError::from(ErrorCode::NotImplementedError(
+            Err(RwError::from(ErrorCode::InternalError(
                 "expects a input ref node".to_string(),
             )))
         }

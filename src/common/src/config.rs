@@ -99,6 +99,19 @@ pub struct StorageConfig {
     #[serde(default = "default::bloom_false_positive")]
     pub bloom_false_positive: f64,
 
+    /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
+    #[serde(default = "default::share_buffers_sync_parallelism")]
+    pub share_buffers_sync_parallelism: u32,
+
+    /// Size threshold to trigger shared buffer flush.
+    #[serde(default = "default::shared_buffer_threshold")]
+    pub shared_buffer_threshold: u32,
+
+    /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
+    /// is enough space.
+    #[serde(default = "default::shared_buffer_capacity")]
+    pub shared_buffer_capacity: u32,
+
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
@@ -157,6 +170,7 @@ impl FrontendConfig {
 }
 
 mod default {
+
     pub fn heartbeat_interval() -> u32 {
         1000
     }
@@ -176,6 +190,20 @@ mod default {
 
     pub fn bloom_false_positive() -> f64 {
         0.1
+    }
+
+    pub fn share_buffers_sync_parallelism() -> u32 {
+        2
+    }
+
+    pub fn shared_buffer_threshold() -> u32 {
+        // 192MB
+        201326592
+    }
+
+    pub fn shared_buffer_capacity() -> u32 {
+        // 256MB
+        268435456
     }
 
     pub fn data_directory() -> String {

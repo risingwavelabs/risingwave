@@ -32,11 +32,13 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(map_first_last)]
 #![feature(let_chains)]
+#![feature(let_else)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
+#![feature(unzip_option)]
 
 #[macro_use]
 extern crate log;

@@ -15,29 +15,25 @@
 #![allow(dead_code)]
 use std::collections::HashSet;
 
-use futures::future::try_join_all;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
+use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
-use risingwave_pb::stream_service::{
-    CreateSourceRequest as ComputeNodeCreateSourceRequest,
-    DropSourceRequest as ComputeNodeDropSourceRequest,
-};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, StreamClient, TableId};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};
+use crate::stream::{
+    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
+};
 
 #[derive(Clone)]
 pub struct DdlServiceImpl<S: MetaStore> {
@@ -45,6 +41,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
 
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
+    source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -57,6 +54,7 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -64,6 +62,7 @@ where
             env,
             catalog_manager,
             stream_manager,
+            source_manager,
             cluster_manager,
             fragment_manager,
         }
@@ -173,13 +172,15 @@ where
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
+        source.id = id;
 
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await
             .map_err(tonic_err)?;
 
-        if let Err(e) = self.create_source_on_compute_node(&source).await {
+        // QUESTION(patrick): why do we need to contact compute node on create source
+        if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
                 .await
@@ -187,7 +188,6 @@ where
             return Err(e.to_grpc_status());
         }
 
-        source.id = id;
         let version = self
             .catalog_manager
             .finish_create_source_procedure(&source)
@@ -214,7 +214,8 @@ where
             .map_err(tonic_err)?;
 
         // 2. Drop source on compute nodes.
-        self.drop_source_on_compute_node(source_id)
+        self.source_manager
+            .drop_source(source_id)
             .await
             .map_err(tonic_err)?;
 
@@ -280,7 +281,10 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
-        if let Err(e) = self.create_mview_on_compute_node(stream_node, id).await {
+        if let Err(e) = self
+            .create_mview_on_compute_node(stream_node, id, None)
+            .await
+        {
             self.catalog_manager
                 .cancel_create_table_procedure(&mview)
                 .await
@@ -306,6 +310,8 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+        use risingwave_common::catalog::TableId;
+
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
         let version = self
@@ -315,7 +321,8 @@ where
             .map_err(tonic_err)?;
 
         // 2. drop mv in stream manager
-        self.drop_mview_on_compute_node(table_id)
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(table_id))
             .await
             .map_err(tonic_err)?;
 
@@ -371,58 +378,11 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn all_stream_clients(&self) -> RwResult<impl Iterator<Item = StreamClient>> {
-        let all_compute_nodes = self
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, Some(Running))
-            .await;
-
-        let all_stream_clients = try_join_all(
-            all_compute_nodes
-                .iter()
-                .map(|worker| self.env.stream_clients().get(worker)),
-        )
-        .await?
-        .into_iter();
-
-        Ok(all_stream_clients)
-    }
-
-    async fn create_source_on_compute_node(&self, source: &Source) -> RwResult<()> {
-        // TODO: restore the source on other nodes when scale out / fail over
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeCreateSourceRequest {
-                    source: Some(source.clone()),
-                };
-                async move { client.create_source(request).await.to_rw_result() }
-            });
-        let _responses: Vec<_> = try_join_all(futures).await?;
-
-        Ok(())
-    }
-
-    async fn drop_source_on_compute_node(&self, source_id: SourceId) -> RwResult<()> {
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await.to_rw_result() }
-            });
-        let _responses: Vec<_> = try_join_all(futures).await?;
-
-        Ok(())
-    }
-
     async fn create_mview_on_compute_node(
         &self,
         mut stream_node: StreamNode,
         id: TableId,
+        affiliated_source: Option<Source>,
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
@@ -450,28 +410,27 @@ where
 
         // Resolve fragments.
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
-        let mut fragmenter = StreamFragmenter::new(
+        let parallel_degree = self
+            .cluster_manager
+            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
+            .await;
+        let mut ctx = CreateMaterializedViewContext {
+            affiliated_source,
+            hash_mapping,
+            ..Default::default()
+        };
+        let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
-            hash_mapping,
+            parallel_degree as u32,
+            false,
         );
         let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
-        let table_fragments = TableFragments::new(mview_id, graph);
+        let table_fragments = TableFragments::new(mview_id, graph, ctx.distribution_keys.clone());
 
         // Create on compute node.
         self.stream_manager
             .create_materialized_view(table_fragments, ctx)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn drop_mview_on_compute_node(&self, table_id: u32) -> RwResult<()> {
-        use risingwave_common::catalog::TableId;
-        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
-        self.stream_manager
-            .drop_materialized_view(&TableRefId::from(&TableId::new(table_id)))
             .await?;
 
         Ok(())
@@ -496,7 +455,7 @@ where
             .await?;
 
         // Create source on compute node.
-        if let Err(e) = self.create_source_on_compute_node(&source).await {
+        if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
@@ -537,15 +496,16 @@ where
         mview.id = mview_id;
 
         // Create mview on compute node.
+        // Noted that this progress relies on the source just created, so we pass it here.
         if let Err(e) = self
-            .create_mview_on_compute_node(stream_node, mview_id)
+            .create_mview_on_compute_node(stream_node, mview_id, Some(source.clone()))
             .await
         {
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
             // drop previously created source
-            self.drop_source_on_compute_node(source_id).await?;
+            self.source_manager.drop_source(source_id).await?;
             return Err(e);
         }
 
@@ -563,6 +523,8 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> RwResult<CatalogVersion> {
+        use risingwave_common::catalog::TableId;
+
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
@@ -571,8 +533,10 @@ where
             .await?;
 
         // 2. Drop source and mv separately.
-        self.drop_source_on_compute_node(source_id).await?;
-        self.drop_mview_on_compute_node(table_id).await?;
+        self.source_manager.drop_source(source_id).await?;
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(table_id))
+            .await?;
 
         Ok(version)
     }

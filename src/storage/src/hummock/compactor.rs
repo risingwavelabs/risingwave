@@ -18,23 +18,27 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::RwError;
+use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator};
-use super::key::{get_epoch, Epoch, FullKey};
-use super::key_range::KeyRange;
+use super::iterator::{
+    BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
+};
 use super::multi_builder::CapacitySplitTableBuilder;
+use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
-use super::version_cmp::VersionedComparator;
 use super::{
-    HummockMetaClient, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
-    SSTableIterator, Sstable,
+    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreMetrics;
@@ -44,9 +48,6 @@ use crate::monitor::StateStoreMetrics;
 pub struct CompactorContext {
     /// Storage configurations.
     pub options: Arc<StorageConfig>,
-
-    /// Local view on the levels of lsm tree.
-    pub local_version_manager: Arc<LocalVersionManager>,
 
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -85,13 +86,37 @@ impl Compactor {
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        iter: MergeIterator<'_>,
+        buffers: Vec<SharedBufferBatch>,
+        stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Vec<Sstable>> {
+        let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();
+        start_user_keys.sort();
+        start_user_keys.dedup();
+        let mut splits = Vec::with_capacity(start_user_keys.len());
+        splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
+        let mut key_split_append = |key_before_last: &Bytes| {
+            splits.last_mut().unwrap().right = key_before_last.clone();
+            splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
+        };
+        if start_user_keys.len() > 1 {
+            let split_num = context.options.share_buffers_sync_parallelism as usize;
+            let buffer_per_split = start_user_keys.len() / split_num;
+            for i in 1..split_num {
+                key_split_append(
+                    &FullKey::from_user_key_slice(
+                        start_user_keys[i * buffer_per_split],
+                        Epoch::MAX,
+                    )
+                    .into_inner()
+                    .into(),
+                );
+            }
+        }
+
         // Local memory compaction looks at all key ranges.
-        let key_range = KeyRange::inf();
         let compact_task = CompactTask {
             input_ssts: vec![],
-            splits: vec![key_range.into()],
+            splits: splits.into_iter().map(|v| v.into()).collect_vec(),
             watermark: u64::MAX,
             sorted_output_ssts: vec![],
             task_id: 0,
@@ -101,10 +126,54 @@ impl Compactor {
             task_status: false,
         };
 
-        let compactor = Compactor::new(context, compact_task);
-        let (_, level0) = compactor.compact_key_range(0, iter).await?;
+        let parallelism = compact_task.splits.len();
+        let mut compact_success = true;
+        let mut output_ssts = Vec::with_capacity(parallelism);
+        let mut compaction_futures = vec![];
+        let compactor = Compactor::new(context, compact_task.clone());
 
-        Ok(level0)
+        for (split_index, _) in compact_task.splits.iter().enumerate() {
+            let compactor = compactor.clone();
+            let iter = {
+                let iters = buffers
+                    .iter()
+                    .map(|m| Box::new(m.iter()) as BoxedForwardHummockIterator);
+                MergeIterator::new(iters, stats.clone())
+            };
+            compaction_futures.push(tokio::spawn(async move {
+                compactor.compact_key_range(split_index, iter).await
+            }));
+        }
+
+        let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
+        let mut err = None;
+        while let Some(future_result) = buffered.next().await {
+            match future_result.unwrap() {
+                Ok((split_index, ssts)) => {
+                    output_ssts.push((split_index, ssts));
+                }
+                Err(e) => {
+                    compact_success = false;
+                    tracing::warn!("Shared Buffer Compaction failed with error: {}", e);
+                    err = Some(e);
+                }
+            }
+        }
+
+        // Sort by split/key range index.
+        output_ssts.sort_by_key(|(split_index, _)| *split_index);
+
+        if compact_success {
+            let mut level0 = Vec::with_capacity(parallelism);
+
+            for (_, sst) in output_ssts {
+                level0.extend(sst);
+            }
+
+            Ok(level0)
+        } else {
+            Err(err.unwrap())
+        }
     }
 
     /// Handle a compaction task and report its status to hummock manager.
@@ -112,7 +181,7 @@ impl Compactor {
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) {
         tracing::debug!(
             "Ready to handle compaction task: \n{}",
-            Compactor::compact_task_to_string(compact_task.clone())
+            compact_task_to_string(compact_task.clone())
         );
 
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -125,9 +194,8 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             compaction_futures.push(tokio::spawn(async move {
-                compactor
-                    .compact_key_range(split_index, compactor.build_sst_iter().await?)
-                    .await
+                let merge_iter = compactor.build_sst_iter().await?;
+                compactor.compact_key_range(split_index, merge_iter).await
             }));
         }
 
@@ -206,7 +274,7 @@ impl Compactor {
     async fn compact_key_range(
         &self,
         split_index: usize,
-        iter: MergeIterator<'_>,
+        iter: MergeIterator,
     ) -> HummockResult<(usize, Vec<Sstable>)> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -217,7 +285,12 @@ impl Compactor {
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = self.context.hummock_meta_client.get_new_table_id().await?;
+            let table_id = self
+                .context
+                .hummock_meta_client
+                .get_new_table_id()
+                .await
+                .map_err(HummockError::meta_error)?;
             let builder = HummockStorage::get_builder(&self.context.options);
             Ok((table_id, builder))
         });
@@ -270,8 +343,8 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<MergeIterator<'_>> {
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+    async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
+        let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         for LevelEntry {
             level_idx: _,
             level: opt_level,
@@ -279,11 +352,9 @@ impl Compactor {
         } in &self.compact_task.input_ssts
         {
             let level = opt_level.as_ref().unwrap();
-            let tables = self
-                .context
-                .local_version_manager
-                .pick_few_tables(level.get_table_ids())
-                .await?;
+            // Do not need to filter the table because manager has done it.
+            let table_idxs = level.table_infos.iter().map(|sst| sst.id).collect_vec();
+            let tables = self.context.sstable_store.sstables(&table_idxs).await?;
 
             // let read_statistics: &mut TableSetStatistics = if *level_idx ==
             // compact_task.target_level {
@@ -304,7 +375,7 @@ impl Compactor {
                     )));
                 }
                 LevelType::Overlapping => {
-                    table_iters.extend(tables.iter().map(|table| -> Box<dyn HummockIterator> {
+                    table_iters.extend(tables.iter().map(|table| -> BoxedForwardHummockIterator {
                         Box::new(SSTableIterator::new(
                             table.clone(),
                             self.context.sstable_store.clone(),
@@ -345,14 +416,12 @@ impl Compactor {
     /// manager and runs compaction tasks.
     pub fn start_compactor(
         options: Arc<StorageConfig>,
-        local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let compactor_context = Arc::new(CompactorContext {
             options,
-            local_version_manager,
             hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
@@ -385,8 +454,8 @@ impl Compactor {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Subsribing to compaction tasks failed with error: {}. Will retry.",
-                            RwError::from(e)
+                            "Subscribing to compaction tasks failed with error: {}. Will retry.",
+                            e
                         );
                         continue 'start_stream;
                     }
@@ -440,7 +509,7 @@ impl Compactor {
     async fn compact_and_build_sst<B, F>(
         sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
-        mut iter: MergeIterator<'_>,
+        mut iter: MergeIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
     ) -> HummockResult<()>
@@ -504,38 +573,5 @@ impl Compactor {
             iter.next().await?;
         }
         Ok(())
-    }
-
-    pub fn compact_task_to_string(compact_task: CompactTask) -> String {
-        let mut s = String::new();
-        s.push_str(&format!(
-            "Compaction task id: {:?}, target level: {:?}\n",
-            compact_task.task_id, compact_task.target_level
-        ));
-        s.push_str(&format!(
-            "Compaction watermark: {:?} \n",
-            compact_task.watermark
-        ));
-        s.push_str(&format!(
-            "Compaction # splits: {:?} \n",
-            compact_task.splits.len()
-        ));
-        s.push_str(&format!(
-            "Compaction task status: {:?} \n",
-            compact_task.task_status
-        ));
-        s.push_str("Compaction SSTables structure: \n");
-        for level_entry in &compact_task.input_ssts {
-            s.push_str(&format!(
-                "Level {:?}: {:?} \n",
-                level_entry.level_idx, level_entry.level
-            ));
-        }
-        s.push_str(&format!(
-            "Compaction task output: {:?} \n",
-            compact_task.sorted_output_ssts
-        ));
-
-        s
     }
 }

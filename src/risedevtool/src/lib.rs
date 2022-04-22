@@ -14,6 +14,7 @@
 
 #![feature(exit_status_error)]
 #![feature(let_chains)]
+#![feature(let_else)]
 
 mod config;
 pub use config::*;
@@ -22,5 +23,5 @@ pub use config_gen::*;
 
 mod task;
 pub mod util;
-mod wait_tcp;
+mod wait;
 pub use task::*;

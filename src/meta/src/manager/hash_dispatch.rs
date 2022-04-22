@@ -19,12 +19,12 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::hash::VIRTUAL_KEY_COUNT;
+use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use tokio::sync::Mutex;
 
 use crate::cluster::ParallelUnitId;
-use crate::model::{ConsistentHashMapping, MetadataModel, VirtualKey};
+use crate::model::{ConsistentHashMapping, MetadataModel};
 use crate::storage::MetaStore;
 
 pub type HashDispatchManagerRef<S> = Arc<HashDispatchManager<S>>;
@@ -87,7 +87,7 @@ where
 
     pub async fn get_worker_mapping(&self) -> Vec<ParallelUnitId> {
         let core = self.core.lock().await;
-        core.key_mapping.get_mapping()
+        core.vnode_mapping.get_mapping()
     }
 }
 
@@ -96,11 +96,11 @@ where
 struct HashDispatchManagerCore<S> {
     /// Total number of hash parallel units in cluster.
     total_hash_parallels: usize,
-    /// Mapping from virtual key to parallel unit, which is persistent.
-    key_mapping: ConsistentHashMapping,
-    /// Mapping from parallel unit to virtual key, which is volatile.
-    owner_mapping: HashMap<ParallelUnitId, Vec<VirtualKey>>,
-    /// Mapping from key count to parallel unit, aiming to maintain load balance.
+    /// Mapping from virtual node to parallel unit, which is persistent.
+    vnode_mapping: ConsistentHashMapping,
+    /// Mapping from parallel unit to virtual node, which is volatile.
+    owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>>,
+    /// Mapping from vnode count to parallel unit, aiming to maintain load balance.
     load_balancer: BTreeMap<usize, Vec<ParallelUnitId>>,
     /// Meta store used for persistence.
     meta_store: Arc<S>,
@@ -114,19 +114,19 @@ struct HashDispatchManagerCore<S> {
 // 2. Transaction: The logic in `HashDispatchManager` is just part of a transaction, but it is not
 // currently supported.
 // 3. Scale Out: Mapping should increase its number of slots when the cluster becomes too large, so
-// that new nodes can still get some virtual key slots.
+// that new nodes can still get some virtual node slots.
 impl<S> HashDispatchManagerCore<S>
 where
     S: MetaStore,
 {
     fn new(meta_store: Arc<S>) -> Self {
-        let key_mapping = ConsistentHashMapping::new();
-        let owner_mapping: HashMap<ParallelUnitId, Vec<VirtualKey>> = HashMap::new();
+        let vnode_mapping = ConsistentHashMapping::new();
+        let owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
         let load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
 
         Self {
             total_hash_parallels: 0,
-            key_mapping,
+            vnode_mapping,
             owner_mapping,
             load_balancer,
             meta_store,
@@ -137,32 +137,37 @@ where
         &mut self,
         parallel_units: &[ParallelUnit],
     ) -> Result<()> {
-        let mut key_mapping = Vec::with_capacity(VIRTUAL_KEY_COUNT);
+        let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
         self.total_hash_parallels = parallel_units.len();
-        let hash_shard_size = VIRTUAL_KEY_COUNT / self.total_hash_parallels;
+        let hash_shard_size = VIRTUAL_NODE_COUNT / self.total_hash_parallels;
         let mut init_bound = hash_shard_size;
 
         parallel_units.iter().for_each(|parallel_unit| {
             let parallel_unit_id = parallel_unit.id;
-            key_mapping.resize(init_bound, parallel_unit_id);
-            let virtual_keys = (init_bound - hash_shard_size..init_bound).collect();
-            self.owner_mapping.insert(parallel_unit_id, virtual_keys);
+            vnode_mapping.resize(init_bound, parallel_unit_id);
+            let vnodes = (init_bound - hash_shard_size..init_bound)
+                .map(|id| id as VirtualNode)
+                .collect();
+            self.owner_mapping.insert(parallel_unit_id, vnodes);
             init_bound += hash_shard_size;
         });
 
         let mut parallel_unit_iter = parallel_units.iter().cycle();
-        for virtual_key in init_bound - hash_shard_size..VIRTUAL_KEY_COUNT {
+        for vnode in init_bound - hash_shard_size..VIRTUAL_NODE_COUNT {
             let id = parallel_unit_iter.next().unwrap().id;
-            key_mapping.push(id);
-            self.owner_mapping.entry(id).or_default().push(virtual_key);
+            vnode_mapping.push(id);
+            self.owner_mapping
+                .entry(id)
+                .or_default()
+                .push(vnode as VirtualNode);
         }
 
         self.owner_mapping
             .iter()
-            .for_each(|(parallel_unit_id, virtual_keys)| {
-                let virtual_key_count = virtual_keys.len();
+            .for_each(|(parallel_unit_id, vnodes)| {
+                let vnode_count = vnodes.len();
                 self.load_balancer
-                    .entry(virtual_key_count)
+                    .entry(vnode_count)
                     .or_default()
                     .push(*parallel_unit_id);
             });
@@ -172,9 +177,9 @@ where
             "Cannot construct consistent hash mapping on cluster initialization."
         );
 
-        self.key_mapping.set_mapping(key_mapping)?;
+        self.vnode_mapping.set_mapping(vnode_mapping)?;
 
-        self.key_mapping.insert(&*self.meta_store).await?;
+        self.vnode_mapping.insert(&*self.meta_store).await?;
 
         Ok(())
     }
@@ -183,11 +188,11 @@ where
         self.total_hash_parallels += parallel_units.len();
 
         let hash_shard_size =
-            (VIRTUAL_KEY_COUNT as f64 / self.total_hash_parallels as f64).round() as usize;
-        let mut new_keys_count = parallel_units.len() * hash_shard_size;
-        let mut new_keys = Vec::new();
+            (VIRTUAL_NODE_COUNT as f64 / self.total_hash_parallels as f64).round() as usize;
+        let mut new_vnodes_count = parallel_units.len() * hash_shard_size;
+        let mut new_vnodes = Vec::new();
 
-        while new_keys_count != 0 {
+        while new_vnodes_count != 0 {
             let mut entry = self
                 .load_balancer
                 .last_entry()
@@ -202,21 +207,21 @@ where
                 self.load_balancer.pop_last();
             }
 
-            let candidate_virtual_keys = self.owner_mapping
+            let candidate_vnodes = self.owner_mapping
                 .get_mut(&candidate_parallel_unit)
                 .unwrap_or_else(|| {
-                    panic!("HashDispatcherManager: expect virtual keys owned by parallel unit {} but got nothing.", candidate_parallel_unit);
+                    panic!("HashDispatcherManager: expect virtual nodes owned by parallel unit {} but got nothing.", candidate_parallel_unit);
                 });
 
-            // Delete candidate key from owner mapping
-            let candidate_key = candidate_virtual_keys
+            // Delete candidate vnode from owner mapping
+            let candidate_vnode = candidate_vnodes
                 .pop()
                 .unwrap_or_else(|| {
-                    panic!("HashDispatcherManager: expect parallel units that own {} virtual keys but got nothing.", candidate_parallel_unit);
+                    panic!("HashDispatcherManager: expect parallel units that own {} virtual nodes but got nothing.", candidate_parallel_unit);
                 });
 
-            // Add candidate key to new keys for future key allocation
-            new_keys.push(candidate_key);
+            // Add candidate vnode to new vnodes for future vnode allocation
+            new_vnodes.push(candidate_vnode);
 
             // Update candidate parallel unit in load balancer
             self.load_balancer
@@ -224,20 +229,22 @@ where
                 .or_default()
                 .push(candidate_parallel_unit);
 
-            new_keys_count -= 1;
+            new_vnodes_count -= 1;
         }
 
         for i in 0..parallel_units.len() {
             let parallel_unit_id = parallel_units[i].id;
-            let allocated_keys = new_keys[i * hash_shard_size..(i + 1) * hash_shard_size].to_vec();
+            let allocated_vnodes =
+                new_vnodes[i * hash_shard_size..(i + 1) * hash_shard_size].to_vec();
 
-            // Update key mapping
-            for key in allocated_keys.clone() {
-                self.key_mapping.update_mapping(key, parallel_unit_id)?;
+            // Update vnode mapping
+            for vnode in allocated_vnodes.clone() {
+                self.vnode_mapping.update_mapping(vnode, parallel_unit_id)?;
             }
 
-            // Add new keys to owner mapping
-            self.owner_mapping.insert(parallel_unit_id, allocated_keys);
+            // Add new vnodes to owner mapping
+            self.owner_mapping
+                .insert(parallel_unit_id, allocated_vnodes);
 
             // Add new parallel unit to load balancer
             self.load_balancer
@@ -247,7 +254,7 @@ where
         }
 
         // Persist mapping
-        self.key_mapping.insert(&*self.meta_store).await?;
+        self.vnode_mapping.insert(&*self.meta_store).await?;
 
         Ok(())
     }
@@ -258,37 +265,37 @@ where
             "HashDispatcherManager: mapping is currently empty, cannot delete worker mapping."
         );
 
-        let mut released_keys = Vec::new();
+        let mut released_vnodes = Vec::new();
 
         parallel_units.iter().for_each(|parallel_unit| {
             // Delete parallel unit from owner mapping
             let parallel_unit_id = parallel_unit.id;
-            let owned_keys = self.owner_mapping.remove(&parallel_unit_id).unwrap();
+            let owned_vnodes = self.owner_mapping.remove(&parallel_unit_id).unwrap();
 
             // Delete parallel unit from load balancer
-            let owned_key_count = owned_keys.len();
+            let owned_vnode_count = owned_vnodes.len();
             self.load_balancer
-                .get_mut(&owned_key_count)
+                .get_mut(&owned_vnode_count)
                 .unwrap_or_else(|| {
-                    panic!("HashDispatcherManager: expect parallel units that own {} virtual keys but got nothing.", owned_key_count);
+                    panic!("HashDispatcherManager: expect parallel units that own {} virtual nodes but got nothing.", owned_vnode_count);
                 })
                 .retain(|&candidate_parallel_unit_id| candidate_parallel_unit_id != parallel_unit_id);
 
-            if self.load_balancer.get(&owned_key_count).unwrap().is_empty() {
-                self.load_balancer.remove(&owned_key_count);
+            if self.load_balancer.get(&owned_vnode_count).unwrap().is_empty() {
+                self.load_balancer.remove(&owned_vnode_count);
             }
 
-            // Add to released keys for future reallocation
-            released_keys.extend(owned_keys);
+            // Add to released vnodes for future reallocation
+            released_vnodes.extend(owned_vnodes);
         });
 
         // All compute nodes have been deleted from the cluster.
         if self.load_balancer.is_empty() {
-            self.key_mapping.clear_mapping();
+            self.vnode_mapping.clear_mapping();
             return Ok(());
         }
 
-        for released_key in released_keys {
+        for released_vnode in released_vnodes {
             let mut entry = self
                 .load_balancer
                 .first_entry()
@@ -298,21 +305,21 @@ where
 
             // Delete candidate parallel unit from load balancer
             let candidate_parallel_unit = candidate_parallel_units.pop().expect(
-                "HashDispatcherManager: expect a parallel unit for virtual key allocation.",
+                "HashDispatcherManager: expect a parallel unit for virtual node allocation.",
             );
             if candidate_parallel_units.is_empty() {
                 self.load_balancer.pop_first();
             }
 
-            // Update key mapping
-            self.key_mapping
-                .update_mapping(released_key, candidate_parallel_unit)?;
+            // Update vnode mapping
+            self.vnode_mapping
+                .update_mapping(released_vnode, candidate_parallel_unit)?;
 
             // Update owner mapping
             self.owner_mapping
                 .entry(candidate_parallel_unit)
                 .or_default()
-                .push(released_key);
+                .push(released_vnode);
 
             // Update candidate parallel unit in load balancer
             self.load_balancer
@@ -322,7 +329,7 @@ where
         }
 
         // Persist mapping
-        self.key_mapping.insert(&*self.meta_store).await?;
+        self.vnode_mapping.insert(&*self.meta_store).await?;
 
         self.total_hash_parallels -= parallel_units.len();
 
@@ -507,24 +514,24 @@ mod tests {
         assert_eq!(
             core.owner_mapping
                 .iter()
-                .map(|(_, keys)| { keys.len() })
+                .map(|(_, vnodes)| { vnodes.len() })
                 .sum::<usize>(),
-            VIRTUAL_KEY_COUNT
+            VIRTUAL_NODE_COUNT
         );
         assert_eq!(
             core.load_balancer
                 .iter()
                 .map(|(load_count, parallel_units)| { load_count * parallel_units.len() })
                 .sum::<usize>(),
-            VIRTUAL_KEY_COUNT
+            VIRTUAL_NODE_COUNT
         );
-        let key_mapping = core.key_mapping.get_mapping();
+        let vnode_mapping = core.vnode_mapping.get_mapping();
         let load_balancer = &core.load_balancer;
         let owner_mapping = &core.owner_mapping;
         for (&load_count, parallel_units) in load_balancer {
             for parallel_unit_id in parallel_units {
                 assert_eq!(
-                    key_mapping
+                    vnode_mapping
                         .iter()
                         .filter(|&id| *id == *parallel_unit_id)
                         .count(),

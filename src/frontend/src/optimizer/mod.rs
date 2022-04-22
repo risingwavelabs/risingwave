@@ -115,12 +115,24 @@ impl PlanRoot {
     pub fn gen_optimized_logical_plan(&self) -> PlanRef {
         let mut plan = self.plan.clone();
 
+        // Subquery Unnesting.
+        plan = {
+            let rules = vec![
+                // This rule should be applied first to pull up LogicalAgg.
+                UnnestAggForLOJ::create(),
+                PullUpCorrelatedPredicate::create(),
+            ];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
         // Predicate Push-down
         plan = {
             let rules = vec![
                 FilterJoinRule::create(),
                 FilterProjectRule::create(),
                 FilterAggRule::create(),
+                FilterMergeRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
@@ -131,7 +143,8 @@ impl PlanRoot {
 
         plan = {
             let rules = vec![
-                ProjectMergeRule::create(), // merge should be applied before eliminate
+                // merge should be applied before eliminate
+                ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
@@ -166,12 +179,8 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    /// Optimize and generate a create materialize view plan.
-    ///
-    /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
-    /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = match self.plan.convention() {
+    fn gen_create_index_stream_plan(&mut self) -> PlanRef {
+        match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream();
@@ -188,20 +197,31 @@ impl PlanRoot {
             Convention::Stream => self
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
-            _ => panic!(),
-        };
+            _ => unreachable!(),
+        }
+    }
 
-        // Ignore the required_dist and required_order, as they are provided by user now.
-        // TODO: need more thinking and refactor.
-
-        // Convert to physical plan node, using distribution of the input node
-        // After that, we will need to wrap a `MaterializeExecutor` on it in `gen_create_mv_plan`.
-
+    /// Optimize and generate a create materialize view plan.
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_create_index_stream_plan();
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            false,
+        )
+    }
+
+    /// Optimize and generate a create index plan.
+    pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_create_index_stream_plan();
+        StreamMaterialize::create(
+            stream_plan,
+            mv_name,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            true,
         )
     }
 

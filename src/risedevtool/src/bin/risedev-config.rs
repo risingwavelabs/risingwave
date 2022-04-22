@@ -60,6 +60,7 @@ pub enum Components {
     MinIO,
     PrometheusAndGrafana,
     Etcd,
+    Kafka,
     Tracing,
     RustComponents,
     LegacyFrontend,
@@ -75,6 +76,7 @@ impl Components {
             Self::MinIO => "[Component] Hummock: MinIO + MinIO-CLI",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
+            Self::Kafka => "[Component] Kafka",
             Self::RustComponents => "[Build] Rust components",
             Self::LegacyFrontend => "[Build] Legacy Java frontend",
             Self::Dashboard => "[Build] Dashboard v2",
@@ -99,6 +101,11 @@ Required if you want to view metrics."
             Self::Etcd => {
                 "
 Required if you want to persistent meta-node data.
+                "
+            }
+            Self::Kafka => {
+                "
+Required if you want to create source from Kafka.
                 "
             }
             Self::RustComponents => {
@@ -149,7 +156,9 @@ a dev cluster.
             "ENABLE_MINIO" => Some(Self::MinIO),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
+            "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
+            "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
             "ENABLE_BUILD_FRONTEND" => Some(Self::LegacyFrontend),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
@@ -164,6 +173,7 @@ a dev cluster.
             Self::MinIO => "ENABLE_MINIO",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
+            Self::Kafka => "ENABLE_KAFKA",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::LegacyFrontend => "ENABLE_BUILD_FRONTEND",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
@@ -186,7 +196,7 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
     println!("RiseDev includes several components. You can select the ones you need, so as to reduce build time.");
     println!();
     println!(
-        "Use {} to navigate, use {} to go to next page, and use {} to select. Press {} to continue.",
+        "Use {} to navigate between up / down, use {} to go to next page,\nand use {} to select an item. Press {} to continue.",
         style("arrow up / down").bold(),
         style("arrow left / right").bold(),
         style("space").bold(),
@@ -213,10 +223,9 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
             let instruction = if (idx + 1) % ITEMS_PER_PAGE == 0 || idx == all_components.len() - 1
             {
                 format!(
-                    "\n\n  page {}/{}, use {} to navigate",
+                    "\n\n  page {}/{}",
                     style(((idx + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE).to_string()).bold(),
                     (all_components.len() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE,
-                    style("arrow key left / right").blue(),
                 )
             } else {
                 String::new()
@@ -298,6 +307,7 @@ fn main() -> Result<()> {
         None => configure(&chosen)?,
     };
 
+    println!("=== Enabled Components ===");
     for component in Components::into_enum_iter() {
         println!(
             "{}: {}",
@@ -309,9 +319,9 @@ fn main() -> Result<()> {
             }
         );
     }
-    println!();
 
-    println!("Writing configuration into {}...", file_path);
+    println!("Configuration saved at {}", file_path);
+    println!("=========================");
 
     let mut file = BufWriter::new(
         OpenOptions::new()
@@ -341,6 +351,17 @@ fn main() -> Result<()> {
     }
 
     file.flush()?;
+
+    println!(
+        "RiseDev will {} the components you've enabled.",
+        style("only download").bold()
+    );
+    println!(
+        "If you want to use these components, please {} in {} to start that component.",
+        style("modify the cluster config").yellow().bold(),
+        style("risedev.yml").bold(),
+    );
+    println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 
     Ok(())
 }

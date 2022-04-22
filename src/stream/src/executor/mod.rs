@@ -18,23 +18,55 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
-pub use aggregation::*;
-use async_trait::async_trait;
+pub use barrier_align::*;
 pub use batch_query::*;
 pub use chain::*;
-pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
-use futures::Stream;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
-pub use lookup::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
 pub use project::*;
+pub use source::*;
+pub use top_n::*;
+pub use top_n_appendonly::*;
+
+use crate::executor_v2::{
+    BoxedExecutor, Executor, HopWindowExecutorBuilder, LookupExecutorBuilder, UnionExecutorBuilder,
+};
+use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
+
+mod actor;
+mod barrier_align;
+mod batch_query;
+mod chain;
+mod dispatch;
+mod filter;
+mod global_simple_agg;
+mod hash_agg;
+mod hash_join;
+mod local_simple_agg;
+pub(crate) mod managed_state;
+mod merge;
+pub mod monitor;
+mod mview;
+mod project;
+mod source;
+mod top_n;
+mod top_n_appendonly;
+
+#[cfg(test)]
+mod integration_tests;
+#[cfg(test)]
+mod test_utils;
+
+use async_trait::async_trait;
+use enum_as_inner::EnumAsInner;
+use futures::Stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -52,47 +84,14 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
-pub use source::*;
-pub use top_n::*;
-pub use top_n_appendonly::*;
 use tracing::trace_span;
-
-use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
-
-mod actor;
-mod aggregation;
-mod barrier_align;
-mod batch_query;
-mod chain;
-mod debug;
-mod dispatch;
-mod filter;
-mod global_simple_agg;
-mod hash_agg;
-mod hash_join;
-mod local_simple_agg;
-mod lookup;
-pub(crate) mod managed_state;
-mod merge;
-pub mod monitor;
-mod mview;
-mod project;
-mod source;
-mod top_n;
-mod top_n_appendonly;
-
-#[cfg(test)]
-mod integration_tests;
-
-#[cfg(test)]
-mod test_utils;
 
 pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// Boxed stream of [`StreamMessage`].
-pub type BoxedExecutorStream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
+pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
@@ -176,15 +175,18 @@ impl Barrier {
         Self { span, ..self }
     }
 
-    pub fn is_stop_mutation(&self) -> bool {
-        self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
+    pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
 
-    pub fn is_add_output_mutation(&self) -> bool {
-        self.mutation
-            .as_ref()
-            .map(|m| m.is_add_output())
-            .unwrap_or(false)
+    pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
+        matches!(
+            self.mutation.as_deref(),
+            Some(Mutation::AddOutput(map)) if map
+                .values()
+                .flatten()
+                .any(|info| info.actor_id == actor_id)
+        )
     }
 }
 
@@ -196,13 +198,11 @@ impl PartialEq for Barrier {
 
 impl Mutation {
     /// Return true if the mutation is stop.
+    ///
+    /// Note that this does not mean we will stop the current actor.
+    #[cfg(test)]
     pub fn is_stop(&self) -> bool {
         matches!(self, Mutation::Stop(_))
-    }
-
-    /// Return true if the mutation is add output.
-    pub fn is_add_output(&self) -> bool {
-        matches!(self, Mutation::AddOutput(_))
     }
 }
 
@@ -293,7 +293,7 @@ impl Barrier {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumAsInner)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -313,13 +313,16 @@ impl<'a> TryFrom<&'a Message> for &'a Barrier {
 impl Message {
     /// Return true if the message is a stop barrier, meaning the stream
     /// will not continue, false otherwise.
-    pub fn is_terminate(&self) -> bool {
+    ///
+    /// Note that this does not mean we will stop the current actor.
+    #[cfg(test)]
+    pub fn is_stop(&self) -> bool {
         matches!(
             self,
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_deref().unwrap().is_stop()
+            }) if mutation.as_ref().unwrap().is_stop()
         )
     }
 
@@ -348,25 +351,11 @@ impl Message {
         };
         Ok(res)
     }
-
-    pub fn as_chunk(&self) -> Option<&StreamChunk> {
-        match self {
-            Self::Chunk(chunk) => Some(chunk),
-            _ => None,
-        }
-    }
-
-    pub fn as_barrier(&self) -> Option<&Barrier> {
-        match self {
-            Self::Barrier(barrier) => Some(barrier),
-            _ => None,
-        }
-    }
 }
 
 /// `Executor` supports handling of control messages.
 #[async_trait]
-pub trait Executor: Send + Debug + 'static {
+pub trait ExecutorV1: Send + Debug + 'static {
     async fn next(&mut self) -> Result<Message>;
 
     /// Return the schema of the OUTPUT of the executor.
@@ -402,26 +391,26 @@ pub trait Executor: Send + Debug + 'static {
 }
 
 #[derive(Debug)]
-pub enum ExecutorState {
+pub enum ExecutorV1State {
     /// Waiting for the first barrier
     Init,
     /// Can read from and write to storage
     Active(u64),
 }
 
-impl ExecutorState {
+impl ExecutorV1State {
     pub fn epoch(&self) -> u64 {
         match self {
-            ExecutorState::Init => panic!("Executor is not active when getting the epoch"),
-            ExecutorState::Active(epoch) => *epoch,
+            ExecutorV1State::Init => panic!("Executor is not active when getting the epoch"),
+            ExecutorV1State::Active(epoch) => *epoch,
         }
     }
 }
 
-pub trait StatefulExecutor: Executor {
-    fn executor_state(&self) -> &ExecutorState;
+pub trait StatefulExecutorV1: ExecutorV1 {
+    fn executor_state(&self) -> &ExecutorV1State;
 
-    fn update_executor_state(&mut self, new_state: ExecutorState);
+    fn update_executor_state(&mut self, new_state: ExecutorV1State);
 
     /// Try initializing the executor if not done.
     /// Return:
@@ -432,16 +421,16 @@ pub trait StatefulExecutor: Executor {
         msg: impl TryInto<&'a Barrier, Error = ()>,
     ) -> Option<Barrier> {
         match self.executor_state() {
-            ExecutorState::Init => {
+            ExecutorV1State::Init => {
                 if let Ok(barrier) = msg.try_into() {
                     // Move to Active state
-                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                    self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
                     Some(barrier.clone())
                 } else {
                     panic!("The first message the executor receives is not a barrier");
                 }
             }
-            ExecutorState::Active(_) => None,
+            ExecutorV1State::Active(_) => None,
         }
     }
 }
@@ -470,17 +459,31 @@ pub fn pk_input_array_refs<'a>(
 }
 
 pub trait ExecutorBuilder {
+    /// For compatibility.
+    fn new_boxed_executor_v1(
+        _executor_params: ExecutorParams,
+        _node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
+    ) -> Result<Box<dyn ExecutorV1>> {
+        unimplemented!()
+    }
+
+    /// Create an executor. May directly override this function to create an executor v2, or it will
+    /// create an [`ExecutorV1`] and wrap it to v2.
     fn new_boxed_executor(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>>;
+    ) -> Result<BoxedExecutor> {
+        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2().boxed())
+    }
 }
 
 #[macro_export]
 macro_rules! build_executor {
-    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),*) => {
+    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node().unwrap() {
             $(
                 $proto_type_name(..) => {
@@ -502,8 +505,12 @@ pub fn create_executor(
     stream: &mut LocalStreamManagerCore,
     node: &stream_plan::StreamNode,
     store: impl StateStore,
-) -> Result<Box<dyn Executor>> {
-    let real_executor = build_executor! { executor_params,node,store,stream,
+) -> Result<BoxedExecutor> {
+    build_executor! {
+        executor_params,
+        node,
+        store,
+        stream,
         Node::SourceNode => SourceExecutorBuilder,
         Node::ProjectNode => ProjectExecutorBuilder,
         Node::TopNNode => TopNExecutorBuilder,
@@ -512,36 +519,21 @@ pub fn create_executor(
         Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
         Node::HashAggNode => HashAggExecutorBuilder,
         Node::HashJoinNode => HashJoinExecutorBuilder,
+        Node::HopWindowNode => HopWindowExecutorBuilder,
         Node::ChainNode => ChainExecutorBuilder,
         Node::BatchPlanNode => BatchQueryExecutorBuilder,
         Node::MergeNode => MergeExecutorBuilder,
         Node::MaterializeNode => MaterializeExecutorBuilder,
-        Node::FilterNode => FilterExecutorBuilder
-    }?;
-    Ok(real_executor)
-}
-
-/// `SimpleExecutor` accepts a single chunk as input.
-pub trait SimpleExecutor: Executor {
-    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
-    fn input(&mut self) -> &mut dyn Executor;
-}
-
-/// Most executors don't care about the control messages, and therefore
-/// this method provides a default implementation helper for them.
-async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Message> {
-    match executor.input().next().await {
-        Ok(message) => match message {
-            Message::Chunk(chunk) => executor.consume_chunk(chunk),
-            Message::Barrier(_) => Ok(message),
-        },
-        Err(e) => Err(e),
+        Node::FilterNode => FilterExecutorBuilder,
+        Node::ArrangeNode => ArrangeExecutorBuilder,
+        Node::LookupNode => LookupExecutorBuilder,
+        Node::UnionNode => UnionExecutorBuilder,
     }
 }
 
-/// `StreamConsumer` is the last step in an actor
-#[async_trait]
-pub trait StreamConsumer: Send + Debug + 'static {
-    /// Run next stream chunk, returns whether the chunk is a barrier.
-    async fn next(&mut self) -> Result<Option<Barrier>>;
+/// `StreamConsumer` is the last step in an actor.
+pub trait StreamConsumer: Send + 'static {
+    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+
+    fn execute(self: Box<Self>) -> Self::BarrierStream;
 }

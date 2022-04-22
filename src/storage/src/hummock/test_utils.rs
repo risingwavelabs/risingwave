@@ -19,23 +19,29 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::key::key_with_epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStorage, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStateStoreIter, HummockStorage, SSTableBuilder, SSTableBuilderOptions,
+    Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
+use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
         sstable_size: 256 * (1 << 20),
         block_size: 64 * (1 << 10),
         bloom_false_positive: 0.1,
+        share_buffers_sync_parallelism: 2,
+        shared_buffer_capacity: 64 << 20,
+        shared_buffer_threshold: 48 << 20,
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
@@ -45,14 +51,18 @@ pub fn default_config_for_test() -> StorageConfig {
 }
 
 pub async fn mock_hummock_storage() -> HummockStorage {
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
     let sstable_store = mock_sstable_store();
     HummockStorage::with_default_stats(
         Arc::new(StorageConfig::default()),
         sstable_store.clone(),
-        Arc::new(LocalVersionManager::new(sstable_store.clone())),
-        Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        ))),
+        Arc::new(LocalVersionManager::new()),
+        mock_hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
@@ -85,19 +95,27 @@ pub fn gen_test_sstable_data(
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
+pub async fn gen_test_sstable_inner(
+    opts: SSTableBuilderOptions,
+    sst_id: u64,
+    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    sstable_store: SstableStoreRef,
+    poliy: CachePolicy,
+) -> Sstable {
+    let (data, meta) = gen_test_sstable_data(opts, kv_iter);
+    let sst = Sstable { id: sst_id, meta };
+    sstable_store.put(&sst, data, poliy).await.unwrap();
+    sst
+}
+
+/// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
 pub async fn gen_test_sstable(
     opts: SSTableBuilderOptions,
     sst_id: u64,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    let (data, meta) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store
-        .put(&sst, data, CachePolicy::Fill)
-        .await
-        .unwrap();
-    sst
+    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::Fill).await
 }
 
 /// The key (with epoch 0) of an index in the test table
@@ -132,4 +150,12 @@ pub async fn gen_default_test_sstable(
         sstable_store,
     )
     .await
+}
+
+pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
+    let mut c: usize = 0;
+    while iter.next().await.unwrap().is_some() {
+        c += 1
+    }
+    c
 }

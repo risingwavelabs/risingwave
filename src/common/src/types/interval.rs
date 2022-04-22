@@ -19,6 +19,7 @@ use std::ops::{Add, Sub};
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub};
+use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
@@ -92,7 +93,7 @@ impl IntervalUnit {
 
     #[must_use]
     pub fn from_days(days: i32) -> Self {
-        IntervalUnit {
+        Self {
             days,
             ..Default::default()
         }
@@ -100,8 +101,16 @@ impl IntervalUnit {
 
     #[must_use]
     pub fn from_millis(ms: i64) -> Self {
-        IntervalUnit {
+        Self {
             ms,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn from_minutes(minutes: i64) -> Self {
+        Self {
+            ms: 1000 * 60 * minutes,
             ..Default::default()
         }
     }
@@ -121,6 +130,72 @@ impl IntervalUnit {
             Ok(16)
         }
         .map_err(|e| RwError::from(IoError(e)))
+    }
+
+    /// Multiple [`IntervalUnit`] by an integer with overflow check.
+    pub fn checked_mul_int<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<i32>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let months = self.months.checked_mul(rhs)?;
+        let days = self.days.checked_mul(rhs)?;
+        let ms = self.ms.checked_mul(rhs as i64)?;
+
+        Some(IntervalUnit { months, days, ms })
+    }
+
+    /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
+    pub fn exact_div(&self, rhs: &Self) -> Option<i64> {
+        let mut res = None;
+        let mut check_unit = |l: i64, r: i64| {
+            if l == 0 && r == 0 {
+                return Some(());
+            }
+            if l != 0 && r == 0 {
+                return None;
+            }
+            if l % r != 0 {
+                return None;
+            }
+            let new_res = l / r;
+            if let Some(old_res) = res {
+                if old_res != new_res {
+                    return None;
+                }
+            } else {
+                res = Some(new_res);
+            }
+
+            Some(())
+        };
+
+        check_unit(self.months as i64, rhs.months as i64)?;
+        check_unit(self.days as i64, rhs.days as i64)?;
+        check_unit(self.ms, rhs.ms)?;
+
+        res
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<IntervalUnitProto> for IntervalUnit {
+    fn into(self) -> IntervalUnitProto {
+        IntervalUnitProto {
+            months: self.months,
+            days: self.days,
+            ms: self.ms,
+        }
+    }
+}
+
+impl From<&'_ IntervalUnitProto> for IntervalUnit {
+    fn from(p: &'_ IntervalUnitProto) -> Self {
+        Self {
+            months: p.months,
+            days: p.days,
+            ms: p.ms,
+        }
     }
 }
 
@@ -202,5 +277,34 @@ mod tests {
         let interval =
             IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233);
         assert_eq!(interval.to_string(), "-1 years -2 mons 3 days 11:45:14.233");
+    }
+
+    #[test]
+    fn test_exact_div() {
+        let cases = [
+            ((14, 6, 6), (14, 6, 6), Some(1)),
+            ((0, 0, 0), (0, 0, 0), None),
+            ((0, 0, 0), (1, 0, 0), Some(0)),
+            ((1, 1, 1), (0, 0, 0), None),
+            ((1, 1, 1), (1, 0, 0), None),
+            ((10, 0, 0), (1, 0, 0), Some(10)),
+            ((10, 0, 0), (4, 0, 0), None),
+            ((0, 24, 0), (4, 0, 0), None),
+            ((6, 8, 9), (3, 1, 3), None),
+            ((6, 8, 12), (3, 4, 6), Some(2)),
+        ];
+
+        for (lhs, rhs, expected) in cases {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let rhs = IntervalUnit::new(rhs.0 as i32, rhs.1 as i32, rhs.2 as i64);
+            let result = std::panic::catch_unwind(|| {
+                let actual = lhs.exact_div(&rhs);
+                assert_eq!(actual, expected);
+            });
+            if result.is_err() {
+                println!("Failed on {}.exact_div({})", lhs, rhs);
+                break;
+            }
+        }
     }
 }

@@ -24,11 +24,12 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use aws_smithy_types::DateTime;
 use http::Uri;
 
-use crate::base::{InnerMessage, SourceReader};
+use crate::base::{SourceMessage, SplitReader};
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::{ConnectorStateV2, Properties};
 
 pub struct KinesisSplitReader {
     client: kinesis_client,
@@ -40,8 +41,8 @@ pub struct KinesisSplitReader {
 }
 
 #[async_trait]
-impl SourceReader for KinesisSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
+impl SplitReader for KinesisSplitReader {
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         if self.assigned_split.is_none() {
             return Err(anyhow::Error::msg(
                 "you should call `assign_split` before calling `next`".to_string(),
@@ -91,7 +92,7 @@ impl SourceReader for KinesisSplitReader {
                 continue;
             }
 
-            let mut record_collection: Vec<InnerMessage> = Vec::new();
+            let mut record_collection: Vec<SourceMessage> = Vec::new();
             for record in records {
                 if !is_stopping(
                     record.sequence_number.as_ref().unwrap(),
@@ -100,7 +101,7 @@ impl SourceReader for KinesisSplitReader {
                     return Ok(Some(record_collection));
                 }
                 self.latest_sequence_num = record.sequence_number().unwrap().to_string();
-                record_collection.push(InnerMessage::from(KinesisMessage::new(
+                record_collection.push(SourceMessage::from(KinesisMessage::new(
                     self.shard_id.clone(),
                     record,
                 )));
@@ -110,10 +111,7 @@ impl SourceReader for KinesisSplitReader {
     }
 
     /// For Kinesis, state identifier is split_id, stream_name is never changed
-    async fn new(
-        config: std::collections::HashMap<String, String>,
-        state: Option<crate::ConnectorState>,
-    ) -> Result<Self>
+    async fn new(config: Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
@@ -136,7 +134,7 @@ impl SourceReader for KinesisSplitReader {
             assigned_split: None,
         };
 
-        if let Some(state) = state {
+        if let ConnectorStateV2::State(state) = state {
             let split_id = String::from_utf8(state.identifier.to_vec())?;
 
             let mut start_offset = KinesisOffset::Earliest;

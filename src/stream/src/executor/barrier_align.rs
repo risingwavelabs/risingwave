@@ -17,8 +17,8 @@ use futures::StreamExt;
 use risingwave_common::error::Result;
 use tokio::select;
 
-use super::{Barrier, Executor, Message, StreamChunk};
-use crate::executor::BoxedExecutorStream;
+use super::{Barrier, ExecutorV1, Message, StreamChunk};
+use crate::executor::BoxedExecutorV1Stream;
 
 #[derive(Debug, PartialEq)]
 enum BarrierWaitState {
@@ -47,15 +47,15 @@ impl<'a> TryFrom<&'a AlignedMessage> for &'a Barrier {
 
 pub struct BarrierAligner {
     /// The input from the left executor
-    input_l: BoxedExecutorStream,
+    input_l: BoxedExecutorV1Stream,
     /// The input from the right executor
-    input_r: BoxedExecutorStream,
+    input_r: BoxedExecutorV1Stream,
     /// The barrier state
     state: BarrierWaitState,
 }
 
 impl BarrierAligner {
-    pub fn new(mut input_l: Box<dyn Executor>, mut input_r: Box<dyn Executor>) -> Self {
+    pub fn new(mut input_l: Box<dyn ExecutorV1>, mut input_r: Box<dyn ExecutorV1>) -> Self {
         // Wrap the input executors into streams to ensure cancellation-safety
         let input_l = try_stream! {
             loop {

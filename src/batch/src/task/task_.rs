@@ -81,6 +81,7 @@ impl TaskId {
 
 impl TryFrom<&ProstOutputId> for TaskOutputId {
     type Error = RwError;
+
     fn try_from(prost: &ProstOutputId) -> Result<Self> {
         Ok(TaskOutputId {
             task_id: TaskId::from(prost.get_task_id()?),
@@ -114,7 +115,11 @@ impl TaskOutput {
                 // Received some data
                 Ok(Some(chunk)) => {
                     let chunk = chunk.compact()?;
-                    trace!("Task output: {:?}, data: {:?}", self.output_id, chunk);
+                    trace!(
+                        "Task output id: {:?}, data len: {:?}",
+                        self.output_id,
+                        chunk.cardinality()
+                    );
                     let pb = chunk.to_protobuf();
                     let resp = GetDataResponse {
                         record_batch: Some(pb),

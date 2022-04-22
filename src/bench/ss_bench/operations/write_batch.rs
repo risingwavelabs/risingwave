@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,8 +19,10 @@ use std::time::Instant;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
-use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
-use risingwave_storage::hummock::mock::MockHummockMetaClient;
+use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
+use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;
 
@@ -41,7 +42,7 @@ impl BatchTaskContext {
         assert!(origin_task_count < (1 << 8));
         Self {
             meta_client,
-            epoch: AtomicU64::new(0),
+            epoch: AtomicU64::new(1),
             task_count: AtomicUsize::new(origin_task_count << 8),
         }
     }
@@ -77,7 +78,12 @@ impl BatchTaskContext {
 }
 
 impl Operations {
-    pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
+    pub(crate) async fn write_batch(
+        &mut self,
+        store: &impl StateStore,
+        opts: &Opts,
+        context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
+    ) {
         let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
         let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
 
@@ -89,6 +95,25 @@ impl Operations {
         println!("batch size: {}", batches.len());
 
         let perf = self.run_batches(store, opts, batches).await;
+        if opts.compact_level_after_write > 0 {
+            if let Some((compact_context, local_version_manager)) = context {
+                if let Some(task) = self.meta_client.get_compact_task().await {
+                    Compactor::compact(compact_context.clone(), task).await;
+                    // FIXME: A workaround to ensure the version after compaction is available
+                    // locally. Notice now multiple tasks are trying to pin_version, which breaks
+                    // the assumption required by LocalVersionManager. It may result in some pinned
+                    // versions never get unpinned. This can be fixed after
+                    // LocalVersionManager::start_workers is modified into push-based.
+                    let last_pinned = local_version_manager.get_version().unwrap();
+                    let version = self
+                        .meta_client
+                        .pin_version(last_pinned.id())
+                        .await
+                        .unwrap();
+                    local_version_manager.try_set_version(version);
+                }
+            }
+        }
 
         println!(
             "
@@ -138,7 +163,7 @@ impl Operations {
         let size = batches
             .iter()
             .flat_map(|batch| batch.iter())
-            .map(|(key, value)| size_of_val(key) + size_of_val(value))
+            .map(|(key, value)| key.len() + value.as_ref().map(|v| v.len()).unwrap_or(0))
             .sum::<usize>();
 
         // partitioned these batches for each concurrency

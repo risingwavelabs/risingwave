@@ -47,19 +47,22 @@ impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
         Literal { data, data_type }
     }
+
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::ConstantValue
     }
+
     pub fn get_data(&self) -> &Datum {
         &self.data
     }
 }
+
 impl Expr for Literal {
     fn return_type(&self) -> DataType {
         self.data_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::*;
         ExprNode {
             expr_type: self.get_expr_type() as i32,

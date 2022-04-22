@@ -169,9 +169,9 @@ impl CompressionAlgorithm {
         match buf.get_u8() {
             0 => Ok(Self::None),
             1 => Ok(Self::Lz4),
-            _ => {
-                Err(HummockError::DecodeError("not valid compression algorithm".to_string()).into())
-            }
+            _ => Err(HummockError::decode_error(
+                "not valid compression algorithm",
+            )),
         }
     }
 }
@@ -196,12 +196,13 @@ impl From<CompressionAlgorithm> for u64 {
 
 impl TryFrom<u8> for CompressionAlgorithm {
     type Error = HummockError;
+
     fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {
         match v {
             0 => Ok(Self::None),
             1 => Ok(Self::Lz4),
-            _ => Err(HummockError::DecodeError(
-                "not valid compression algorithm".to_string(),
+            _ => Err(HummockError::decode_error(
+                "not valid compression algorithm",
             )),
         }
     }

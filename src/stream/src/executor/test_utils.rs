@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
-
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -32,93 +30,6 @@ macro_rules! row_nonnull {
             Row(vec![$(Some($value.to_scalar_value()), )*])
         }
     };
-}
-
-pub struct MockSource {
-    schema: Schema,
-    pk_indices: PkIndices,
-    epoch: u64,
-    msgs: VecDeque<Message>,
-}
-
-impl std::fmt::Debug for MockSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockSource")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .finish()
-    }
-}
-
-impl MockSource {
-    pub fn new(schema: Schema, pk_indices: PkIndices) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            epoch: 0,
-            msgs: VecDeque::default(),
-        }
-    }
-
-    pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            epoch: 0,
-            msgs: msgs.into(),
-        }
-    }
-
-    pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            epoch: 0,
-            msgs: chunks.into_iter().map(Message::Chunk).collect(),
-        }
-    }
-
-    pub fn push_chunks(&mut self, chunks: impl Iterator<Item = StreamChunk>) {
-        self.msgs.extend(chunks.map(Message::Chunk));
-    }
-
-    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new_test_barrier(epoch);
-        if stop {
-            barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()));
-        }
-        self.msgs.push_back(Message::Barrier(barrier));
-    }
-}
-
-#[async_trait]
-impl Executor for MockSource {
-    async fn next(&mut self) -> Result<Message> {
-        self.epoch += 1;
-        match self.msgs.pop_front() {
-            Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(
-                Barrier::new_test_barrier(self.epoch)
-                    .with_mutation(Mutation::Stop(HashSet::default())),
-            )),
-        }
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &'static str {
-        "MockSource"
-    }
-
-    fn logical_operator_info(&self) -> &str {
-        self.identity()
-    }
 }
 
 /// This source takes message from users asynchronously
@@ -181,7 +92,7 @@ impl MockAsyncSource {
 }
 
 #[async_trait]
-impl Executor for MockAsyncSource {
+impl ExecutorV1 for MockAsyncSource {
     async fn next(&mut self) -> Result<Message> {
         self.epoch += 1;
         match self.rx.recv().await {

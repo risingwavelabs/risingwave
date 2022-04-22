@@ -16,20 +16,23 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
-use crate::optimizer::plan_node::{LogicalInsert, PlanRef};
+use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        let input = self.plan_query(insert.source)?.as_subplan();
+        let mut input = self.plan_query(insert.source)?.as_subplan();
+        if !insert.cast_exprs.is_empty() {
+            let aliases = vec![None; insert.cast_exprs.len()];
+            input = LogicalProject::create(input, insert.cast_exprs, aliases);
+        }
         // `columns` not used by backend yet.
         let plan: PlanRef = LogicalInsert::create(
             input,
             insert.table_source.name,
             insert.table_source.source_id,
-            vec![],
         )?
         .into();
         let order = Order::any().clone();

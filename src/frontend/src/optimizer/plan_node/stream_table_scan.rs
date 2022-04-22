@@ -42,8 +42,8 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::Single,
-            false, // TODO: determine the `append-only` field of table scan
+            Distribution::AnyShard, // Mark as `AnyShard` cause we don't know the distribution yet.
+            false,                  // TODO: determine the `append-only` field of table scan
         );
         Self {
             base,
@@ -100,18 +100,18 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            distribution_keys: self
-                .base
-                .dist
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as i32)
-                .collect_vec(),
+            /// StreamTableScan should follow the same distribution as upstream materialize node.
+            /// So this will be filled in meta.
+            distribution_keys: vec![],
+            // Will fill when resolving chain node.
+            hash_mapping: None,
+            parallel_unit_id: 0,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
+            fields: vec![], // TODO: fill this later
             input: vec![
                 // The merge node should be empty
                 ProstStreamPlan {
@@ -128,9 +128,12 @@ impl StreamTableScan {
                     identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
+                    fields: vec![], // TODO: fill this later
+                    append_only: true,
                 },
             ],
             node: Some(ProstStreamNode::ChainNode(ChainNode {
+                disable_rearrange: false,
                 table_ref_id: Some(TableRefId {
                     table_id: self.logical.table_desc().table_id.table_id as i32,
                     schema_ref_id: None, // TODO: fill schema ref id
@@ -165,6 +168,7 @@ impl StreamTableScan {
             } else {
                 "".into()
             },
+            append_only: self.append_only(),
         }
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
@@ -26,37 +27,51 @@ use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::HummockSnapshotManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
-/// which receives meta's notification and update frontend's data.
+/// which receives meta's notification and update frontend data.
 pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
+    meta_client: MetaClient,
+    addr: HostAddr,
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
+
+const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 impl ObserverManager {
     pub async fn new(
-        client: MetaClient,
+        meta_client: MetaClient,
         addr: HostAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
-        let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
+        let rx = meta_client
+            .subscribe(&addr, WorkerType::Frontend)
+            .await
+            .unwrap();
         Self {
             rx,
+            meta_client,
+            addr,
             worker_node_manager,
             catalog,
             catalog_updated_tx,
+            hummock_snapshot_manager,
         }
     }
 
-    pub fn handle_first_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    pub fn handle_snapshot_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         let mut catalog_guard = self.catalog.write();
+        catalog_guard.clear();
         match resp.info {
             Some(Info::FeSnapshot(snapshot)) => {
                 for db in snapshot.database {
@@ -71,9 +86,7 @@ impl ObserverManager {
                 for source in snapshot.source {
                     catalog_guard.create_source(source)
                 }
-                for node in snapshot.nodes {
-                    self.worker_node_manager.add_worker_node(node)
-                }
+                self.worker_node_manager.refresh_worker_node(snapshot.nodes);
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
@@ -88,30 +101,9 @@ impl ObserverManager {
         Ok(())
     }
 
-    pub fn handle_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_catalog_v2_notification(&mut self, resp: SubscribeResponse) {
         let mut catalog_guard = self.catalog.write();
         match &resp.info {
-            Some(Info::Database(_)) => {
-                panic!(
-                    "received a deprecated catalog notification from meta {:?}",
-                    resp
-                );
-            }
-            Some(Info::Schema(_)) => {
-                panic!(
-                    "received a deprecated catalog notification from meta {:?}",
-                    resp
-                );
-            }
-            Some(Info::Table(_)) => {
-                panic!(
-                    "received a deprecated catalog notification from meta {:?}",
-                    resp
-                );
-            }
-            Some(Info::Node(node)) => {
-                self.update_worker_node_manager(resp.operation(), node.clone());
-            }
             Some(Info::DatabaseV2(database)) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database.clone()),
                 Operation::Delete => catalog_guard.drop_database(database.id),
@@ -136,13 +128,7 @@ impl ObserverManager {
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Some(Info::FeSnapshot(_)) => {
-                panic!(
-                    "receiving an FeSnapshot in the middle is unsupported now {:?}",
-                    resp
-                )
-            }
-            _ => panic!("receive an unsupported notify {:?}", resp),
+            _ => unreachable!(),
         }
         assert!(
             resp.version > catalog_guard.version(),
@@ -154,8 +140,40 @@ impl ObserverManager {
         self.catalog_updated_tx.send(resp.version).unwrap();
     }
 
+    pub async fn handle_notification(&mut self, resp: SubscribeResponse) {
+        match &resp.info {
+            Some(Info::Database(_)) | Some(Info::Schema(_)) | Some(Info::Table(_)) => {
+                panic!(
+                    "received a deprecated catalog notification from meta {:?}",
+                    resp
+                );
+            }
+            Some(Info::DatabaseV2(_))
+            | Some(Info::SchemaV2(_))
+            | Some(Info::TableV2(_))
+            | Some(Info::Source(_)) => {
+                self.handle_catalog_v2_notification(resp);
+            }
+            Some(Info::Node(node)) => {
+                self.update_worker_node_manager(resp.operation(), node.clone());
+            }
+            Some(Info::FeSnapshot(_)) => {
+                panic!(
+                    "receiving an FeSnapshot in the middle is unsupported now {:?}",
+                    resp
+                )
+            }
+            Some(Info::HummockSnapshot(hummock_snapshot)) => {
+                self.hummock_snapshot_manager
+                    .update_snapshot_status(hummock_snapshot.epoch)
+                    .await;
+            }
+            None => panic!("receive an unsupported notify {:?}", resp),
+        }
+    }
+
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
-    /// update frontend's data. `start` use `mut self` as parameter.
+    /// update frontend data.
     pub async fn start(mut self) -> Result<JoinHandle<()>> {
         let first_resp = self.rx.next().await?.ok_or_else(|| {
             ErrorCode::InternalError(
@@ -163,19 +181,44 @@ impl ObserverManager {
                     .to_string(),
             )
         })?;
-        self.handle_first_notification(first_resp)?;
+        self.handle_snapshot_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
                 if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
                         tracing::error!("Stream of notification terminated.");
-                        break;
+                        self.re_subscribe().await;
+                        continue;
                     }
-                    self.handle_notification(resp.unwrap());
+                    self.handle_notification(resp.unwrap()).await;
                 }
             }
         });
         Ok(handle)
+    }
+
+    /// `re_subscribe` is used to re-subscribe to the meta's notification.
+    async fn re_subscribe(&mut self) {
+        loop {
+            match self
+                .meta_client
+                .subscribe(&self.addr, WorkerType::Frontend)
+                .await
+            {
+                Ok(rx) => {
+                    tracing::debug!("re-subscribe success");
+                    self.rx = rx;
+                    if let Ok(Some(snapshot_resp)) = self.rx.next().await {
+                        self.handle_snapshot_notification(snapshot_resp)
+                            .expect("handle snapshot notification failed after re-subscribe");
+                        break;
+                    }
+                }
+                Err(_) => {
+                    tokio::time::sleep(RE_SUBSCRIBE_RETRY_INTERVAL).await;
+                }
+            }
+        }
     }
 
     /// `update_worker_node_manager` is called in `start` method.

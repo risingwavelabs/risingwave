@@ -61,6 +61,9 @@ impl Hash for WorkerKey {
     }
 }
 
+/// The id preserved for the meta node. Note that there's no such entry in cluster manager.
+pub const META_NODE_ID: u32 = 0;
+
 /// [`ClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct ClusterManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -184,7 +187,7 @@ where
                 if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.env
                         .notification_manager()
-                        .notify_frontend(Operation::Add, &Info::Node(worker.worker_node))
+                        .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
                         .await;
                 }
 
@@ -219,7 +222,7 @@ where
                 if worker_type == WorkerType::ComputeNode {
                     self.env
                         .notification_manager()
-                        .notify_frontend(Operation::Delete, &Info::Node(worker_node.clone()))
+                        .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()))
                         .await;
                 }
 

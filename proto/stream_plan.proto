@@ -6,14 +6,23 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
+import "data.proto";
 import "expr.proto";
 import "plan.proto";
 
-// Hash mapping for compute node. Stores mapping from virtual key to actor id.
+// Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint32 hash_mapping = 1;
+  repeated uint64 original_indices = 1;
+  repeated uint32 data = 2;
 }
 
+// Hash mapping for compute node. Stores mapping from virtual node to parallel unit id.
+message ParallelUnitMapping {
+  repeated uint64 original_indices = 1;
+  repeated uint32 data = 2;
+}
+
+// todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
     TABLE = 0;
@@ -22,6 +31,15 @@ message SourceNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
+  // split allocation information,
+  // and in the future will distinguish between `StreamSource` and `TableSource`
+  // so that there is no need to put many fields that are not common into the same SourceNode structure
+  StreamSourceState stream_source_state = 4;
+}
+
+message StreamSourceState {
+  string split_type = 1;
+  repeated bytes stream_source_splits = 2;
 }
 
 message ProjectNode {
@@ -35,6 +53,9 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
+// The node will be used for both create mv and create index. When creating mv,
+// `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
+// arrange columns and pk columns, while distribution keys will be arrange columns.
 message MaterializeNode {
   plan.TableRefId table_ref_id = 1;
   plan.TableRefId associated_table_ref_id = 2;
@@ -42,6 +63,7 @@ message MaterializeNode {
   repeated plan.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
+  // Hash keys of the materialize node, which is a subset of pk.
   repeated int32 distribution_keys = 5;
 }
 
@@ -71,19 +93,29 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated int32 distribution_keys = 5;
+  // Whether to use delta join for this hash join node.
+  // TODO: remove this in the future when we have a separate DeltaHashJoin node.
+  bool is_delta_join = 6;
+  // Used for internal table states.
+  plan.TableRefId left_table_ref_id = 7;
+  plan.TableRefId right_table_ref_id = 8;
+}
+
+message HopWindowNode {
+  expr.InputRefExpr time_col = 1;
+  data.IntervalUnit window_slide = 2;
+  data.IntervalUnit window_size = 3;
 }
 
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
-  // The schema of input columns.
+  // The schema of input columns. TODO: remove this field.
   repeated plan.Field fields = 2;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
 // and maybe `DispatcherNode` later.
 message ExchangeNode {
-  // The schema of input columns.
-  repeated plan.Field fields = 1;
   DispatchStrategy strategy = 2;
 }
 
@@ -96,6 +128,11 @@ message ChainNode {
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan.Field upstream_fields = 2;
   repeated int32 column_ids = 3;
+  // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
+  // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
+  // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
+  // This option is used to disable barrier rearrangement.
+  bool disable_rearrange = 4;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -105,7 +142,43 @@ message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
+  // TODO: make hash_mapping more compact. (e.g. store ranges)
+  ParallelUnitMapping hash_mapping = 4;
+  uint32 parallel_unit_id = 5;
 }
+
+// Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
+// produce a special Materialize executor, which materializes data for downstream to query.
+message ArrangeNode {
+  // The keys used to group the rows, aka. arrange key.
+  repeated int32 arrange_key_indexes = 1;
+}
+
+// Special node for shared state. LookupNode will join an arrangement with a stream.
+message LookupNode {
+  // Join keys of the arrangement side
+  repeated int32 arrange_key = 1;
+  // Join keys of the stream side
+  repeated int32 stream_key = 2;
+  // Whether to join the current epoch of arrangement
+  bool use_current_epoch = 3;
+  // Sometimes we need to re-order the output data to meet the requirement of schema.
+  // By default, lookup executor will produce `<arrangement side, stream side>`. We
+  // will then apply the column mapping to the combined result.
+  repeated int32 column_mapping = 4;
+  // The fragment id of upstream arrangement
+  // TODO: record arrangements in catalog and use table_id
+  uint32 arrange_fragment_id = 5;
+  // Temporarily used when generating fragments on meta node. When generating lookup
+  // fragments, the global fragment id of upstream arrange won't be available. Therefore,
+  // we record local id here, and rewrite it into global id when sealing fragments.
+  uint32 arrange_local_fragment_id = 6;
+  // The operator id of upstream arrangement
+  uint64 arrange_operator_id = 7;
+}
+
+// Special node for shared state. Merge and align barrier from upstreams.
+message UnionNode {}
 
 message StreamNode {
   oneof node {
@@ -119,24 +192,40 @@ message StreamNode {
     TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
     TopNNode top_n_node = 12;
+    HopWindowNode hop_window_node = 23;
     MergeNode merge_node = 13;
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;
     BatchPlanNode batch_plan_node = 17;
+    LookupNode lookup_node = 20;
+    ArrangeNode arrange_node = 21;
+    UnionNode union_node = 22;
   }
   // The id for the operator.
   uint64 operator_id = 1;
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
+  bool append_only = 24;
   string identity = 18;
+  // The schema of the plan node
+  repeated plan.Field fields = 19;
 }
 
 enum DispatcherType {
   INVALID = 0;
+  // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
+  // Broadcast to all downstreams.
+  // TODO: we don't need this as we now support multi-dispatcher per actor.
   BROADCAST = 2;
+  // Only one downstream.
+  // TODO: seems that same as broadcast dispatch (with only one downstream actor).
   SIMPLE = 3;
+  // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
+  // piped into the downstream actor, if there are the same number of actors. If number of actors
+  // are not the same, should use hash instead. Should be only used when distribution is the same.
+  NO_SHUFFLE = 4;
 }
 
 message DispatchStrategy {
@@ -166,4 +255,6 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
+  // Placement rule for actor, need to stay on the same node as upstream.
+  bool same_worker_node_as_upstream = 7;
 }

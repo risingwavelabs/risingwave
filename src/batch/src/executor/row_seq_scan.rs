@@ -19,7 +19,6 @@ use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
-// use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use super::monitor::BatchMetrics;
@@ -134,12 +133,12 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         }
 
         let iter = self.iter.as_mut().expect("executor not open");
-        let result = iter
+        let chunk = iter
             .collect_data_chunk(&self.table, Some(self.chunk_size))
-            .await;
+            .await?;
         timer.observe_duration();
 
-        result
+        Ok(chunk)
     }
 
     async fn close(&mut self) -> Result<()> {

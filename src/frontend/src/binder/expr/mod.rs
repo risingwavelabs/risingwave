@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::zip_eq;
+use itertools::{zip_eq, Itertools as _};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{least_restrictive, Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -71,19 +71,14 @@ impl Binder {
             ))),
             Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Cast { expr, data_type } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_cast(*expr, data_type)?,
-            ))),
+            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
-            Expr::TypedString { data_type, value } => Ok(ExprImpl::FunctionCall(Box::new(
-                FunctionCall::new_with_return_type(
-                    ExprType::Cast,
-                    vec![ExprImpl::Literal(Box::new(self.bind_string(value)?))],
-                    bind_data_type(&data_type)?,
-                ),
-            ))),
+            Expr::TypedString { data_type, value } => {
+                let s: ExprImpl = self.bind_string(value)?.into();
+                s.cast_explicit(bind_data_type(&data_type)?)
+            }
             Expr::Between {
                 expr,
                 negated,
@@ -93,29 +88,58 @@ impl Binder {
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
-            _ => Err(
-                ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
-            ),
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => self.bind_in_list(*expr, list, negated),
+            _ => Err(ErrorCode::NotImplemented(
+                format!("unsupported expression {:?}", expr),
+                112.into(),
+            )
+            .into()),
         }
     }
 
     pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
-        Ok(FunctionCall::new_or_else(
+        let arg = self.bind_expr(expr)?;
+        let arg_type = arg.return_type();
+        Ok(FunctionCall::new(
             ExprType::Extract,
-            vec![
-                self.bind_string(field.to_string())?.into(),
-                self.bind_expr(expr)?,
-            ],
-            |inputs| {
-                ErrorCode::NotImplementedError(format!(
+            vec![self.bind_string(field.to_string())?.into(), arg],
+        )
+        .map_err(|_| {
+            ErrorCode::NotImplemented(
+                format!(
                     "function extract({} from {:?}) doesn't exist",
-                    field,
-                    inputs[1].return_type()
-                ))
-                .into()
-            },
-        )?
+                    field, arg_type
+                ),
+                112.into(),
+            )
+        })?
         .into())
+    }
+
+    pub(super) fn bind_in_list(
+        &mut self,
+        expr: Expr,
+        list: Vec<Expr>,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let mut bound_expr_list = vec![self.bind_expr(expr)?];
+        for elem in list {
+            bound_expr_list.push(self.bind_expr(elem)?);
+        }
+        align_types(bound_expr_list.iter_mut())?;
+        let in_expr = FunctionCall::new_unchecked(ExprType::In, bound_expr_list, DataType::Boolean);
+        if negated {
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
+                    .into(),
+            )
+        } else {
+            Ok(in_expr.into())
+        }
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
@@ -126,24 +150,15 @@ impl Binder {
                 return self.rewrite_positive(expr);
             }
             _ => {
-                return Err(ErrorCode::NotImplementedError(format!(
-                    "unsupported unary expression: {:?}",
-                    op
-                ))
+                return Err(ErrorCode::NotImplemented(
+                    format!("unsupported unary expression: {:?}", op),
+                    112.into(),
+                )
                 .into())
             }
         };
         let expr = self.bind_expr(expr)?;
-        let return_type = expr.return_type();
-        FunctionCall::new(func_type, vec![expr])
-            .ok_or_else(|| {
-                ErrorCode::NotImplementedError(format!(
-                    "unsupported unary expression {:?} {:?}",
-                    op, return_type
-                ))
-                .into()
-            })
-            .map(|f| f.into())
+        FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
     }
 
     /// Directly returns the expression itself if it is a positive number.
@@ -174,11 +189,7 @@ impl Binder {
             }
             None => ExprType::Trim,
         };
-        Ok(FunctionCall::new_with_return_type(
-            func_type,
-            inputs,
-            DataType::Varchar,
-        ))
+        FunctionCall::new(func_type, inputs)
     }
 
     /// Bind `expr (not) between low and high`
@@ -195,41 +206,22 @@ impl Binder {
 
         let func_call = if negated {
             // negated = true: expr < low or expr > high
-            FunctionCall::new_with_return_type(
+            FunctionCall::new_unchecked(
                 ExprType::Or,
                 vec![
-                    FunctionCall::new_with_return_type(
-                        ExprType::LessThan,
-                        vec![expr.clone(), low],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new_with_return_type(
-                        ExprType::GreaterThan,
-                        vec![expr, high],
-                        DataType::Boolean,
-                    )
-                    .into(),
+                    FunctionCall::new(ExprType::LessThan, vec![expr.clone(), low])?.into(),
+                    FunctionCall::new(ExprType::GreaterThan, vec![expr, high])?.into(),
                 ],
                 DataType::Boolean,
             )
         } else {
             // negated = false: expr >= low and expr <= high
-            FunctionCall::new_with_return_type(
+            FunctionCall::new_unchecked(
                 ExprType::And,
                 vec![
-                    FunctionCall::new_with_return_type(
-                        ExprType::GreaterThanOrEqual,
-                        vec![expr.clone(), low],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new_with_return_type(
-                        ExprType::LessThanOrEqual,
-                        vec![expr, high],
-                        DataType::Boolean,
-                    )
-                    .into(),
+                    FunctionCall::new(ExprType::GreaterThanOrEqual, vec![expr.clone(), low])?
+                        .into(),
+                    FunctionCall::new(ExprType::LessThanOrEqual, vec![expr, high])?.into(),
                 ],
                 DataType::Boolean,
             )
@@ -246,19 +238,14 @@ impl Binder {
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
         let mut inputs = Vec::new();
-        let results_expr: Vec<ExprImpl> = results
+        let mut results_expr: Vec<ExprImpl> = results
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .collect::<Result<_>>()?;
-        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
-        let mut return_type = results_expr.get(0).unwrap().return_type();
-        for i in 1..results_expr.len() {
-            return_type =
-                Self::find_compat(return_type, results_expr.get(i).unwrap().return_type())?;
-        }
-        if let Some(expr) = &else_result_expr {
-            return_type = Binder::find_compat(return_type, expr.return_type())?;
-        }
+        let mut else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
+
+        let return_type = align_types(results_expr.iter_mut().chain(else_result_expr.iter_mut()))?;
+
         for (condition, result) in zip_eq(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
@@ -269,12 +256,12 @@ impl Binder {
                 None => condition,
             };
             inputs.push(self.bind_expr(condition)?);
-            inputs.push(result.ensure_type(return_type.clone()));
+            inputs.push(result);
         }
         if let Some(expr) = else_result_expr {
-            inputs.push(expr.ensure_type(return_type.clone()));
+            inputs.push(expr);
         }
-        Ok(FunctionCall::new_with_return_type(
+        Ok(FunctionCall::new_unchecked(
             ExprType::Case,
             inputs,
             return_type,
@@ -288,15 +275,11 @@ impl Binder {
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
         FunctionCall::new(func_type, vec![expr])
-            .ok_or_else(|| ErrorCode::NotImplementedError(format!("{:?}", &func_type)).into())
     }
 
-    pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
-        Ok(FunctionCall::new_with_return_type(
-            ExprType::Cast,
-            vec![self.bind_expr(expr)?],
-            bind_data_type(&data_type)?,
-        ))
+    pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
+        self.bind_expr(expr)?
+            .cast_explicit(bind_data_type(&data_type)?)
     }
 }
 
@@ -309,7 +292,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Char(_) => DataType::Char,
         AstDataType::Varchar(_) => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
@@ -319,13 +301,46 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
         },
+        AstDataType::Char(..) => {
+            return Err(ErrorCode::NotImplemented(
+                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
+                None.into(),
+            )
+            .into())
+        }
         _ => {
-            return Err(ErrorCode::NotImplementedError(format!(
-                "unsupported data type: {:?}",
-                data_type
-            ))
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported data type: {:?}", data_type),
+                None.into(),
+            )
             .into())
         }
     };
     Ok(data_type)
+}
+
+/// Find the `least_restrictive` type over a list of `exprs`, and add implicit cast when necessary.
+/// Used by `VALUES`, `CASE`, `UNION`, etc. See [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
+pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<DataType> {
+    use std::mem::swap;
+
+    let exprs = exprs.collect_vec();
+    // Essentially a filter_map followed by a try_reduce, which is unstable.
+    let mut ret_type = None;
+    for e in &exprs {
+        if e.is_null() {
+            continue;
+        }
+        ret_type = match ret_type {
+            None => Some(e.return_type()),
+            Some(t) => Some(least_restrictive(t, e.return_type())?),
+        };
+    }
+    let ret_type = ret_type.unwrap_or(DataType::Varchar);
+    for e in exprs {
+        let mut dummy = ExprImpl::literal_bool(false);
+        swap(&mut dummy, e);
+        *e = dummy.cast_implicit(ret_type.clone())?;
+    }
+    Ok(ret_type)
 }

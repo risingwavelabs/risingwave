@@ -30,7 +30,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Distribution, Order};
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -77,10 +77,12 @@ impl StreamMaterialize {
             .iter()
             .map(|field| match is_row_id_column_name(&field.name) {
                 true => {
-                    let field = Field {
-                        data_type: field.data_type.clone(),
-                        name: gen_row_id_column_name(row_id_count),
-                    };
+                    let field = Field::with_struct(
+                        field.data_type.clone(),
+                        gen_row_id_column_name(row_id_count),
+                        field.sub_fields.clone(),
+                        field.type_name.clone(),
+                    );
                     row_id_count += 1;
                     field
                 }
@@ -89,6 +91,7 @@ impl StreamMaterialize {
             .collect();
         Ok(Schema { fields })
     }
+
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();
@@ -96,32 +99,45 @@ impl StreamMaterialize {
     }
 
     /// Create a materialize node.
+    ///
+    /// When creating index, `distribute_only_order_by` should be true. We should distribute keys
+    /// using order by columns, instead of pk.
     pub fn create(
         input: PlanRef,
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        distribute_only_order_by: bool,
     ) -> Result<Self> {
+        // ensure the same pk will not shuffle to different node
+        let input = match input.distribution() {
+            Distribution::Single => input,
+            _ => Distribution::HashShard(if distribute_only_order_by {
+                user_order_by.field_order.iter().map(|x| x.index).collect()
+            } else {
+                input.pk_indices().to_vec()
+            })
+            .enforce_if_not_satisfies(input, Order::any()),
+        };
+
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
-        let columns = schema
+        let mut columns = schema
             .fields()
             .iter()
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: field.data_type.clone(),
-                    column_id: (i as i32).into(),
-                    name: field.name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                },
+                column_desc: ColumnDesc::from_field_without_column_id(field),
                 is_hidden: !user_cols.contains(i),
             })
             .collect_vec();
+
+        // Since the `field.into()` only generate same ColumnId,
+        // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
+        ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());
         let mut pk_desc = vec![];

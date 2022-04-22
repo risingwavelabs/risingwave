@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::string::String;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -57,7 +58,7 @@ impl LogicalProject {
         }
     }
 
-    /// get the Mapping of columnIndex from input column index to out column index
+    /// get the Mapping of columnIndex from output column index to input column index
     fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
         let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
@@ -137,14 +138,16 @@ impl LogicalProject {
             .zip_eq(expr_alias.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
-                let name = alias.clone().unwrap_or(match o2i.try_map(id) {
-                    Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
-                    None => format!("expr#{}", id),
-                });
-                Field {
-                    name,
-                    data_type: expr.return_type(),
-                }
+                // Get field info from o2i.
+                let (default_name, sub_fields, type_name) = match o2i.try_map(id) {
+                    Some(input_idx) => {
+                        let field = input_schema.fields()[input_idx].clone();
+                        (field.name, field.sub_fields, field.type_name)
+                    }
+                    None => (format!("expr#{}", id), vec![], String::new()),
+                };
+                let name = alias.clone().unwrap_or(default_name);
+                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
             .collect();
         Schema { fields }
@@ -158,6 +161,7 @@ impl LogicalProject {
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
     }
+
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.exprs
     }
@@ -194,15 +198,21 @@ impl LogicalProject {
                     matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
                 })
     }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>, PlanRef) {
+        (self.exprs, self.expr_alias, self.input)
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
     }
+
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -344,18 +354,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],
@@ -393,10 +394,10 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        match project.exprs()[1].clone() {
-            ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
-            _ => panic!("Expected function call"),
-        }
+
+        let expr = project.exprs()[1].clone();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
 
         let values = project.input();
         let values = values.as_logical_values().unwrap();

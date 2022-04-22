@@ -41,15 +41,15 @@ pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
 /// In [], the parameters are for constructing new expression
 /// * $l: left expression
 /// * $r: right expression
-/// * ret: return array type
+/// * $ret: return array type
 /// In ()*, the parameters are for generating match cases
 /// * $i1: left array type
 /// * $i2: right array type
-/// * $cast: The cast type in that the operation will calculate
+/// * $rt: The return type in that the operation will calculate
 /// * $The scalar function for expression, it's a generic function and specialized by the type of
-///   `$i1, $i2, $cast`
+///   `$i1, $i2, $rt`
 macro_rules! gen_atm_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident },)*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $rt:ident, $func:ident },)*) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
@@ -57,13 +57,13 @@ macro_rules! gen_atm_impl {
                         BinaryExpression::<
                             $i1! { type_array },
                             $i2! { type_array },
-                            $cast! { type_array },
+                            $rt! { type_array },
                             _
                         >::new(
                             $l,
                             $r,
                             $ret,
-                            $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
+                            $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$rt! { type_array } as Array>::OwnedItem>,
                         )
                     )
                 },
@@ -124,16 +124,6 @@ macro_rules! gen_binary_expr_cmp {
                     $l, $r, $ret, $str_f,
                 ))
             }
-            (DataType::Varchar, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
-            (DataType::Char, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
             _ => {
                 $macro! {
                     [$l, $r, $ret],
@@ -188,66 +178,60 @@ macro_rules! gen_binary_expr_cmp {
 ///  `atm` means arithmetic here.
 /// They are differentiate cuz one type may not support atm and cmp at the same time. For example,
 /// Varchar can support compare but not arithmetic.
-/// * `general_f`: generic atm function (require a common ``TryInto`` type for two input)
-/// * `interval_date_f`: atm function between interval and date
-/// * `interval_date_f`: atm function between date and interval
+/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
 macro_rules! gen_binary_expr_atm {
     (
         $macro:ident,
         $l:expr,
         $r:expr,
         $ret:expr,
+        $general_f:ident,
         {
-            $(General => $general_f:ident,)?
-            $((Timestamp, Timestamp) => $timestamp_timestamp_f:ident,)?
-            $((Date, Date) => $date_date_f:ident,)?
-            $((Interval, Date) => $interval_date_f:ident,)?
-            $((Date, Interval) => $date_interval_f:ident,)?
-            $((Interval, Interval) => $interval_interval_f:ident,)?
+            $( { $i1:ident, $i2:ident, $rt:ident, $func:ident }, )*
         } $(,)?
     ) => {
         $macro! {
             [$l, $r, $ret],
-            $({ int16, int16, int16, $general_f },)?
-            $({ int16, int32, int32, $general_f },)?
-            $({ int16, int64, int64, $general_f },)?
-            $({ int16, float32, float64, $general_f },)?
-            $({ int16, float64, float64, $general_f },)?
-            $({ int32, int16, int32, $general_f },)?
-            $({ int32, int32, int32, $general_f },)?
-            $({ int32, int64, int64, $general_f },)?
-            $({ int32, float32, float64, $general_f },)?
-            $({ int32, float64, float64, $general_f },)?
-            $({ int64, int16,int64, $general_f },)?
-            $({ int64, int32,int64, $general_f },)?
-            $({ int64, int64, int64, $general_f },)?
-            $({ int64, float32, float64 , $general_f},)?
-            $({ int64, float64, float64, $general_f },)?
-            $({ float32, int16, float64, $general_f },)?
-            $({ float32, int32, float64, $general_f },)?
-            $({ float32, int64, float64 , $general_f},)?
-            $({ float32, float32, float32, $general_f },)?
-            $({ float32, float64, float64, $general_f },)?
-            $({ float64, int16, float64, $general_f },)?
-            $({ float64, int32, float64, $general_f },)?
-            $({ float64, int64, float64, $general_f },)?
-            $({ float64, float32, float64, $general_f },)?
-            $({ float64, float64, float64, $general_f },)?
-            $({ decimal, int16, decimal, $general_f },)?
-            $({ decimal, int32, decimal, $general_f },)?
-            $({ decimal, int64, decimal, $general_f },)?
-            $({ decimal, float32, decimal, $general_f },)?
-            $({ decimal, float64, decimal, $general_f },)?
-            $({ int16, decimal, decimal, $general_f },)?
-            $({ int32, decimal, decimal, $general_f },)?
-            $({ int64, decimal, decimal, $general_f },)?
-            $({ decimal, decimal, decimal, $general_f },)?
-            $({ float32, decimal, float64, $general_f },)?
-            $({ float64, decimal, float64, $general_f },)?
-            $({ timestamp, timestamp, interval, $timestamp_timestamp_f },)?
-            $({ date, date, int32, $date_date_f },)?
-            $({ date, interval, timestamp, $date_interval_f },)?
-            $({ interval, date, timestamp, $interval_date_f },)?
+            { int16, int16, int16, $general_f },
+            { int16, int32, int32, $general_f },
+            { int16, int64, int64, $general_f },
+            { int16, float32, float64, $general_f },
+            { int16, float64, float64, $general_f },
+            { int32, int16, int32, $general_f },
+            { int32, int32, int32, $general_f },
+            { int32, int64, int64, $general_f },
+            { int32, float32, float64, $general_f },
+            { int32, float64, float64, $general_f },
+            { int64, int16,int64, $general_f },
+            { int64, int32,int64, $general_f },
+            { int64, int64, int64, $general_f },
+            { int64, float32, float64 , $general_f},
+            { int64, float64, float64, $general_f },
+            { float32, int16, float64, $general_f },
+            { float32, int32, float64, $general_f },
+            { float32, int64, float64 , $general_f},
+            { float32, float32, float32, $general_f },
+            { float32, float64, float64, $general_f },
+            { float64, int16, float64, $general_f },
+            { float64, int32, float64, $general_f },
+            { float64, int64, float64, $general_f },
+            { float64, float32, float64, $general_f },
+            { float64, float64, float64, $general_f },
+            { decimal, int16, decimal, $general_f },
+            { decimal, int32, decimal, $general_f },
+            { decimal, int64, decimal, $general_f },
+            { decimal, float32, decimal, $general_f },
+            { decimal, float64, decimal, $general_f },
+            { int16, decimal, decimal, $general_f },
+            { int32, decimal, decimal, $general_f },
+            { int64, decimal, decimal, $general_f },
+            { decimal, decimal, decimal, $general_f },
+            { float32, decimal, float64, $general_f },
+            { float64, decimal, float64, $general_f },
+            $(
+                { $i1, $i2, $rt, $func },
+            )*
         }
     };
 }
@@ -305,11 +289,13 @@ pub fn new_binary_expr(
             gen_binary_expr_atm! {
                 gen_atm_impl,
                 l, r, ret,
+                general_add,
                 {
-                    General => general_add,
-                    (Interval, Date) => interval_date_add,
-                    (Date, Interval) => date_interval_add,
-                    (Interval, Interval) => general_add,
+                    { timestamp, interval, timestamp, timestamp_interval_add },
+                    { interval, timestamp, timestamp, interval_timestamp_add },
+                    { interval, date, timestamp, interval_date_add },
+                    { date, interval, timestamp, date_interval_add },
+                    { interval, interval, interval, general_add },
                 },
             }
         }
@@ -317,12 +303,13 @@ pub fn new_binary_expr(
             gen_binary_expr_atm! {
                 gen_atm_impl,
                 l, r, ret,
+                general_sub,
                 {
-                    General => general_sub,
-                    (Timestamp, Timestamp) => timestamp_timestamp_sub,
-                    (Date, Date) => date_date_sub,
-                    (Date, Interval) => date_interval_sub,
-                    (Interval, Interval) => general_sub,
+                    { timestamp, timestamp, interval, timestamp_timestamp_sub },
+                    { timestamp, interval, timestamp, timestamp_interval_sub },
+                    { date, date, int32, date_date_sub },
+                    { date, interval, timestamp, date_interval_sub },
+                    { interval, interval, interval, general_sub },
                 },
             }
         }
@@ -330,8 +317,14 @@ pub fn new_binary_expr(
             gen_binary_expr_atm! {
                 gen_atm_impl,
                 l, r, ret,
+                general_mul,
                 {
-                    General => general_mul,
+                    { interval, int16, interval, interval_int_mul },
+                    { interval, int32, interval, interval_int_mul },
+                    { interval, int64, interval, interval_int_mul },
+                    { int16, interval, interval, int_interval_mul },
+                    { int32, interval, interval, int_interval_mul },
+                    { int64, interval, interval, int_interval_mul },
                 },
             }
         }
@@ -339,8 +332,8 @@ pub fn new_binary_expr(
             gen_binary_expr_atm! {
                 gen_atm_impl,
                 l, r, ret,
+                general_div,
                 {
-                    General => general_div,
                 },
             }
         }
@@ -348,8 +341,8 @@ pub fn new_binary_expr(
             gen_binary_expr_atm! {
                 gen_atm_impl,
                 l, r, ret,
+                general_mod,
                 {
-                    General => general_mod,
                 },
             }
         }
@@ -384,7 +377,7 @@ fn new_tumble_start(
         DataType::Date => Box::new(BinaryExpression::<
             NaiveDateArray,
             IntervalArray,
-            NaiveDateArray,
+            NaiveDateTimeArray,
             _,
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date

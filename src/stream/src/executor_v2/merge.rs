@@ -17,6 +17,7 @@ use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use futures_async_stream::{for_await, try_stream};
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
@@ -24,9 +25,9 @@ use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 use tracing_futures::Instrument;
 
-use super::{Barrier, Executor, Message, PkIndicesRef};
-use crate::executor::{Mutation, PkIndices};
-use crate::executor_v2::error::TracedStreamExecutorError;
+use super::error::StreamExecutorError;
+use super::{Executor, Message, PkIndicesRef};
+use crate::executor::PkIndices;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::UpDownActorIds;
 
@@ -80,36 +81,13 @@ impl RemoteInput {
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
-    /// Number of inputs
-    num_inputs: usize,
-
-    /// Active channels
-    active: Vec<Receiver<Message>>,
-
-    /// Count of terminated channels
-    terminated: usize,
-
-    /// Channels that blocked by barriers are parked here. Would be put back
-    /// until all barriers reached
-    blocked: Vec<Receiver<Message>>,
-
-    /// Current barrier.
-    next_barrier: Option<Barrier>,
+    /// Upstream channels.
+    upstreams: Vec<Receiver<Message>>,
 
     /// Belonged actor id.
     actor_id: u32,
 
     info: ExecutorInfo,
-}
-
-impl std::fmt::Debug for MergeExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MergeExecutor")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
-            .field("num_inputs", &self.num_inputs)
-            .finish()
-    }
 }
 
 impl MergeExecutor {
@@ -120,11 +98,7 @@ impl MergeExecutor {
         inputs: Vec<Receiver<Message>>,
     ) -> Self {
         Self {
-            num_inputs: inputs.len(),
-            active: inputs,
-            blocked: vec![],
-            terminated: 0,
-            next_barrier: None,
+            upstreams: inputs,
             actor_id,
             info: ExecutorInfo {
                 schema,
@@ -155,60 +129,71 @@ impl Executor for MergeExecutor {
 }
 
 impl MergeExecutor {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
-    async fn execute_inner(mut self) {
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(self) {
+        let mut upstreams = self.upstreams;
+
         loop {
-            // Convert channel receivers to futures here to do `select_all`
-            // TODO: Get rid of future array and rewirte it as more async stream-based.
-            let mut futures = vec![];
-            for ch in self.active.drain(..) {
-                futures.push(ch.into_future());
-            }
-            let ((message, from), _id, remains) = select_all(futures)
-                .instrument(tracing::trace_span!("idle"))
-                .await;
-            for fut in remains {
-                self.active.push(fut.into_inner().unwrap());
-            }
+            // Futures of all active upstreams.
+            let mut active = upstreams
+                .into_iter()
+                .map(|ch| ch.into_future())
+                .collect_vec();
+            // Channels that're blocked by the barrier to align.
+            let mut blocked = Vec::with_capacity(active.len());
+            // The current barrier to align.
+            let mut current_barrier = None;
 
-            let message = message.expect(
-                "upstream channel closed unexpectedly, please check error in upstream executors",
-            );
+            // 1. Align the barriers.
+            while !active.is_empty() {
+                // Poll upstreams and get a message from the ready one.
+                let ((message, from), _id, remainings) = select_all(active)
+                    .instrument(tracing::trace_span!("idle"))
+                    .await;
 
-            match message {
-                Message::Chunk(chunk) => {
-                    self.active.push(from);
-                    yield Message::Chunk(chunk);
-                }
-                Message::Barrier(barrier) => {
-                    if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
-                        if actors.contains(&self.actor_id) {
-                            self.terminated += 1;
+                // Panic on channel close.
+                let message = message.expect(
+                    "upstream channel closed unexpectedly, please check error in upstream executors"
+                );
+                // Put back the remainings.
+                active = remainings;
+
+                match message {
+                    Message::Chunk(_) => {
+                        // We may still receive message from this channel.
+                        active.push(from.into_future());
+                        yield message;
+                    }
+                    Message::Barrier(barrier) => {
+                        // Align the barrier.
+                        if let Some(current_barrier) = current_barrier.as_ref() {
+                            if &barrier != current_barrier {
+                                return Err(StreamExecutorError::align_barrier(
+                                    current_barrier.clone(),
+                                    barrier,
+                                ));
+                            }
+                            assert_eq!(&barrier, current_barrier);
+                        } else {
+                            current_barrier = Some(barrier);
                         }
+                        // We'll not receive message from this channel during this epoch.
+                        blocked.push(from);
                     }
-                    // Move this channel into the `blocked` list
-                    if self.blocked.is_empty() {
-                        assert_eq!(self.next_barrier, None);
-                        self.next_barrier = Some(barrier.clone());
-                    } else {
-                        assert_eq!(self.next_barrier, Some(barrier.clone()));
-                    }
-
-                    self.blocked.push(from);
                 }
             }
 
-            if self.terminated == self.num_inputs {
-                yield Message::Barrier(self.next_barrier.take().unwrap());
+            // 2. Yield the barrier to downstream once all barriers collected from upstream.
+            let barrier = current_barrier.unwrap();
+            let to_stop = barrier.is_to_stop_actor(self.actor_id);
+            yield Message::Barrier(barrier);
+
+            // 3. Put back the upstreams, or close the stream.
+            if to_stop {
+                break;
+            } else {
+                upstreams = blocked;
             }
-            if self.blocked.len() == self.num_inputs {
-                // Emit the barrier to downstream once all barriers collected from upstream
-                assert!(self.active.is_empty());
-                self.active = std::mem::take(&mut self.blocked);
-                let barrier = self.next_barrier.take().unwrap();
-                yield Message::Barrier(barrier);
-            }
-            assert!(!self.active.is_empty())
         }
     }
 }
@@ -238,9 +223,9 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::executor::Executor;
+    use crate::executor::{Barrier, ExecutorV1, Mutation};
     use crate::executor_v2::merge::RemoteInput;
-    use crate::executor_v2::Executor as ExecutorV2;
+    use crate::executor_v2::Executor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -285,7 +270,7 @@ mod tests {
             handles.push(handle);
         }
 
-        let mut merger = Box::new(merger).v1();
+        let mut merger = merger.boxed().v1();
         for epoch in epochs {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {

@@ -59,6 +59,7 @@ impl PlanTreeNodeUnary for StreamProject {
     fn input(&self) -> PlanRef {
         self.logical.input()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.logical.clone_with_input(input))
     }
@@ -68,7 +69,12 @@ impl_plan_tree_node_for_unary! {StreamProject}
 impl ToStreamProst for StreamProject {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         ProstStreamNode::ProjectNode(ProjectNode {
-            select_list: self.logical.exprs().iter().map(Expr::to_protobuf).collect(),
+            select_list: self
+                .logical
+                .exprs()
+                .iter()
+                .map(Expr::to_expr_proto)
+                .collect(),
         })
     }
 }

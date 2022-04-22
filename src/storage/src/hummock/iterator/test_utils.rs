@@ -17,14 +17,19 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use futures::executor::block_on;
+use itertools::Itertools;
+use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use sstable_store::{SstableStore, SstableStoreRef};
 
-use crate::hummock::key::{key_with_epoch, Epoch};
+use crate::hummock::iterator::BoxedForwardHummockIterator;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::test_utils::gen_test_sstable;
-use crate::hummock::{sstable_store, HummockValue, SSTableBuilderOptions, Sstable};
+use crate::hummock::test_utils::{gen_test_sstable, gen_test_sstable_inner};
+use crate::hummock::{
+    sstable_store, CachePolicy, HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable,
+};
 use crate::monitor::StateStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreRef};
+use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -41,7 +46,7 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let object_store = Arc::new(InMemObjectStore::new());
+    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     mock_sstable_store_with_object_store(object_store)
 }
 
@@ -95,6 +100,28 @@ pub async fn gen_iterator_test_sstable_base(
     .await
 }
 
+pub async fn gen_iterator_test_sstable_base_without_buf(
+    sst_id: u64,
+    opts: SSTableBuilderOptions,
+    idx_mapping: impl Fn(usize) -> usize,
+    sstable_store: SstableStoreRef,
+    total: usize,
+) -> Sstable {
+    gen_test_sstable_inner(
+        opts,
+        sst_id,
+        (0..total).map(|i| {
+            (
+                iterator_test_key_of(idx_mapping(i)),
+                HummockValue::put(iterator_test_value_of(idx_mapping(i))),
+            )
+        }),
+        sstable_store,
+        CachePolicy::NotFill,
+    )
+    .await
+}
+
 // key=[idx, epoch], value
 pub async fn gen_iterator_test_sstable_from_kv_pair(
     sst_id: u64,
@@ -110,4 +137,24 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
         sstable_store,
     )
     .await
+}
+
+pub fn gen_merge_iterator_interleave_test_sstable_iters(
+    key_count: usize,
+    count: usize,
+) -> Vec<BoxedForwardHummockIterator> {
+    let sstable_store = mock_sstable_store();
+    (0..count)
+        .map(|i: usize| {
+            let table = block_on(gen_iterator_test_sstable_base(
+                i as u64,
+                default_builder_opt_for_test(),
+                |x| x * count + i,
+                sstable_store.clone(),
+                key_count,
+            ));
+            Box::new(SSTableIterator::new(Arc::new(table), sstable_store.clone()))
+                as BoxedForwardHummockIterator
+        })
+        .collect_vec()
 }

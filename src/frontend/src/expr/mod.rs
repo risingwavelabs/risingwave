@@ -12,35 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
+use paste::paste;
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
-
-use crate::binder::BoundSetExpr;
-mod input_ref;
-pub use input_ref::*;
-mod correlated_input_ref;
-pub use correlated_input_ref::*;
-mod literal;
-pub use literal::*;
-mod function_call;
-pub use function_call::*;
-mod agg_call;
-pub use agg_call::*;
-mod subquery;
-pub use subquery::*;
-mod type_inference;
 use risingwave_pb::expr::ExprNode;
-pub use type_inference::*;
-mod utils;
-pub use utils::*;
+
+mod agg_call;
+mod correlated_input_ref;
+mod function_call;
+mod input_ref;
+mod literal;
+mod subquery;
+
 mod expr_rewriter;
-pub use expr_rewriter::*;
 mod expr_visitor;
-pub use expr_visitor::*;
+mod type_inference;
+mod utils;
+
+pub use agg_call::AggCall;
+pub use correlated_input_ref::CorrelatedInputRef;
+pub use function_call::FunctionCall;
+pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use literal::Literal;
+pub use subquery::{Subquery, SubqueryKind};
+
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
-use paste::paste;
+pub use expr_rewriter::ExprRewriter;
+pub use expr_visitor::ExprVisitor;
+pub use type_inference::{cast_ok, infer_type, least_restrictive, CastContext};
+pub use utils::*;
 
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
@@ -48,10 +52,10 @@ pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
 
     /// Serialize the expression
-    fn to_protobuf(&self) -> ExprNode;
+    fn to_expr_proto(&self) -> ExprNode;
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
@@ -96,43 +100,21 @@ impl ExprImpl {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
     }
 
-    /// Check if cast needs to be inserted.
-    /// TODO: check castiblility with context.
-    pub fn ensure_type(self, ty: DataType) -> ExprImpl {
-        if self.is_null() {
-            ExprImpl::Literal(Box::new(Literal::new(None, ty)))
-        } else if ty == self.return_type() {
-            self
-        } else {
-            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                ExprType::Cast,
-                vec![self],
-                ty,
-            )))
-        }
+    /// Shorthand to create cast expr to `target` type in implicit context.
+    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Implicit)
+    }
+
+    /// Shorthand to create cast expr to `target` type in assign context.
+    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Assign)
+    }
+
+    /// Shorthand to create cast expr to `target` type in explicit context.
+    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 }
-
-/// Implement downcast functions, e.g., `as_subquery(self) -> Option<Subquery>`
-macro_rules! impl_as_variant {
-    ( $($variant:ident),* ) => {
-        paste! {
-            impl ExprImpl {
-                $(
-                    pub fn [<as_ $variant:snake>](self) -> Option<$variant> {
-                        if let ExprImpl::$variant(expr) = self {
-                            Some(*expr)
-                        } else {
-                            None
-                        }
-                    }
-                )*
-            }
-        }
-    };
-}
-
-impl_as_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, CorrelatedInputRef}
 
 /// Implement helper functions which recursively checks whether an variant is included in the
 /// expression. e.g., `has_subquery(&self) -> bool`
@@ -181,6 +163,8 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) {
+                use crate::binder::BoundSetExpr;
+
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => select
                         .select_items
@@ -211,14 +195,14 @@ impl Expr for ExprImpl {
         }
     }
 
-    fn to_protobuf(&self) -> ExprNode {
+    fn to_expr_proto(&self) -> ExprNode {
         match self {
-            ExprImpl::InputRef(e) => e.to_protobuf(),
-            ExprImpl::Literal(e) => e.to_protobuf(),
-            ExprImpl::FunctionCall(e) => e.to_protobuf(),
-            ExprImpl::AggCall(e) => e.to_protobuf(),
-            ExprImpl::Subquery(e) => e.to_protobuf(),
-            ExprImpl::CorrelatedInputRef(e) => e.to_protobuf(),
+            ExprImpl::InputRef(e) => e.to_expr_proto(),
+            ExprImpl::Literal(e) => e.to_expr_proto(),
+            ExprImpl::FunctionCall(e) => e.to_expr_proto(),
+            ExprImpl::AggCall(e) => e.to_expr_proto(),
+            ExprImpl::Subquery(e) => e.to_expr_proto(),
+            ExprImpl::CorrelatedInputRef(e) => e.to_expr_proto(),
         }
     }
 }
@@ -256,6 +240,16 @@ impl From<Subquery> for ExprImpl {
 impl From<CorrelatedInputRef> for ExprImpl {
     fn from(correlated_input_ref: CorrelatedInputRef) -> Self {
         ExprImpl::CorrelatedInputRef(Box::new(correlated_input_ref))
+    }
+}
+
+impl From<Condition> for ExprImpl {
+    fn from(c: Condition) -> Self {
+        merge_expr_by_binary(
+            c.conjunctions.into_iter(),
+            ExprType::And,
+            ExprImpl::literal_bool(true),
+        )
     }
 }
 
@@ -300,6 +294,8 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+
+use crate::utils::Condition;
 
 #[cfg(test)]
 mod tests {

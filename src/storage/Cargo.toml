@@ -1,18 +1,18 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.9", default-features = false }
-aws-sdk-s3 = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.39"
-aws-smithy-types = "0.39"
-aws-types = { version = "0.9", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.10", default-features = false }
+aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.40"
+aws-smithy-types = "0.40"
+aws-types = { version = "0.10", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -20,11 +20,14 @@ crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
+enum-as-inner = "0.4"
+fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
+libc = "0.2"
 log = "0.4"
 lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
@@ -37,16 +40,18 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
-    "encryption",
-    "static_libcpp",
-], optional = true }
+# rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
+#     "encryption",
+#     "static_libcpp",
+# ], optional = true }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
+spin = "0.5.2"
 thiserror = "1"
-tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
+# tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
     "fs",
     "rt",
@@ -64,16 +69,30 @@ twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
+procfs = { version = "0.12", default-features = false }
+
 [dev-dependencies]
 criterion = "0.3"
+risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
-rocksdb-local = ["rocksdb"]
-tikv = ["tikv-client"]
+# rocksdb-local = ["rocksdb"]
+# tikv = ["tikv-client"]
+failpoints = ["fail/failpoints"]
 
 [[bench]]
 name = "bench_block_iter"
 harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
+
+[[bench]]
+name = "bench_lru_cache"
+harness = false
+
+[[bench]]
+name = "bench_merge_iter"
+harness = false

@@ -16,7 +16,6 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
 
 use super::StateStore;
 use crate::storage_value::StorageValue;
@@ -34,6 +33,7 @@ impl TikvStateStore {
 
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
@@ -117,7 +117,9 @@ impl TikvStateStoreIter {
 
 impl StateStoreIter for TikvStateStoreIter {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { unimplemented!() }

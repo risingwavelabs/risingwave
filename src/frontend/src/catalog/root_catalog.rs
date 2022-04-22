@@ -14,15 +14,15 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::Result;
-use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{
-    source, Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 
-use super::CatalogError;
+use super::source_catalog::SourceCatalog;
+use super::{CatalogError, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -61,6 +61,11 @@ impl Catalog {
         self.database_by_name.get_mut(name)
     }
 
+    pub fn clear(&mut self) {
+        self.database_by_name.clear();
+        self.db_name_by_id.clear();
+    }
+
     pub fn create_database(&mut self, db: ProstDatabase) {
         let name = db.name.clone();
         let id = db.id;
@@ -84,6 +89,7 @@ impl Catalog {
             .unwrap()
             .create_table(proto);
     }
+
     pub fn create_source(&mut self, proto: ProstSource) {
         self.get_database_mut(proto.database_id)
             .unwrap()
@@ -123,6 +129,14 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
     }
 
+    pub fn get_all_schema_names(&self, db_name: &str) -> Result<Vec<String>> {
+        Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
+    }
+
+    pub fn get_all_database_names(&self) -> Vec<String> {
+        self.database_by_name.keys().cloned().collect_vec()
+    }
+
     pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Result<&SchemaCatalog> {
         self.get_database_by_name(db_name)?
             .get_schema_by_name(schema_name)
@@ -145,7 +159,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         source_name: &str,
-    ) -> Result<&ProstSource> {
+    ) -> Result<&SourceCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
@@ -164,11 +178,11 @@ impl Catalog {
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            match source.info.as_ref().unwrap() {
-                source::Info::TableSource(_) => {
+            match source.source_type {
+                risingwave_pb::stream_plan::source_node::SourceType::Table => {
                     Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
                 }
-                source::Info::StreamSource(_) => {
+                risingwave_pb::stream_plan::source_node::SourceType::Source => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
             }

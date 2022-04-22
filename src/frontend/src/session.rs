@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Formatter;
 use std::marker::Sync;
@@ -36,11 +37,12 @@ use tokio::task::JoinHandle;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::handler::query::IMPLICIT_FLUSH;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
-use crate::scheduler::schedule::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::QueryManager;
+use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
+use crate::scheduler::{HummockSnapshotManager, QueryManager};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -123,7 +125,7 @@ pub struct FrontendEnv {
     meta_client: Arc<dyn FrontendMetaClient>,
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
-    worker_node_manager: Arc<WorkerNodeManager>,
+    worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
 }
 
@@ -142,12 +144,15 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let query_manager = QueryManager::new(worker_node_manager.clone(), false);
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let query_manager =
+            QueryManager::new(worker_node_manager.clone(), hummock_snapshot_manager);
         Self {
+            meta_client,
             catalog_writer,
             catalog_reader,
             worker_node_manager,
-            meta_client: Arc::new(MockFrontendMetaClient {}),
             query_manager,
         }
     }
@@ -167,7 +172,7 @@ impl FrontendEnv {
             .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
-            .register(frontend_address.clone(), WorkerType::Frontend)
+            .register(&frontend_address, WorkerType::Frontend)
             .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
@@ -184,7 +189,14 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-        let query_manager = QueryManager::new(worker_node_manager.clone(), opts.dist_query);
+
+        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
+        let hummock_snapshot_manager =
+            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+        let query_manager = QueryManager::new(
+            worker_node_manager.clone(),
+            hummock_snapshot_manager.clone(),
+        );
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
@@ -192,18 +204,19 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
+            hummock_snapshot_manager,
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
 
-        meta_client.activate(frontend_address.clone()).await?;
+        meta_client.activate(&frontend_address).await?;
 
         Ok((
             Self {
                 catalog_reader,
                 catalog_writer,
                 worker_node_manager,
-                meta_client: Arc::new(FrontendMetaClientImpl(meta_client)),
+                meta_client: frontend_meta_client,
                 query_manager,
             },
             observer_join_handle,
@@ -246,11 +259,33 @@ impl FrontendEnv {
 pub struct SessionImpl {
     env: FrontendEnv,
     database: String,
+    /// Stores the value of configurations.
+    config_map: RwLock<HashMap<String, ConfigEntry>>,
+}
+
+#[derive(Clone)]
+pub struct ConfigEntry {
+    str_val: String,
+}
+
+impl ConfigEntry {
+    pub fn new(str_val: String) -> Self {
+        ConfigEntry { str_val }
+    }
+
+    /// Only used for boolean configurations.
+    pub fn is_set(&self, default: bool) -> bool {
+        self.str_val.parse().unwrap_or(default)
+    }
 }
 
 impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
-        Self { env, database }
+        Self {
+            env,
+            database,
+            config_map: Self::init_config_map(),
+        }
     }
 
     #[cfg(test)]
@@ -258,6 +293,7 @@ impl SessionImpl {
         Self {
             env: FrontendEnv::mock(),
             database: "dev".to_string(),
+            config_map: Self::init_config_map(),
         }
     }
 
@@ -267,6 +303,30 @@ impl SessionImpl {
 
     pub fn database(&self) -> &str {
         &self.database
+    }
+
+    /// Set configuration values in this session.
+    /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
+    pub fn set_config(&self, key: &str, val: &str) {
+        self.config_map
+            .write()
+            .insert(key.to_string(), ConfigEntry::new(val.to_string()));
+    }
+
+    /// Get configuration values in this session.
+    pub fn get_config(&self, key: &str) -> Option<ConfigEntry> {
+        let reader = self.config_map.read();
+        reader.get(key).cloned()
+    }
+
+    fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
+        let mut map = HashMap::new();
+        // FIXME: May need better init way + default config.
+        map.insert(
+            IMPLICIT_FLUSH.to_string(),
+            ConfigEntry::new("false".to_string()),
+        );
+        RwLock::new(map)
     }
 }
 

@@ -54,6 +54,7 @@ impl PlanTreeNodeUnary for BatchLimit {
     fn input(&self) -> PlanRef {
         self.logical.input()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.logical.clone_with_input(input))
     }

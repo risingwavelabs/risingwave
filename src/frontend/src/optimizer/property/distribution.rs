@@ -40,7 +40,7 @@ impl Distribution {
                 Distribution::Broadcast => DistributionMode::Broadcast,
                 Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: Should panic if AnyShard or Any
-                _ => DistributionMode::Hash,
+                _ => DistributionMode::Single,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -52,7 +52,7 @@ impl Distribution {
                     keys: keys.iter().map(|num| *num as u32).collect(),
                 })),
                 // TODO: Should panic if AnyShard or Any
-                Distribution::AnyShard | Distribution::Any => None,
+                _ => None,
             },
         }
     }
@@ -74,6 +74,7 @@ impl Distribution {
             _ => unreachable!(),
         }
     }
+
     // "A -> B" represent A satisfies B
     //                   +---+
     //                   |Any|
@@ -108,9 +109,11 @@ impl Distribution {
             },
         }
     }
+
     pub fn any() -> &'static Self {
         &ANY_DISTRIBUTION
     }
+
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
     }

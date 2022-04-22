@@ -44,6 +44,7 @@ impl BatchManager {
         plan: PlanFragment,
         epoch: u64,
     ) -> Result<()> {
+        trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, env, epoch)?;
         let task_id = task.get_task_id().clone();
 
@@ -62,6 +63,7 @@ impl BatchManager {
 
     pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
+        debug!("Trying to take output of: {:?}", output_id);
         self.tasks
             .lock()
             .get(&task_id)

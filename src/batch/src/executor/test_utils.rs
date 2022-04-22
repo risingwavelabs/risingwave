@@ -15,13 +15,15 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 
 use super::BoxedExecutor;
 use crate::executor::Executor;
+use crate::executor2::{BoxedDataChunkStream, Executor2};
 
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,
@@ -76,6 +78,29 @@ impl Executor for MockExecutor {
 
     fn identity(&self) -> &str {
         &self.identity
+    }
+}
+
+impl Executor2 for MockExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl MockExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        for data_chunk in self.chunks {
+            yield data_chunk;
+        }
     }
 }
 

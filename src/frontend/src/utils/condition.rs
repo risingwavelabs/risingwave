@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
@@ -29,8 +30,8 @@ pub struct Condition {
 }
 
 impl IntoIterator for Condition {
-    type Item = ExprImpl;
     type IntoIter = std::vec::IntoIter<ExprImpl>;
+    type Item = ExprImpl;
 
     fn into_iter(self) -> Self::IntoIter {
         self.conjunctions.into_iter()
@@ -43,18 +44,23 @@ impl fmt::Display for Condition {
         if let Some(expr) = conjunctions.next() {
             write!(f, "{:?}", expr)?;
         }
-        for expr in conjunctions {
-            write!(f, " AND {:?}", expr)?;
+        if self.always_true() {
+            write!(f, "always")?;
+        } else {
+            for expr in conjunctions {
+                write!(f, " AND {:?}", expr)?;
+            }
         }
+
         Ok(())
     }
 }
 
 impl Condition {
     pub fn with_expr(expr: ExprImpl) -> Self {
-        Self {
-            conjunctions: to_conjunctions(expr),
-        }
+        let conjunctions = to_conjunctions(expr);
+
+        Self { conjunctions }.simplify()
     }
 
     pub fn true_cond() -> Self {
@@ -67,62 +73,20 @@ impl Condition {
         self.conjunctions.is_empty()
     }
 
-    pub fn to_expr(self) -> ExprImpl {
-        let mut iter = self.conjunctions.into_iter();
-        if let Some(mut ret) = iter.next() {
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr])
-                    .unwrap()
-                    .into();
-            }
-            ret
-        } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
-        }
-    }
-
-    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
-    // rather than using `AND` to combine them.
-    pub fn as_expr(&self) -> ExprImpl {
-        let mut iter = self.conjunctions.iter();
-        if let Some(e) = iter.next() {
-            let mut ret = e.clone();
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
-                    .unwrap()
-                    .into();
-            }
-            ret
-        } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
-        }
-    }
-
     /// Convert condition to an expression. If always true, return `None`.
     pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
-        let mut iter = self.conjunctions.iter();
-        if let Some(e) = iter.next() {
-            let mut ret = e.clone();
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
-                    .unwrap()
-                    .into();
-            }
-            Some(ret)
-        } else {
+        if self.always_true() {
             None
+        } else {
+            Some(self.clone().into())
         }
     }
 
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
-        ret.conjunctions
-            .reserve(ret.conjunctions.len() + other.conjunctions.len());
-        for expr in other.conjunctions {
-            ret.conjunctions.push(expr);
-        }
-        ret
+        ret.conjunctions.extend(other.conjunctions);
+        ret.simplify()
     }
 
     #[must_use]
@@ -253,14 +217,65 @@ impl Condition {
             .iter()
             .for_each(|expr| visitor.visit_expr(expr))
     }
+
+    /// Simplify conditions
+    /// It simplify conditions by applying constant folding and removing unnecessary conjunctions
+    fn simplify(self) -> Self {
+        // boolean constant folding
+        let conjunctions: Vec<_> = self
+            .conjunctions
+            .into_iter()
+            .map(push_down_not)
+            .map(fold_boolean_constant)
+            .flat_map(to_conjunctions)
+            .collect();
+        let mut res: Vec<ExprImpl> = Vec::new();
+        let mut visited: HashSet<ExprImpl> = HashSet::new();
+        for expr in conjunctions {
+            // factorization_expr requires hash-able ExprImpl
+            if !expr.has_subquery() {
+                let results_of_factorization = factorization_expr(expr);
+                res.extend(
+                    results_of_factorization
+                        .clone()
+                        .into_iter()
+                        .filter(|expr| !visited.contains(expr)),
+                );
+                visited.extend(results_of_factorization);
+            } else {
+                // for subquery, simply give up factorization
+                res.push(expr);
+            }
+        }
+        // remove all constant boolean `true`
+        res.retain(|expr| {
+            if let Some(v) = try_get_bool_constant(expr) && v {
+                false
+            } else {
+                true
+            }
+        });
+        // if there is a `false` in conjunctions, the whole condition will be `false`
+        for expr in &mut res {
+            if let Some(v) = try_get_bool_constant(expr) {
+                if !v {
+                    res.clear();
+                    res.push(ExprImpl::literal_bool(false));
+                    break;
+                }
+            }
+        }
+        Self { conjunctions: res }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use rand::Rng;
+    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::InputRef;
+    use crate::expr::{FunctionCall, InputRef};
 
     #[test]
     fn test_split() {

@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_sqlparser"
-version = "0.1.4"
+version = "0.1.5"
 license = "Apache-2.0"
 include = [
     "src/**/*.rs",
@@ -30,7 +30,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 matches = "0.1"
-risingwave_sqlparser_test_runner = { path = "test_runner" }
 
 [package.metadata.release]
 # Instruct `cargo release` to not run `cargo publish` locally:

@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use either::Either;
@@ -26,23 +27,24 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::state;
+use risingwave_connector::SplitImpl;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_source::connector_source::ConnectorStreamSource;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::executor::{ExecutorBuilder, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
+    /// the future that builds stream_reader. It is required because source should not establish
+    /// connections to the upstream before `next` is called
     /// The reader for stream source
-    pub stream_reader: Box<dyn StreamSourceReader>,
+    pub stream_reader: Option<Box<dyn StreamSourceReader>>,
     /// The reader for barrier
     pub barrier_receiver: UnboundedReceiver<Message>,
 }
@@ -56,6 +58,7 @@ type ReaderStream =
 pub struct SourceExecutor {
     source_id: TableId,
     source_desc: SourceDesc,
+
     column_ids: Vec<ColumnId>,
     schema: Schema,
     pk_indices: PkIndices,
@@ -69,9 +72,7 @@ pub struct SourceExecutor {
     /// Logical Operator Info
     op_info: String,
 
-    /// The reader object. When `next` is called for the first time on `SourceExecutor`, the
-    /// `reader` will be turned into `reader_stream`, and this field will become `None`.
-    reader: Option<SourceReader>,
+    barrier_receiver: Option<UnboundedReceiver<Message>>,
 
     /// Stream object for reader. When `next` is called for the first time on `SourceExecutor`, the
     /// `reader` will be turned into a `futures::Stream`.
@@ -79,18 +80,23 @@ pub struct SourceExecutor {
 
     // monitor
     metrics: Arc<StreamingMetrics>,
+
+    /// Split info for stream source
+    #[allow(dead_code)]
+    stream_source_splits: Vec<SplitImpl>,
+
     source_identify: String,
 }
 
 pub struct SourceExecutorBuilder {}
 
 impl ExecutorBuilder for SourceExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Box<dyn ExecutorV1>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
@@ -100,6 +106,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
+
+        let stream_source_splits = match &node.stream_source_state {
+            Some(splits) => splits
+                .stream_source_splits
+                .iter()
+                .map(|split| SplitImpl::restore_from_bytes(splits.get_split_type().clone(), split))
+                .collect::<anyhow::Result<Vec<SplitImpl>>>()
+                .to_rw_result(),
+            _ => Ok(vec![]),
+        }?;
 
         let column_ids: Vec<_> = node
             .get_column_ids()
@@ -133,6 +149,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.operator_id,
             params.op_info,
             params.executor_stats,
+            stream_source_splits,
         )?))
     }
 }
@@ -142,49 +159,37 @@ impl SourceExecutor {
     pub fn new<S: StateStore>(
         source_id: TableId,
         source_desc: SourceDesc,
-        keyspace: Keyspace<S>,
+        _keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
         barrier_receiver: UnboundedReceiver<Message>,
         executor_id: u64,
-        operator_id: u64,
+        _operator_id: u64,
         op_info: String,
         streaming_metrics: Arc<StreamingMetrics>,
+        stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
-        let source = source_desc.clone().source;
-        let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-            SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
-                HighLevelKafkaSourceReaderContext {
-                    query_id: Some(format!("source-operator-{}", operator_id)),
-                    bound_timestamp_ms: None,
-                },
-                column_ids.clone(),
-            )?),
-            SourceImpl::TableV2(s) => {
-                Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
-            }
-            SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
-                source_reader: s.clone(),
-                state_store: state::SourceStateHandler::new(keyspace),
-            }),
-        };
-
+        // todo(chen): dirty code to generate row_id start position
+        let row_id_start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let row_id_start = row_id_start << 32;
         Ok(Self {
             source_id,
             source_desc,
             column_ids,
             schema,
             pk_indices,
-            reader: Some(SourceReader {
-                stream_reader,
-                barrier_receiver,
-            }),
-            next_row_id: AtomicU64::from(0u64),
+            barrier_receiver: Some(barrier_receiver),
+            // fixme(chen): may conflict
+            next_row_id: AtomicU64::from(row_id_start),
             identity: format!("SourceExecutor {:X}", executor_id),
             op_info,
             reader_stream: None,
             metrics: streaming_metrics,
+            stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
         })
     }
@@ -255,7 +260,7 @@ impl SourceReader {
     }
 
     pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunk>>> {
-        let stream_reader = Self::stream_reader(self.stream_reader);
+        let stream_reader = Self::stream_reader(self.stream_reader.unwrap());
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
         select_with_strategy(
             barrier_receiver.map(Either::Left),
@@ -266,38 +271,77 @@ impl SourceReader {
 }
 
 #[async_trait]
-impl Executor for SourceExecutor {
+impl ExecutorV1 for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        if let Some(mut reader) = self.reader.take() {
-            reader.stream_reader.open().await?;
-            self.reader_stream.replace(reader.into_stream().boxed());
-        }
+        match self.reader_stream.as_mut() {
+            None => {
+                let msg = self
+                    .barrier_receiver
+                    .as_mut()
+                    .unwrap()
+                    .recv()
+                    .await
+                    .unwrap();
 
-        match self.reader_stream.as_mut().unwrap().next().await {
-            // This branch will be preferred.
-            Some(Either::Left(message)) => message,
+                // todo: use epoch from msg to restore state from state store
 
-            // If there's barrier, this branch will be deferred.
-            Some(Either::Right(chunk)) => {
-                let mut chunk = chunk?;
+                assert!(matches!(msg, Message::Barrier(_)));
 
-                // Refill row id only if not a table source.
-                // Note(eric): Currently, rows from external sources are filled with row_ids here,
-                // but rows from tables (by insert statements) are filled in InsertExecutor.
-                //
-                // TODO: in the future, we may add row_id column here for TableV2 as well
-                if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-                    chunk = self.refill_row_id_column(chunk);
-                }
+                let reader = self
+                    .source_desc
+                    .source
+                    .stream_reader(
+                        match self.source_desc.source.as_ref() {
+                            SourceImpl::TableV2(_) => SourceReaderContext::None(()),
+                            SourceImpl::Connector(_c) => {
+                                SourceReaderContext::ConnectorReaderContext(
+                                    self.stream_source_splits.clone(),
+                                )
+                            }
+                        },
+                        self.column_ids.clone(),
+                    )
+                    .await?;
 
-                self.metrics
-                    .source_output_row_count
-                    .with_label_values(&[self.source_identify.as_str()])
-                    .inc_by(chunk.cardinality() as u64);
-                Ok(Message::Chunk(chunk))
+                let barrier = self.barrier_receiver.take().unwrap();
+
+                let reader = SourceReader {
+                    stream_reader: Some(Box::new(reader)),
+                    barrier_receiver: barrier,
+                };
+
+                self.reader_stream.replace(reader.into_stream().boxed());
+
+                Ok(msg)
             }
+            Some(stream) => {
+                match stream.as_mut().next().await {
+                    // This branch will be preferred.
+                    Some(Either::Left(message)) => message,
 
-            None => unreachable!(),
+                    // If there's barrier, this branch will be deferred.
+                    Some(Either::Right(chunk)) => {
+                        let mut chunk = chunk?;
+                        // Refill row id only if not a table source.
+                        // Note(eric): Currently, rows from external sources are filled with row_ids
+                        // here, but rows from tables (by insert statements)
+                        // are filled in InsertExecutor.
+                        //
+                        // TODO: in the future, we may add row_id column here for TableV2 as well
+                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
+                            chunk = self.refill_row_id_column(chunk);
+                        }
+
+                        self.metrics
+                            .source_output_row_count
+                            .with_label_values(&[self.source_identify.as_str()])
+                            .inc_by(chunk.cardinality() as u64);
+                        Ok(Message::Chunk(chunk))
+                    }
+
+                    None => unreachable!(),
+                }
+            }
         }
     }
 
@@ -378,7 +422,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -434,13 +478,14 @@ mod tests {
             1,
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
+            vec![],
         )
         .unwrap();
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
             tokio::spawn(async move {
-                let table_source = source.as_table_v2();
+                let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
             });
         };
@@ -528,7 +573,7 @@ mod tests {
             },
         ];
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table_columns)?;
+        source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -571,13 +616,14 @@ mod tests {
             1,
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::unused()),
+            vec![],
         )
         .unwrap();
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
             tokio::spawn(async move {
-                let table_source = source.as_table_v2();
+                let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
             });
         };

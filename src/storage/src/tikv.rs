@@ -42,6 +42,7 @@ impl TikvStateStore {
             pd: pd_endpoints,
         }
     }
+
     pub async fn client(&self) -> &tikv_client::transaction::Client {
         self.client
             .get_or_init(|| async {
@@ -54,6 +55,7 @@ impl TikvStateStore {
 
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
@@ -215,7 +217,9 @@ impl TikvStateStoreIter {
 
 impl StateStoreIter for TikvStateStoreIter {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -257,9 +261,9 @@ impl StateStoreIter for TikvStateStoreIter {
 mod tests {
 
     use bytes::Bytes;
+    use risingwave_hummock_sdk::key::next_key;
 
     use super::{TikvStateStore, *};
-    use crate::hummock::key::next_key;
     use crate::StateStore;
 
     #[tokio::test]

@@ -14,6 +14,7 @@
 
 use std::ops::Index;
 
+use itertools::Itertools;
 use risingwave_pb::plan::Field as ProstField;
 
 use super::ColumnDesc;
@@ -26,6 +27,11 @@ use crate::types::DataType;
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
+    /// For STRUCT type.
+    pub sub_fields: Vec<Field>,
+    /// The user-defined type's name, when the type is created from a protobuf schema file,
+    /// this field will store the message name.
+    pub type_name: String,
 }
 
 impl std::fmt::Debug for Field {
@@ -85,6 +91,10 @@ impl Schema {
         &self.fields
     }
 
+    pub fn into_fields(self) -> Vec<Field> {
+        self.fields
+    }
+
     /// Create array builders for all fields in this schema.
     pub fn create_array_builders(&self, capacity: usize) -> Result<Vec<ArrayBuilderImpl>> {
         self.fields
@@ -110,6 +120,25 @@ impl Field {
         Self {
             data_type,
             name: name.into(),
+            sub_fields: vec![],
+            type_name: String::new(),
+        }
+    }
+
+    pub fn with_struct<S>(
+        data_type: DataType,
+        name: S,
+        sub_fields: Vec<Field>,
+        type_name: S,
+    ) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            data_type,
+            name: name.into(),
+            sub_fields,
+            type_name: type_name.into(),
         }
     }
 
@@ -117,6 +146,8 @@ impl Field {
         Self {
             data_type,
             name: String::new(),
+            sub_fields: vec![],
+            type_name: String::new(),
         }
     }
 
@@ -130,6 +161,8 @@ impl From<&ProstField> for Field {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
+            sub_fields: vec![],
+            type_name: String::new(),
         }
     }
 }
@@ -139,6 +172,8 @@ impl From<&ColumnDesc> for Field {
         Self {
             data_type: desc.data_type.clone(),
             name: desc.name.clone(),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
         }
     }
 }
@@ -148,6 +183,14 @@ impl Index<usize> for Schema {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.fields[index]
+    }
+}
+
+impl FromIterator<Field> for Schema {
+    fn from_iter<I: IntoIterator<Item = Field>>(iter: I) -> Self {
+        Schema {
+            fields: iter.into_iter().collect::<Vec<_>>(),
+        }
     }
 }
 

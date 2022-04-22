@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -29,31 +27,34 @@ pub enum SourceOffset {
     String(String),
 }
 
-use crate::pulsar::PulsarSplitEnumerator;
-use crate::{kafka, pulsar};
+use crate::kafka::KafkaSplit;
+use crate::kinesis::split::KinesisSplit;
+use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
+use crate::utils::AnyhowProperties;
+use crate::{kafka, kinesis, pulsar, Properties};
 
-const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
+const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
+const PULSAR_SOURCE: &str = "pulsar";
 
-pub trait SourceMessage {
-    fn payload(&self) -> Result<Option<&[u8]>>;
-    fn offset(&self) -> Result<Option<SourceOffset>>;
-    fn serialize(&self) -> Result<String>;
-}
-
+/// The message pumped from the external source service.
+/// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct InnerMessage {
+pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
     pub split_id: String,
 }
 
-pub trait SourceSplit {
+/// The metadata of a split.
+pub trait SourceSplit: Sized {
     fn id(&self) -> String;
     fn to_string(&self) -> Result<String>;
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
+/// The persistent state of the connector.
 #[derive(Debug, Clone)]
 pub struct ConnectorState {
     pub identifier: Bytes,
@@ -61,15 +62,51 @@ pub struct ConnectorState {
     pub end_offset: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum ConnectorStateV2 {
+    State(ConnectorState),
+    Splits(Vec<SplitImpl>),
+    None,
+}
+
 #[async_trait]
-pub trait SourceReader {
-    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
-    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
-    async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
+pub trait SplitReader {
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    /// `state` is used to recover from the formerly persisted state.
+    /// If the reader is newly created via CREATE SOURCE, the state will be none.
+    async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized;
 }
 
+pub enum SplitReaderImpl {
+    Kafka(KafkaSplitReader),
+    Kinesis(KinesisSplitReader),
+}
+
+impl SplitReaderImpl {
+    pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+        match self {
+            Self::Kafka(r) => r.next().await,
+            Self::Kinesis(r) => r.next().await,
+        }
+    }
+
+    pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
+        let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
+        let connector = match upstream_type.as_str() {
+            KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
+            KINESIS_SOURCE => Self::Kinesis(KinesisSplitReader::new(config, state).await?),
+            _other => {
+                todo!()
+            }
+        };
+        Ok(connector)
+    }
+}
+
+/// `SplitEnumerator` fetches the split metadata from the external source service.
+/// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator {
     type Split: SourceSplit + Send + Sync;
@@ -77,13 +114,57 @@ pub trait SplitEnumerator {
 }
 
 pub enum SplitEnumeratorImpl {
-    Kafka(KafkaSplitEnumerator),
+    Kafka(kafka::enumerator::KafkaSplitEnumerator),
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
+    Kinesis(kinesis::enumerator::client::KinesisSplitEnumerator),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(kafka::KafkaSplit),
     Pulsar(pulsar::PulsarSplit),
+    Kinesis(kinesis::split::KinesisSplit),
+}
+
+const PULSAR_SPLIT_TYPE: &str = "pulsar";
+const S3_SPLIT_TYPE: &str = "s3";
+const KINESIS_SPLIT_TYPE: &str = "kinesis";
+const KAFKA_SPLIT_TYPE: &str = "kafka";
+
+impl SplitImpl {
+    pub fn id(&self) -> String {
+        match self {
+            SplitImpl::Kafka(k) => k.id(),
+            SplitImpl::Pulsar(p) => p.id(),
+            SplitImpl::Kinesis(k) => k.id(),
+        }
+    }
+
+    pub fn to_string(&self) -> Result<String> {
+        match self {
+            SplitImpl::Kafka(k) => k.to_string(),
+            SplitImpl::Pulsar(p) => p.to_string(),
+            SplitImpl::Kinesis(k) => k.to_string(),
+        }
+    }
+
+    pub fn get_type(&self) -> String {
+        match self {
+            SplitImpl::Kafka(_) => KAFKA_SPLIT_TYPE,
+            SplitImpl::Pulsar(_) => PULSAR_SPLIT_TYPE,
+            SplitImpl::Kinesis(_) => PULSAR_SPLIT_TYPE,
+        }
+        .to_string()
+    }
+
+    pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
+        match split_type.as_str() {
+            KAFKA_SPLIT_TYPE => KafkaSplit::restore_from_bytes(bytes).map(SplitImpl::Kafka),
+            PULSAR_SPLIT_TYPE => PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar),
+            KINESIS_SPLIT_TYPE => KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis),
+            other => Err(anyhow!("split type {} not supported", other)),
+        }
+    }
 }
 
 impl SplitEnumeratorImpl {
@@ -97,42 +178,22 @@ impl SplitEnumeratorImpl {
                 .list_splits()
                 .await
                 .map(|ss| ss.into_iter().map(SplitImpl::Pulsar).collect_vec()),
+            SplitEnumeratorImpl::Kinesis(k) => k
+                .list_splits()
+                .await
+                .map(|ss| ss.into_iter().map(SplitImpl::Kinesis).collect_vec()),
         }
     }
-}
 
-pub fn extract_split_enumerator(
-    properties: &HashMap<String, String>,
-) -> Result<SplitEnumeratorImpl> {
-    let source_type = match properties.get("upstream.source") {
-        None => return Err(anyhow!("upstream.source not found")),
-        Some(value) => value,
-    };
-
-    match source_type.as_ref() {
-        "kafka" => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
-        "pulsar" => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
-        _ => Err(anyhow!("unsupported source type: {}", source_type)),
+    pub fn create(properties: &AnyhowProperties) -> Result<SplitEnumeratorImpl> {
+        let source_type = properties.get(UPSTREAM_SOURCE_KEY)?;
+        match source_type.as_str() {
+            KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
+            PULSAR_SOURCE => {
+                PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
+            }
+            KINESIS_SOURCE => todo!(),
+            _ => Err(anyhow!("unsupported source type: {}", source_type)),
+        }
     }
-}
-
-pub async fn new_connector(
-    config: HashMap<String, String>,
-    state: Option<ConnectorState>,
-) -> Result<Box<dyn SourceReader + Send + Sync>> {
-    let upstream_type = config.get(UPSTREAM_SOURCE_KEY).unwrap();
-    let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
-        KAFKA_SOURCE => {
-            let kafka = KafkaSplitReader::new(config, state).await?;
-            Box::new(kafka)
-        }
-        KINESIS_SOURCE => {
-            let kinesis = KinesisSplitReader::new(config, state).await?;
-            Box::new(kinesis)
-        }
-        _other => {
-            todo!()
-        }
-    };
-    Ok(connector)
 }

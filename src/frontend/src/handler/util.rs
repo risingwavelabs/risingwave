@@ -50,7 +50,7 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .rows()
         .map(|r| {
             Row::new(
-                r.0.into_iter()
+                r.values()
                     .map(|data| data.map(pg_value_format))
                     .collect_vec(),
             )
@@ -71,7 +71,6 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Float32 => TypeOid::Float4,
         DataType::Float64 => TypeOid::Float8,
         DataType::Boolean => TypeOid::Boolean,
-        DataType::Char => TypeOid::CharArray,
         DataType::Varchar => TypeOid::Varchar,
         DataType::Date => TypeOid::Date,
         DataType::Time => TypeOid::Time,

@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_rpc_client"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [dependencies]
@@ -9,6 +9,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 log = "0.4"
 paste = "1"
 risingwave_common = { path = "../common" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 tokio = { version = "1", features = [
     "rt",

@@ -32,15 +32,16 @@ pub enum StatementType {
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_SOURCE,
+    DESCRIBE_TABLE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
-    DROP_STREAM,
+    DROP_SOURCE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
-    SHOW_SOURCE,
+    SHOW_COMMAND,
     FLUSH,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
@@ -53,6 +54,7 @@ impl std::fmt::Display for StatementType {
     }
 }
 
+#[derive(Debug)]
 pub struct PgResponse {
     stmt_type: StatementType,
     row_cnt: i32,
@@ -91,6 +93,10 @@ impl PgResponse {
         }
     }
 
+    pub fn empty_result(stmt_type: StatementType) -> Self {
+        Self::new(stmt_type, 0, vec![], vec![])
+    }
+
     pub fn get_stmt_type(&self) -> StatementType {
         self.stmt_type
     }
@@ -102,7 +108,10 @@ impl PgResponse {
     pub fn is_query(&self) -> bool {
         matches!(
             self.stmt_type,
-            StatementType::SELECT | StatementType::EXPLAIN | StatementType::SHOW_SOURCE
+            StatementType::SELECT
+                | StatementType::EXPLAIN
+                | StatementType::SHOW_COMMAND
+                | StatementType::DESCRIBE_TABLE
         )
     }
 

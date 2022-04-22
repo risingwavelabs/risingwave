@@ -104,9 +104,9 @@ impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
 
 impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
-    type RefItem<'a> = T;
-    type OwnedItem = T;
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = T;
+    type RefItem<'a> = T;
 
     fn value_at(&self, idx: usize) -> Option<T> {
         if !self.is_null(idx) {

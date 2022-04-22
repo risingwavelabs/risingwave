@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
+use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
@@ -22,9 +23,7 @@ use crate::cluster::ClusterManagerRef;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{
-    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
-};
+use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -33,11 +32,11 @@ pub struct StreamServiceImpl<S>
 where
     S: MetaStore,
 {
+    env: MetaSrvEnv<S>,
+
     global_stream_manager: GlobalStreamManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
-
-    env: MetaSrvEnv<S>,
 }
 
 impl<S> StreamServiceImpl<S>
@@ -45,17 +44,16 @@ where
     S: MetaStore,
 {
     pub fn new(
+        env: MetaSrvEnv<S>,
         global_stream_manager: GlobalStreamManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
-        _source_manager: SourceManagerRef<S>,
-        env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
+            env,
             global_stream_manager,
             fragment_manager,
             cluster_manager,
-            env,
         }
     }
 }
@@ -81,19 +79,28 @@ where
         );
 
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
+        let parallel_degree = self
+            .cluster_manager
+            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
+            .await;
+        let mut ctx = CreateMaterializedViewContext {
+            is_legacy_frontend: true,
+            hash_mapping,
+            ..Default::default()
+        };
 
-        let mut fragmenter = StreamFragmenter::new(
+        let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
-            hash_mapping,
+            parallel_degree as u32,
+            true,
         );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph);
+        let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph, vec![]);
         match self
             .global_stream_manager
             .create_materialized_view(table_fragments, ctx)
@@ -115,7 +122,7 @@ where
 
         match self
             .global_stream_manager
-            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
+            .drop_materialized_view(&TableId::from(&req.table_ref_id))
             .await
         {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),

@@ -30,7 +30,7 @@
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(let_else)]
 #![feature(trait_alias)]
-
+#![feature(drain_filter)]
 #[macro_use]
 pub mod catalog;
 pub mod binder;
@@ -45,6 +45,7 @@ pub mod utils;
 extern crate log;
 mod meta_client;
 pub mod test_utils;
+extern crate core;
 extern crate risingwave_common;
 
 use std::ffi::OsString;
@@ -75,14 +76,6 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
-
-    /// Execute query in distributed mode or single mode.
-    ///
-    /// We need this because currently we don't support `set` statement.
-    ///
-    /// TODO: Remove this after `set` statement.
-    #[clap(short, long)]
-    pub dist_query: bool,
 }
 
 impl Default for FrontendOpts {

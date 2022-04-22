@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use std::env;
-use std::sync::Arc;
 
 use anyhow::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
-use risingwave_storage::monitor::HummockMetrics;
 
 pub struct MetaServiceOpts {
     pub meta_addr: String,
@@ -48,21 +45,11 @@ impl MetaServiceOpts {
         let mut client = MetaClient::new(&self.meta_addr).await?;
         // FIXME: don't use 127.0.0.1 for ctl
         let worker_id = client
-            .register("127.0.0.1:2333".parse().unwrap(), WorkerType::RiseCtl)
+            .register(&"127.0.0.1:2333".parse().unwrap(), WorkerType::RiseCtl)
             .await?;
         tracing::info!("registered as RiseCtl worker, worker_id = {}", worker_id);
         // TODO: remove worker node
         client.set_worker_id(worker_id);
         Ok(client)
-    }
-
-    /// Create hummock meta client from options
-    pub async fn create_hummock_meta_client(&self) -> Result<(MetaClient, RpcHummockMetaClient)> {
-        let meta_client = self.create_meta_client().await?;
-        let stats = Arc::new(HummockMetrics::unused());
-        Ok((
-            meta_client.clone(),
-            RpcHummockMetaClient::new(meta_client, stats),
-        ))
     }
 }

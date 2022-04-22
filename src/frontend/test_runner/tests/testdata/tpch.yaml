@@ -166,31 +166,37 @@
           s_name,
           p_partkey
     limit 100;
-  logical_plan: |
-    LogicalLimit { limit: 100, offset: 0 }
-      LogicalProject { exprs: [$16, $12, $26, $1, $3, $13, $15, $17], expr_alias: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment] }
-        LogicalFilter { predicate: ($1 = $19) AND ($11 = $20) AND ($6 = 4:Int32) AND Like($5, '%TIN':Varchar) AND ($14 = $25) AND ($27 = $30) AND ($31 = 'AFRICA':Varchar) AND ($22 = $33) }
-          LogicalApply { type: LeftOuter }
-            LogicalJoin { type: Inner, on: true:Boolean }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
-                    LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                  LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
-                LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
-              LogicalScan { table: region, columns: [_row_id#0, r_regionkey, r_name, r_comment] }
-            LogicalProject { exprs: [$0], expr_alias: [ ] }
-              LogicalAgg { group_keys: [], agg_calls: [min($0)] }
-                LogicalProject { exprs: [$4], expr_alias: [ ] }
-                  LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } = $1) AND ($7 = $2) AND ($10 = $15) AND ($17 = $20) AND ($21 = 'AFRICA':Varchar) }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
-                        LogicalJoin { type: Inner, on: true:Boolean }
-                          LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
+  optimized_logical_plan: |
+    LogicalTopN { order: [$0 DESC, $2 ASC, $1 ASC, $3 ASC], limit: 100, offset: 0 }
+      LogicalProject { exprs: [$5, $2, $8, $0, $1, $3, $4, $6], expr_alias: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment] }
+        LogicalFilter { predicate: ($7 = $9) }
+          LogicalProject { exprs: [$1, $3, $12, $13, $15, $16, $17, $22, $26, $33], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+            LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], agg_calls: [min($33)] }
+              LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                LogicalJoin { type: LeftOuter, on: ($1 = $34) }
+                  LogicalJoin { type: Inner, on: ($27 = $30) }
+                    LogicalJoin { type: Inner, on: ($14 = $25) }
+                      LogicalJoin { type: Inner, on: ($1 = $19) AND ($11 = $20) }
+                        LogicalJoin { type: Inner, on: always }
+                          LogicalFilter { predicate: ($6 = 4:Int32) AND Like($5, '%TIN':Varchar) }
+                            LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                           LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                        LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+                        LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
+                      LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+                    LogicalFilter { predicate: ($2 = 'AFRICA':Varchar) }
                       LogicalScan { table: region, columns: [_row_id#0, r_regionkey, r_name, r_comment] }
+                  LogicalProject { exprs: [$1, $0], expr_alias: [ ,  ] }
+                    LogicalJoin { type: Inner, on: ($2 = $3) }
+                      LogicalProject { exprs: [$0, $1, $4], expr_alias: [ ,  ,  ] }
+                        LogicalJoin { type: Inner, on: ($2 = $3) }
+                          LogicalProject { exprs: [$0, $2, $4], expr_alias: [ ,  ,  ] }
+                            LogicalJoin { type: Inner, on: ($3 = $1) }
+                              LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                              LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                          LogicalScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                      LogicalProject { exprs: [$0], expr_alias: [ ] }
+                        LogicalFilter { predicate: ($1 = 'AFRICA':Varchar) }
+                          LogicalScan { table: region, columns: [r_regionkey, r_name] }
 - id: tpch_q3
   before:
     - create_tables
@@ -232,7 +238,7 @@
                       BatchHashJoin { type: Inner, predicate: $0 = $2 }
                         BatchProject { exprs: [$0], expr_alias: [ ] }
                           BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
+                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
                               BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
                         BatchExchange { order: [], dist: HashShard([1]) }
                           BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
@@ -253,7 +259,7 @@
                     StreamHashJoin { type: Inner, predicate: $0 = $3 }
                       StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
+                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
                             StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
                       StreamExchange { dist: HashShard([1]) }
                         StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
@@ -287,16 +293,37 @@
       o_orderpriority
     order by
       o_orderpriority;
-  logical_plan: |
-    LogicalProject { exprs: [$0, $1], expr_alias: [o_orderpriority, order_count] }
-      LogicalAgg { group_keys: [0], agg_calls: [count] }
-        LogicalProject { exprs: [$6], expr_alias: [ ] }
-          LogicalFilter { predicate: ($5 >= '1997-07-01':Varchar::Date) AND ($5 < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-            LogicalApply { type: LeftSemi }
-              LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-              LogicalProject { exprs: [$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16], expr_alias: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 1 }) AND ($12 < $13) }
-                  LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+  batch_plan: |
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchProject { exprs: [$0, $1], expr_alias: [o_orderpriority, order_count] }
+          BatchHashAgg { group_keys: [$0], aggs: [count] }
+            BatchProject { exprs: [$1], expr_alias: [ ] }
+              BatchExchange { order: [], dist: HashShard([1]) }
+                BatchHashJoin { type: LeftSemi, predicate: $0 = $2 }
+                  BatchProject { exprs: [$0, $2], expr_alias: [ ,  ] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchFilter { predicate: ($1 >= '1997-07-01':Varchar::Date) AND ($1 < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                        BatchScan { table: orders, columns: [o_orderkey, o_orderdate, o_orderpriority] }
+                  BatchProject { exprs: [$0], expr_alias: [ ] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchFilter { predicate: ($1 < $2) }
+                        BatchScan { table: lineitem, columns: [l_orderkey, l_commitdate, l_receiptdate] }
+  stream_plan: |
+    StreamMaterialize { columns: [o_orderpriority, order_count], pk_columns: [o_orderpriority] }
+      StreamProject { exprs: [$0, $2], expr_alias: [o_orderpriority, order_count] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, count] }
+          StreamProject { exprs: [$1, $2, $4], expr_alias: [ ,  ,  ] }
+            StreamExchange { dist: HashShard([1]) }
+              StreamHashJoin { type: LeftSemi, predicate: $0 = $3 }
+                StreamProject { exprs: [$0, $2, $3], expr_alias: [ ,  ,  ] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: ($1 >= '1997-07-01':Varchar::Date) AND ($1 < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                      StreamTableScan { table: orders, columns: [o_orderkey, o_orderdate, o_orderpriority, _row_id#0], pk_indices: [3] }
+                StreamProject { exprs: [$0, $3], expr_alias: [ ,  ] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: ($1 < $2) }
+                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_commitdate, l_receiptdate, _row_id#0], pk_indices: [3] }
 - id: tpch_q5
   before:
     - create_tables
@@ -325,22 +352,6 @@
       n_name
     order by
       revenue desc;
-  logical_plan: |
-    LogicalProject { exprs: [$0, $1], expr_alias: [n_name, revenue] }
-      LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
-        LogicalProject { exprs: [$46, ($25 * (1:Int32 - $26))], expr_alias: [ ,  ] }
-          LogicalFilter { predicate: ($1 = $11) AND ($20 = $10) AND ($22 = $37) AND ($4 = $40) AND ($40 = $45) AND ($47 = $50) AND ($51 = 'MIDDLE EAST':Varchar) AND ($14 >= '1994-01-01':Varchar::Date) AND ($14 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-            LogicalJoin { type: Inner, on: true:Boolean }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
-                      LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-                    LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                  LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
-              LogicalScan { table: region, columns: [_row_id#0, r_regionkey, r_name, r_comment] }
   batch_plan: |
     BatchExchange { order: [$1 DESC], dist: Single }
       BatchSort { order: [$1 DESC] }
@@ -362,8 +373,7 @@
                                       BatchExchange { order: [], dist: HashShard([2]) }
                                         BatchHashJoin { type: Inner, predicate: $0 = $3 }
                                           BatchExchange { order: [], dist: HashShard([0]) }
-                                            BatchFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                              BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
+                                            BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
                                           BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
                                             BatchExchange { order: [], dist: HashShard([1]) }
                                               BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -398,8 +408,7 @@
                                     StreamExchange { dist: HashShard([3]) }
                                       StreamHashJoin { type: Inner, predicate: $0 = $4 }
                                         StreamExchange { dist: HashShard([0]) }
-                                          StreamFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                            StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id#0], pk_indices: [2] }
+                                          StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id#0], pk_indices: [2] }
                                         StreamProject { exprs: [$0, $1, $3], expr_alias: [ ,  ,  ] }
                                           StreamExchange { dist: HashShard([1]) }
                                             StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -438,9 +447,10 @@
     StreamMaterialize { columns: [revenue, agg#0(hidden)], pk_columns: [agg#0, revenue] }
       StreamProject { exprs: [$1, $0], expr_alias: [revenue,  ] }
         StreamSimpleAgg { aggs: [count, sum($0)] }
-          StreamProject { exprs: [($1 * $2), $4], expr_alias: [ ,  ] }
-            StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
-              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
+          StreamExchange { dist: Single }
+            StreamProject { exprs: [($1 * $2), $4], expr_alias: [ ,  ] }
+              StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
+                StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
 - id: tpch_q7
   before:
     - create_tables
@@ -484,23 +494,6 @@
       supp_nation,
       cust_nation,
       l_year;
-  logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [supp_nation, cust_nation, l_year, revenue] }
-      LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
-        LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
-          LogicalProject { exprs: [$46, $51, Extract('YEAR':Varchar, $19), ($14 * (1:Int32 - $15))], expr_alias: [supp_nation, cust_nation, l_year, volume] }
-            LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($36 = $27) AND ($4 = $45) AND ($39 = $50) AND ((($46 = 'ROMANIA':Varchar) AND ($51 = 'IRAN':Varchar)) OR (($46 = 'IRAN':Varchar) AND ($51 = 'ROMANIA':Varchar))) AND ($19 >= '1983-01-01':Varchar::Date) AND ($19 <= '2000-12-31':Varchar::Date) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
-                        LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                        LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                      LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-                    LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
-                  LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
-                LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
   batch_plan: |
     BatchExchange { order: [$0 ASC, $1 ASC, $2 ASC], dist: Single }
       BatchSort { order: [$0 ASC, $1 ASC, $2 ASC] }
@@ -523,8 +516,7 @@
                                         BatchExchange { order: [], dist: HashShard([2]) }
                                           BatchHashJoin { type: Inner, predicate: $0 = $3 }
                                             BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                                BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                              BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
                                             BatchExchange { order: [], dist: HashShard([1]) }
                                               BatchFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
                                                 BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate] }
@@ -557,8 +549,7 @@
                                       StreamExchange { dist: HashShard([3]) }
                                         StreamHashJoin { type: Inner, predicate: $0 = $4 }
                                           StreamExchange { dist: HashShard([0]) }
-                                            StreamFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                              StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id#0], pk_indices: [2] }
+                                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id#0], pk_indices: [2] }
                                           StreamExchange { dist: HashShard([1]) }
                                             StreamFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
                                               StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [5] }
@@ -611,27 +602,35 @@
       o_year
     order by
       o_year;
-  logical_plan: |
+  optimized_logical_plan: |
     LogicalProject { exprs: [$0, RoundDigit(($1 / $2), 6:Int32)], expr_alias: [o_year, mkt_share] }
       LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($2)] }
-        LogicalProject { exprs: [$0, Case(($2 = 'IRAN':Varchar), $1, 0:Int32::Decimal), $1], expr_alias: [ ,  ,  ] }
-          LogicalProject { exprs: [Extract('YEAR':Varchar, $40), ($24 * (1:Int32 - $25)), $61], expr_alias: [o_year, volume, nation] }
-            LogicalFilter { predicate: ($1 = $20) AND ($11 = $21) AND ($19 = $36) AND ($37 = $46) AND ($49 = $55) AND ($57 = $65) AND ($66 = 'ASIA':Varchar) AND ($14 = $60) AND ($40 >= '1995-01-01':Varchar::Date) AND ($40 <= '1996-12-31':Varchar::Date) AND ($5 = 'PROMO ANODIZED STEEL':Varchar) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
-                        LogicalJoin { type: Inner, on: true:Boolean }
-                          LogicalJoin { type: Inner, on: true:Boolean }
-                            LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
-                            LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                          LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                        LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-                      LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
-                    LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
-                  LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
-                LogicalScan { table: region, columns: [_row_id#0, r_regionkey, r_name, r_comment] }
+        LogicalProject { exprs: [Extract('YEAR':Varchar, $2), Case(($4 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))], expr_alias: [ ,  ,  ] }
+          LogicalJoin { type: Inner, on: ($3 = $5) }
+            LogicalProject { exprs: [$1, $2, $3, $4, $6], expr_alias: [ ,  ,  ,  ,  ] }
+              LogicalJoin { type: Inner, on: ($0 = $5) }
+                LogicalProject { exprs: [$0, $1, $2, $3, $6], expr_alias: [ ,  ,  ,  ,  ] }
+                  LogicalJoin { type: Inner, on: ($4 = $5) }
+                    LogicalProject { exprs: [$0, $1, $2, $4, $6], expr_alias: [ ,  ,  ,  ,  ] }
+                      LogicalJoin { type: Inner, on: ($3 = $5) }
+                        LogicalProject { exprs: [$0, $2, $3, $5, $6], expr_alias: [ ,  ,  ,  ,  ] }
+                          LogicalJoin { type: Inner, on: ($1 = $4) }
+                            LogicalProject { exprs: [$2, $3, $6, $7], expr_alias: [ ,  ,  ,  ] }
+                              LogicalJoin { type: Inner, on: ($0 = $4) AND ($1 = $5) }
+                                LogicalJoin { type: Inner, on: always }
+                                  LogicalProject { exprs: [$0], expr_alias: [ ] }
+                                    LogicalFilter { predicate: ($1 = 'PROMO ANODIZED STEEL':Varchar) }
+                                      LogicalScan { table: part, columns: [p_partkey, p_type] }
+                                  LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                LogicalScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_extendedprice, l_discount] }
+                            LogicalFilter { predicate: ($2 >= '1995-01-01':Varchar::Date) AND ($2 <= '1996-12-31':Varchar::Date) }
+                              LogicalScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
+                        LogicalScan { table: customer, columns: [c_custkey, c_nationkey] }
+                    LogicalScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                LogicalScan { table: nation, columns: [n_nationkey, n_name] }
+            LogicalProject { exprs: [$0], expr_alias: [ ] }
+              LogicalFilter { predicate: ($1 = 'ASIA':Varchar) }
+                LogicalScan { table: region, columns: [r_regionkey, r_name] }
 - id: tpch_q9
   before:
     - create_tables
@@ -668,23 +667,26 @@
     order by
       nation,
       o_year desc;
-  logical_plan: |
+  optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1, RoundDigit($2, 2:Int32)], expr_alias: [nation, o_year, sum_profit] }
       LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2)] }
-        LogicalProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
-          LogicalProject { exprs: [$53, Extract('YEAR':Varchar, $46), (($24 * (1:Int32 - $25)) - ($39 * $23))], expr_alias: [nation, o_year, amount] }
-            LogicalFilter { predicate: ($11 = $21) AND ($37 = $21) AND ($36 = $20) AND ($1 = $20) AND ($42 = $19) AND ($14 = $52) AND Like($2, '%yellow%':Varchar) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
-                        LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
-                        LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                      LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                    LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
-                  LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-                LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+        LogicalProject { exprs: [$7, Extract('YEAR':Varchar, $5), (($2 * (1:Int32 - $3)) - ($4 * $1))], expr_alias: [ ,  ,  ] }
+          LogicalJoin { type: Inner, on: ($0 = $6) }
+            LogicalProject { exprs: [$0, $2, $3, $4, $5, $7], expr_alias: [ ,  ,  ,  ,  ,  ] }
+              LogicalJoin { type: Inner, on: ($6 = $1) }
+                LogicalProject { exprs: [$0, $1, $4, $5, $6, $9], expr_alias: [ ,  ,  ,  ,  ,  ] }
+                  LogicalJoin { type: Inner, on: ($8 = $3) AND ($7 = $2) }
+                    LogicalProject { exprs: [$2, $3, $4, $5, $6, $7, $8], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
+                      LogicalJoin { type: Inner, on: ($1 = $5) AND ($0 = $4) }
+                        LogicalJoin { type: Inner, on: always }
+                          LogicalProject { exprs: [$0], expr_alias: [ ] }
+                            LogicalFilter { predicate: Like($1, '%yellow%':Varchar) }
+                              LogicalScan { table: part, columns: [p_partkey, p_name] }
+                          LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                        LogicalScan { table: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount] }
+                    LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                LogicalScan { table: orders, columns: [o_orderkey, o_orderdate] }
+            LogicalScan { table: nation, columns: [n_nationkey, n_name] }
 - id: tpch_q10
   before:
     - create_tables
@@ -721,19 +723,59 @@
     order by
       revenue desc
     limit 20;
-  logical_plan: |
-    LogicalLimit { limit: 20, offset: 0 }
-      LogicalProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6], expr_alias: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment] }
-        LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
-          LogicalProject { exprs: [$1, $2, $6, $5, $38, $3, $8, ($25 * (1.00:Decimal - $26))], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
-            LogicalFilter { predicate: ($1 = $11) AND ($20 = $10) AND ($14 >= '1994-01-01':Varchar::Date) AND ($14 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) AND ($28 = 'R':Varchar) AND ($4 = $37) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
-                    LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-                  LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+  batch_plan: |
+    BatchTopN { order: [$2 DESC], limit: 20, offset: 0 }
+      BatchExchange { order: [], dist: Single }
+        BatchProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6], expr_alias: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment] }
+          BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
+            BatchProject { exprs: [$0, $1, $5, $4, $10, $2, $6, ($7 * (1.00:Decimal - $8))], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
+              BatchExchange { order: [], dist: HashShard([0, 1, 5, 4, 10, 2, 6]) }
+                BatchHashJoin { type: Inner, predicate: $3 = $9 }
+                  BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $9, $10], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                    BatchExchange { order: [], dist: HashShard([3]) }
+                      BatchHashJoin { type: Inner, predicate: $7 = $8 }
+                        BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
+                          BatchExchange { order: [], dist: HashShard([7]) }
+                            BatchHashJoin { type: Inner, predicate: $0 = $8 }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment] }
+                              BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
+                                BatchExchange { order: [], dist: HashShard([1]) }
+                                  BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                                    BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
+                        BatchProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchFilter { predicate: ($3 = 'R':Varchar) }
+                              BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: nation, columns: [n_nationkey, n_name] }
+  stream_plan: |
+    StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment] }
+      StreamTopN { order: [$2 DESC], limit: 20, offset: 0 }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [$0, $1, $8, $2, $4, $5, $3, $6], expr_alias: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment] }
+            StreamHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [count, sum($7)] }
+              StreamProject { exprs: [$0, $1, $5, $4, $13, $2, $6, ($7 * (1.00:Decimal - $8)), $9, $10, $11, $14], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                StreamExchange { dist: HashShard([0, 1, 5, 4, 13, 2, 6]) }
+                  StreamHashJoin { type: Inner, predicate: $3 = $12 }
+                    StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $11, $12, $8, $9, $13], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                      StreamExchange { dist: HashShard([3]) }
+                        StreamHashJoin { type: Inner, predicate: $7 = $10 }
+                          StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $8, $7, $10], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                            StreamExchange { dist: HashShard([8]) }
+                              StreamHashJoin { type: Inner, predicate: $0 = $9 }
+                                StreamExchange { dist: HashShard([0]) }
+                                  StreamTableScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment, _row_id#0], pk_indices: [7] }
+                                StreamProject { exprs: [$0, $1, $3], expr_alias: [ ,  ,  ] }
+                                  StreamExchange { dist: HashShard([1]) }
+                                    StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                                      StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, _row_id#0], pk_indices: [3] }
+                          StreamProject { exprs: [$0, $1, $2, $4], expr_alias: [ ,  ,  ,  ] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamFilter { predicate: ($3 = 'R':Varchar) }
+                                StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag, _row_id#0], pk_indices: [4] }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id#0], pk_indices: [2] }
 - id: tpch_q12
   before:
     - create_tables
@@ -766,7 +808,33 @@
         l_shipmode
     order by
         l_shipmode;
-  binder_error: 'Feature is not yet implemented: unsupported expression InList { expr: Identifier(Ident { value: "l_shipmode", quote_style: None }), list: [Value(SingleQuotedString("FOB")), Value(SingleQuotedString("SHIP"))], negated: false }'
+  batch_plan: |
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchProject { exprs: [$0, $1, $2], expr_alias: [l_shipmode, high_line_count, low_line_count] }
+          BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
+            BatchProject { exprs: [$3, Case((($1 = '1-URGENT':Varchar) OR ($1 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($1 <> '1-URGENT':Varchar) AND ($1 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)], expr_alias: [ ,  ,  ] }
+              BatchExchange { order: [], dist: HashShard([3]) }
+                BatchHashJoin { type: Inner, predicate: $0 = $2 }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: orders, columns: [o_orderkey, o_orderpriority] }
+                  BatchProject { exprs: [$0, $4], expr_alias: [ ,  ] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                        BatchScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode] }
+  stream_plan: |
+    StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], pk_columns: [l_shipmode] }
+      StreamProject { exprs: [$0, $2, $3], expr_alias: [l_shipmode, high_line_count, low_line_count] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($2)] }
+          StreamProject { exprs: [$4, Case((($1 = '1-URGENT':Varchar) OR ($1 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($1 <> '1-URGENT':Varchar) AND ($1 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32), $2, $5], expr_alias: [ ,  ,  ,  ,  ] }
+            StreamExchange { dist: HashShard([4]) }
+              StreamHashJoin { type: Inner, predicate: $0 = $3 }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamTableScan { table: orders, columns: [o_orderkey, o_orderpriority, _row_id#0], pk_indices: [2] }
+                StreamProject { exprs: [$0, $4, $5], expr_alias: [ ,  ,  ] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: In($4, 'FOB':Varchar, 'SHIP':Varchar) AND ($2 < $3) AND ($1 < $2) AND ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_shipdate, l_commitdate, l_receiptdate, l_shipmode, _row_id#0], pk_indices: [5] }
 - id: tpch_q13
   before:
     - create_tables
@@ -791,16 +859,6 @@
     order by
       custdist desc,
       c_count desc;
-  logical_plan: |
-    LogicalProject { exprs: [$0, $1], expr_alias: [c_count, custdist] }
-      LogicalAgg { group_keys: [0], agg_calls: [count] }
-        LogicalProject { exprs: [$1], expr_alias: [ ] }
-          LogicalProject { exprs: [$0, $1], expr_alias: [c_custkey, c_count] }
-            LogicalAgg { group_keys: [0], agg_calls: [count($1)] }
-              LogicalProject { exprs: [$1, $10], expr_alias: [ ,  ] }
-                LogicalJoin { type: LeftOuter, on: ($1 = $11) AND Not(Like($18, '%:1%:2%':Varchar)) }
-                  LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
-                  LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
   batch_plan: |
     BatchExchange { order: [$1 DESC, $0 DESC], dist: Single }
       BatchSort { order: [$1 DESC, $0 DESC] }
@@ -845,14 +903,31 @@
       l_partkey = p_partkey
       and l_shipdate >= date '1995-09-01'
       and l_shipdate < date '1995-09-01' + interval '1' month;
-  logical_plan: |
-    LogicalProject { exprs: [((100.00:Decimal * $0) / $1)], expr_alias: [promo_revenue] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0), sum($1)] }
-        LogicalProject { exprs: [Case(Like($22, 'PROMO%':Varchar), ($6 * (1:Int32 - $7)), 0:Int32::Decimal), ($6 * (1:Int32 - $7))], expr_alias: [ ,  ] }
-          LogicalFilter { predicate: ($2 = $18) AND ($11 >= '1995-09-01':Varchar::Date) AND ($11 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-            LogicalJoin { type: Inner, on: true:Boolean }
-              LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-              LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
+  batch_plan: |
+    BatchProject { exprs: [((100.00:Decimal * $0) / $1)], expr_alias: [promo_revenue] }
+      BatchSimpleAgg { aggs: [sum($0), sum($1)] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [Case(Like($4, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
+            BatchHashJoin { type: Inner, predicate: $0 = $3 }
+              BatchProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
+                    BatchScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate] }
+              BatchExchange { order: [], dist: HashShard([0]) }
+                BatchScan { table: part, columns: [p_partkey, p_type] }
+  stream_plan: |
+    StreamMaterialize { columns: [promo_revenue, agg#0(hidden), agg#1(hidden), agg#2(hidden)], pk_columns: [agg#0, agg#1, agg#2] }
+      StreamProject { exprs: [((100.00:Decimal * $1) / $2), $0, $1, $2], expr_alias: [promo_revenue,  ,  ,  ] }
+        StreamSimpleAgg { aggs: [count, sum($0), sum($1)] }
+          StreamExchange { dist: Single }
+            StreamProject { exprs: [Case(Like($5, 'PROMO%':Varchar), ($1 * (1:Int32 - $2)), 0:Int32::Decimal), ($1 * (1:Int32 - $2)), $3, $6], expr_alias: [ ,  ,  ,  ] }
+              StreamHashJoin { type: Inner, predicate: $0 = $4 }
+                StreamProject { exprs: [$0, $1, $2, $4], expr_alias: [ ,  ,  ,  ] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: ($3 >= '1995-09-01':Varchar::Date) AND ($3 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
+                      StreamTableScan { table: lineitem, columns: [l_partkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamTableScan { table: part, columns: [p_partkey, p_type, _row_id#0], pk_indices: [2] }
 - id: tpch_q15
   before:
     - create_tables
@@ -898,25 +973,25 @@
       )
     order by
       s_suppkey;
-  logical_plan: |
-    LogicalProject { exprs: [$1, $2, $3, $5, $9], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue] }
-      LogicalFilter { predicate: ($1 = $8) AND ($9 = $10) }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
-          LogicalJoin { type: Inner, on: true:Boolean }
-            LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-            LogicalProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
-              LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
-                LogicalProject { exprs: [$3, ($6 * (1:Int32 - $7))], expr_alias: [ ,  ] }
-                  LogicalFilter { predicate: ($11 >= '1993-01-01':Varchar::Date) AND ($11 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                    LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue] }
+      LogicalFilter { predicate: ($4 = $5) }
+        LogicalJoin { type: LeftOuter, on: always }
+          LogicalProject { exprs: [$0, $1, $2, $3, $5], expr_alias: [ ,  ,  ,  ,  ] }
+            LogicalJoin { type: Inner, on: ($0 = $4) }
+              LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
+              LogicalProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
+                LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+                  LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
+                    LogicalFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                      LogicalScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
           LogicalProject { exprs: [$0], expr_alias: [max_revenue] }
             LogicalAgg { group_keys: [], agg_calls: [max($0)] }
               LogicalProject { exprs: [$1], expr_alias: [ ] }
-                LogicalProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
-                  LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
-                    LogicalProject { exprs: [$3, ($6 * (1:Int32 - $7))], expr_alias: [ ,  ] }
-                      LogicalFilter { predicate: ($11 >= '1993-01-01':Varchar::Date) AND ($11 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                        LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+                LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+                  LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
+                    LogicalFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                      LogicalScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
 - id: tpch_q17
   before:
     - create_tables
@@ -938,20 +1013,49 @@
         where
           l_partkey = p_partkey
       );
-  logical_plan: |
-    LogicalProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)], expr_alias: [avg_yearly] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
-        LogicalProject { exprs: [$6], expr_alias: [ ] }
-          LogicalFilter { predicate: ($18 = $2) AND ($21 = 'Brand#13':Varchar) AND ($24 = 'JUMBO PKG':Varchar) AND ($5 < $27) }
-            LogicalApply { type: LeftOuter }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
-                LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
-              LogicalProject { exprs: [(0.2:Decimal * ($0 / $1))], expr_alias: [ ] }
-                LogicalAgg { group_keys: [], agg_calls: [sum($0), count($0)] }
-                  LogicalProject { exprs: [$5], expr_alias: [ ] }
-                    LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 18, depth: 1 }) }
-                      LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+  batch_plan: |
+    BatchProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)], expr_alias: [avg_yearly] }
+      BatchSimpleAgg { aggs: [sum($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [$1], expr_alias: [ ] }
+            BatchFilter { predicate: ($0 < (0.2:Decimal * ($2 / $3))) }
+              BatchProject { exprs: [$5, $6, $27, $28], expr_alias: [ ,  ,  ,  ] }
+                BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26], aggs: [sum($27), count($27)] }
+                  BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                    BatchExchange { order: [], dist: HashShard([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]) }
+                      BatchHashJoin { type: LeftOuter, predicate: $18 = $28 }
+                        BatchExchange { order: [], dist: HashShard([18]) }
+                          BatchHashJoin { type: Inner, predicate: $2 = $18 }
+                            BatchExchange { order: [], dist: HashShard([2]) }
+                              BatchScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+                            BatchExchange { order: [], dist: HashShard([1]) }
+                              BatchFilter { predicate: ($4 = 'Brand#13':Varchar) AND ($7 = 'JUMBO PKG':Varchar) }
+                                BatchScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
+                        BatchProject { exprs: [$1, $0], expr_alias: [ ,  ] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchScan { table: lineitem, columns: [l_partkey, l_quantity] }
+  stream_plan: |
+    StreamMaterialize { columns: [avg_yearly, agg#0(hidden), agg#1(hidden)], pk_columns: [agg#0, agg#1] }
+      StreamProject { exprs: [RoundDigit(($1 / 7.0:Decimal), 16:Int32), $0, $1], expr_alias: [avg_yearly,  ,  ] }
+        StreamSimpleAgg { aggs: [count, sum($0)] }
+          StreamExchange { dist: Single }
+            StreamProject { exprs: [$1, $4, $5, $6, $7, $8, $0, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+              StreamFilter { predicate: ($0 < (0.2:Decimal * ($2 / $3))) }
+                StreamProject { exprs: [$5, $6, $28, $29, $0, $1, $2, $3, $4, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                  StreamHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26], aggs: [count, sum($27), count($27)] }
+                    StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $29], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                      StreamExchange { dist: HashShard([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]) }
+                        StreamHashJoin { type: LeftOuter, predicate: $18 = $28 }
+                          StreamExchange { dist: HashShard([18]) }
+                            StreamHashJoin { type: Inner, predicate: $2 = $18 }
+                              StreamExchange { dist: HashShard([2]) }
+                                StreamTableScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment], pk_indices: [0] }
+                              StreamExchange { dist: HashShard([1]) }
+                                StreamFilter { predicate: ($4 = 'Brand#13':Varchar) AND ($7 = 'JUMBO PKG':Varchar) }
+                                  StreamTableScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment], pk_indices: [0] }
+                          StreamProject { exprs: [$1, $0, $2], expr_alias: [ ,  ,  ] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, _row_id#0], pk_indices: [2] }
 - id: tpch_q18
   before:
     - create_tables
@@ -989,7 +1093,7 @@
       o_totalprice desc,
       o_orderdate
     LIMIT 100;
-  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "o_orderkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "l_orderkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [Identifier(Ident { value: "l_orderkey", quote_style: None })], having: Some(BinaryOp { left: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }), op: Gt, right: Value(Number("1", false)) }) }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }'
+  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "o_orderkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "l_orderkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [Identifier(Ident { value: "l_orderkey", quote_style: None })], having: Some(BinaryOp { left: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }), op: Gt, right: Value(Number("1", false)) }) }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: tpch_q19
   before:
     - create_tables
@@ -1029,7 +1133,35 @@
         and l_shipmode in ('AIR', 'AIR REG')
         and l_shipinstruct = 'DELIVER IN PERSON'
       );
-  binder_error: 'Feature is not yet implemented: unsupported expression InList { expr: Identifier(Ident { value: "p_container", quote_style: None }), list: [Value(SingleQuotedString("SM CASE")), Value(SingleQuotedString("SM BOX")), Value(SingleQuotedString("SM PACK")), Value(SingleQuotedString("SM PKG"))], negated: false }'
+  batch_plan: |
+    BatchProject { exprs: [$0], expr_alias: [revenue] }
+      BatchSimpleAgg { aggs: [sum($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [($2 * (1:Int32 - $3))], expr_alias: [ ] }
+            BatchFilter { predicate: ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))) }
+              BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                BatchProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
+                      BatchScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchFilter { predicate: ($2 >= 1:Int32) }
+                    BatchScan { table: part, columns: [p_partkey, p_brand, p_size, p_container] }
+  stream_plan: |
+    StreamMaterialize { columns: [revenue, agg#0(hidden)], pk_columns: [agg#0, revenue] }
+      StreamProject { exprs: [$1, $0], expr_alias: [revenue,  ] }
+        StreamSimpleAgg { aggs: [count, sum($0)] }
+          StreamExchange { dist: Single }
+            StreamProject { exprs: [($2 * (1:Int32 - $3)), $4, $9], expr_alias: [ ,  ,  ] }
+              StreamFilter { predicate: ((((((($6 = 'Brand#52':Varchar) AND In($8, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($7 <= 5:Int32)) OR ((((($6 = 'Brand#24':Varchar) AND In($8, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($7 <= 10:Int32))) OR ((((($6 = 'Brand#32':Varchar) AND In($8, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($7 <= 15:Int32))) }
+                StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                  StreamProject { exprs: [$0, $1, $2, $3, $6], expr_alias: [ ,  ,  ,  ,  ] }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamFilter { predicate: In($5, 'AIR':Varchar, 'AIR REG':Varchar) AND ($4 = 'DELIVER IN PERSON':Varchar) }
+                        StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice, l_discount, l_shipinstruct, l_shipmode, _row_id#0], pk_indices: [6] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: ($2 >= 1:Int32) }
+                      StreamTableScan { table: part, columns: [p_partkey, p_brand, p_size, p_container, _row_id#0], pk_indices: [4] }
 - id: tpch_q20
   before:
     - create_tables
@@ -1071,4 +1203,4 @@
       and n_name = 'KENYA'
     order by
       s_name;
-  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "s_suppkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "ps_suppkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "partsupp", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: InSubquery { expr: Identifier(Ident { value: "ps_partkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "p_partkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "part", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: Identifier(Ident { value: "p_name", quote_style: None }), op: Like, right: Value(SingleQuotedString("forest%")) }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, op: And, right: BinaryOp { left: Identifier(Ident { value: "ps_availqty", quote_style: None }), op: Gt, right: Subquery(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(BinaryOp { left: Value(Number("0.5", false)), op: Multiply, right: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }) })], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: BinaryOp { left: BinaryOp { left: BinaryOp { left: Identifier(Ident { value: "l_partkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_partkey", quote_style: None }) }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_suppkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_suppkey", quote_style: None }) } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: GtEq, right: TypedString { data_type: Date, value: "1994-01-01" } } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: Lt, right: BinaryOp { left: TypedString { data_type: Date, value: "1994-01-01" }, op: Plus, right: Value(Interval { value: "1", leading_field: Some(Year), leading_precision: None, last_field: None, fractional_seconds_precision: None }) } } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }) } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }'
+  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "s_suppkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "ps_suppkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "partsupp", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: InSubquery { expr: Identifier(Ident { value: "ps_partkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "p_partkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "part", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: Identifier(Ident { value: "p_name", quote_style: None }), op: Like, right: Value(SingleQuotedString("forest%")) }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, op: And, right: BinaryOp { left: Identifier(Ident { value: "ps_availqty", quote_style: None }), op: Gt, right: Subquery(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(BinaryOp { left: Value(Number("0.5", false)), op: Multiply, right: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }) })], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: BinaryOp { left: BinaryOp { left: BinaryOp { left: Identifier(Ident { value: "l_partkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_partkey", quote_style: None }) }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_suppkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_suppkey", quote_style: None }) } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: GtEq, right: TypedString { data_type: Date, value: "1994-01-01" } } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: Lt, right: BinaryOp { left: TypedString { data_type: Date, value: "1994-01-01" }, op: Plus, right: Value(Interval { value: "1", leading_field: Some(Year), leading_precision: None, last_field: None, fractional_seconds_precision: None }) } } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }) } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'

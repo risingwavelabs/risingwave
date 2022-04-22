@@ -38,6 +38,7 @@ impl CatalogReader {
     pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
         CatalogReader(inner)
     }
+
     pub fn read_guard(&self) -> CatalogReadGuard {
         self.0.read_arc()
     }
@@ -66,6 +67,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
+
+    async fn drop_source(&self, source_id: u32) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -136,6 +139,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let version = self.meta_client.drop_materialized_view(table_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_source(&self, source_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_source(source_id).await?;
         self.wait_version(version).await
     }
 }

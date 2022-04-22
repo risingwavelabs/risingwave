@@ -16,19 +16,15 @@ use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, Sstable};
-use crate::hummock::iterator::variants::FORWARD;
-use crate::hummock::iterator::HummockIterator;
-use crate::hummock::version_cmp::VersionedComparator;
-use crate::hummock::SstableStoreRef;
-
-pub trait SSTableIteratorBase: HummockIterator {}
+use super::Sstable;
+use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::{BlockIterator, SstableStoreRef};
 
 pub trait SSTableIteratorType {
-    type SSTableIterator: SSTableIteratorBase;
-    const DIRECTION: usize;
+    type SSTableIterator: HummockIterator;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
 }
@@ -89,6 +85,8 @@ impl SSTableIterator {
 
 #[async_trait]
 impl HummockIterator for SSTableIterator {
+    type Direction = Forward;
+
     async fn next(&mut self) -> HummockResult<()> {
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
@@ -143,11 +141,8 @@ impl HummockIterator for SSTableIterator {
     }
 }
 
-impl SSTableIteratorBase for SSTableIterator {}
-
 impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
-    const DIRECTION: usize = FORWARD;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
         SSTableIterator::new(table, sstable_store)
@@ -158,16 +153,15 @@ impl SSTableIteratorType for SSTableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use risingwave_hummock_sdk::key::key_with_epoch;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::key::key_with_epoch;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
-
     #[tokio::test]
     async fn test_table_iterator() {
         // Build remote table

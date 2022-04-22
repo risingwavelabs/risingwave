@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_hummock_sdk::{HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::hummock::HummockVersionRefId;
-use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::MetadataModel;
@@ -31,8 +31,8 @@ pub struct CurrentHummockVersionId {
 }
 
 impl MetadataModel for CurrentHummockVersionId {
-    type ProstType = HummockVersionRefId;
     type KeyType = String;
+    type ProstType = HummockVersionRefId;
 
     fn cf_name() -> String {
         HUMMOCK_DEFAULT_CF_NAME.to_string()

@@ -23,8 +23,8 @@ use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct InputRef {
-    index: usize,
-    data_type: DataType,
+    pub index: usize,
+    pub data_type: DataType,
 }
 
 #[derive(Clone, Copy)]
@@ -35,12 +35,6 @@ pub struct AliasDisplay<'a>(Option<&'a str>);
 
 pub fn as_alias_display(x: &Option<impl AsRef<str>>) -> AliasDisplay<'_> {
     AliasDisplay(x.as_ref().map(|x| x.as_ref()))
-}
-
-pub fn column_idx_to_inputref_proto(column_idx: usize) -> InputRefExpr {
-    InputRefExpr {
-        column_idx: column_idx as i32,
-    }
 }
 
 pub fn input_ref_to_column_indices(input_refs: &[InputRef]) -> Vec<usize> {
@@ -103,10 +97,22 @@ impl InputRef {
         self.index
     }
 
+    /// Shift the input ref's index with offset.
+    pub fn shift_with_offset(&mut self, offset: isize) {
+        self.index = (self.index as isize + offset) as usize;
+    }
+
+    /// Convert to [`InputRefExpr`].
+    pub fn to_proto(&self) -> InputRefExpr {
+        InputRefExpr {
+            column_idx: self.index as i32,
+        }
+    }
+
     /// Convert [`InputRef`] to an arg of agg call.
-    pub fn to_agg_arg_protobuf(&self) -> ProstAggCallArg {
+    pub fn to_agg_arg_proto(&self) -> ProstAggCallArg {
         ProstAggCallArg {
-            input: Some(column_idx_to_inputref_proto(self.index)),
+            input: Some(self.to_proto()),
             r#type: Some(self.data_type.to_protobuf()),
         }
     }
@@ -117,15 +123,13 @@ impl Expr for InputRef {
         self.data_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
             expr_type: ExprType::InputRef.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::InputRef(InputRefExpr {
-                column_idx: self.index() as i32,
-            })),
+            rex_node: Some(RexNode::InputRef(self.to_proto())),
         }
     }
 }

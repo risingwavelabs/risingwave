@@ -17,7 +17,7 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SourceSnapshot, SubscribeRequest, SubscribeResponse};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
@@ -69,18 +69,6 @@ where
 
         match worker_type {
             WorkerType::ComputeNode => {
-                // send source snapshot to new workers.
-                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                let sources = catalog_guard.list_sources().await.map_err(tonic_err)?;
-                let source_snapshot = SourceSnapshot { sources };
-
-                tx.send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: Operation::Snapshot as i32,
-                    info: Some(Info::BeSnapshot(source_snapshot)),
-                    version: self.env.epoch_generator().generate().into_inner(),
-                }))
-                .unwrap();
                 self.env
                     .notification_manager()
                     .insert_compute_sender(WorkerKey(host_address), tx)
@@ -103,13 +91,13 @@ where
                     schema,
                     source,
                     table,
-                    ..Default::default()
+                    view: Default::default(),
                 };
                 tx.send(Ok(SubscribeResponse {
                     status: None,
                     operation: Operation::Snapshot as i32,
                     info: Some(Info::FeSnapshot(meta_snapshot)),
-                    version: self.env.epoch_generator().generate().into_inner(),
+                    version: self.env.notification_manager().current_version().await,
                 }))
                 .unwrap();
                 self.env

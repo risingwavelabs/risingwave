@@ -88,10 +88,10 @@ impl AggCall {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(&agg_kind, &data_types).ok_or_else(|| {
             let args = data_types.iter().map(|t| format!("{:?}", t)).join(", ");
-            RwError::from(ErrorCode::NotImplementedError(format!(
-                "No function matches to {}({})",
-                agg_kind, args
-            )))
+            RwError::from(ErrorCode::NotImplemented(
+                format!("No function matches to {}({})", agg_kind, args),
+                None.into(),
+            ))
         })?;
         Ok(AggCall {
             agg_kind,
@@ -99,9 +99,11 @@ impl AggCall {
             inputs,
         })
     }
+
     pub fn decompose(self) -> (AggKind, Vec<ExprImpl>) {
         (self.agg_kind, self.inputs)
     }
+
     pub fn agg_kind(&self) -> AggKind {
         self.agg_kind.clone()
     }
@@ -116,7 +118,7 @@ impl Expr for AggCall {
         self.return_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         // This function is always called on the physical planning step, where
         // `ExprImpl::AggCall` must have been rewritten to aggregate operators.
 

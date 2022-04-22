@@ -29,35 +29,31 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use connector_source::ConnectorSource;
-pub use high_level_kafka::*;
+use enum_as_inner::EnumAsInner;
 pub use manager::*;
 pub use parser::*;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
+use risingwave_connector::SplitImpl;
 pub use table_v2::*;
+
+use crate::connector_source::{ConnectorReaderContext, ConnectorSource, ConnectorStreamReader};
 
 pub mod parser;
 
 pub mod connector_source;
-mod high_level_kafka;
 mod manager;
 
 mod common;
 mod table_v2;
 
+extern crate core;
 extern crate maplit;
-
-#[derive(Clone, Debug)]
-pub enum SourceConfig {
-    Kafka(HighLevelKafkaSourceConfig),
-    Connector(HashMap<String, String>),
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -68,18 +64,52 @@ pub enum SourceFormat {
     Avro,
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
-    HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
     Connector(ConnectorSource),
 }
 
-impl SourceImpl {
-    pub fn as_table_v2(&self) -> &TableSourceV2 {
+pub enum SourceStreamReaderImpl {
+    TableV2(TableV2StreamReader),
+    Connector(ConnectorStreamReader),
+}
+
+#[async_trait]
+impl StreamSourceReader for SourceStreamReaderImpl {
+    async fn next(&mut self) -> Result<StreamChunk> {
         match self {
-            SourceImpl::TableV2(table) => table,
-            _ => panic!("not a table source v2"),
+            SourceStreamReaderImpl::TableV2(t) => t.next().await,
+            SourceStreamReaderImpl::Connector(c) => c.next().await,
+        }
+    }
+}
+
+pub enum SourceReaderContext {
+    None(()),
+    ConnectorReaderContext(Vec<SplitImpl>),
+}
+
+impl SourceImpl {
+    pub async fn stream_reader(
+        &self,
+        context: SourceReaderContext,
+        column_ids: Vec<ColumnId>,
+    ) -> Result<SourceStreamReaderImpl> {
+        log::debug!("Creating new stream reader");
+
+        match (self, context) {
+            (SourceImpl::TableV2(x), SourceReaderContext::None(_)) => x
+                .stream_reader(TableV2ReaderContext {}, column_ids)
+                .await
+                .map(SourceStreamReaderImpl::TableV2),
+            (SourceImpl::Connector(c), SourceReaderContext::ConnectorReaderContext(context)) => c
+                .stream_reader(ConnectorReaderContext { splits: context }, column_ids)
+                .await
+                .map(SourceStreamReaderImpl::Connector),
+            _ => Err(RwError::from(InternalError(
+                "unmatched source and context".to_string(),
+            ))),
         }
     }
 }
@@ -87,18 +117,10 @@ impl SourceImpl {
 #[async_trait]
 pub trait Source: Send + Sync + 'static {
     type ReaderContext;
-    type BatchReader: BatchSourceReader;
     type StreamReader: StreamSourceReader;
 
-    /// Create a batch reader
-    fn batch_reader(
-        &self,
-        context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::BatchReader>;
-
     /// Create a stream reader
-    fn stream_reader(
+    async fn stream_reader(
         &self,
         context: Self::ReaderContext,
         column_ids: Vec<ColumnId>,
@@ -106,22 +128,7 @@ pub trait Source: Send + Sync + 'static {
 }
 
 #[async_trait]
-pub trait BatchSourceReader: Send + Sync + 'static {
-    /// `open` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
-    /// `next` returns a row or `None` immediately if there is no more result
-    async fn next(&mut self) -> Result<Option<DataChunk>>;
-
-    /// `close` is called to stop the reader
-    async fn close(&mut self) -> Result<()>;
-}
-
-#[async_trait]
 pub trait StreamSourceReader: Send + Sync + 'static {
-    /// `init` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
     async fn next(&mut self) -> Result<StreamChunk>;

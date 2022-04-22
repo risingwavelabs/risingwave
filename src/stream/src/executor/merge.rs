@@ -17,8 +17,9 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use super::{Executor, Result};
+use super::Result;
 use crate::executor::ExecutorBuilder;
+use crate::executor_v2::BoxedExecutor;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct MergeExecutorBuilder {}
@@ -29,7 +30,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
         stream.create_merge_node(params, node)
     }

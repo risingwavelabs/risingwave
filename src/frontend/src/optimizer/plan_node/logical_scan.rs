@@ -99,6 +99,7 @@ impl LogicalScan {
             .map(|f| f.name.clone())
             .collect()
     }
+
     pub fn table_name(&self) -> &str {
         &self.table_name
     }
@@ -182,6 +183,7 @@ impl ToStream for LogicalScan {
                     .collect_vec();
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);
+                let new_len = required_col_idx.len();
                 (
                     Self::new(
                         self.table_name.clone(),
@@ -190,7 +192,7 @@ impl ToStream for LogicalScan {
                         self.base.ctx.clone(),
                     )
                     .into(),
-                    ColIndexMapping::identity(self.schema().len()),
+                    ColIndexMapping::identity_or_none(self.schema().len(), new_len),
                 )
             }
             false => (

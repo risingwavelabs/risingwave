@@ -43,7 +43,9 @@ macro_rules! array_impl_literal_append {
                     append_literal_to_arr(inner, None, $cardinality)?;
                 }
             )*
-            (_, _) => unimplemented!("Do not support values in insert values executor"),
+            (_, _) => return Err(ErrorCode::NotImplemented(
+                "Do not support values in insert values executor".to_string(), None.into(),
+            ).into()),
         }
     };
 }
@@ -95,8 +97,12 @@ fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> b
                     | (DataType::Float32, ScalarImpl::Float32(_))
                     | (DataType::Float64, ScalarImpl::Float64(_))
                     | (DataType::Date, ScalarImpl::Int32(_))
-                    | (DataType::Char, ScalarImpl::Utf8(_))
                     | (DataType::Varchar, ScalarImpl::Utf8(_))
+                    | (DataType::Date, ScalarImpl::NaiveDate(_))
+                    | (DataType::Time, ScalarImpl::NaiveTime(_))
+                    | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
+                    | (DataType::Decimal, ScalarImpl::Decimal(_))
+                    | (DataType::Interval, ScalarImpl::Interval(_))
             )
         }
         None => true,
@@ -226,7 +232,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         "Unrecognized type name: {:?}",
                         prost.get_return_type()?.get_type_name()
                     ))
-                    .into())
+                    .into());
                 }
             };
 
@@ -284,7 +290,7 @@ mod tests {
         let bytes = v.to_be_bytes().to_vec();
         assert!(LiteralExpression::try_from(&make_expression(
             Some(bytes.clone()),
-            TypeName::Boolean
+            TypeName::Boolean,
         ))
         .is_err());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();

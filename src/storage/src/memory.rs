@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use lazy_static::lazy_static;
-use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
 use crate::storage_value::StorageValue;
@@ -83,6 +82,7 @@ impl MemoryStateStore {
 
 impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
@@ -154,10 +154,12 @@ impl StateStore for MemoryStateStore {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let mut inner = self.inner.lock().await;
+            let mut size: u64 = 0;
             for (key, value) in kv_pairs {
+                size += (key.len() + value.size()) as u64;
                 inner.insert((key, Reverse(epoch)), value.user_value);
             }
-            Ok(())
+            Ok(size)
         }
     }
 
@@ -216,7 +218,10 @@ impl MemoryStateStoreIter {
 
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { Ok(self.inner.next()) }
     }

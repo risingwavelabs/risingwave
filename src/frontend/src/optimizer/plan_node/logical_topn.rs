@@ -17,8 +17,8 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 
 use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
+use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -50,15 +50,35 @@ impl LogicalTopN {
     pub fn create(input: PlanRef, limit: usize, offset: usize, order: Order) -> PlanRef {
         Self::new(input, limit, offset, order).into()
     }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
+    /// already exists and it was designed to return the operator's physical property order.
+    ///
+    /// Note that `order()` and `topn_order()` may differ. For streaming query, `order()` which
+    /// implies the output ordering of an operator, is never guaranteed; while `topn_order()` must
+    /// be non-null because it's a critical information for Top-N operators to work
+    pub fn topn_order(&self) -> &Order {
+        &self.order
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalTopN {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.limit, self.offset, self.order.clone())
     }
+
     #[must_use]
     fn rewrite_with_input(
         &self,
@@ -80,8 +100,12 @@ impl PlanTreeNodeUnary for LogicalTopN {
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "LogicalTopN {{ order: {}, limit: {}, offset: {} }}",
+            &self.order, &self.limit, &self.offset,
+        )
     }
 }
 
@@ -125,14 +149,31 @@ impl ColPrunable for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        self.to_batch_with_order_required(Order::any())
+    }
+
+    fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        let ret = BatchTopN::new(new_logical).into();
+
+        if self.topn_order().satisfies(required_order) {
+            ret
+        } else {
+            required_order.enforce(ret)
+        }
     }
 }
 
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
+        let input = self
+            .input()
+            .to_stream_with_dist_required(&Distribution::Single);
+        StreamTopN::new(self.clone_with_input(input)).into()
     }
+
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);

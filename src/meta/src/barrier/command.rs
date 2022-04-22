@@ -17,11 +17,10 @@ use std::collections::{HashMap, HashSet};
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
-use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
@@ -42,14 +41,14 @@ pub enum Command {
     /// After the barrier is collected, it does nothing.
     Plain(Mutation),
 
-    /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableRefId`]. The
+    /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
     /// catalog has ensured that this materialized view is safe to be dropped by reference counts
     /// before.
     ///
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropMaterializedView(TableRefId),
+    DropMaterializedView(TableId),
 
     /// `CreateMaterializedView` command generates a `Add` barrier by given info.
     ///
@@ -90,8 +89,8 @@ pub struct CommandContext<'a, S> {
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
     pub info: &'a BarrierActorInfo,
 
-    pub prev_epoch: u64,
-    pub curr_epoch: u64,
+    pub prev_epoch: &'a Epoch,
+    pub curr_epoch: &'a Epoch,
 
     command: Command,
 }
@@ -101,8 +100,8 @@ impl<'a, S> CommandContext<'a, S> {
         fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
-        prev_epoch: u64,
-        curr_epoch: u64,
+        prev_epoch: &'a Epoch,
+        curr_epoch: &'a Epoch,
         command: Command,
     ) -> Self {
         Self {
@@ -126,10 +125,7 @@ where
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
-                let actors = self
-                    .fragment_manager
-                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))
-                    .await?;
+                let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
                 Mutation::Stop(StopMutation { actors })
             }
 
@@ -170,20 +166,17 @@ where
         match &self.command {
             Command::Plain(_) => {}
 
-            Command::DropMaterializedView(table_ref_id) => {
+            Command::DropMaterializedView(table_id) => {
                 // Tell compute nodes to drop actors.
-                let table_id = TableId::from(&Some(table_ref_id.clone()));
-                let node_actors = self.fragment_manager.table_node_actors(&table_id).await?;
+                let node_actors = self.fragment_manager.table_node_actors(table_id).await?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();
 
                     async move {
                         let mut client = self.clients.get(node).await?;
-                        tracing::debug!(request_id = %request_id, node = node_id, actors = ?actors, "drop actors");
                         let request = DropActorsRequest {
                             request_id,
-                            table_ref_id: Some(table_ref_id.to_owned()),
                             actor_ids: actors.to_owned(),
                         };
                         client.drop_actors(request).await.to_rw_result()?;
@@ -195,13 +188,7 @@ where
                 try_join_all(futures).await?;
 
                 // Drop fragment info in meta store.
-                self.fragment_manager
-                    .drop_table_fragments(&table_id)
-                    .await?;
-
-                // TODO: delete downstream actor infos from upstream actors:
-                // 1. resolve chain nodes, find upstream actors and table id.
-                // 2. delete downstream actor infos from upstream actors in depended table.
+                self.fragment_manager.drop_table_fragments(table_id).await?;
             }
 
             Command::CreateMaterializedView {
@@ -209,13 +196,7 @@ where
                 dispatches,
                 table_sink_map,
             } => {
-                // TODO: all related updates should be done in one transaction.
-                let mut table_fragments = table_fragments.clone();
-                table_fragments.update_actors_state(ActorState::Running);
-                self.fragment_manager
-                    .update_table_fragments(table_fragments)
-                    .await?;
-
+                let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
@@ -230,10 +211,14 @@ where
                             )
                         })
                         .collect::<HashMap<ActorId, Vec<ActorId>>>();
-                    self.fragment_manager
-                        .update_table_fragments_downstream(table_id, &downstream_actors)
-                        .await?;
+                    dependent_table_actors.push((*table_id, downstream_actors));
                 }
+                self.fragment_manager
+                    .finish_create_table_fragments(
+                        &table_fragments.table_id(),
+                        &dependent_table_actors,
+                    )
+                    .await?;
             }
         }
 

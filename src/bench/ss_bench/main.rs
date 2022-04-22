@@ -20,7 +20,9 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
-use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
@@ -39,8 +41,33 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = 64)]
     block_size_kb: u32,
 
+    #[clap(long, default_value_t = 256)]
+    block_cache_capacity_mb: u32,
+
+    #[clap(long, default_value_t = 64)]
+    meta_cache_capacity_mb: u32,
+
+    #[clap(long, default_value_t = 192)]
+    shared_buffer_threshold_mb: u32,
+
+    #[clap(long, default_value_t = 256)]
+    shared_buffer_capacity_mb: u32,
+
+    #[clap(long, default_value_t = 2)]
+    share_buffers_sync_parallelism: u32,
+
     #[clap(long, default_value_t = 0.1)]
     bloom_false_positive: f64,
+
+    #[clap(long, default_value_t = 0)]
+    compact_level_after_write: u32,
+
+    #[clap(long)]
+    // since we want to enable async checkpoint as the default
+    async_checkpoint_disabled: bool,
+
+    #[clap(long)]
+    write_conflict_detection_enabled: bool,
 
     // ----- benchmarks -----
     #[clap(long)]
@@ -119,30 +146,49 @@ async fn main() {
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
+        shared_buffer_threshold: opts.shared_buffer_threshold_mb * (1 << 20),
+        shared_buffer_capacity: opts.shared_buffer_capacity_mb * (1 << 20),
         bloom_false_positive: opts.bloom_false_positive,
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
+        share_buffers_sync_parallelism: opts.share_buffers_sync_parallelism,
         data_directory: "hummock_001".to_string(),
-        async_checkpoint_enabled: true,
-        write_conflict_detection_enabled: false,
-        block_cache_capacity: 256 << 20,
-        meta_cache_capacity: 64 << 20,
+        async_checkpoint_enabled: !opts.async_checkpoint_disabled,
+        write_conflict_detection_enabled: opts.write_conflict_detection_enabled,
+        block_cache_capacity: opts.block_cache_capacity_mb as usize * (1 << 20),
+        meta_cache_capacity: opts.meta_cache_capacity_mb as usize * (1 << 20),
     });
 
-    let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(mock_hummock_meta_service));
-
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
     let state_store = StateStoreImpl::new(
         &opts.store,
-        config,
+        config.clone(),
         mock_hummock_meta_client.clone(),
         state_store_stats.clone(),
     )
     .await
     .expect("Failed to get state_store");
+    let mut context = None;
+    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+        context = Some((
+            Arc::new(CompactorContext {
+                options: config.clone(),
+                hummock_meta_client: mock_hummock_meta_client.clone(),
+                sstable_store: hummock.inner().sstable_store(),
+                stats: state_store_stats.clone(),
+                is_share_buffer_compact: false,
+            }),
+            hummock.inner().local_version_manager().clone(),
+        ));
+    }
 
     dispatch_state_store!(state_store, store, {
-        Operations::run(store, mock_hummock_meta_client, &opts).await
+        Operations::run(store, mock_hummock_meta_client, context, &opts).await
     });
 
     if opts.statistics {
