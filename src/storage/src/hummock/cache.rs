@@ -149,20 +149,24 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
         (self.flags & IN_CACHE) > 0
     }
 
-    fn get_key(&self) -> &K {
-        &self.kv.as_ref().unwrap().0
+    unsafe fn get_key(&self) -> &K {
+        debug_assert!(self.kv.is_some());
+        &self.kv.as_ref().unwrap_unchecked().0
     }
 
-    fn get_value(&self) -> &T {
-        &self.kv.as_ref().unwrap().1
+    unsafe fn get_value(&self) -> &T {
+        debug_assert!(self.kv.is_some());
+        &self.kv.as_ref().unwrap_unchecked().1
     }
 
-    fn is_same_key(&self, key: &K) -> bool {
-        self.kv.as_ref().unwrap().0.eq(key)
+    unsafe fn is_same_key(&self, key: &K) -> bool {
+        debug_assert!(self.kv.is_some());
+        self.kv.as_ref().unwrap_unchecked().0.eq(key)
     }
 
-    fn take_kv(&mut self) -> (K, T) {
-        self.kv.take().unwrap()
+    unsafe fn take_kv(&mut self) -> (K, T) {
+        debug_assert!(self.kv.is_some());
+        self.kv.take().unwrap_unchecked()
     }
 
     #[cfg(debug_assertions)]
@@ -387,13 +391,16 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         value
     }
 
+    /// Try to recycle a handle object if the object pool is not full.
+    ///
+    /// The handle should already cleared its kv.
     unsafe fn try_recycle_handle_object(&mut self, h: *mut LruHandle<K, T>) {
         if self.object_pool.len() < self.object_pool.capacity() {
             let mut node = Box::from_raw(h);
             node.next_hash = null_mut();
             node.next = null_mut();
             node.prev = null_mut();
-            node.kv.take();
+            debug_assert!(node.kv.is_none());
             self.object_pool.push(node);
         }
     }
