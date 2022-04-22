@@ -22,7 +22,8 @@ use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
@@ -229,18 +230,28 @@ impl SourceExecutor {
         })
     }
 
-    fn gen_row_column(&mut self, len: usize) -> Column {
+    fn gen_row_column(&mut self, old_column: &Column, ops: Ops<'_>) -> Column {
+        let len = old_column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len).unwrap();
 
-        for _ in 0..len {
-            builder
-                .append(Some(
-                    self.row_id_generator
-                        .as_mut()
-                        .expect("row id generator")
-                        .next_row_id(),
-                ))
-                .unwrap();
+        for i in 0..len {
+            // Only refill row_id for insert operation.
+            if ops.get(i) == Some(&Op::Insert) {
+                builder
+                    .append(Some(
+                        self.row_id_generator
+                            .as_mut()
+                            .expect("row id generator")
+                            .next_row_id(),
+                    ))
+                    .unwrap();
+            } else {
+                builder
+                    .append(Some(
+                        i64::try_from(old_column.array_ref().datum_at(i).unwrap()).unwrap(),
+                    ))
+                    .unwrap();
+            }
         }
 
         Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
@@ -256,7 +267,9 @@ impl SourceExecutor {
                 .position(|column_id| *column_id == row_id_column_id)
             {
                 let (ops, mut columns, bitmap) = chunk.into_inner();
-                columns[idx] = self.gen_row_column(columns[idx].array().len());
+                if ops.iter().any(|op| *op == Op::Insert) {
+                    columns[idx] = self.gen_row_column(&columns[idx], &ops);
+                }
                 return StreamChunk::new(ops, columns, bitmap);
             }
         }
