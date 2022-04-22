@@ -103,7 +103,7 @@ pub struct SourceExecutor {
 
     pk_indices: PkIndices,
 
-    /// row id generator
+    /// Row id generator
     row_id_generator: Option<RowIdGenerator>,
 
     /// Identity string
