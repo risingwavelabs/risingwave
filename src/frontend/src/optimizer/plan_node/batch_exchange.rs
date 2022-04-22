@@ -15,7 +15,7 @@
 use std::fmt;
 
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{ColumnOrder, ExchangeNode, MergeSortExchangeNode};
+use risingwave_pb::plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order};
@@ -79,17 +79,7 @@ impl ToBatchProst for BatchExchange {
                     sources: vec![],
                     input_schema: self.base.schema.to_prost(),
                 }),
-                column_orders: self
-                    .base
-                    .order
-                    .to_protobuf()
-                    .iter()
-                    .map(|(input_ref, order_type)| ColumnOrder {
-                        order_type: *order_type as i32,
-                        input_ref: Some(input_ref.clone()),
-                        return_type: None,
-                    })
-                    .collect(),
+                column_orders: self.base.order.to_protobuf(&self.base.schema),
             })
         }
     }

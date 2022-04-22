@@ -27,7 +27,7 @@ use crate::executor::PkIndicesRef;
 use crate::executor_v2::aggregation::{
     create_streaming_agg_state, generate_agg_schema, AggCall, StreamingAggStateImpl,
 };
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::PkIndices;
 
 pub struct LocalSimpleAggExecutor {
@@ -77,7 +77,7 @@ impl LocalSimpleAggExecutor {
         Ok(())
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let LocalSimpleAggExecutor {
             input,

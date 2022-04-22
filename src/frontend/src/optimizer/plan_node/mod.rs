@@ -191,6 +191,7 @@ impl dyn PlanNode {
             operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
             pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
+            append_only: self.append_only(),
         }
     }
 }
@@ -220,11 +221,13 @@ mod batch_project;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_topn;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
 mod logical_delete;
 mod logical_filter;
+mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
 mod logical_limit;
@@ -237,11 +240,13 @@ mod stream_exchange;
 mod stream_filter;
 mod stream_hash_agg;
 mod stream_hash_join;
+mod stream_hop_window;
 mod stream_materialize;
 mod stream_project;
 mod stream_simple_agg;
 mod stream_source;
 mod stream_table_scan;
+mod stream_topn;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -254,11 +259,13 @@ pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_topn::BatchTopN;
 pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
+pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
@@ -271,11 +278,13 @@ pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
+pub use stream_hop_window::StreamHopWindow;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
@@ -308,6 +317,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Values }
             ,{ Logical, Limit }
             ,{ Logical, TopN }
+            ,{ Logical, HopWindow }
             // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
             ,{ Batch, SimpleAgg }
             ,{ Batch, HashAgg }
@@ -321,6 +331,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
+            ,{ Batch, TopN }
             ,{ Stream, Project }
             ,{ Stream, Filter }
             ,{ Stream, TableScan }
@@ -330,9 +341,12 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
+            ,{ Stream, TopN }
+            ,{ Stream, HopWindow }
         }
     };
 }
+
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
 macro_rules! for_logical_plan_nodes {
@@ -351,6 +365,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Values }
             ,{ Logical, Limit }
             ,{ Logical, TopN }
+            ,{ Logical, HopWindow }
             // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -372,6 +387,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Values }
             ,{ Batch, Limit }
             ,{ Batch, Sort }
+            ,{ Batch, TopN }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }
             ,{ Batch, Delete }
@@ -394,6 +410,8 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
+            ,{ Stream, TopN }
+            ,{ Stream, HopWindow }
         }
     };
 }
@@ -422,6 +440,7 @@ macro_rules! enum_plan_node_type {
         }
     }
 }
+
 for_all_plan_nodes! { enum_plan_node_type }
 
 /// impl fn `plan_ref` for each node.

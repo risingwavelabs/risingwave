@@ -21,10 +21,12 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     BatchParallelInfo, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
+use risingwave_pb::ProstFieldNotFound;
 
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
@@ -397,6 +399,8 @@ where
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,
+        table_id_offset: u32,
+        table_id_len: u32,
     ) -> Result<HashMap<LocalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
 
@@ -421,6 +425,8 @@ where
                 &mut upstream_actors,
                 builder.get_fragment_id(),
                 builder.get_parallel_degree(),
+                table_id_offset,
+                table_id_len,
             )?);
 
             graph
@@ -453,6 +459,7 @@ where
     /// 2. ignore root node when it's `ExchangeNode`.
     /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
     /// ids if it is a `ChainNode`.
+    #[allow(clippy::too_many_arguments)]
     pub fn build_inner(
         &self,
         ctx: &mut CreateMaterializedViewContext,
@@ -461,6 +468,8 @@ where
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         fragment_id: LocalFragmentId,
         parallel_degree: u32,
+        table_id_offset: u32,
+        table_id_len: u32,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
@@ -475,6 +484,24 @@ where
             ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
+                if let Node::HashJoinNode(node) = new_stream_node
+                    .node
+                    .as_mut()
+                    .ok_or(ProstFieldNotFound("prost stream node field not found"))?
+                {
+                    let left_table_id = (ctx.next_local_table_id + table_id_offset) as u64;
+                    let right_table_id = left_table_id + 1;
+                    node.left_table_ref_id = Some(TableRefId {
+                        table_id: left_table_id as i32,
+                        ..Default::default()
+                    });
+                    node.right_table_ref_id = Some(TableRefId {
+                        table_id: right_table_id as i32,
+                        ..Default::default()
+                    });
+                    ctx.next_local_table_id += 2;
+                }
+                assert!(ctx.next_local_table_id <= table_id_len);
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
                         Node::ExchangeNode(_) => {
@@ -491,6 +518,7 @@ where
                                 fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
+                                append_only: input.append_only,
                             };
                         }
                         Node::ChainNode(_) => {
@@ -510,6 +538,8 @@ where
                                 upstream_actor_id,
                                 fragment_id,
                                 parallel_degree,
+                                table_id_offset,
+                                table_id_len,
                             )?;
                         }
                     }
@@ -581,6 +611,7 @@ where
                     fields: chain_node.upstream_fields.clone(),
                     operator_id: merge_node.operator_id,
                     identity: "MergeExecutor".to_string(),
+                    append_only: stream_node.append_only,
                 },
                 batch_plan_node,
             ];
@@ -592,6 +623,7 @@ where
                 operator_id: stream_node.operator_id,
                 identity: "ChainExecutor".to_string(),
                 fields: chain_node.upstream_fields.clone(),
+                append_only: stream_node.append_only,
             })
         } else {
             unreachable!()

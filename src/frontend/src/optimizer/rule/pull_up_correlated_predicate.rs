@@ -68,15 +68,14 @@ impl Rule for PullUpCorrelatedPredicate {
                 .map(|input_ref| input_ref.into()),
         );
 
-        // TODO: remove LogicalFilter with always true condition.
-        let filter = LogicalFilter::new(
+        let filter = LogicalFilter::create(
             filter.input(),
             Condition {
                 conjunctions: uncor_exprs,
             },
         );
 
-        let project = LogicalProject::new(filter.into(), proj_exprs, proj_expr_alias);
+        let project = LogicalProject::new(filter, proj_exprs, proj_expr_alias);
 
         // Merge these expressions with LogicalApply into LogicalJoin.
         let on = Condition {

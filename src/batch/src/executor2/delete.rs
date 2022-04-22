@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
@@ -23,29 +24,26 @@ use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use super::BoxedExecutor;
-use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-/// [`DeleteExecutor`] implements table deletion with values from its child executor.
+/// [`DeleteExecutor2`] implements table deletion with values from its child executor.
 // TODO: concurrent `DELETE` may cause problems. A scheduler might be required.
-pub struct DeleteExecutor {
+pub struct DeleteExecutor2 {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-
-    child: BoxedExecutor,
-    executed: bool,
+    child: BoxedExecutor2,
     schema: Schema,
     identity: String,
 }
 
-impl DeleteExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+impl DeleteExecutor2 {
+    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor2) -> Self {
         Self {
             table_id,
             source_manager,
             child,
-            executed: false,
             // TODO: support `RETURNING`
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
@@ -55,29 +53,35 @@ impl DeleteExecutor {
     }
 }
 
-#[async_trait::async_trait]
-impl Executor for DeleteExecutor {
-    async fn open(&mut self) -> Result<()> {
-        self.child.open().await?;
-        info!("Delete executor");
-        Ok(())
+impl Executor2 for DeleteExecutor2 {
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.executed {
-            return Ok(None);
-        }
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl DeleteExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table_v2().expect("not table source");
 
         let mut notifiers = Vec::new();
 
-        while let Some(child_chunk) = self.child.next().await? {
-            let len = child_chunk.cardinality();
-            assert!(child_chunk.visibility().is_none());
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?;
+            let len = data_chunk.cardinality();
+            assert!(data_chunk.visibility().is_none());
 
-            let chunk = StreamChunk::from_parts(vec![Op::Delete; len], child_chunk);
+            let chunk = StreamChunk::from_parts(vec![Op::Delete; len], data_chunk);
 
             let notifier = source.write_chunk(chunk)?;
             notifiers.push(notifier);
@@ -104,28 +108,13 @@ impl Executor for DeleteExecutor {
                 .columns(vec![Column::new(Arc::new(array.into()))])
                 .build();
 
-            self.executed = true;
-            Ok(Some(ret_chunk))
+            yield ret_chunk
         }
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.child.close().await?;
-        info!("Cleaning delete executor.");
-        Ok(())
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
     }
 }
 
-impl BoxedExecutorBuilder for DeleteExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for DeleteExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let delete_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Delete
@@ -138,16 +127,13 @@ impl BoxedExecutorBuilder for DeleteExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build2()?;
 
-        Ok(Box::new(
-            Self::new(
-                table_id,
-                source.global_batch_env().source_manager_ref(),
-                child,
-            )
-            .fuse(),
-        ))
+        Ok(Box::new(Self::new(
+            table_id,
+            source.global_batch_env().source_manager_ref(),
+            child,
+        )))
     }
 }
 
@@ -155,6 +141,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
 mod tests {
     use std::sync::Arc;
 
+    use futures::StreamExt;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
@@ -207,12 +194,19 @@ mod tests {
             .await?;
 
         // Delete
-        let mut delete_executor =
-            DeleteExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor));
+        let delete_executor = Box::new(DeleteExecutor2::new(
+            table_id,
+            source_manager.clone(),
+            Box::new(mock_executor),
+        ));
+
         let handle = tokio::spawn(async move {
-            delete_executor.open().await.unwrap();
-            let result = delete_executor.next().await.unwrap().unwrap();
-            delete_executor.close().await.unwrap();
+            let fields = &delete_executor.schema().fields;
+            assert_eq!(fields[0].data_type, DataType::Int64);
+
+            let mut stream = delete_executor.execute();
+            let result = stream.next().await.unwrap().unwrap();
+
             assert_eq!(
                 result
                     .column_at(0)
@@ -225,7 +219,6 @@ mod tests {
         });
 
         // Read
-        reader.open().await?;
         let chunk = reader.next().await?;
 
         assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);

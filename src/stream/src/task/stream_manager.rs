@@ -25,7 +25,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_common::util::env_var::env_var_is_true;
+use risingwave_common::util::compress::decompress_data;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -39,7 +39,7 @@ use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{BoxedExecutor, Executor, MergeExecutor};
+use crate::executor_v2::{BoxedExecutor, DebugExecutor, Executor, MergeExecutor};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -417,15 +417,11 @@ impl LocalStreamManagerCore {
                         .iter()
                         .map(|i| *i as usize)
                         .collect();
-                    let hash_mapping = dispatcher
-                        .hash_mapping
-                        .clone()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(
-                                "hash dispatcher doesn't have consistent hash mapping".to_string(),
-                            ))
-                        })?
-                        .hash_mapping;
+                    let compressed_mapping = dispatcher.get_hash_mapping()?;
+                    let hash_mapping = decompress_data(
+                        &compressed_mapping.original_indices,
+                        &compressed_mapping.data,
+                    );
 
                     DispatcherImpl::Hash(HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),
@@ -459,7 +455,7 @@ impl LocalStreamManagerCore {
         fragment_id: u32,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
-        _input_pos: usize,
+        input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
     ) -> Result<BoxedExecutor> {
@@ -505,12 +501,12 @@ impl LocalStreamManagerCore {
         };
 
         let executor = create_executor(executor_params, self, node, store)?;
-        // let executor = Self::wrap_executor_for_debug(
-        //     executor,
-        //     actor_id,
-        //     input_pos,
-        //     self.streaming_metrics.clone(),
-        // )?;
+        let executor = Self::wrap_executor_for_debug(
+            executor,
+            actor_id,
+            input_pos,
+            self.streaming_metrics.clone(),
+        );
         Ok(executor)
     }
 
@@ -527,38 +523,17 @@ impl LocalStreamManagerCore {
         })
     }
 
-    #[allow(dead_code)]
     fn wrap_executor_for_debug(
-        mut executor: Box<dyn ExecutorV1>,
+        executor: BoxedExecutor,
         actor_id: ActorId,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
-    ) -> Result<Box<dyn ExecutorV1>> {
-        if !cfg!(debug_assertions) {
-            return Ok(executor);
+    ) -> BoxedExecutor {
+        if cfg!(debug_assertions) {
+            DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
+        } else {
+            executor
         }
-        let identity = executor.identity().to_string();
-
-        // Trace
-        executor = Box::new(TraceExecutor::new(
-            executor,
-            identity,
-            input_pos,
-            actor_id,
-            streaming_metrics,
-        ));
-        // Schema check
-        executor = Box::new(SchemaCheckExecutor::new(executor));
-        // Epoch check
-        executor = Box::new(EpochCheckExecutor::new(executor));
-        // Cache clear
-        if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
-            executor = Box::new(CacheClearExecutor::new(executor));
-        }
-        // Update check
-        executor = Box::new(UpdateCheckExecutor::new(executor));
-
-        Ok(executor)
     }
 
     pub fn create_merge_node(

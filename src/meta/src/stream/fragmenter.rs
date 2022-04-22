@@ -124,7 +124,29 @@ where
             .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
             .await? as _;
 
-        let stream_graph = self.stream_graph.build(ctx, start_actor_id, actor_len)?;
+        // Compute how many table ids should be allocated for all actors.
+        let mut table_ids_cnt = 0;
+        for (local_fragment_id, fragment) in self.fragment_graph.fragments() {
+            let num_of_actors = self
+                .fragment_actors
+                .get(local_fragment_id)
+                .expect("Fragment should have at least one actor")
+                .len();
+            // Total table ids number equals to table ids cnt in all actors.
+            table_ids_cnt += num_of_actors * fragment.table_ids_cnt;
+        }
+        let start_table_id = self
+            .id_gen_manager
+            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+            .await? as _;
+
+        let stream_graph = self.stream_graph.build(
+            ctx,
+            start_actor_id,
+            actor_len,
+            start_table_id,
+            table_ids_cnt as u32,
+        )?;
 
         // Serialize the graph
         stream_graph
@@ -184,7 +206,7 @@ where
                             r#type: DispatcherType::NoShuffle.into(),
                             column_indices: vec![],
                         };
-
+                        let append_only = child_node.append_only;
                         StreamNode {
                             pk_indices: child_node.pk_indices.clone(),
                             fields: child_node.fields.clone(),
@@ -194,6 +216,7 @@ where
                             operator_id: self.gen_operator_id() as u64,
                             input: vec![child_node],
                             identity: "Exchange (NoShuffle)".to_string(),
+                            append_only,
                         }
                     } else {
                         self.rewrite_stream_node_inner(child_node, true)?
@@ -230,7 +253,8 @@ where
     }
 
     /// Build new fragment and link dependencies by visiting children recursively, update
-    /// `is_singleton` and `fragment_type` properties for current fragment.
+    /// `is_singleton` and `fragment_type` properties for current fragment. While traversing the
+    /// tree, count how many table ids should be allocated in this fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
         &mut self,
@@ -252,8 +276,24 @@ where
             _ => {}
         };
 
-        let inputs = std::mem::take(&mut stream_node.input);
+        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+        // with only equal conditions
+        if let Node::HashJoinNode(hash_join_node) = stream_node.get_node()? {
+            current_fragment.table_ids_cnt += 2;
+            if hash_join_node.is_delta_join {
+                if hash_join_node.get_join_type()? == JoinType::Inner
+                    && hash_join_node.condition.is_none()
+                {
+                    return self.build_delta_join(current_fragment, stream_node);
+                } else {
+                    panic!(
+                        "only inner join without non-equal condition is supported for delta joins"
+                    );
+                }
+            }
+        }
 
+        let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
         let inputs = inputs
             .into_iter()
@@ -287,22 +327,7 @@ where
                         if is_simple_dispatcher {
                             current_fragment.is_singleton = true;
                         }
-
                         Ok(child_node)
-                    }
-
-                    // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-                    // with only equal conditions
-                    Node::HashJoinNode(hash_join_node)
-                        if hash_join_node.get_join_type()? == JoinType::Inner
-                            && hash_join_node.condition.is_none() =>
-                    {
-                        const ENABLE_DELTA_JOIN: bool = false;
-                        if ENABLE_DELTA_JOIN {
-                            self.build_delta_join(current_fragment, child_node)
-                        } else {
-                            self.build_fragment(current_fragment, child_node)
-                        }
                     }
 
                     // For other children, visit recursively.
@@ -414,7 +439,7 @@ where
         let mut actionable_fragment_id = VecDeque::new();
         let mut downstream_cnts = HashMap::new();
 
-        // Iterator all fragments
+        // Iterate all fragments
         for (fragment_id, _) in self.fragment_graph.fragments().iter() {
             // Count how many downstreams we have for a given fragment
             let downstream_cnt = self.fragment_graph.get_downstreams(*fragment_id).len();

@@ -23,6 +23,7 @@ macro_rules! impl_flush_status {
         ///        \------(delete)-> Delete --(insert)-> DeleteInsert --(delete)-> Delete
         /// ```
         $(
+            #[derive(Debug)]
             pub enum $struct_name<T> {
                 /// The entry will be deleted.
                 Delete,
