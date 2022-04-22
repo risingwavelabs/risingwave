@@ -306,14 +306,13 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
     lru_usage: Arc<AtomicUsize>,
     usage: Arc<AtomicUsize>,
     capacity: usize,
-    strict_capacity_limit: bool,
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for LruCacheShard<K, T> {}
 unsafe impl<K: LruKey, T: LruValue> Sync for LruCacheShard<K, T> {}
 
 impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
-    fn new(capacity: usize, object_capacity: usize, strict_capacity_limit: bool) -> Self {
+    fn new(capacity: usize, object_capacity: usize) -> Self {
         let mut lru = Box::new(LruHandle::default());
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
@@ -326,7 +325,6 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
             lru_usage: Arc::new(AtomicUsize::new(0)),
             usage: Arc::new(AtomicUsize::new(0)),
             object_pool,
-            strict_capacity_limit,
             lru,
             table: LruHandleTable::new(),
         }
@@ -415,10 +413,6 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         last_reference_list: &mut Vec<T>,
     ) -> *mut LruHandle<K, T> {
         self.evict_from_lru(charge, last_reference_list);
-        if self.usage.load(Ordering::Relaxed) + charge > self.capacity && self.strict_capacity_limit
-        {
-            return null_mut();
-        }
 
         let handle = if let Some(mut h) = self.object_pool.pop() {
             h.init(key, value, hash, charge);
@@ -541,7 +535,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         let mut shard_usages = Vec::with_capacity(num_shards);
         let mut shard_lru_usages = Vec::with_capacity(num_shards);
         for _ in 0..num_shards {
-            let shard = LruCacheShard::new(per_shard, per_shard_object, false);
+            let shard = LruCacheShard::new(per_shard, per_shard_object);
             shard_usages.push(shard.usage.clone());
             shard_lru_usages.push(shard.lru_usage.clone());
             shards.push(Mutex::new(shard));
@@ -585,18 +579,15 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         hash: u64,
         charge: usize,
         value: T,
-    ) -> Option<CachableEntry<K, T>> {
+    ) -> CachableEntry<K, T> {
         let mut to_delete = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
-            if ptr.is_null() {
-                None
-            } else {
-                Some(CachableEntry::<K, T> {
-                    cache: self.clone(),
-                    handle: ptr,
-                })
+            debug_assert!(!ptr.is_null());
+            CachableEntry::<K, T> {
+                cache: self.clone(),
+                handle: ptr,
             }
         };
         to_delete.clear();
@@ -738,7 +729,7 @@ mod tests {
     }
 
     fn create_cache(capacity: usize) -> LruCacheShard<String, String> {
-        LruCacheShard::new(capacity, capacity, false)
+        LruCacheShard::new(capacity, capacity)
     }
 
     fn lookup(cache: &mut LruCacheShard<String, String>, key: &str) -> bool {
