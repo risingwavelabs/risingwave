@@ -19,10 +19,9 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use crate::executor::{AggCall, Executor, ExecutorBuilder};
-use crate::executor_v2::{
-    Executor as ExecutorV2, LocalSimpleAggExecutor as LocalSimpleAggExecutorV2,
-};
+use crate::executor::ExecutorBuilder;
+use crate::executor_v2::aggregation::AggCall;
+use crate::executor_v2::{BoxedExecutor, Executor, LocalSimpleAggExecutor};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 pub struct LocalSimpleAggExecutorBuilder {}
@@ -33,22 +32,21 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::LocalSimpleAggNode)?;
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        Ok(Box::new(
-            Box::new(LocalSimpleAggExecutorV2::new_from_v1(
-                params.input.remove(0),
-                agg_calls,
-                params.pk_indices,
-                params.executor_id,
-                params.op_info,
-            )?)
-            .v1(),
-        ))
+
+        Ok(LocalSimpleAggExecutor::new_from_v1(
+            params.input.remove(0),
+            agg_calls,
+            params.pk_indices,
+            params.executor_id,
+            params.op_info,
+        )?
+        .boxed())
     }
 }

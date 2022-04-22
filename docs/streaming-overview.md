@@ -65,27 +65,15 @@ We use the term consistency to denote the model of the *completeness and correct
 
 ### Barrier based checkpoint
 
-To guarantee consistency, RisingWave introduces a Chandy-Lamport style consistent snapshot algorithm as its checkpoint scheme. In particular, RisingWave will periodically repeat the following procedure:
+To guarantee consistency, RisingWave introduces a Chandy-Lamport style consistent snapshot algorithm as its checkpoint scheme. 
 
-1. The meta service initializes a barrier and broadcasts it to all source actors across the streaming engine. 
-2. For each actor, when it receives a barrier on any of its input channels, it waits for all barrier comes and flushes its dirty states to the storage layer. 
-3. When all dirty states from a compute node are flushed, the compute node sends a finish signal to the meta. 
-4. After receiving the finish signal from all compute nodes, the meta updates its meta information and finishes the checkpoint procedure.
-
-This procedure guarantees that every state to be flushed into the storage is consistent (matching a certain barrier at the source). Therefore when querying materialized views, consistency is naturally guaranteed when the batch engine reads a consistent snapshot (of views and tables) on the storage. We also call each barrier an epoch and sometimes use both terms interchangeably as data streams are cut into epochs. In other words, the write to the database is visible only after it has been committed to the storage via the checkpoint, i.e. we support transactional commit via epochs by default. 
+This procedure guarantees that every state to be flushed into the storage is consistent (matching a certain barrier at the source). Therefore when querying materialized views, consistency is naturally guaranteed when the batch engine reads a consistent snapshot (of views and tables) on the storage. We also call each barrier an epoch and sometimes use both terms interchangeably as data streams are cut into epochs. In other words, the write to the database is visible only after it has been committed to the storage via the checkpoint.
 
 To improve the efficiency, all dirty states on the same compute node are gathered to a shared buffer, and the compute node asynchronously flushes the whole shared buffer into a single SST file in the storage, such that the checkpoint procedure shall not block stream processing. 
+
+See more detailed descriptions on [Checkpoint](./checkpoint.md).
 
 ### Fault tolerance
 
 When the streaming engine crashes down, the system must globally rollback to a previous consistent snapshot. To achieve this, whenever the meta detects the failover of some certain compute node or any undergoing checkpoint procedure, it triggers a recovery process. After rebuilding the streaming pipeline, each executor will reset its local state from a consistent snapshot on the storage and recover its computation. 
 
-## Advanced features
-
-TODO: describe more. 
-
-* Configuration change
-* Consistent hashing
-* Partitioned checkpoint
-* Concurrent checkpoint
-* Shared states

@@ -139,7 +139,7 @@ Now we can run `./risedev d`. The new dev cluster will contain components from R
 
 You may also add multiple compute nodes in the cluster. The `ci-3node` config is an example.
 
-### Start All-In-One Process
+### Start Playground with RiseDev
 
 Sometimes, developers might not need to start a full cluster to develop. `./risedev p` can help start an all-in-one process, where meta-node, compute-node and frontend-node are running in the same process. Logs are also printed to stdout instead of separate log files.
 
@@ -148,6 +148,20 @@ Sometimes, developers might not need to start a full cluster to develop. `./rise
 ```
 
 For more information, refer to `README.md` under `src/risedevtool`.
+
+### Start Playground with `cargo`
+
+To start an all-in-one process from IDE or command line, you may also use
+
+```shell
+cargo run --bin risingwave -- playground
+```
+
+Then, connect to the playground instance via
+
+```shell
+psql -h localhost -p 4566
+```
 
 ## Testing and Lint
 
@@ -206,7 +220,7 @@ Then run some e2e tests:
 After running e2e tests, you may kill the cluster and clean data.
 
 ```shell
-./risedev k
+./risedev k  # shortcut for ./risedev kill
 ./risedev clean-data
 ```
 

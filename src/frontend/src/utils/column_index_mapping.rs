@@ -60,6 +60,14 @@ impl ColIndexMapping {
         (&self.map, self.target_size)
     }
 
+    pub fn put(&mut self, src: usize, tar: Option<usize>) {
+        assert!(src < self.source_size());
+        if let Some(tar) = tar {
+            assert!(tar < self.target_size());
+        }
+        self.map[src] = tar;
+    }
+
     pub fn identity(size: usize) -> Self {
         let map = (0..size).into_iter().map(Some).collect();
         Self::new(map)
@@ -70,7 +78,7 @@ impl ColIndexMapping {
             .into_iter()
             .map(|i| if i < target_size { Some(i) } else { None })
             .collect();
-        Self::new(map)
+        Self::with_target_size(map, target_size)
     }
 
     pub fn empty(size: usize) -> Self {

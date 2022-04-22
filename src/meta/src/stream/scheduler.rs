@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{internal_error, Result};
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -92,6 +92,32 @@ impl ScheduledLocations {
             })
             .collect::<Vec<_>>()
     }
+
+    /// Find a placement location that is on the same node of given actor ids.
+    pub fn schedule_colocate_with(&self, actor_ids: &[ActorId]) -> Result<ParallelUnit> {
+        let mut result_location = None;
+        for actor_id in actor_ids {
+            let location = self.actor_locations.get(actor_id);
+            if let Some(location) = location {
+                if result_location.is_none() {
+                    result_location = Some(location.clone());
+                } else if location != result_location.as_ref().unwrap() {
+                    return Err(internal_error(format!(
+                        "cannot satisfy placement rule: {} is at {:?}, while others are on {:?}",
+                        actor_id,
+                        location,
+                        result_location.as_ref().unwrap()
+                    )));
+                }
+            } else {
+                return Err(internal_error(format!(
+                    "actor location not found: {}",
+                    actor_id
+                )));
+            }
+        }
+        Ok(result_location.unwrap())
+    }
 }
 
 impl<S> Scheduler<S>
@@ -122,16 +148,26 @@ where
 
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // singleton fragment
-            let single_parallel_units = self
-                .cluster_manager
-                .list_parallel_units(Some(ParallelUnitType::Single))
-                .await;
-            if let Ok(single_idx) =
-                self.single_rr
+            let actor = &fragment.actors[0];
+
+            if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
+                let parallel_unit = locations.schedule_colocate_with(&actor.upstream_actor_id)?;
+                locations
+                    .actor_locations
+                    .insert(fragment.actors[0].actor_id, parallel_unit);
+            } else {
+                let single_parallel_units = self
+                    .cluster_manager
+                    .list_parallel_units(Some(ParallelUnitType::Single))
+                    .await;
+
+                let single_idx = self
+                    .single_rr
                     .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |idx| {
                         Some((idx + 1) % single_parallel_units.len())
                     })
-            {
+                    .map_err(|_| internal_error("failed to round robin id"))?;
+
                 locations.actor_locations.insert(
                     fragment.actors[0].actor_id,
                     single_parallel_units[single_idx].clone(),
@@ -143,12 +179,20 @@ where
                 .cluster_manager
                 .list_parallel_units(Some(ParallelUnitType::Hash))
                 .await;
-            fragment.actors.iter().enumerate().for_each(|(idx, actor)| {
-                locations.actor_locations.insert(
-                    actor.actor_id,
-                    parallel_units[idx % parallel_units.len()].clone(),
-                );
-            });
+            for (idx, actor) in fragment.actors.iter().enumerate() {
+                if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
+                    let parallel_unit =
+                        locations.schedule_colocate_with(&actor.upstream_actor_id)?;
+                    locations
+                        .actor_locations
+                        .insert(actor.actor_id, parallel_unit);
+                } else {
+                    locations.actor_locations.insert(
+                        actor.actor_id,
+                        parallel_units[idx % parallel_units.len()].clone(),
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -203,6 +247,7 @@ mod test {
                         nodes: None,
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
+                        same_worker_node_as_upstream: false,
                     }],
                 };
                 actor_id += 1;
@@ -219,6 +264,7 @@ mod test {
                         nodes: None,
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
+                        same_worker_node_as_upstream: false,
                     })
                     .collect_vec();
                 actor_id += node_count * 7;

@@ -31,13 +31,14 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator};
+use super::iterator::{
+    BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
+};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
 use super::{
-    HummockError, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
-    SSTableIterator, Sstable,
+    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreMetrics;
@@ -47,9 +48,6 @@ use crate::monitor::StateStoreMetrics;
 pub struct CompactorContext {
     /// Storage configurations.
     pub options: Arc<StorageConfig>,
-
-    /// Local view on the levels of lsm tree.
-    pub local_version_manager: Arc<LocalVersionManager>,
 
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -139,7 +137,7 @@ impl Compactor {
             let iter = {
                 let iters = buffers
                     .iter()
-                    .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
+                    .map(|m| Box::new(m.iter()) as BoxedForwardHummockIterator);
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
@@ -276,7 +274,7 @@ impl Compactor {
     async fn compact_key_range(
         &self,
         split_index: usize,
-        iter: MergeIterator<'_>,
+        iter: MergeIterator,
     ) -> HummockResult<(usize, Vec<Sstable>)> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -345,8 +343,8 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<MergeIterator<'_>> {
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+    async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
+        let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         for LevelEntry {
             level_idx: _,
             level: opt_level,
@@ -356,11 +354,7 @@ impl Compactor {
             let level = opt_level.as_ref().unwrap();
             // Do not need to filter the table because manager has done it.
             let table_idxs = level.table_infos.iter().map(|sst| sst.id).collect_vec();
-            let tables = self
-                .context
-                .local_version_manager
-                .pick_few_tables(&table_idxs)
-                .await?;
+            let tables = self.context.sstable_store.sstables(&table_idxs).await?;
 
             // let read_statistics: &mut TableSetStatistics = if *level_idx ==
             // compact_task.target_level {
@@ -381,7 +375,7 @@ impl Compactor {
                     )));
                 }
                 LevelType::Overlapping => {
-                    table_iters.extend(tables.iter().map(|table| -> Box<dyn HummockIterator> {
+                    table_iters.extend(tables.iter().map(|table| -> BoxedForwardHummockIterator {
                         Box::new(SSTableIterator::new(
                             table.clone(),
                             self.context.sstable_store.clone(),
@@ -422,14 +416,12 @@ impl Compactor {
     /// manager and runs compaction tasks.
     pub fn start_compactor(
         options: Arc<StorageConfig>,
-        local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let compactor_context = Arc::new(CompactorContext {
             options,
-            local_version_manager,
             hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
@@ -517,7 +509,7 @@ impl Compactor {
     async fn compact_and_build_sst<B, F>(
         sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
-        mut iter: MergeIterator<'_>,
+        mut iter: MergeIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
     ) -> HummockResult<()>

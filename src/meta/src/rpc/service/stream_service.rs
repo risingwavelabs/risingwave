@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
+use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
@@ -78,12 +79,21 @@ where
         );
 
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
+        let parallel_degree = self
+            .cluster_manager
+            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
+            .await;
+        let mut ctx = CreateMaterializedViewContext {
+            is_legacy_frontend: true,
+            hash_mapping,
+            ..Default::default()
+        };
 
         let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
-            hash_mapping,
+            parallel_degree as u32,
+            true,
         );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)

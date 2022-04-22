@@ -91,7 +91,9 @@ impl PlanTreeNodeUnary for LogicalFilter {
         (Self::new(input, predicate), input_col_change)
     }
 }
+
 impl_plan_tree_node_for_unary! {LogicalFilter}
+
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "LogicalFilter {{ predicate: {} }}", self.predicate)
@@ -214,7 +216,7 @@ mod tests {
         assert_eq!(filter.schema().fields()[1], fields[2]);
         assert_eq!(filter.id().0, 3);
 
-        let expr = filter.predicate.clone().to_expr();
+        let expr: ExprImpl = filter.predicate.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         let values = filter.input();
@@ -274,7 +276,7 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        let expr = filter.predicate.clone().to_expr();
+        let expr: ExprImpl = filter.predicate.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
 

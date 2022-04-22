@@ -17,14 +17,13 @@ use std::sync::Arc;
 use either::Either;
 use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
-use futures::{stream, FutureExt, Stream, StreamExt};
+use futures::{stream, FutureExt, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use super::error::{StreamExecutorResult, TracedStreamExecutorError};
-use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor_v2::error::StreamExecutorError;
+use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream};
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -107,7 +106,7 @@ impl RearrangedChainExecutor {
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         // 0. Project the upstream with `upstream_indices`.
         let upstream_indices = self.upstream_indices.clone();
@@ -256,11 +255,11 @@ impl RearrangedChainExecutor {
 
     /// Background rearrangement task. Check `execute_inner` for more details.
     async fn rearrange(
-        upstream: impl Stream<Item = StreamExecutorResult<Message>> + std::marker::Unpin,
+        upstream: impl MessageStream + std::marker::Unpin,
         upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
         rearranged_barrier_tx: mpsc::UnboundedSender<RearrangedMessage>,
         stop_rearrange_rx: oneshot::Receiver<()>,
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<Message>>> {
+    ) -> StreamExecutorResult<impl MessageStream> {
         // Stop when `stop_rearrange_rx` is received.
         // TODO(bugen): clearer way to select from both, since the left side is an oneshot
         let mut selected = select_with_strategy(

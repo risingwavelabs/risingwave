@@ -268,7 +268,7 @@ impl StageRunner {
     }
 
     async fn schedule_task(&self, task_id: TaskIdProst, plan_fragment: PlanFragment) -> Result<()> {
-        let worker_node = self.worker_node_manager.next_random();
+        let worker_node = self.worker_node_manager.next_random()?;
         let compute_client = ComputeClient::new(worker_node.host.as_ref().unwrap().into()).await?;
 
         let t_id = task_id.task_id;

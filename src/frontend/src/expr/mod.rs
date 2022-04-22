@@ -52,7 +52,7 @@ pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
 
     /// Serialize the expression
-    fn to_protobuf(&self) -> ExprNode;
+    fn to_expr_proto(&self) -> ExprNode;
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
@@ -195,14 +195,14 @@ impl Expr for ExprImpl {
         }
     }
 
-    fn to_protobuf(&self) -> ExprNode {
+    fn to_expr_proto(&self) -> ExprNode {
         match self {
-            ExprImpl::InputRef(e) => e.to_protobuf(),
-            ExprImpl::Literal(e) => e.to_protobuf(),
-            ExprImpl::FunctionCall(e) => e.to_protobuf(),
-            ExprImpl::AggCall(e) => e.to_protobuf(),
-            ExprImpl::Subquery(e) => e.to_protobuf(),
-            ExprImpl::CorrelatedInputRef(e) => e.to_protobuf(),
+            ExprImpl::InputRef(e) => e.to_expr_proto(),
+            ExprImpl::Literal(e) => e.to_expr_proto(),
+            ExprImpl::FunctionCall(e) => e.to_expr_proto(),
+            ExprImpl::AggCall(e) => e.to_expr_proto(),
+            ExprImpl::Subquery(e) => e.to_expr_proto(),
+            ExprImpl::CorrelatedInputRef(e) => e.to_expr_proto(),
         }
     }
 }
@@ -240,6 +240,16 @@ impl From<Subquery> for ExprImpl {
 impl From<CorrelatedInputRef> for ExprImpl {
     fn from(correlated_input_ref: CorrelatedInputRef) -> Self {
         ExprImpl::CorrelatedInputRef(Box::new(correlated_input_ref))
+    }
+}
+
+impl From<Condition> for ExprImpl {
+    fn from(c: Condition) -> Self {
+        merge_expr_by_binary(
+            c.conjunctions.into_iter(),
+            ExprType::And,
+            ExprImpl::literal_bool(true),
+        )
     }
 }
 
@@ -284,6 +294,8 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+
+use crate::utils::Condition;
 
 #[cfg(test)]
 mod tests {

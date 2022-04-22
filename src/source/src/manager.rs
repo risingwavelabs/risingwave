@@ -23,42 +23,26 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::base::SourceReader;
-use risingwave_connector::new_connector;
+use risingwave_connector::Properties;
 use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
-use crate::{
-    DebeziumJsonParser, HighLevelKafkaSource, JSONParser, ProtobufParser, SourceConfig,
-    SourceFormat, SourceImpl, SourceParser,
-};
+use crate::{SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
-// the same key is defined in `src/batch/src/executor/create_source.rs`, remove in batch if
-// necessary
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
 
-const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
 const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    async fn create_source(
-        &self,
-        source_id: &TableId,
-        format: SourceFormat,
-        parser: Arc<dyn SourceParser + Send + Sync>,
-        config: &SourceConfig,
-        columns: Vec<SourceColumnDesc>,
-        row_id_index: Option<usize>,
-    ) -> Result<()>;
-    async fn create_source_v2(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
+    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
@@ -104,68 +88,9 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }
 
-fn get_properties<'a>(properties: &'a HashMap<String, String>, key: &'a str) -> Result<&'a str> {
-    Ok(properties
-        .get(key)
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "property {} not found",
-                UPSTREAM_SOURCE_KEY
-            )))
-        })?
-        .as_str())
-}
-
 #[async_trait]
 impl SourceManager for MemSourceManager {
-    async fn create_source(
-        &self,
-        source_id: &TableId,
-        format: SourceFormat,
-        parser: Arc<dyn SourceParser + Send + Sync>,
-        config: &SourceConfig,
-        columns: Vec<SourceColumnDesc>,
-        row_id_index: Option<usize>,
-    ) -> Result<()> {
-        let source = match config {
-            SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
-                config.clone(),
-                Arc::new(columns.clone()),
-                parser.clone(),
-            )),
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(config.clone(), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
-            }
-        };
-
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            format,
-            columns,
-            row_id_index,
-        };
-        let mut tables = self.get_sources()?;
-        ensure!(
-            !tables.contains_key(source_id),
-            "Source id already exists: {:?}",
-            source_id
-        );
-        tables.insert(*source_id, desc);
-
-        Ok(())
-    }
-
-    async fn create_source_v2(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
+    async fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -179,8 +104,9 @@ impl SourceManager for MemSourceManager {
             )));
         }
 
+        let properties = Properties::new(info.properties.clone());
         let parser =
-            build_source_parser(&format, &info.properties, info.row_schema_location.as_str())?;
+            SourceParserImpl::create(&format, &properties, info.row_schema_location.as_str())?;
 
         let columns = info
             .columns
@@ -204,35 +130,22 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = Some(info.row_id_index as usize);
 
-        let config = match get_properties(&info.properties, UPSTREAM_SOURCE_KEY)? {
+        match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
             // TODO support more connector here
-            KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
-            KAFKA_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
-            other => Err(RwError::from(ProtocolError(format!(
-                "source type {} not supported",
-                other
-            )))),
-        }?;
+            KINESIS_SOURCE | KAFKA_SOURCE => {}
+            other => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "source type {} not supported",
+                    other
+                ))));
+            }
+        };
 
-        let source =
-            match config {
-                SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(
-                    HighLevelKafkaSource::new(config, Arc::new(columns.clone()), parser.clone()),
-                ),
-                SourceConfig::Connector(config) => {
-                    let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                        Arc::new(tokio::sync::Mutex::new(
-                            new_connector(config.clone(), None)
-                                .await
-                                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                        ));
-                    SourceImpl::Connector(ConnectorSource {
-                        parser: parser.clone(),
-                        reader: split_reader,
-                        column_descs: columns.clone(),
-                    })
-                }
-            };
+        let source = SourceImpl::Connector(ConnectorSource {
+            config: properties,
+            columns: columns.clone(),
+            parser,
+        });
 
         let desc = SourceDesc {
             source: Arc::new(source),
@@ -252,7 +165,7 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -319,44 +232,8 @@ impl Default for MemSourceManager {
     }
 }
 
-fn build_source_parser(
-    format: &SourceFormat,
-    properties: &HashMap<String, String>,
-    schema_location: &str,
-) -> Result<Arc<dyn SourceParser + Send + Sync>> {
-    let parser: Arc<dyn SourceParser + Send + Sync> = match format {
-        SourceFormat::Json => {
-            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(JSONParser {});
-            Ok(parser)
-        }
-        SourceFormat::Protobuf => {
-            let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
-                RwError::from(ProtocolError(format!(
-                    "{} not found in properties",
-                    PROTOBUF_MESSAGE_KEY
-                )))
-            })?;
-
-            let parser: Arc<dyn SourceParser + Send + Sync> =
-                Arc::new(ProtobufParser::new(schema_location, message_name)?);
-
-            Ok(parser)
-        }
-        SourceFormat::DebeziumJson => {
-            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(DebeziumJsonParser {});
-            Ok(parser)
-        }
-        _ => Err(RwError::from(InternalError(
-            "format not support".to_string(),
-        ))),
-    }?;
-
-    Ok(parser)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
@@ -371,55 +248,6 @@ mod tests {
 
     const KAFKA_TOPIC_KEY: &str = "kafka.topic";
     const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
-
-    #[tokio::test]
-    async fn test_source() -> Result<()> {
-        // init
-        let table_id = TableId::default();
-        let format = SourceFormat::Json;
-        let parser = Arc::new(JSONParser {});
-
-        let config = SourceConfig::Kafka(HighLevelKafkaSourceConfig {
-            bootstrap_servers: KAFKA_BOOTSTRAP_SERVERS_KEY
-                .split(',')
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            topic: KAFKA_TOPIC_KEY.to_string(),
-            properties: Default::default(),
-        });
-
-        let columns = vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)];
-        let source_columns = columns
-            .iter()
-            .map(|c| SourceColumnDesc {
-                name: "123".to_string(),
-                data_type: c.data_type.clone(),
-                column_id: c.column_id,
-                skip_parse: false,
-            })
-            .collect();
-
-        // create source
-        let mem_source_manager = MemSourceManager::new();
-        let new_source = mem_source_manager
-            .create_source(&table_id, format, parser, &config, source_columns, Some(0))
-            .await;
-        assert!(new_source.is_ok());
-
-        // get source
-        let get_source_res = mem_source_manager.get_source(&table_id)?;
-        assert_eq!(get_source_res.columns[0].name, "123");
-
-        // drop source
-        let drop_source_res = mem_source_manager.drop_source(&table_id);
-        assert!(drop_source_res.is_ok());
-
-        let get_source_res = mem_source_manager.get_source(&table_id);
-
-        assert!(get_source_res.is_err());
-
-        Ok(())
-    }
 
     #[tokio::test]
     #[ignore] // ignored because the test involves aws credentials, remove this line after changing to other
@@ -446,7 +274,7 @@ mod tests {
         let source_id = TableId::default();
 
         let mem_source_manager = MemSourceManager::new();
-        let source = mem_source_manager.create_source_v2(&source_id, info).await;
+        let source = mem_source_manager.create_source(&source_id, info).await;
 
         assert!(source.is_ok());
 
@@ -480,7 +308,7 @@ mod tests {
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source_v2(&table_id, table_columns);
+        let res = mem_source_manager.create_table_source(&table_id, table_columns);
         assert!(res.is_ok());
 
         // get source

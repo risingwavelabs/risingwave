@@ -20,7 +20,7 @@ use itertools::Itertools;
 use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
-use crate::array::{Row, RowRef};
+use crate::array::Row;
 use crate::types::{serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
@@ -58,21 +58,6 @@ impl OrderedRow {
                 ReversedOrder(datum) => datum.0,
             })
             .collect::<Vec<_>>())
-    }
-
-    pub fn as_row_ref(&self) -> RowRef<'_> {
-        let datum_refs = self
-            .0
-            .iter()
-            .map(|ordered_datum| {
-                let datum = match ordered_datum {
-                    NormalOrder(datum) => datum,
-                    ReversedOrder(datum) => &datum.0,
-                };
-                datum.as_ref().map(|scalar| scalar.as_scalar_ref_impl())
-            })
-            .collect::<Vec<_>>();
-        RowRef(datum_refs)
     }
 
     /// Serialize the row into a memcomparable bytes.

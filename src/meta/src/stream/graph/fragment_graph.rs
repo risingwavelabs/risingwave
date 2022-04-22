@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{DispatchStrategy, StreamNode};
 
 use crate::model::LocalFragmentId;
@@ -28,6 +28,11 @@ pub struct StreamFragmentEdge {
 
     /// Whether the two linked nodes should be placed on the same worker node
     pub same_worker_node: bool,
+
+    /// A unique identifer of this edge. Generally it should be exchange node's operator id. When
+    /// rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
+    /// virtual links generated.
+    pub link_id: u64,
 }
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
@@ -37,23 +42,61 @@ pub struct StreamFragment {
     pub fragment_id: LocalFragmentId,
 
     /// root stream node in this fragment.
-    pub node: Arc<StreamNode>,
+    pub node: Option<Box<StreamNode>>,
 
     /// type of this fragment.
     pub fragment_type: FragmentType,
 
     /// mark whether this fragment should only have one actor.
     pub is_singleton: bool,
+
+    /// mark whether this fragment has been sealed.
+    pub is_sealed: bool,
+
+    /// Number of table ids (stateful states) for this fragment.
+    pub table_ids_cnt: usize,
 }
 
 impl StreamFragment {
-    pub fn new(fragment_id: LocalFragmentId, node: Arc<StreamNode>) -> Self {
+    pub fn new(fragment_id: LocalFragmentId) -> Self {
         Self {
             fragment_id,
-            node,
             fragment_type: FragmentType::Others,
             is_singleton: false,
+            node: None,
+            is_sealed: false,
+            table_ids_cnt: 0,
         }
+    }
+
+    /// Seal the stream node content.
+    pub fn seal_node(&mut self, node: StreamNode) {
+        assert!(self.node.is_none());
+        assert!(!self.is_sealed);
+        self.node = Some(Box::new(node));
+    }
+
+    fn visit(node: &mut StreamNode, (offset, len): (u32, u32)) {
+        for input in &mut node.input {
+            Self::visit(input, (offset, len));
+        }
+        if let Some(Node::LookupNode(ref mut lookup)) = node.node {
+            assert!(lookup.arrange_local_fragment_id < len);
+            lookup.arrange_fragment_id = lookup.arrange_local_fragment_id + offset;
+        }
+    }
+
+    /// Seal the fragment and rewrite local ids inside the node.
+    /// TODO: when we add support of arrangement id in catalog, we won't need to rewrite stream node
+    /// content any more.
+    pub fn seal(&mut self, offset: u32, len: u32) {
+        Self::visit(self.node.as_mut().unwrap(), (offset, len));
+        self.is_sealed = true;
+    }
+
+    pub fn get_node(&self) -> &StreamNode {
+        assert!(self.is_sealed);
+        self.node.as_ref().unwrap()
     }
 }
 
@@ -163,8 +206,9 @@ impl StreamFragmentGraph {
         self.sealed = true;
         self.fragments = std::mem::take(&mut self.fragments)
             .into_iter()
-            .map(|(id, fragment)| {
+            .map(|(id, mut fragment)| {
                 let id = id.to_global_id(offset, len);
+                fragment.seal(offset, len);
                 (
                     id,
                     StreamFragment {

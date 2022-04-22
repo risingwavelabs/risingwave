@@ -14,13 +14,13 @@
 
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::try_match_expand;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{Executor, ExecutorBuilder, Result};
-use crate::executor_v2::{Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2};
+use crate::executor::{ExecutorBuilder, Result};
+use crate::executor_v2::{BoxedExecutor, Executor, MaterializeExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct MaterializeExecutorBuilder;
@@ -31,7 +31,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
 
         let table_id = TableId::from(&node.table_ref_id);
@@ -48,22 +48,61 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
-        let v2 = Box::new(MaterializeExecutorV2::new_from_v1(
+        let executor = MaterializeExecutor::new_from_v1(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
             params.op_info,
-            key_indices,
-        ));
+        );
 
-        Ok(Box::new(v2.v1()))
+        Ok(executor.boxed())
+    }
+}
+
+pub struct ArrangeExecutorBuilder;
+
+impl ExecutorBuilder for ArrangeExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
+    ) -> Result<BoxedExecutor> {
+        let arrange_node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
+
+        let keyspace = Keyspace::shared_executor_root(store, params.operator_id);
+
+        // Set materialize keys as arrange key + pk
+        let keys = arrange_node
+            .arrange_key_indexes
+            .iter()
+            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
+            .chain(
+                node.pk_indices
+                    .iter()
+                    .map(|x| OrderPair::new(*x as usize, OrderType::Ascending)),
+            )
+            .collect();
+
+        // Simply generate column id 0..schema_len
+        let column_ids = node
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| ColumnId::from(idx as i32))
+            .collect();
+
+        let executor = MaterializeExecutor::new_from_v1(
+            params.input.remove(0),
+            keyspace,
+            keys,
+            column_ids,
+            params.executor_id,
+            params.op_info,
+        );
+
+        Ok(executor.boxed())
     }
 }

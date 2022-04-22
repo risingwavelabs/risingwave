@@ -20,17 +20,19 @@ use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement
 
 use crate::session::{OptimizerContext, SessionImpl};
 
+pub mod create_index;
 pub mod create_mv;
 pub mod create_source;
 pub mod create_table;
 mod describe;
+pub mod dml;
 pub mod drop_mv;
+pub mod drop_source;
 pub mod drop_table;
 mod explain;
 mod flush;
 #[allow(dead_code)]
 pub mod query;
-pub mod query_single;
 mod set;
 mod show;
 pub mod util;
@@ -59,12 +61,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             match object_type {
                 ObjectType::Table => drop_table::handle_drop_table(context, name).await,
                 ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, name).await,
-                ObjectType::MaterializedSource => {
-                    // FIXME: We currently treat MATERIALIZE SOURCE as an alias TABLE, while
-                    // this assumption is not correct. DROP MATERIALIZE SOURCE should only drops
-                    // materialized sources.
-                    drop_table::handle_drop_table(context, name).await
-                }
+                ObjectType::Source => drop_source::handle_drop_source(context, name).await,
                 _ => Err(ErrorCode::InvalidInputSyntax(format!(
                     "DROP {} is unsupported",
                     object_type
@@ -72,16 +69,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
                 .into()),
             }
         }
-        Statement::Query(_) => {
-            if context.session_ctx.env().query_manager().dist_query() {
-                query::handle_query(context, stmt).await
-            } else {
-                query_single::handle_query_single(context, stmt).await
-            }
-        }
-        Statement::Insert { .. } | Statement::Delete { .. } => {
-            query_single::handle_query_single(context, stmt).await
-        }
+        Statement::Query(_) => query::handle_query(context, stmt).await,
+        Statement::Insert { .. } | Statement::Delete { .. } => dml::handle_dml(context, stmt).await,
         Statement::CreateView {
             materialized: true,
             or_replace: false,
@@ -95,6 +84,27 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             variable,
             value,
         } => set::handle_set(context, variable, value),
+        Statement::CreateIndex {
+            name,
+            table_name,
+            columns,
+            unique,
+            if_not_exists,
+        } => {
+            if unique {
+                return Err(
+                    ErrorCode::NotImplemented("create unique index".into(), None.into()).into(),
+                );
+            }
+            if if_not_exists {
+                return Err(ErrorCode::NotImplemented(
+                    "create if_not_exists index".into(),
+                    None.into(),
+                )
+                .into());
+            }
+            create_index::handle_create_index(context, name, table_name, columns).await
+        }
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }

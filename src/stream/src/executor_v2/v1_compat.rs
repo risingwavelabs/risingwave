@@ -23,18 +23,20 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
+use super::error::StreamExecutorError;
 use super::filter::SimpleFilterExecutor;
 use super::project::SimpleProjectExecutor;
 use super::{
     BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
     HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
+    RearrangedChainExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use crate::executor::AggCall;
+use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::executor_v2::top_n::TopNExecutor;
 use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;
@@ -43,7 +45,7 @@ use crate::task::FinishCreateMviewNotifier;
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
 ///
 /// With this wrapper, we can migrate our executors from v1 to v2 step by step.
-pub struct StreamExecutorV1 {
+struct ExecutorV2AsV1 {
     /// The wrapped uninited executor.
     pub(super) executor_v2: Option<BoxedExecutor>,
 
@@ -53,16 +55,16 @@ pub struct StreamExecutorV1 {
     pub(super) info: ExecutorInfo,
 }
 
-impl fmt::Debug for StreamExecutorV1 {
+impl fmt::Debug for ExecutorV2AsV1 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamExecutor")
+        f.debug_struct("ExecutorV2AsV1")
             .field("info", &self.info)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 #[async_trait]
-impl ExecutorV1 for StreamExecutorV1 {
+impl ExecutorV1 for ExecutorV2AsV1 {
     async fn next(&mut self) -> Result<Message> {
         let stream = self.stream.as_mut().expect("not inited");
 
@@ -96,7 +98,34 @@ impl ExecutorV1 for StreamExecutorV1 {
     }
 }
 
-pub struct ExecutorV1AsV2(pub Box<dyn ExecutorV1>);
+impl dyn Executor {
+    /// Return an executor which implements [`ExecutorV1`].
+    pub fn v1(self: Box<Self>) -> impl ExecutorV1 {
+        let info = self.info();
+        let stream = self.execute();
+
+        ExecutorV2AsV1 {
+            executor_v2: None,
+            stream: Some(stream),
+            info,
+        }
+    }
+
+    /// Return an executor which implements [`ExecutorV1`] and requires [`ExecutorV1::init`] to be
+    /// called before executing.
+    pub fn v1_uninited(self: Box<Self>) -> impl ExecutorV1 {
+        let info = self.info();
+
+        ExecutorV2AsV1 {
+            executor_v2: Some(self),
+            stream: None,
+            info,
+        }
+    }
+}
+
+/// The struct wraps a [`ExecutorV1`] and implements the interface of [`Executor`].
+struct ExecutorV1AsV2(Box<dyn ExecutorV1>);
 
 impl Executor for ExecutorV1AsV2 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
@@ -122,12 +151,12 @@ impl Executor for ExecutorV1AsV2 {
 }
 
 impl ExecutorV1AsV2 {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         loop {
             let msg = self.0.next().await;
             match msg {
-                // For snapshot input of `Chain`, we use `Eof` to represent the end of stream.
+                // We previously use `Eof` to represent the end of stream.
                 Err(e) if matches!(e.inner(), ErrorCode::Eof) => break,
                 _ => yield msg.map_err(StreamExecutorError::executor_v1)?,
             }
@@ -135,9 +164,15 @@ impl ExecutorV1AsV2 {
     }
 }
 
+impl dyn ExecutorV1 {
+    pub fn v2(self: Box<Self>) -> impl Executor {
+        ExecutorV1AsV2(self)
+    }
+}
+
 impl FilterExecutor {
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         expr: BoxedExpression,
         executor_id: u64,
         _op_info: String,
@@ -147,7 +182,7 @@ impl FilterExecutor {
             pk_indices: input.pk_indices().to_owned(),
             identity: "Filter".to_owned(),
         };
-        let input = Box::new(ExecutorV1AsV2(input));
+
         super::SimpleExecutorWrapper {
             input,
             inner: SimpleFilterExecutor::new(info, expr, executor_id),
@@ -157,7 +192,7 @@ impl FilterExecutor {
 
 impl ProjectExecutor {
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
@@ -168,7 +203,7 @@ impl ProjectExecutor {
             pk_indices,
             identity: "Project".to_owned(),
         };
-        let input = Box::new(ExecutorV1AsV2(input));
+
         super::SimpleExecutorWrapper {
             input,
             inner: SimpleProjectExecutor::new(info, exprs, executor_id),
@@ -176,10 +211,31 @@ impl ProjectExecutor {
     }
 }
 
+impl RearrangedChainExecutor {
+    pub fn new_from_v1(
+        snapshot: BoxedExecutor,
+        mview: BoxedExecutor,
+        notifier: FinishCreateMviewNotifier,
+        schema: Schema,
+        column_idxs: Vec<usize>,
+        _op_info: String,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: mview.pk_indices().to_owned(),
+            identity: "RearrangedChain".to_owned(),
+        };
+
+        let actor_id = notifier.actor_id;
+
+        Self::new(snapshot, mview, column_idxs, notifier, actor_id, info)
+    }
+}
+
 impl ChainExecutor {
     pub fn new_from_v1(
-        snapshot: Box<dyn ExecutorV1>,
-        mview: Box<dyn ExecutorV1>,
+        snapshot: BoxedExecutor,
+        mview: BoxedExecutor,
         notifier: FinishCreateMviewNotifier,
         schema: Schema,
         column_idxs: Vec<usize>,
@@ -193,54 +249,38 @@ impl ChainExecutor {
 
         let actor_id = notifier.actor_id;
 
-        Self::new(
-            Box::new(ExecutorV1AsV2(snapshot)),
-            Box::new(ExecutorV1AsV2(mview)),
-            column_idxs,
-            notifier,
-            actor_id,
-            info,
-        )
+        Self::new(snapshot, mview, column_idxs, notifier, actor_id, info)
     }
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         keyspace: Keyspace<S>,
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         _op_info: String,
-        key_indices: Vec<usize>,
     ) -> Self {
-        Self::new(
-            Box::new(ExecutorV1AsV2(input)),
-            keyspace,
-            keys,
-            column_ids,
-            executor_id,
-            key_indices,
-        )
+        Self::new(input, keyspace, keys, column_ids, executor_id)
     }
 }
 
 impl LocalSimpleAggExecutor {
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
         _op_info: String,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
         Self::new(input, agg_calls, pk_indices, executor_id)
     }
 }
 
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
@@ -248,7 +288,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
         Self::new(
             input,
             agg_calls,
@@ -262,7 +301,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
         keyspace: Keyspace<S>,
@@ -270,7 +309,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         executor_id: u64,
         _op_info: String,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
         Self::new(
             input,
             agg_calls,
@@ -288,6 +326,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         _op_info: String,
         key_indices: Vec<usize>,
+        parallel_info: BatchParallelInfo,
     ) -> Self {
         let schema = table.schema().clone();
         let info = ExecutorInfo {
@@ -296,14 +335,20 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             identity: "BatchQuery".to_owned(),
         };
 
-        Self::new(table, Self::DEFAULT_BATCH_SIZE, info, key_indices)
+        Self::new(
+            table,
+            Self::DEFAULT_BATCH_SIZE,
+            info,
+            key_indices,
+            parallel_info,
+        )
     }
 }
 
 impl<S: StateStore> TopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         pk_order_types: Vec<OrderType>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
@@ -314,7 +359,6 @@ impl<S: StateStore> TopNExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
         Self::new(
             input,
             pk_order_types,
@@ -332,7 +376,7 @@ impl<S: StateStore> TopNExecutor<S> {
 impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_v1(
-        input: Box<dyn ExecutorV1>,
+        input: BoxedExecutor,
         pk_order_types: Vec<OrderType>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
@@ -343,7 +387,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input = Box::new(ExecutorV1AsV2(input));
         Self::new(
             input,
             pk_order_types,

@@ -34,22 +34,6 @@ mod kafka;
 pub mod kinesis;
 mod pulsar;
 mod utils;
-
 pub use base::*;
+pub use utils::{AnyhowProperties, Properties};
 pub mod state;
-
-use crate::kinesis::config::AwsConfigInfo;
-
-#[derive(Clone, Debug)]
-pub enum ConnectorConfig {
-    Kinesis(AwsConfigInfo),
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}

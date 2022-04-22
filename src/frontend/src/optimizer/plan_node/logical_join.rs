@@ -83,12 +83,16 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
+    // FIXME: please note that the modification here is just a temporary fix for bug of LogicalJoin.
+    // Related issue is #1849.
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                left_len + right_len
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
+            JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter
+            | JoinType::LeftSemi => left_len + right_len,
+            JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
         }
     }
@@ -100,10 +104,14 @@ impl LogicalJoin {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::LeftSemi
+            | JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter => {
                 ColIndexMapping::identity_or_none(left_len + right_len, left_len)
             }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+            JoinType::LeftAnti => ColIndexMapping::identity(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
         }
     }
@@ -115,10 +123,14 @@ impl LogicalJoin {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::LeftSemi
+            | JoinType::Inner
+            | JoinType::LeftOuter
+            | JoinType::RightOuter
+            | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::LeftAnti => ColIndexMapping::empty(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
         }
     }
@@ -483,7 +495,7 @@ mod tests {
         assert_eq!(join.schema().fields().len(), 3);
         assert_eq!(join.schema().fields(), &fields[1..4]);
 
-        let expr = join.on.clone().to_expr();
+        let expr: ExprImpl = join.on.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         assert_eq_input_ref!(&call.inputs()[1], 2);
@@ -558,7 +570,7 @@ mod tests {
         assert_eq!(join.schema().fields()[0], fields[1]);
         assert_eq!(join.schema().fields()[1], fields[3]);
 
-        let expr = join.on.clone().to_expr();
+        let expr: ExprImpl = join.on.clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         assert_eq_input_ref!(&call.inputs()[1], 1);
@@ -646,11 +658,17 @@ mod tests {
 
         // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
         let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(batch_filter.predicate().as_expr(), non_eq_cond);
+        assert_eq!(
+            ExprImpl::from(batch_filter.predicate().clone()),
+            non_eq_cond
+        );
 
         let input = batch_filter.input();
         let hash_join = input.as_batch_hash_join().unwrap();
-        assert_eq!(hash_join.eq_join_predicate().eq_cond().as_expr(), eq_cond);
+        assert_eq!(
+            ExprImpl::from(hash_join.eq_join_predicate().eq_cond()),
+            eq_cond
+        );
     }
 
     /// Convert

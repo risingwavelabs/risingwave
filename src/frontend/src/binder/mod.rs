@@ -25,18 +25,19 @@ mod select;
 mod set_expr;
 mod statement;
 mod values;
-mod window_table_function;
 
 pub use bind_context::BindContext;
 pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
-pub use relation::{BoundBaseTable, BoundJoin, BoundSource, BoundTableSource, Relation};
+pub use relation::{
+    BoundBaseTable, BoundJoin, BoundSource, BoundTableSource, BoundWindowTableFunction, Relation,
+    WindowTableFunctionKind,
+};
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
 pub use values::BoundValues;
-pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
 use crate::catalog::catalog_service::CatalogReadGuard;
 

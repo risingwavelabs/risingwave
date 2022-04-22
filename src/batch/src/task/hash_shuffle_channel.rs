@@ -50,7 +50,7 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<u
         )
         .map_err(|e| InternalError(format!("get_hash_values:{}", e)))?
         .iter_mut()
-        .map(|hash_value| *hash_value as usize % output_count)
+        .map(|hash_value| hash_value.hash_code() as usize % output_count)
         .collect::<Vec<_>>();
     Ok(hash_values)
 }

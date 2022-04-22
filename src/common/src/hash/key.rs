@@ -21,6 +21,7 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
+use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
@@ -40,9 +41,29 @@ use crate::util::hash_util::CRC32FastBuilder;
 /// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
 /// encoded in certain format of ("abc", 1).
 
+/// A wrapper for u64 hash result.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct HashCode(pub u64);
+
+impl From<u64> for HashCode {
+    fn from(hash_code: u64) -> Self {
+        Self(hash_code)
+    }
+}
+
+impl HashCode {
+    pub fn hash_code(&self) -> u64 {
+        self.0
+    }
+
+    pub fn to_vnode(self) -> VirtualNode {
+        (self.0 % VIRTUAL_NODE_COUNT as u64) as u16
+    }
+}
+
 pub trait HashKeySerializer {
     type K: HashKey;
-    fn from_hash_code(hash_code: u64) -> Self;
+    fn from_hash_code(hash_code: HashCode) -> Self;
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) -> Result<()>;
     fn into_hash_key(self) -> Self::K;
 }
@@ -77,6 +98,14 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> Result<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
+        Self::build_from_hash_code(column_idxes, data_chunk, hash_codes)
+    }
+
+    fn build_from_hash_code(
+        column_idxes: &[usize],
+        data_chunk: &DataChunk,
+        hash_codes: Vec<HashCode>,
+    ) -> Result<Vec<Self>> {
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
             .map(Self::S::from_hash_code)
@@ -431,13 +460,13 @@ impl<const N: usize> FixedSizeKeySerializer<N> {
 impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
     type K = FixedSizeKey<N>;
 
-    fn from_hash_code(hash_code: u64) -> Self {
+    fn from_hash_code(hash_code: HashCode) -> Self {
         Self {
             buffer: [0u8; N],
             null_bitmap: 0xFFu8,
             null_bitmap_idx: 0,
             data_len: 0,
-            hash_code,
+            hash_code: hash_code.0,
         }
     }
 
@@ -511,10 +540,10 @@ pub struct SerializedKeySerializer {
 impl HashKeySerializer for SerializedKeySerializer {
     type K = SerializedKey;
 
-    fn from_hash_code(hash_code: u64) -> Self {
+    fn from_hash_code(hash_code: HashCode) -> Self {
         Self {
             buffer: Vec::new(),
-            hash_code,
+            hash_code: hash_code.0,
             has_null: false,
         }
     }

@@ -14,87 +14,41 @@
 
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
-use std::sync::atomic::Ordering;
-use std::sync::{atomic, Arc};
+use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::{Mutex, RwLock as PLRwLock};
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use crate::error::StorageResult;
-use crate::hummock::iterator::variants::*;
+use super::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem};
+use super::shared_buffer_uploader::{SharedBufferUploader, UploadItem};
+use crate::hummock::iterator::{Backward, Forward};
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem,
-};
-use crate::hummock::shared_buffer::shared_buffer_uploader::{
-    SharedBufferUploader, SharedBufferUploaderItem, SyncItem,
-};
 use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockEpoch, HummockError, HummockResult, SstableStoreRef};
+use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-#[derive(Debug)]
-pub struct SharedBufferMetrics {
-    pub shared_buffer_cur_size: atomic::AtomicU64,
-    pub shared_buffer_threshold_size: u64,
+/// `{ end key -> batch }`
+pub type EpochSharedBuffer = BTreeMap<Vec<u8>, SharedBufferBatch>;
+
+#[derive(Default)]
+pub struct SharedBufferManagerCore {
+    pub buffer: BTreeMap<HummockEpoch, EpochSharedBuffer>,
+    pub size: usize,
 }
 
-impl SharedBufferMetrics {
-    pub fn new(options: &StorageConfig) -> Self {
-        Self {
-            shared_buffer_cur_size: atomic::AtomicU64::new(0),
-            shared_buffer_threshold_size: options.shared_buffer_threshold_size as u64,
-        }
-    }
-}
-
-/// A manager to manage reads and writes on shared buffer.
-/// Shared buffer is a node level abstraction to buffer write batches across executors.
 pub struct SharedBufferManager {
-    /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
-    shared_buffer: PLRwLock<BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
-    uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
-    uploader_handle: JoinHandle<StorageResult<()>>,
-    stats: SharedBufferMetrics,
-    ongoing_flush: OnGoingFlush,
-}
+    capacity: usize,
 
-#[derive(Debug)]
-struct OnGoingFlush {
-    data: Mutex<Option<WatchSender<bool>>>,
-}
+    core: Arc<RwLock<SharedBufferManagerCore>>,
 
-impl OnGoingFlush {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Option::None),
-        }
-    }
-
-    pub fn subscribe(&self) -> Option<WatchReceiver<bool>> {
-        let guard = self.data.lock();
-        guard.as_ref().map(|tx| tx.subscribe())
-    }
-
-    pub fn init(&self) {
-        let mut guard = self.data.lock();
-        assert!(guard.is_none());
-        let (watch_tx, _) = tokio::sync::watch::channel(false);
-        guard.replace(watch_tx);
-    }
-
-    pub fn notify(&self, success: bool) {
-        let mut guard = self.data.lock();
-        assert!(guard.is_some());
-        if let Some(watch_tx) = guard.take() {
-            watch_tx.send(success).ok(); // ignore send error
-        }
-    }
+    uploader_tx: mpsc::UnboundedSender<UploadItem>,
+    uploader_handle: JoinHandle<HummockResult<()>>,
 }
 
 impl SharedBufferManager {
@@ -102,165 +56,89 @@ impl SharedBufferManager {
         options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        // TODO: separate `HummockStats` from `StateStoreMetrics`.
-        state_store_stats: Arc<StateStoreMetrics>,
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
-        let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
-        let stats = SharedBufferMetrics::new(options.as_ref());
-        let uploader = SharedBufferUploader::new(
-            options,
-            local_version_manager,
+        let (uploader_tx, uploader_rx) = mpsc::unbounded_channel();
+        let core = Arc::new(RwLock::new(SharedBufferManagerCore::default()));
+        let mut uploader = SharedBufferUploader::new(
+            options.clone(),
+            options.shared_buffer_threshold as usize,
             sstable_store,
-            state_store_stats,
+            local_version_manager,
             hummock_meta_client,
+            core.clone(),
             uploader_rx,
+            stats,
         );
-        let uploader_handle = tokio::spawn(uploader.run());
+        let uploader_handle = tokio::spawn(async move { uploader.run().await });
         Self {
-            shared_buffer: PLRwLock::new(BTreeMap::new()),
+            capacity: options.shared_buffer_capacity as usize,
+            core,
             uploader_tx,
             uploader_handle,
-            stats,
-            ongoing_flush: OnGoingFlush::new(),
         }
     }
 
-    fn empty(&self) -> bool {
-        self.stats.shared_buffer_cur_size.load(Ordering::SeqCst) == 0
+    pub fn size(&self) -> usize {
+        self.core.read().size
     }
 
-    /// Allocates a shared buffer budget.
-    async fn allocate_space(&self, batch_size: u64) -> HummockResult<()> {
-        let mut current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-        let threshold = self.stats.shared_buffer_threshold_size;
-
-        // Atomically allocates space,
-        // since there could be concurrent Actors write to the shared buffer.
-        'retry_allocate: loop {
-            // flush shared buffer if there is no enough space
-            while threshold < current_size + batch_size {
-                log::debug!(
-                    "trigge flush: threshold {}, new_size {}",
-                    threshold,
-                    current_size + batch_size
-                );
-                self.flush().await?;
-                current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-            }
-
-            let res = self.stats.shared_buffer_cur_size.compare_exchange(
-                current_size,
-                current_size + batch_size,
-                Ordering::SeqCst,
-                Ordering::Acquire,
-            );
-            match res {
-                Ok(_) => {
-                    assert!(current_size + batch_size <= threshold);
-                    break; // success
-                }
-                Err(old_val) => {
-                    current_size = old_val;
-                    continue 'retry_allocate;
-                }
-            }
-        }
-        Ok(())
+    pub fn is_empty(&self) -> bool {
+        self.size() == 0
     }
 
     /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
     pub async fn write_batch(
         &self,
-        batch: Vec<SharedBufferItem>,
+        items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
     ) -> HummockResult<u64> {
-        let batch = SharedBufferBatch::new(batch, epoch);
-        let size = batch.size;
+        let batch = SharedBufferBatch::new(items, epoch);
+        let batch_size = batch.size;
 
-        self.allocate_space(size).await?;
+        // TODO: Uncomment the following lines after flushed sstable can be accessed.
+        // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
+        // Stall writes that attempting to exceeds capacity.
+        // Actively trigger flush, suspend, and wait until some flush completed.
+        // while self.size() + batch_size as usize > self.capacity {
+        //     self.sync(None).await?;
+        // }
 
-        self.shared_buffer
-            .write()
+        let mut guard = self.core.write();
+        guard
+            .buffer
             .entry(epoch)
-            .or_insert(BTreeMap::new())
+            .or_insert_with(BTreeMap::default)
             .insert(batch.end_user_key().to_vec(), batch.clone());
+        guard.size += batch_size as usize;
+
         self.uploader_tx
-            .send(SharedBufferUploaderItem::Batch(batch))
+            .send(UploadItem::Batch(batch))
             .map_err(HummockError::shared_buffer_error)?;
-        Ok(size)
+
+        Ok(batch_size)
     }
 
-    /// Puts a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
-    pub fn replicate_remote_batch(
-        &self,
-        batch: Vec<SharedBufferItem>,
-        epoch: u64,
-    ) -> HummockResult<()> {
-        let batch = SharedBufferBatch::new(batch, epoch);
-        self.shared_buffer
-            .write()
-            .entry(epoch)
-            .or_insert(BTreeMap::new())
-            .insert(batch.end_user_key().to_vec(), batch.clone());
-        Ok(())
+    /// This function was called while [`SharedBufferManager`] exited.
+    pub async fn wait(self) -> HummockResult<()> {
+        self.uploader_handle.await.unwrap()
     }
 
-    async fn flush(&self) -> HummockResult<()> {
-        assert!(!self.empty());
-        let mut res = Ok(());
-
-        let notifier = self.ongoing_flush.subscribe();
-        if let Some(mut rx) = notifier {
-            log::debug!("flush: wait for notification");
-            // Wait for notification
-            rx.changed().await.unwrap();
-            if !(*rx.borrow()) {
-                res = Err(HummockError::shared_buffer_error(
-                    "Fail to flush shared buffer",
-                ));
-            }
-        } else {
-            self.ongoing_flush.init();
-            // Flush all batches in the shared buffer
-            res = self.sync(None).await;
-            // Notify other waiters if any
-            self.ongoing_flush.notify(res.is_ok());
-            log::debug!("flush: notify subscribers, result {}", res.is_ok());
-        }
-        res
-    }
-
-    // TODO: support time-based syncing
     pub async fn sync(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
-        if self.empty() {
+        if self.is_empty() {
             return Ok(());
         }
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.uploader_tx
-            .send(SharedBufferUploaderItem::Sync(SyncItem {
+            .send(UploadItem::Sync {
                 epoch,
-                notifier: Some(tx),
-            }))
-            .unwrap();
-
-        let mut res = Ok(());
-        let sync_res = rx.await.unwrap();
-        match sync_res {
-            Ok(sync_size) => {
-                // Update the shared buffer size
-                let shared_buff_prev_size = self
-                    .stats
-                    .shared_buffer_cur_size
-                    .fetch_sub(sync_size, Ordering::SeqCst);
-                assert!(shared_buff_prev_size >= sync_size);
-            }
-            Err(e) => {
-                res = Err(e);
-            }
-        }
-        res
+                notifier: tx,
+            })
+            .map_err(HummockError::shared_buffer_error)?;
+        rx.await.map_err(HummockError::shared_buffer_error)?;
+        Ok(())
     }
 
     /// Searches shared buffers within the `epoch_range` for the given key.
@@ -272,8 +150,8 @@ impl SharedBufferManager {
         user_key: &[u8],
         epoch_range: impl RangeBounds<u64>,
     ) -> Option<HummockValue<Vec<u8>>> {
-        let guard = self.shared_buffer.read();
-        for (_epoch, buffers) in guard.range(epoch_range).rev() {
+        let guard = self.core.read();
+        for (_epoch, buffers) in guard.buffer.range(epoch_range).rev() {
             for (_, m) in buffers.range(user_key.to_vec()..) {
                 if m.start_user_key() > user_key {
                     continue;
@@ -293,13 +171,14 @@ impl SharedBufferManager {
         &self,
         key_range: &R,
         epoch_range: impl RangeBounds<u64>,
-    ) -> Vec<SharedBufferBatchIterator<FORWARD>>
+    ) -> Vec<SharedBufferBatchIterator<Forward>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.shared_buffer
+        self.core
             .read()
+            .buffer
             .range(epoch_range)
             .flat_map(|entry| {
                 entry
@@ -322,13 +201,14 @@ impl SharedBufferManager {
         &self,
         key_range: &R,
         epoch_range: impl RangeBounds<u64>,
-    ) -> Vec<SharedBufferBatchIterator<BACKWARD>>
+    ) -> Vec<SharedBufferBatchIterator<Backward>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.shared_buffer
+        self.core
             .read()
+            .buffer
             .range(epoch_range)
             .flat_map(|entry| {
                 entry
@@ -345,34 +225,43 @@ impl SharedBufferManager {
             .collect_vec()
     }
 
+    // TODO: Remove `delete_before` after flushed sstable can be accessed.
+    // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
     /// Deletes shared buffers before a given `epoch` exclusively.
-    pub fn delete_before(&self, epoch: u64) {
-        let mut guard = self.shared_buffer.write();
-        let new = guard.split_off(&epoch);
-        *guard = new;
+    pub fn delete_before(&self, epoch: HummockEpoch) {
+        let mut guard = self.core.write();
+        // buffer = newer part
+        let mut buffer = guard.buffer.split_off(&epoch);
+        // buffer = older part, core.buffer = new part
+        std::mem::swap(&mut buffer, &mut guard.buffer);
+        for (_epoch, batches) in buffer {
+            for (_end_user_key, batch) in batches {
+                guard.size -= batch.size as usize
+            }
+        }
     }
 
-    /// This function was called while [`SharedBufferManager`] exited.
-    pub async fn wait(self) -> StorageResult<()> {
-        self.uploader_handle.await.unwrap()
-    }
-
-    pub fn reset(&mut self, epoch: u64) {
-        // Reset uploader item.
-        self.uploader_tx
-            .send(SharedBufferUploaderItem::Reset(epoch))
-            .unwrap();
-        // Remove items of the given epoch from shared buffer
-        self.shared_buffer.write().remove(&epoch);
-    }
-
-    pub fn stats(&self) -> &SharedBufferMetrics {
-        &self.stats
+    /// Puts a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
+    pub fn replicate_remote_batch(
+        &self,
+        batch: Vec<SharedBufferItem>,
+        epoch: u64,
+    ) -> HummockResult<()> {
+        let batch = SharedBufferBatch::new(batch, epoch);
+        let batch_size = batch.size as usize;
+        let mut guard = self.core.write();
+        guard
+            .buffer
+            .entry(epoch)
+            .or_insert(BTreeMap::new())
+            .insert(batch.end_user_key().to_vec(), batch.clone());
+        guard.size += batch_size;
+        Ok(())
     }
 
     #[cfg(test)]
-    pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
-        self.shared_buffer.read().clone()
+    pub fn get_shared_buffer(&self) -> BTreeMap<u64, EpochSharedBuffer> {
+        self.core.read().buffer.clone()
     }
 }
 
@@ -387,7 +276,8 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
     use crate::hummock::iterator::{
-        BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
+        BoxedBackwardHummockIterator, BoxedForwardHummockIterator, HummockIterator, MergeIterator,
+        ReverseMergeIterator,
     };
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
@@ -403,7 +293,7 @@ mod tests {
             64 << 20,
             64 << 20,
         ));
-        let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+        let vm = Arc::new(LocalVersionManager::new());
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -581,7 +471,7 @@ mod tests {
         let mut merge_iterator = MergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedForwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -605,7 +495,7 @@ mod tests {
         let mut merge_iterator = MergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedForwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -658,7 +548,7 @@ mod tests {
         let mut merge_iterator = MergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedForwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -718,7 +608,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -742,7 +632,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -797,7 +687,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -814,47 +704,5 @@ mod tests {
             merge_iterator.next().await.unwrap();
         }
         assert!(!merge_iterator.is_valid());
-    }
-
-    #[tokio::test]
-    async fn test_shared_buffer_manager_reset() {
-        let mut shared_buffer_manager = new_shared_buffer_manager().await;
-
-        let mut keys = Vec::new();
-        for i in 0..4 {
-            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
-        }
-        let mut idx = 0;
-
-        // Write a batch
-        let epoch = 1;
-        let shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager).await;
-
-        // Get and check value with epoch 0..=epoch1
-        for (idx, key) in keys.iter().enumerate() {
-            assert_eq!(
-                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
-                shared_buffer_items[idx].1
-            );
-        }
-
-        // Reset shared buffer. Expect all keys are gone.
-        shared_buffer_manager.reset(epoch);
-        for item in &shared_buffer_items {
-            assert_eq!(shared_buffer_manager.get(item.0.as_slice(), ..=epoch), None);
-        }
-
-        // Generate new items overlapping with old items and check
-        keys.push(format!("key_test_{:05}", 100).as_bytes().to_vec());
-        let epoch = 1;
-        let new_shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager).await;
-        for (idx, key) in keys.iter().enumerate() {
-            assert_eq!(
-                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
-                new_shared_buffer_items[idx].1
-            );
-        }
     }
 }

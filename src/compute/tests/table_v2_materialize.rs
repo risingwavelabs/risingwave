@@ -14,12 +14,14 @@
 
 use std::sync::Arc;
 
+use futures::stream::StreamExt;
 use itertools::Itertools;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
-    CreateTableExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor,
+    CreateTableExecutor, Executor as BatchExecutor, RowSeqScanExecutor,
 };
+use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
+use risingwave_batch::executor2::{DeleteExecutor2, Executor2, InsertExecutor2};
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
@@ -37,11 +39,9 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, Message, PkIndices, SourceExecutor, StreamingMetrics,
+    Barrier, ExecutorV1, Message, PkIndices, SourceExecutor, StreamingMetrics,
 };
-use risingwave_stream::executor_v2::{
-    Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2,
-};
+use risingwave_stream::executor_v2::{Executor, MaterializeExecutor};
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
@@ -166,15 +166,17 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
-    let mut materialize = Box::new(MaterializeExecutorV2::new_from_v1(
-        Box::new(stream_source),
+    let mut materialize = MaterializeExecutor::new_from_v1(
+        (Box::new(stream_source) as Box<dyn ExecutorV1>)
+            .v2()
+            .boxed(),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
         "MaterializeExecutor".to_string(),
-        vec![],
-    ))
+    )
+    .boxed()
     .v1();
 
     // 1.
@@ -184,19 +186,19 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
     let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
-    let mut insert = InsertExecutor::new(
+    let insert_inner: Box<dyn BatchExecutor> =
+        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert = Box::new(InsertExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(insert_inner),
+        Box::new(ExecutorWrapper::from(insert_inner)),
         0,
         false,
-    );
+    ));
 
     tokio::spawn(async move {
-        insert.open().await?;
-        insert.next().await?;
-        insert.close().await?;
+        let mut stream = insert.execute();
+        let _ = stream.next().await.unwrap()?;
         Ok::<_, RwError>(())
     });
 
@@ -230,6 +232,21 @@ async fn test_table_v2_materialize() -> Result<()> {
     );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
+
+    // Send a barrier to start materialized view
+    let curr_epoch = 1919;
+    barrier_tx
+        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch)))
+        .unwrap();
+
+    assert!(matches!(
+        materialize.next().await?,
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: None,
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
 
     // Poll `Materialize`, should output the same insertion stream chunk
     let message = materialize.next().await?;
@@ -287,17 +304,17 @@ async fn test_table_v2_materialize() -> Result<()> {
         column_nonnull! { I64Array, [0] }, // row id column
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let delete_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
-    let mut delete = DeleteExecutor::new(
+    let delete_inner: Box<dyn BatchExecutor> =
+        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let delete = Box::new(DeleteExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(delete_inner),
-    );
+        Box::new(ExecutorWrapper::from(delete_inner)),
+    ));
 
     tokio::spawn(async move {
-        delete.open().await?;
-        delete.next().await?;
-        delete.close().await?;
+        let mut stream = delete.execute();
+        let _ = stream.next().await.unwrap()?;
         Ok::<_, RwError>(())
     });
 

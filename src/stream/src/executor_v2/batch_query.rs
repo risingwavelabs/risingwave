@@ -14,12 +14,15 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
 
-use super::error::TracedStreamExecutorError;
+use super::error::StreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};
 use crate::executor_v2::BoxedMessageStream;
 
@@ -35,6 +38,10 @@ pub struct BatchQueryExecutor<S: StateStore> {
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+
+    /// This is a workaround for parallelized chain.
+    /// TODO(zbw): Remove this when we support range scan.
+    parallel_info: BatchParallelInfo,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -48,16 +55,18 @@ where
         batch_size: usize,
         info: ExecutorInfo,
         key_indices: Vec<usize>,
+        parallel_info: BatchParallelInfo,
     ) -> Self {
         Self {
             table,
             batch_size,
             info,
             key_indices,
+            parallel_info,
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
         let mut iter = self.table.iter(epoch).await?;
 
@@ -65,9 +74,41 @@ where
             .collect_data_chunk(&self.table, Some(self.batch_size))
             .await?
         {
-            let ops = vec![Op::Insert; data_chunk.cardinality()];
-            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+            // Filter out rows
+            let filtered_data_chunk = match self.filter_chunk(data_chunk) {
+                Some(chunk) => chunk,
+                None => {
+                    continue;
+                }
+            };
+            let compacted_chunk = filtered_data_chunk
+                .compact()
+                .map_err(StreamExecutorError::eval_error)?;
+            let ops = vec![Op::Insert; compacted_chunk.cardinality()];
+            let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
             yield Message::Chunk(stream_chunk);
+        }
+    }
+
+    /// Now we use hash as a workaround for supporting parallelized chain.
+    fn filter_chunk(&self, data_chunk: DataChunk) -> Option<DataChunk> {
+        let hash_values = data_chunk
+            .get_hash_values(self.info.pk_indices.as_ref(), CRC32FastBuilder)
+            .unwrap();
+        let n = data_chunk.cardinality();
+        let (columns, _visibility) = data_chunk.into_parts();
+
+        let mut new_visibility = BitmapBuilder::with_capacity(n);
+        for hv in &hash_values {
+            new_visibility.append(
+                (hv.0 % self.parallel_info.degree as u64) == self.parallel_info.index as u64,
+            );
+        }
+        let new_visibility = new_visibility.finish();
+        if new_visibility.num_high_bits() > 0 {
+            Some(DataChunk::new(columns, Some(new_visibility)))
+        } else {
+            None
         }
     }
 }
@@ -123,6 +164,10 @@ mod test {
             test_batch_size,
             info,
             vec![],
+            BatchParallelInfo {
+                degree: 1,
+                index: 0,
+            },
         ));
 
         let stream = executor.execute_with_epoch(u64::MAX);

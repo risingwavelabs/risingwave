@@ -19,13 +19,12 @@ use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-pub use super::executor::{
-    Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
-};
+pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef};
 
-mod agg;
+pub mod aggregation;
 mod batch_query;
 mod chain;
+mod debug;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
@@ -35,7 +34,6 @@ mod lookup;
 pub mod merge;
 pub(crate) mod mview;
 mod project;
-#[allow(dead_code)]
 mod rearranged_chain;
 pub mod receiver;
 mod simple;
@@ -44,10 +42,12 @@ mod test_utils;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
+mod union;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
+pub use debug::DebugExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
@@ -57,18 +57,22 @@ pub use lookup::*;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
+pub use rearranged_chain::RearrangedChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use v1_compat::StreamExecutorV1;
+pub use union::{UnionExecutor, UnionExecutorBuilder};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
+/// The maximum chunk length produced by executor at a time.
+const PROCESSING_WINDOW_SIZE: usize = 1024;
+
 /// Static information of an executor.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ExecutorInfo {
     /// See [`Executor::schema`].
     pub schema: Schema,
@@ -108,37 +112,6 @@ pub trait Executor: Send + 'static {
             schema,
             pk_indices,
             identity,
-        }
-    }
-
-    /// Return an executor which implements [`ExecutorV1`].
-    fn v1(self: Box<Self>) -> StreamExecutorV1
-    where
-        Self: Sized,
-    {
-        let info = self.info();
-        let stream = self.execute();
-        let stream = Box::pin(stream);
-
-        StreamExecutorV1 {
-            executor_v2: None,
-            stream: Some(stream),
-            info,
-        }
-    }
-
-    /// Return an executor which implements [`ExecutorV1`] and requires [`ExecutorV1::init`] to be
-    /// called before executing.
-    fn v1_uninited(self: Box<Self>) -> StreamExecutorV1
-    where
-        Self: Sized,
-    {
-        let info = self.info();
-
-        StreamExecutorV1 {
-            executor_v2: Some(self),
-            stream: None,
-            info,
         }
     }
 

@@ -56,6 +56,10 @@ fn arrangement_col_arrange_rules() -> Vec<OrderPair> {
     ]
 }
 
+fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
+    vec![OrderPair::new(1, OrderType::Ascending)]
+}
+
 /// Create a test arrangement.
 ///
 /// In this arrangement, there are two columns, with the following data flow:
@@ -128,7 +132,6 @@ async fn create_arrangement(
         arrangement_col_arrange_rules(),
         column_ids,
         1,
-        vec![],
     ))
 }
 
@@ -224,11 +227,18 @@ async fn test_lookup_this_epoch() {
         stream,
         arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
         arrangement_col_descs: arrangement_col_descs(),
-        arrangement_order_rules: arrangement_col_arrange_rules(),
+        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
         use_current_epoch: true,
-        stream_join_key_indices: vec![1],
-        arrange_join_key_indices: vec![0],
+        stream_join_key_indices: vec![0],
+        arrange_join_key_indices: vec![1],
+        column_mapping: vec![2, 3, 0, 1],
+        schema: Schema::new(vec![
+            Field::with_name(DataType::Int32, "join_column"),
+            Field::with_name(DataType::Int32, "rowid_column"),
+            Field::with_name(DataType::Int32, "rowid_column"),
+            Field::with_name(DataType::Int32, "join_column"),
+        ]),
     }));
     let mut lookup_executor = lookup_executor.execute();
 
@@ -259,10 +269,10 @@ async fn test_lookup_this_epoch() {
     let expected_chunk1 = StreamChunk::new(
         vec![Op::Insert, Op::Insert],
         vec![
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [1, 1] },
             column_nonnull! { I32Array, [2333, 2334] },
             column_nonnull! { I32Array, [6, 6] },
+            column_nonnull! { I32Array, [6, 6] },
+            column_nonnull! { I32Array, [1, 1] },
         ],
         None,
     );
@@ -273,10 +283,10 @@ async fn test_lookup_this_epoch() {
     let expected_chunk2 = StreamChunk::new(
         vec![Op::Delete, Op::Delete],
         vec![
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [1, 1] },
             column_nonnull! { I32Array, [2334, 2335] },
             column_nonnull! { I32Array, [6, 6] },
+            column_nonnull! { I32Array, [6, 6] },
+            column_nonnull! { I32Array, [1, 1] },
         ],
         None,
     );
@@ -294,11 +304,18 @@ async fn test_lookup_last_epoch() {
         stream,
         arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
         arrangement_col_descs: arrangement_col_descs(),
-        arrangement_order_rules: arrangement_col_arrange_rules(),
+        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
         use_current_epoch: false,
-        stream_join_key_indices: vec![1],
-        arrange_join_key_indices: vec![0],
+        stream_join_key_indices: vec![0],
+        arrange_join_key_indices: vec![1],
+        column_mapping: vec![0, 1, 2, 3],
+        schema: Schema::new(vec![
+            Field::with_name(DataType::Int32, "rowid_column"),
+            Field::with_name(DataType::Int32, "join_column"),
+            Field::with_name(DataType::Int32, "join_column"),
+            Field::with_name(DataType::Int32, "rowid_column"),
+        ]),
     }));
     let mut lookup_executor = lookup_executor.execute();
 

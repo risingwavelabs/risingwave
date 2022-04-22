@@ -21,10 +21,11 @@ use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
-use crate::array::data_chunk_iter::{DataChunkRefIter, Row, RowRef};
+use crate::array::data_chunk_iter::{Row, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::{Result, RwError};
+use crate::hash::HashCode;
 use crate::types::DataType;
 use crate::util::hash_util::finalize_hashers;
 
@@ -350,19 +351,17 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-    ) -> Result<Vec<u64>> {
+    ) -> Result<Vec<HashCode>> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states[..]))
-    }
-
-    /// Get an iterator for visible rows.
-    pub fn rows(&self) -> DataChunkRefIter<'_> {
-        DataChunkRefIter::new(self)
+        Ok(finalize_hashers(&mut states[..])
+            .into_iter()
+            .map(|hash_code| hash_code.into())
+            .collect_vec())
     }
 
     /// Random access a tuple in a data chunk. Return in a row format.
@@ -384,11 +383,7 @@ impl DataChunk {
     /// # Arguments
     /// * `pos` - Index of look up tuple
     pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
-        let mut row = Vec::with_capacity(self.columns.len());
-        for column in &self.columns {
-            row.push(column.array_ref().value_at(pos));
-        }
-        RowRef::new(row)
+        RowRef::new(self, pos)
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
@@ -398,8 +393,7 @@ impl DataChunk {
         table.load_preset("||--+-++|    ++++++\n");
         for row in self.rows() {
             let cells: Vec<_> = row
-                .0
-                .iter()
+                .values()
                 .map(|v| {
                     match v {
                         None => "".to_owned(), // null
@@ -410,6 +404,20 @@ impl DataChunk {
             table.add_row(cells);
         }
         table.to_string()
+    }
+
+    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// the chunk contains column `[a, b, c]`, then the output will be
+    /// `[c, b, a]`.
+    pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
+        let mut new_columns = Vec::with_capacity(column_mapping.len());
+        for &idx in column_mapping {
+            new_columns.push(self.columns[idx].clone());
+        }
+        Self {
+            columns: new_columns,
+            ..self
+        }
     }
 }
 

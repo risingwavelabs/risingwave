@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{BatchSourceReader, Source, StreamSourceReader};
+use crate::{Source, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -111,21 +111,6 @@ pub struct TableV2ReaderContext;
 #[derive(Debug)]
 pub struct TableV2BatchReader;
 
-#[async_trait]
-impl BatchSourceReader for TableV2BatchReader {
-    async fn open(&mut self) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-        unimplemented!()
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        unimplemented!()
-    }
-}
-
 /// [`TableV2StreamReader`] reads changes from a certain table continuously.
 /// This struct should be only used for associated materialize task, thus the reader should be
 /// created only once. Further streaming task relying on this table source should follow the
@@ -141,10 +126,6 @@ pub struct TableV2StreamReader {
 
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     async fn next(&mut self) -> Result<StreamChunk> {
         let (chunk, notifier) = self
             .rx
@@ -173,19 +154,10 @@ impl StreamSourceReader for TableV2StreamReader {
 
 #[async_trait]
 impl Source for TableSourceV2 {
-    type BatchReader = TableV2BatchReader;
     type ReaderContext = TableV2ReaderContext;
     type StreamReader = TableV2StreamReader;
 
-    fn batch_reader(
-        &self,
-        _context: Self::ReaderContext,
-        _column_ids: Vec<ColumnId>,
-    ) -> Result<Self::BatchReader> {
-        unreachable!("should use table_scan instead of stream_scan to read the table source")
-    }
-
-    fn stream_reader(
+    async fn stream_reader(
         &self,
         _context: Self::ReaderContext,
         column_ids: Vec<ColumnId>,
@@ -210,7 +182,6 @@ impl Source for TableSourceV2 {
 
 #[cfg(test)]
 mod tests {
-
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
@@ -236,7 +207,9 @@ mod tests {
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
         let source = Arc::new(new_source());
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
+        let mut reader = source
+            .stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])
+            .await?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -253,8 +226,6 @@ mod tests {
         }
 
         write_chunk!(0);
-
-        reader.open().await?;
 
         macro_rules! check_next_chunk {
             ($i: expr) => {

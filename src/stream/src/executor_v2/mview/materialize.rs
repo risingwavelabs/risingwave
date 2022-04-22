@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::mview::ManagedMViewState;
 use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
@@ -36,10 +36,6 @@ pub struct MaterializeExecutor<S: StateStore> {
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
 
-    #[allow(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
-
     info: ExecutorInfo,
 }
 
@@ -50,7 +46,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        key_indices: Vec<usize>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
@@ -64,11 +59,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            key_indices,
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let input = self.input.execute();
         #[for_await]
@@ -118,7 +112,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     self.local_state
                         .flush(b.epoch.prev)
                         .await
-                        .map_err(StreamExecutorError::ExecutorV1)?;
+                        .map_err(StreamExecutorError::executor_v1)?;
                     Message::Barrier(b)
                 }
             }
@@ -221,7 +215,6 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
-            vec![],
         ))
         .execute();
 
