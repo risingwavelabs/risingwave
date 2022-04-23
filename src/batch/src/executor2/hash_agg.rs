@@ -160,7 +160,7 @@ impl<K> HashAggExecutor2<K> {
 
 impl<K: HashKey + Send + Sync> Executor2 for HashAggExecutor2<K> {
     fn schema(&self) -> &Schema {
-        self.child.schema()
+        &self.schema
     }
 
     fn identity(&self) -> &str {
