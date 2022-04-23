@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan::JoinType;
@@ -169,33 +169,27 @@ where
         )?;
 
         // Serialize the graph
-        stream_graph
-            .iter()
+        let stream_graph = stream_graph
+            .into_iter()
             .map(|(fragment_id, actors)| {
-                Ok::<_, RwError>((
-                    fragment_id.as_global_id(),
+                let fragment = self.fragment_graph.get_fragment(fragment_id).unwrap();
+                let fragment_id = fragment_id.as_global_id();
+                (
+                    fragment_id,
                     Fragment {
-                        fragment_id: fragment_id.as_global_id(),
-                        fragment_type: self
-                            .fragment_graph
-                            .get_fragment(*fragment_id)
-                            .unwrap()
-                            .fragment_type as i32,
-                        distribution_type: if self
-                            .fragment_graph
-                            .get_fragment(*fragment_id)
-                            .unwrap()
-                            .is_singleton
-                        {
+                        fragment_id,
+                        fragment_type: fragment.fragment_type as i32,
+                        distribution_type: if fragment.is_singleton {
                             FragmentDistributionType::Single
                         } else {
                             FragmentDistributionType::Hash
                         } as i32,
-                        actors: actors.clone(),
+                        actors,
                     },
-                ))
+                )
             })
-            .collect::<Result<BTreeMap<_, _>>>()
+            .collect();
+        Ok(stream_graph)
     }
 
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
