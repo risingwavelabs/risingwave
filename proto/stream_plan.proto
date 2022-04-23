@@ -6,12 +6,20 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
+import "data.proto";
 import "expr.proto";
 import "plan.proto";
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint32 hash_mapping = 1;
+  repeated uint64 original_indices = 1;
+  repeated uint32 data = 2;
+}
+
+// Hash mapping for compute node. Stores mapping from virtual node to parallel unit id.
+message ParallelUnitMapping {
+  repeated uint64 original_indices = 1;
+  repeated uint32 data = 2;
 }
 
 // todo: StreamSourceNode or TableSourceNode
@@ -45,6 +53,9 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
+// The node will be used for both create mv and create index. When creating mv,
+// `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
+// arrange columns and pk columns, while distribution keys will be arrange columns.
 message MaterializeNode {
   plan.TableRefId table_ref_id = 1;
   plan.TableRefId associated_table_ref_id = 2;
@@ -52,7 +63,7 @@ message MaterializeNode {
   repeated plan.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
-  // TODO: remove this field, not used anywhere
+  // Hash keys of the materialize node, which is a subset of pk.
   repeated int32 distribution_keys = 5;
 }
 
@@ -82,6 +93,18 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated int32 distribution_keys = 5;
+  // Whether to use delta join for this hash join node.
+  // TODO: remove this in the future when we have a separate DeltaHashJoin node.
+  bool is_delta_join = 6;
+  // Used for internal table states.
+  plan.TableRefId left_table_ref_id = 7;
+  plan.TableRefId right_table_ref_id = 8;
+}
+
+message HopWindowNode {
+  expr.InputRefExpr time_col = 1;
+  data.IntervalUnit window_slide = 2;
+  data.IntervalUnit window_size = 3;
 }
 
 message MergeNode {
@@ -105,13 +128,11 @@ message ChainNode {
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan.Field upstream_fields = 2;
   repeated int32 column_ids = 3;
-}
-
-// BatchParallelInfo is a temporary workaround for parallelized chain node.
-// This should be removed once we support ranged batch query.
-message BatchParallelInfo {
-  uint32 degree = 1;
-  uint32 index = 2;
+  // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
+  // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
+  // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
+  // This option is used to disable barrier rearrangement.
+  bool disable_rearrange = 4;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -121,11 +142,13 @@ message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
-  BatchParallelInfo parallel_info = 4;
+  // TODO: make hash_mapping more compact. (e.g. store ranges)
+  ParallelUnitMapping hash_mapping = 4;
+  uint32 parallel_unit_id = 5;
 }
 
-// Special node for shared state. ArrangeNode will produce a special Materialize executor,
-// which materializes data for downstream to query.
+// Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
+// produce a special Materialize executor, which materializes data for downstream to query.
 message ArrangeNode {
   // The keys used to group the rows, aka. arrange key.
   repeated int32 arrange_key_indexes = 1;
@@ -169,6 +192,7 @@ message StreamNode {
     TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
     TopNNode top_n_node = 12;
+    HopWindowNode hop_window_node = 23;
     MergeNode merge_node = 13;
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;
@@ -182,6 +206,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
+  bool append_only = 24;
   string identity = 18;
   // The schema of the plan node
   repeated plan.Field fields = 19;

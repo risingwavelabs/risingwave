@@ -58,7 +58,9 @@ impl Task for ZooKeeperService {
         let path = if self.config.persist_data {
             Path::new(&env::var("PREFIX_DATA")?).join(self.id())
         } else {
-            Path::new("/tmp").join(self.id())
+            let path = Path::new("/tmp/risedev").join(self.id());
+            std::fs::remove_dir_all(&path).ok();
+            path
         };
         std::fs::create_dir_all(&path)?;
 

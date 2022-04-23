@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
@@ -27,10 +27,12 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
-use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
+use super::{ExecutorV1, ExecutorV1State, Message, PkIndices, PkIndicesRef, StatefulExecutorV1};
 use crate::common::StreamChunkBuilder;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
+
+pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -52,9 +54,6 @@ mod SideType {
     pub const Left: SideTypePrimitive = 0;
     pub const Right: SideTypePrimitive = 1;
 }
-
-const JOIN_LEFT_PATH: u8 = b'l';
-const JOIN_RIGHT_PATH: u8 = b'r';
 
 const fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
     join_type == JoinType::FullOuter
@@ -124,15 +123,16 @@ impl<S: StateStore> JoinSide<S> {
 pub struct HashJoinExecutorBuilder {}
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(
+    fn new_boxed_executor_v1(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Box<dyn ExecutorV1>> {
+        // Get table id and used as keyspace prefix.
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
-        let source_r = params.input.remove(1);
-        let source_l = params.input.remove(0);
+        let source_r = Box::new(params.input.remove(1).v1());
+        let source_l = Box::new(params.input.remove(0).v1());
         let params_l = JoinParams::new(
             node.get_left_key()
                 .iter()
@@ -158,6 +158,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
+        let left_table_id = TableId::from(&node.left_table_ref_id);
+        let right_table_id = TableId::from(&node.right_table_ref_id);
         macro_rules! impl_create_hash_join_executor {
             ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
                 |typ| match typ {
@@ -167,12 +169,13 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                         params_l,
                         params_r,
                         params.pk_indices,
-                        Keyspace::shared_executor_root(store.clone(), params.operator_id),
                         params.executor_id,
                         condition,
                         params.op_info,
                         key_indices,
-                    )) as Box<dyn Executor>, )*
+                        Keyspace::table_root(store.clone(), &left_table_id),
+                        Keyspace::table_root(store.clone(), &right_table_id),
+                    )) as Box<dyn ExecutorV1>, )*
                     _ => todo!("Join type {:?} not implemented", typ),
                 }
             }
@@ -223,7 +226,7 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     op_info: String,
 
     /// Executor state
-    executor_state: ExecutorState,
+    executor_state: ExecutorV1State,
 
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -246,7 +249,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
 }
 
 #[async_trait]
-impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S, T> {
+impl<S: StateStore, const T: JoinTypePrimitive> ExecutorV1 for HashJoinExecutor<S, T> {
     async fn next(&mut self) -> Result<Message> {
         let msg = self.aligner.next().await;
         if let Some(barrier) = self.try_init_executor(&msg) {
@@ -268,7 +271,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -301,16 +304,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 #[allow(clippy::too_many_arguments)]
 impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     pub fn new(
-        input_l: Box<dyn Executor>,
-        input_r: Box<dyn Executor>,
+        input_l: Box<dyn ExecutorV1>,
+        input_r: Box<dyn ExecutorV1>,
         params_l: JoinParams,
         params_r: JoinParams,
         pk_indices: PkIndices,
-        keyspace: Keyspace<S>,
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
         key_indices: Vec<usize>,
+        ks_l: Keyspace<S>,
+        ks_r: Keyspace<S>,
     ) -> Self {
         let debug_l = format!("{:#?}", &input_l);
         let debug_r = format!("{:#?}", &input_r);
@@ -344,9 +348,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             .collect_vec();
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
-
-        let ks_l = keyspace.append_u8(JOIN_LEFT_PATH);
-        let ks_r = keyspace.append_u8(JOIN_RIGHT_PATH);
         Self {
             aligner: BarrierAligner::new(input_l, input_r),
             output_data_types,
@@ -355,7 +356,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             },
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    1 << 16,
+                    JOIN_CACHE_SIZE,
                     pk_indices_l.clone(),
                     col_l_datatypes.clone(),
                     ks_l.clone(),
@@ -368,7 +369,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    1 << 16,
+                    JOIN_CACHE_SIZE,
                     pk_indices_r.clone(),
                     col_r_datatypes.clone(),
                     ks_r.clone(),
@@ -385,7 +386,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::Init,
+            executor_state: ExecutorV1State::Init,
             key_indices,
         }
     }
@@ -628,12 +629,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutor for HashJoinExecutor<S, T> {
-    fn executor_state(&self) -> &ExecutorState {
+impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutorV1 for HashJoinExecutor<S, T> {
+    fn executor_state(&self) -> &ExecutorV1State {
         &self.executor_state
     }
 
-    fn update_executor_state(&mut self, new_state: ExecutorState) {
+    fn update_executor_state(&mut self, new_state: ExecutorV1State) {
         self.executor_state = new_state;
     }
 }
@@ -652,10 +653,14 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::executor::test_utils::MockAsyncSource;
-    use crate::executor::{Barrier, Epoch, Executor, Message};
+    use crate::executor::{Barrier, Epoch, ExecutorV1, Message};
 
-    fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
-        Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+    fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
+        let mem_state = MemoryStateStore::new();
+        (
+            Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
+            Keyspace::table_root(mem_state, &TableId::new(1)),
+        )
     }
 
     fn create_cond() -> Option<RowExpression> {
@@ -717,10 +722,10 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
+
+        let (ks_l, ks_r) = create_in_memory_keyspace();
 
         let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
             Box::new(source_l),
@@ -728,11 +733,12 @@ mod tests {
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             None,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right
@@ -921,10 +927,10 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
+
+        let (ks_l, ks_r) = create_in_memory_keyspace();
 
         let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
             Box::new(source_l),
@@ -932,11 +938,12 @@ mod tests {
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             None,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right
@@ -1167,22 +1174,22 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
+        let (ks_l, ks_r) = create_in_memory_keyspace();
         let mut hash_join = HashJoinExecutor::<_, { JoinType::LeftOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             None,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right
@@ -1417,22 +1424,22 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
+        let (ks_l, ks_r) = create_in_memory_keyspace();
         let mut hash_join = HashJoinExecutor::<_, { JoinType::RightOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             None,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right
@@ -1617,22 +1624,22 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
+        let (ks_l, ks_r) = create_in_memory_keyspace();
         let mut hash_join = HashJoinExecutor::<_, { JoinType::FullOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             None,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right
@@ -1870,24 +1877,24 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let cond = create_cond();
 
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
+        let (ks_l, ks_r) = create_in_memory_keyspace();
         let mut hash_join = HashJoinExecutor::<_, { JoinType::FullOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             cond,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right
@@ -2125,24 +2132,24 @@ mod tests {
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
         let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
 
-        let keyspace = create_in_memory_keyspace();
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
         let cond = create_cond();
 
+        let (ks_l, ks_r) = create_in_memory_keyspace();
         let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
-            keyspace,
             1,
             cond,
             "HashJoinExecutor".to_string(),
             vec![],
+            ks_l,
+            ks_r,
         );
 
         // push the init barrier for left and right

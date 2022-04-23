@@ -22,18 +22,15 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Executor, Message, PkIndicesRef, StreamExecutorResult};
-use crate::executor::{
-    AlignedMessage, BarrierAligner, Executor as ExecutorV1, ExecutorBuilder, PkIndices,
-};
-use crate::executor_v2::error::TracedStreamExecutorError;
+use super::{BoxedExecutor, Executor, Message, PkIndicesRef, StreamExecutorResult};
+use crate::executor::{AlignedMessage, BarrierAligner, ExecutorBuilder, PkIndices};
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `UnionExecutor` merges data from multiple inputs. Currently this is done by using
 /// [`BarrierAligner`]. In the future we could have more efficient implementation.
 pub struct UnionExecutor {
-    inputs: Vec<Box<dyn ExecutorV1>>,
+    inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
 }
 
@@ -47,7 +44,7 @@ impl std::fmt::Debug for UnionExecutor {
 }
 
 impl UnionExecutor {
-    pub fn new(pk_indices: PkIndices, inputs: Vec<Box<dyn ExecutorV1>>) -> Self {
+    pub fn new(pk_indices: PkIndices, inputs: Vec<BoxedExecutor>) -> Self {
         Self {
             info: ExecutorInfo {
                 schema: inputs[0].schema().clone(),
@@ -99,15 +96,15 @@ impl Executor for BarrierAlignerWrapper {
 }
 
 impl BarrierAlignerWrapper {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         loop {
             match self.0.next().await {
                 AlignedMessage::Left(x) => {
-                    yield Message::Chunk(x.map_err(StreamExecutorError::InputError)?)
+                    yield Message::Chunk(x.map_err(StreamExecutorError::input_error)?)
                 }
                 AlignedMessage::Right(x) => {
-                    yield Message::Chunk(x.map_err(StreamExecutorError::InputError)?)
+                    yield Message::Chunk(x.map_err(StreamExecutorError::input_error)?)
                 }
                 AlignedMessage::Barrier(x) => yield Message::Barrier(x),
             }
@@ -115,9 +112,7 @@ impl BarrierAlignerWrapper {
     }
 }
 
-fn build_align_executor(
-    mut inputs: Vec<Box<dyn ExecutorV1>>,
-) -> StreamExecutorResult<Box<dyn ExecutorV1>> {
+fn build_align_executor(mut inputs: Vec<BoxedExecutor>) -> StreamExecutorResult<BoxedExecutor> {
     match inputs.len() {
         0 => unreachable!(),
         1 => Ok(inputs.remove(0)),
@@ -128,32 +123,29 @@ fn build_align_executor(
             let pk_indices = right.pk_indices().to_vec();
             assert_eq!(&schema, right.schema());
             assert_eq!(pk_indices, right.pk_indices());
-            let aligner = BarrierAligner::new(left, right);
-            Ok(Box::new(
-                Box::new(BarrierAlignerWrapper(
-                    aligner,
-                    ExecutorInfo {
-                        schema,
-                        pk_indices,
-                        identity: "BarrierAlignerWrapper".to_string(),
-                    },
-                ))
-                .v1(),
-            ))
+            let aligner = BarrierAligner::new(Box::new(left.v1()), Box::new(right.v1()));
+            Ok(BarrierAlignerWrapper(
+                aligner,
+                ExecutorInfo {
+                    schema,
+                    pk_indices,
+                    identity: "BarrierAlignerWrapper".to_string(),
+                },
+            )
+            .boxed())
         }
     }
 }
 
 impl UnionExecutor {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let mut executor = build_align_executor(self.inputs)?;
-        loop {
-            let item = executor
-                .next()
-                .await
-                .map_err(StreamExecutorError::executor_v1)?;
-            yield item;
+        let executor = build_align_executor(self.inputs)?;
+        let stream = executor.execute();
+
+        #[for_await]
+        for item in stream {
+            yield item?;
         }
     }
 }
@@ -166,10 +158,8 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<Box<dyn ExecutorV1>> {
+    ) -> risingwave_common::error::Result<BoxedExecutor> {
         try_match_expand!(node.get_node().unwrap(), Node::UnionNode)?;
-        Ok(Box::new(
-            Box::new(UnionExecutor::new(params.pk_indices, params.input)).v1(),
-        ))
+        Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
     }
 }

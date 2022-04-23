@@ -25,7 +25,7 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::RwLock;
 
-use crate::cluster::WorkerId;
+use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -46,6 +46,13 @@ pub struct ActorInfos {
 
     /// all reachable source actors
     pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+}
+
+#[derive(Default)]
+pub struct BuildGraphInfo {
+    pub table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
+    pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
+    pub upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -232,25 +239,25 @@ where
                 s == ActorState::Running || include_inactive && s == ActorState::Inactive
             };
 
-            for (node_id, actors_status) in fragments.node_actors_status() {
-                for actor_status in actors_status {
-                    if check_state(actor_status.1) {
+            for (node_id, actor_states) in fragments.node_actor_states() {
+                for actor_state in actor_states {
+                    if check_state(actor_state.1) {
                         actor_maps
                             .entry(node_id)
                             .or_insert_with(Vec::new)
-                            .push(actor_status.0);
+                            .push(actor_state.0);
                     }
                 }
             }
 
-            let source_actors = fragments.node_source_actors_status();
-            for (&node_id, actors_status) in &source_actors {
-                for actor_status in actors_status {
-                    if check_state(actor_status.1) {
+            let source_actors = fragments.node_source_actor_states();
+            for (&node_id, actor_states) in &source_actors {
+                for actor_state in actor_states {
+                    if check_state(actor_state.1) {
                         source_actor_ids
                             .entry(node_id)
                             .or_insert_with(Vec::new)
-                            .push(actor_status.0);
+                            .push(actor_state.0);
                     }
                 }
             }
@@ -323,34 +330,80 @@ where
         }
     }
 
-    // TODO(bugen): remove this.
-    pub fn blocking_table_node_actors(
+    // we will read three things at once, avoiding locking too much.
+    pub async fn get_build_graph_info(
         &self,
-        table_id: &TableId,
-    ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
-        tokio::task::block_in_place(|| {
-            let map = &self.core.blocking_read().table_fragments;
+        table_ids: &HashSet<TableId>,
+    ) -> Result<BuildGraphInfo> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: BuildGraphInfo = Default::default();
+
+        for table_id in table_ids {
             match map.get(table_id) {
-                Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
-                None => Err(RwError::from(InternalError(format!(
-                    "table_fragment not exist: id={}",
-                    table_id
-                )))),
+                Some(table_fragment) => {
+                    info.table_node_actors
+                        .insert(*table_id, table_fragment.node_actor_ids());
+                    info.table_sink_actor_ids
+                        .insert(*table_id, table_fragment.sink_actor_ids());
+                    info.upstream_distribution_keys
+                        .insert(*table_id, table_fragment.distribution_keys().clone());
+                }
+                None => {
+                    return Err(RwError::from(InternalError(format!(
+                        "table_fragment not exist: id={}",
+                        table_id
+                    ))));
+                }
             }
-        })
+        }
+        Ok(info)
     }
 
-    // TODO(bugen): remove this.
-    pub fn blocking_get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
-        tokio::task::block_in_place(|| {
-            let map = &self.core.blocking_read().table_fragments;
+    pub async fn get_sink_parallel_unit_ids(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> Result<HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>> = HashMap::new();
+
+        for table_id in table_ids {
             match map.get(table_id) {
-                Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
-                None => Err(RwError::from(InternalError(format!(
-                    "table_fragment not exist: id={}",
-                    table_id
-                )))),
+                Some(table_fragment) => {
+                    info.insert(*table_id, table_fragment.parallel_unit_sink_actor_id());
+                }
+                None => {
+                    return Err(RwError::from(InternalError(format!(
+                        "table_fragment not exist: id={}",
+                        table_id
+                    ))));
+                }
             }
-        })
+        }
+
+        Ok(info)
+    }
+
+    pub async fn get_tables_node_actors(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> Result<HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>> = HashMap::new();
+
+        for table_id in table_ids {
+            match map.get(table_id) {
+                Some(table_fragment) => {
+                    info.insert(*table_id, table_fragment.node_actor_ids());
+                }
+                None => {
+                    return Err(RwError::from(InternalError(format!(
+                        "table_fragment not exist: id={}",
+                        table_id
+                    ))));
+                }
+            }
+        }
+
+        Ok(info)
     }
 }

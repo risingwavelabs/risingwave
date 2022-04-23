@@ -20,7 +20,7 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::hash::{HashCode, VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::hash::{HashCode, VirtualNode};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -85,7 +85,8 @@ where
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
 
     /// Computed via consistent hash. The value is to be set in value meta and used for grouping
-    /// the kv together in storage. Each state will have the same value of virtual node.
+    /// the kv together in storage. Each extreme state will have the same value of virtual node,
+    /// since it is computed on group key.
     vnode: VirtualNode,
 }
 
@@ -129,7 +130,7 @@ where
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
-        group_key_hash_code: u64,
+        group_key_hash_code: HashCode,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
@@ -140,7 +141,7 @@ where
             top_n_count,
             data_type: data_type.clone(),
             serializer: ExtremeSerializer::new(data_type, pk_data_types),
-            vnode: (group_key_hash_code % (VIRTUAL_NODE_COUNT as u64)) as VirtualNode,
+            vnode: group_key_hash_code.to_vnode(),
         })
     }
 
@@ -333,12 +334,12 @@ where
         }
 
         let mut local = write_batch.prefixify(&self.keyspace);
+        let value_meta = ValueMeta::new_with_vnode(self.vnode);
 
         // TODO: we can populate the cache while flushing, but that's hard.
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = self.serializer.serialize(key, &pks)?;
-            let value_meta = ValueMeta::new_with_vnode(self.vnode);
             match v.into_option() {
                 Some(v) => {
                     local.put(
@@ -451,7 +452,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                             top_n_count,
                             row_count,
                             pk_data_types,
-                            key_hash_code.unwrap_or_default().hash_code()
+                            key_hash_code.unwrap_or_default()
                         ).await?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
@@ -461,7 +462,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                             top_n_count,
                             row_count,
                             pk_data_types,
-                            key_hash_code.unwrap_or_default().hash_code()
+                            key_hash_code.unwrap_or_default()
                         ).await?,
                     )),
                 )*
@@ -506,7 +507,7 @@ mod tests {
             Some(5),
             0,
             PkDataTypes::new(),
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();
@@ -649,7 +650,7 @@ mod tests {
             Some(5),
             row_count,
             PkDataTypes::new(),
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();
@@ -691,7 +692,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();
@@ -777,7 +778,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();
@@ -879,7 +880,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();
@@ -959,7 +960,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();
@@ -1057,7 +1058,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
-            567,
+            HashCode(567),
         )
         .await
         .unwrap();

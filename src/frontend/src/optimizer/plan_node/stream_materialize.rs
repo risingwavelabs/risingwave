@@ -30,7 +30,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Distribution, Order};
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -99,12 +99,27 @@ impl StreamMaterialize {
     }
 
     /// Create a materialize node.
+    ///
+    /// When creating index, `distribute_only_order_by` should be true. We should distribute keys
+    /// using order by columns, instead of pk.
     pub fn create(
         input: PlanRef,
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        distribute_only_order_by: bool,
     ) -> Result<Self> {
+        // ensure the same pk will not shuffle to different node
+        let input = match input.distribution() {
+            Distribution::Single => input,
+            _ => Distribution::HashShard(if distribute_only_order_by {
+                user_order_by.field_order.iter().map(|x| x.index).collect()
+            } else {
+                input.pk_indices().to_vec()
+            })
+            .enforce_if_not_satisfies(input, Order::any()),
+        };
+
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;

@@ -92,6 +92,15 @@ impl CellBasedRowDeserializer {
             (bytes, Row(ret))
         })
     }
+
+    /// Since [`CellBasedRowDeserializer`] can be repetitively used with different inputs,
+    /// it needs to be reset so that pk and data are both cleared for the next use.
+    pub fn reset(&mut self) {
+        self.data.iter_mut().for_each(|datum| {
+            datum.take();
+        });
+        self.pk_bytes.take();
+    }
 }
 
 #[cfg(test)]

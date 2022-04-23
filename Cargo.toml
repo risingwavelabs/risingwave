@@ -3,6 +3,7 @@ members = [
   "src/batch",
   "src/bench",
   "src/cmd",
+  "src/cmd_all",
   "src/common",
   "src/compute",
   "src/connector",

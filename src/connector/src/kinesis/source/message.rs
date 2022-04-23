@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use aws_sdk_kinesis::model::Record;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::base::{InnerMessage, SourceMessage, SourceOffset};
+use crate::base::SourceMessage;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisMessage {
@@ -27,23 +26,9 @@ pub struct KinesisMessage {
     pub payload: Option<Vec<u8>>,
 }
 
-impl SourceMessage for KinesisMessage {
-    fn payload(&self) -> anyhow::Result<Option<&[u8]>> {
-        Ok(self.payload.as_ref().map(|payload| payload.as_ref()))
-    }
-
-    fn offset(&self) -> anyhow::Result<Option<SourceOffset>> {
-        Ok(Some(SourceOffset::String(self.sequence_number.clone())))
-    }
-
-    fn serialize(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow!(e))
-    }
-}
-
-impl From<KinesisMessage> for InnerMessage {
+impl From<KinesisMessage> for SourceMessage {
     fn from(msg: KinesisMessage) -> Self {
-        InnerMessage {
+        SourceMessage {
             payload: msg
                 .payload
                 .as_ref()

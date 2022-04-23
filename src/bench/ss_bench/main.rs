@@ -41,8 +41,33 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = 64)]
     block_size_kb: u32,
 
+    #[clap(long, default_value_t = 256)]
+    block_cache_capacity_mb: u32,
+
+    #[clap(long, default_value_t = 64)]
+    meta_cache_capacity_mb: u32,
+
+    #[clap(long, default_value_t = 192)]
+    shared_buffer_threshold_mb: u32,
+
+    #[clap(long, default_value_t = 256)]
+    shared_buffer_capacity_mb: u32,
+
+    #[clap(long, default_value_t = 2)]
+    share_buffers_sync_parallelism: u32,
+
     #[clap(long, default_value_t = 0.1)]
     bloom_false_positive: f64,
+
+    #[clap(long, default_value_t = 0)]
+    compact_level_after_write: u32,
+
+    #[clap(long)]
+    // since we want to enable async checkpoint as the default
+    async_checkpoint_disabled: bool,
+
+    #[clap(long)]
+    write_conflict_detection_enabled: bool,
 
     // ----- benchmarks -----
     #[clap(long)]
@@ -92,10 +117,6 @@ pub(crate) struct Opts {
 
     #[clap(long)]
     calibrate_histogram: bool,
-
-    // 0 represent do nothing because all files will be synced to L0.
-    #[clap(long, default_value_t = 0)]
-    compact_level_after_write: u32,
 }
 
 fn preprocess_options(opts: &mut Opts) {
@@ -125,16 +146,17 @@ async fn main() {
     println!("Configurations after preprocess:\n {:?}", &opts);
 
     let config = Arc::new(StorageConfig {
-        shared_buffer_threshold_size: 268435456, // 256 MB
+        shared_buffer_threshold: opts.shared_buffer_threshold_mb * (1 << 20),
+        shared_buffer_capacity: opts.shared_buffer_capacity_mb * (1 << 20),
         bloom_false_positive: opts.bloom_false_positive,
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
-        share_buffers_sync_parallelism: 2,
+        share_buffers_sync_parallelism: opts.share_buffers_sync_parallelism,
         data_directory: "hummock_001".to_string(),
-        async_checkpoint_enabled: true,
-        write_conflict_detection_enabled: false,
-        block_cache_capacity: 256 << 20,
-        meta_cache_capacity: 64 << 20,
+        async_checkpoint_enabled: !opts.async_checkpoint_disabled,
+        write_conflict_detection_enabled: opts.write_conflict_detection_enabled,
+        block_cache_capacity: opts.block_cache_capacity_mb as usize * (1 << 20),
+        meta_cache_capacity: opts.meta_cache_capacity_mb as usize * (1 << 20),
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
