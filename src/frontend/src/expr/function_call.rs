@@ -15,8 +15,7 @@
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::binder::expr::align_types;
+use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
