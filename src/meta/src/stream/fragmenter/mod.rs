@@ -431,7 +431,7 @@ where
                 | DispatcherType::NoShuffle) => {
                     self.stream_graph_builder.add_link(
                         &actor_ids,
-                        &downstream_actors,
+                        downstream_actors,
                         dispatch_edge.link_id,
                         Dispatcher {
                             r#type: ty.into(),
