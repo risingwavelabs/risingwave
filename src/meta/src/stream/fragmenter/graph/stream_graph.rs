@@ -32,7 +32,7 @@ use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext};
 
 /// A list of actors with order.
 #[derive(Debug, Clone)]
-pub struct OrderedActorLink(pub Vec<LocalActorId>);
+struct OrderedActorLink(pub Vec<LocalActorId>);
 
 impl OrderedActorLink {
     pub fn to_global_ids(&self, actor_id_offset: u32, actor_id_len: u32) -> Self {
@@ -277,7 +277,7 @@ impl StreamGraphBuilder {
     ) {
         self.actor_builders.insert(
             actor_id,
-            StreamActorBuilder::new(actor_id, fragment_id, node.clone()),
+            StreamActorBuilder::new(actor_id, fragment_id, node),
         );
     }
 
@@ -440,7 +440,7 @@ impl StreamGraphBuilder {
     /// 2. ignore root node when it's `ExchangeNode`.
     /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
     /// ids if it is a `ChainNode`.
-    pub fn build_inner(
+    fn build_inner(
         &self,
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
