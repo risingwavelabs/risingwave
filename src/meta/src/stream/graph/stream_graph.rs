@@ -413,7 +413,6 @@ impl StreamGraphBuilder {
                 actor.get_nodes()?,
                 actor_id,
                 &mut upstream_actors,
-                actor_id,
                 table_id_offset,
                 table_id_len,
             )?);
@@ -443,7 +442,6 @@ impl StreamGraphBuilder {
         stream_node: &StreamNode,
         actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
-        actor_id: LocalActorId,
         table_id_offset: u32,
         table_id_len: u32,
     ) -> Result<StreamNode> {
@@ -501,7 +499,6 @@ impl StreamGraphBuilder {
                                 input,
                                 actor_id,
                                 upstream_actor_id,
-                                actor_id,
                                 table_id_offset,
                                 table_id_len,
                             )?;
