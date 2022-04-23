@@ -38,40 +38,34 @@ use crate::storage::MetaStore;
 
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
+    // ==== Local states ====
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
-
-    /// fragment manager, used to retrieve upstream table fragment infos (dist_keys, actor_ids).
-    fragment_manager: FragmentManagerRef<S>,
-
     /// stream graph builder, to build streaming DAG.
-    stream_graph: StreamGraphBuilder,
-
-    /// id generator, used to generate actor id.
-    id_gen_manager: IdGeneratorManagerRef<S>,
-
-    /// local fragment id
-    next_local_fragment_id: u32,
-
-    /// local actor id
-    next_local_actor_id: u32,
-
-    /// rewrite will produce new operators, and we need to track next operator id
-    next_operator_id: u32,
-
+    stream_graph_builder: StreamGraphBuilder,
     /// when converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
-
-    /// degree of parallelism
-    parallel_degree: u32,
-
     /// dependent table ids
     dependent_table_ids: HashSet<TableId>,
-
     /// upstream dispatch keys
     distribution_keys: Vec<i32>,
 
+    // ==== Local IDs ====
+    /// local fragment id
+    next_local_fragment_id: u32,
+    /// local actor id
+    next_local_actor_id: u32,
+    /// rewrite will produce new operators, and we need to track next operator id
+    next_operator_id: u32,
+
+    // ==== Input parameters ====
+    /// fragment manager, used to retrieve upstream table fragment infos (dist_keys, actor_ids).
+    fragment_manager: FragmentManagerRef<S>,
+    /// id generator, used to generate actor id.
+    id_gen_manager: IdGeneratorManagerRef<S>,
+    /// degree of parallelism
+    parallel_degree: u32,
     // TODO: remove this when we deprecate Java frontend.
     is_legacy_frontend: bool,
 }
@@ -89,7 +83,7 @@ where
         Self {
             fragment_graph: StreamFragmentGraph::new(),
             fragment_manager,
-            stream_graph: Default::default(),
+            stream_graph_builder: Default::default(),
             id_gen_manager,
             next_local_fragment_id: 0,
             next_local_actor_id: 0,
@@ -130,7 +124,7 @@ where
             .fragment_manager
             .get_build_graph_info(&self.dependent_table_ids)
             .await?;
-        self.stream_graph.fill_info(info);
+        self.stream_graph_builder.fill_info(info);
 
         let fragment_len = self.fragment_graph.fragment_len() as u32;
         assert_eq!(fragment_len, self.next_local_fragment_id);
@@ -143,7 +137,7 @@ where
         // Generate actors of the streaming plan
         self.build_actor_graph()?;
 
-        let actor_len = self.stream_graph.actor_len() as u32;
+        let actor_len = self.stream_graph_builder.actor_len() as u32;
         assert_eq!(actor_len, self.next_local_actor_id);
         let start_actor_id = self
             .id_gen_manager
@@ -166,7 +160,7 @@ where
             .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
             .await? as _;
 
-        let stream_graph = self.stream_graph.build(
+        let stream_graph = self.stream_graph_builder.build(
             ctx,
             start_actor_id,
             actor_len,
@@ -419,7 +413,8 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            self.stream_graph.add_actor(*id, fragment_id, node.clone());
+            self.stream_graph_builder
+                .add_actor(*id, fragment_id, node.clone());
         }
 
         for (downstream_fragment_id, dispatch_edge) in
@@ -436,7 +431,7 @@ where
                 | DispatcherType::Simple
                 | DispatcherType::Broadcast
                 | DispatcherType::NoShuffle) => {
-                    self.stream_graph.add_link(
+                    self.stream_graph_builder.add_link(
                         &actor_ids,
                         &downstream_actors,
                         dispatch_edge.link_id,
