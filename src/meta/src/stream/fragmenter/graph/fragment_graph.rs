@@ -200,7 +200,8 @@ impl StreamFragmentGraph {
     }
 
     /// Convert all local ids to global ids by `local_id + offset`
-    pub fn seal(&mut self, offset: u32, len: u32) {
+    pub fn seal(&mut self, offset: u32) {
+        let len = self.fragment_len() as u32;
         self.sealed = true;
         self.fragments = std::mem::take(&mut self.fragments)
             .into_iter()

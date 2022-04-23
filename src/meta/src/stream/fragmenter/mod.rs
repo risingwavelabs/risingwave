@@ -106,59 +106,64 @@ where
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
         // Phase 1: Generate fragment graph and seal
+        {
+            let stream_node = stream_node.clone();
+            self.generate_fragment_graph(stream_node)?;
+            // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
 
-        let stream_node = stream_node.clone();
-        self.generate_fragment_graph(stream_node)?;
-        // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
+            // save distribution key and dependent table ids in ctx
+            ctx.distribution_keys = self.distribution_keys.clone();
+            ctx.dependent_table_ids = self.dependent_table_ids.clone();
 
-        // save distribution key and dependent table ids in ctx
-        ctx.distribution_keys = self.distribution_keys.clone();
-        ctx.dependent_table_ids = self.dependent_table_ids.clone();
+            // resolve upstream table infos first
+            // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
+            // stream manager and remove dependency on fragment manager.
+            let info = self
+                .fragment_manager
+                .get_build_graph_info(&self.dependent_table_ids)
+                .await?;
+            self.stream_graph_builder.fill_info(info);
 
-        // resolve upstream table infos first
-        // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
-        // stream manager and remove dependency on fragment manager.
-        let info = self
-            .fragment_manager
-            .get_build_graph_info(&self.dependent_table_ids)
-            .await?;
-        self.stream_graph_builder.fill_info(info);
-
-        let fragment_len = self.fragment_graph.fragment_len() as u32;
-        assert_eq!(fragment_len, self.next_local_fragment_id);
-        let offset = self
-            .id_gen_manager
-            .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
-            .await? as _;
-        self.fragment_graph.seal(offset, fragment_len);
+            let fragment_len = self.fragment_graph.fragment_len() as u32;
+            assert_eq!(fragment_len, self.next_local_fragment_id);
+            let offset = self
+                .id_gen_manager
+                .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
+                .await? as _;
+            self.fragment_graph.seal(offset);
+        }
 
         // Phase 2: Generate stream graph
 
         // Generate actors of the streaming plan
         self.build_actor_graph()?;
 
-        let actor_len = self.stream_graph_builder.actor_len() as u32;
-        assert_eq!(actor_len, self.next_local_actor_id);
-        let start_actor_id = self
-            .id_gen_manager
-            .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
-            .await? as _;
+        // generates global ids
+        let (actor_len, start_actor_id, table_ids_cnt, start_table_id) = {
+            let actor_len = self.stream_graph_builder.actor_len() as u32;
+            assert_eq!(actor_len, self.next_local_actor_id);
+            let start_actor_id = self
+                .id_gen_manager
+                .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
+                .await? as _;
 
-        // Compute how many table ids should be allocated for all actors.
-        let mut table_ids_cnt = 0;
-        for (local_fragment_id, fragment) in self.fragment_graph.fragments() {
-            let num_of_actors = self
-                .fragment_actors
-                .get(local_fragment_id)
-                .expect("Fragment should have at least one actor")
-                .len();
-            // Total table ids number equals to table ids cnt in all actors.
-            table_ids_cnt += num_of_actors * fragment.table_ids_cnt;
-        }
-        let start_table_id = self
-            .id_gen_manager
-            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
-            .await? as _;
+            // Compute how many table ids should be allocated for all actors.
+            let mut table_ids_cnt = 0;
+            for (local_fragment_id, fragment) in self.fragment_graph.fragments() {
+                let num_of_actors = self
+                    .fragment_actors
+                    .get(local_fragment_id)
+                    .expect("Fragment should have at least one actor")
+                    .len();
+                // Total table ids number equals to table ids cnt in all actors.
+                table_ids_cnt += num_of_actors * fragment.table_ids_cnt;
+            }
+            let start_table_id = self
+                .id_gen_manager
+                .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+                .await? as _;
+            (actor_len, start_actor_id, table_ids_cnt, start_table_id)
+        };
 
         let stream_graph = self.stream_graph_builder.build(
             ctx,
