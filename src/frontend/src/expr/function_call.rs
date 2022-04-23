@@ -92,6 +92,9 @@ impl FunctionCall {
             ExprType::Case => {
                 let len = inputs.len();
                 align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                    // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
+                    // the end. So we align exprs at odd indices as well as the last one when length
+                    // is odd.
                     match (i & 1) == 1 || (len & 1) == 1 && i == len - 1 {
                         true => Some(e),
                         false => None,

@@ -315,6 +315,9 @@ lazy_static::lazy_static! {
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
 /// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
+///
+/// If you also need to cast them to this type, and there are more than 2 exprs, check out
+/// [`align_types`].
 pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     if lhs == rhs {
         Ok(lhs)
