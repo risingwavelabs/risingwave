@@ -205,7 +205,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
         }
 
         // the aggregated result set
-        let mut result = Some(mem::take(&mut groups).into_iter());
+        let mut result = Some(groups.into_iter());
 
         // generate output data chunks
         if let Some(res) = result.as_mut() {
