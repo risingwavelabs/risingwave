@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -402,7 +402,6 @@ impl StreamGraphBuilder {
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
             let mut actor = builder.build();
-            let mut dispatch_upstreams = vec![];
             let mut upstream_actors = builder
                 .upstreams
                 .iter()
@@ -411,8 +410,8 @@ impl StreamGraphBuilder {
 
             actor.nodes = Some(self.build_inner(
                 ctx,
-                &mut dispatch_upstreams,
                 actor.get_nodes()?,
+                actor_id,
                 &mut upstream_actors,
                 table_id_offset,
                 table_id_len,
@@ -422,19 +421,6 @@ impl StreamGraphBuilder {
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
                 .push(actor);
-
-            if ctx.is_legacy_frontend {
-                for up_id in dispatch_upstreams {
-                    match ctx.dispatches.entry(up_id) {
-                        Entry::Occupied(mut o) => {
-                            o.get_mut().push(actor_id.as_global_id());
-                        }
-                        Entry::Vacant(v) => {
-                            v.insert(vec![actor_id.as_global_id()]);
-                        }
-                    }
-                }
-            }
         }
         for actor_ids in ctx.upstream_node_actors.values_mut() {
             actor_ids.sort_unstable();
@@ -453,8 +439,8 @@ impl StreamGraphBuilder {
     pub fn build_inner(
         &self,
         ctx: &mut CreateMaterializedViewContext,
-        dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
+        actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         table_id_offset: u32,
         table_id_len: u32,
@@ -463,7 +449,7 @@ impl StreamGraphBuilder {
             Node::ExchangeNode(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
             }
-            Node::ChainNode(_) => self.resolve_chain_node(ctx, dispatch_upstreams, stream_node),
+            Node::ChainNode(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
             _ => {
                 let mut new_stream_node = stream_node.clone();
                 if let Node::HashJoinNode(node) = new_stream_node
@@ -505,13 +491,13 @@ impl StreamGraphBuilder {
                         }
                         Node::ChainNode(_) => {
                             new_stream_node.input[idx] =
-                                self.resolve_chain_node(ctx, dispatch_upstreams, input)?;
+                                self.resolve_chain_node(ctx, input, actor_id)?;
                         }
                         _ => {
                             new_stream_node.input[idx] = self.build_inner(
                                 ctx,
-                                dispatch_upstreams,
                                 input,
+                                actor_id,
                                 upstream_actor_id,
                                 table_id_offset,
                                 table_id_len,
@@ -529,8 +515,8 @@ impl StreamGraphBuilder {
     fn resolve_chain_node(
         &self,
         ctx: &mut CreateMaterializedViewContext,
-        dispatch_upstreams: &mut Vec<ActorId>,
         stream_node: &StreamNode,
+        actor_id: LocalActorId,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
             let input = stream_node.get_input();
@@ -538,18 +524,20 @@ impl StreamGraphBuilder {
             let table_id = TableId::from(&chain_node.table_ref_id);
 
             let upstream_actor_ids = HashSet::<ActorId>::from_iter(
-                match ctx.table_sink_map.entry(table_id) {
-                    Entry::Vacant(v) => {
-                        let actor_ids = self.table_sink_actor_ids.get(&table_id).unwrap().clone();
-                        v.insert(actor_ids).clone()
-                    }
-                    Entry::Occupied(o) => o.get().clone(),
-                }
-                .into_iter(),
+                ctx.table_sink_map
+                    .entry(table_id)
+                    .or_insert_with(|| self.table_sink_actor_ids.get(&table_id).unwrap().clone())
+                    .clone()
+                    .into_iter(),
             );
 
             if ctx.is_legacy_frontend {
-                dispatch_upstreams.extend(upstream_actor_ids.iter());
+                for &up_id in &upstream_actor_ids {
+                    ctx.dispatches
+                        .entry(up_id)
+                        .or_default()
+                        .push(actor_id.as_global_id());
+                }
                 let chain_upstream_table_node_actors =
                     self.table_node_actors.get(&table_id).unwrap();
                 let chain_upstream_node_actors = chain_upstream_table_node_actors
@@ -560,14 +548,10 @@ impl StreamGraphBuilder {
                     .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
                     .into_group_map();
                 for (node_id, actor_ids) in chain_upstream_node_actors {
-                    match ctx.upstream_node_actors.entry(node_id) {
-                        Entry::Occupied(mut o) => {
-                            o.get_mut().extend(actor_ids.iter());
-                        }
-                        Entry::Vacant(v) => {
-                            v.insert(actor_ids);
-                        }
-                    }
+                    ctx.upstream_node_actors
+                        .entry(node_id)
+                        .or_default()
+                        .extend(actor_ids.iter());
                 }
             }
 

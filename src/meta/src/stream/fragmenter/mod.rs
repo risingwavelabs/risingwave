@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod rewrite;
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
@@ -267,10 +269,7 @@ where
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    pub(super) fn build_and_add_fragment(
-        &mut self,
-        stream_node: StreamNode,
-    ) -> Result<StreamFragment> {
+    fn build_and_add_fragment(&mut self, stream_node: StreamNode) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment();
         let node = self.build_fragment(&mut fragment, stream_node)?;
         fragment.seal_node(node);
@@ -396,7 +395,7 @@ where
     }
 
     /// Generate an operator id
-    pub(super) fn gen_operator_id(&mut self) -> u32 {
+    fn gen_operator_id(&mut self) -> u32 {
         self.next_operator_id -= 1;
         self.next_operator_id
     }
