@@ -39,10 +39,6 @@ use crate::storage::MetaStore;
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
     // ==== Local states ====
-    /// fragment graph field, transformed from input streaming plan.
-    fragment_graph: StreamFragmentGraph,
-    /// stream graph builder, to build streaming DAG.
-    stream_graph_builder: StreamGraphBuilder,
     /// when converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
@@ -81,9 +77,7 @@ where
         is_legacy_frontend: bool,
     ) -> Self {
         Self {
-            fragment_graph: StreamFragmentGraph::new(),
             fragment_manager,
-            stream_graph_builder: Default::default(),
             id_gen_manager,
             next_local_fragment_id: 0,
             next_local_actor_id: 0,
@@ -106,41 +100,45 @@ where
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
         // Phase 1: Generate fragment graph and seal
-        {
+        let fragment_graph = {
             let stream_node = stream_node.clone();
-            self.generate_fragment_graph(stream_node)?;
+            let mut fragment_graph = self.generate_fragment_graph(stream_node)?;
             // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
 
             // save distribution key and dependent table ids in ctx
+            // They are set in `build_fragment`
             ctx.distribution_keys = self.distribution_keys.clone();
             ctx.dependent_table_ids = self.dependent_table_ids.clone();
 
-            // resolve upstream table infos first
-            // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
-            // stream manager and remove dependency on fragment manager.
-            let info = self
-                .fragment_manager
-                .get_build_graph_info(&self.dependent_table_ids)
-                .await?;
-            self.stream_graph_builder.fill_info(info);
-
-            let fragment_len = self.fragment_graph.fragment_len() as u32;
+            let fragment_len = fragment_graph.fragment_len() as u32;
             assert_eq!(fragment_len, self.next_local_fragment_id);
             let offset = self
                 .id_gen_manager
                 .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
                 .await? as _;
-            self.fragment_graph.seal(offset);
-        }
+            fragment_graph.seal(offset);
+            fragment_graph
+        };
 
         // Phase 2: Generate stream graph
 
+        // resolve upstream table infos first
+        // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
+        // stream manager and remove dependency on fragment manager.
+        let info = self
+            .fragment_manager
+            .get_build_graph_info(&self.dependent_table_ids)
+            .await?;
+
+        let mut stream_graph_builder = StreamGraphBuilder::default();
+        stream_graph_builder.fill_info(info);
+
         // Generate actors of the streaming plan
-        self.build_actor_graph()?;
+        self.build_actor_graph(&mut stream_graph_builder, &fragment_graph)?;
 
         // generates global ids
         let (actor_len, start_actor_id, table_ids_cnt, start_table_id) = {
-            let actor_len = self.stream_graph_builder.actor_len() as u32;
+            let actor_len = stream_graph_builder.actor_len() as u32;
             assert_eq!(actor_len, self.next_local_actor_id);
             let start_actor_id = self
                 .id_gen_manager
@@ -149,7 +147,7 @@ where
 
             // Compute how many table ids should be allocated for all actors.
             let mut table_ids_cnt = 0;
-            for (local_fragment_id, fragment) in self.fragment_graph.fragments() {
+            for (local_fragment_id, fragment) in fragment_graph.fragments() {
                 let num_of_actors = self
                     .fragment_actors
                     .get(local_fragment_id)
@@ -165,7 +163,7 @@ where
             (actor_len, start_actor_id, table_ids_cnt, start_table_id)
         };
 
-        let stream_graph = self.stream_graph_builder.build(
+        let stream_graph = stream_graph_builder.build(
             ctx,
             start_actor_id,
             actor_len,
@@ -177,7 +175,7 @@ where
         let stream_graph = stream_graph
             .into_iter()
             .map(|(fragment_id, actors)| {
-                let fragment = self.fragment_graph.get_fragment(fragment_id).unwrap();
+                let fragment = fragment_graph.get_fragment(fragment_id).unwrap();
                 let fragment_id = fragment_id.as_global_id();
                 (
                     fragment_id,
@@ -253,18 +251,24 @@ where
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
-    fn generate_fragment_graph(&mut self, stream_node: StreamNode) -> Result<()> {
+    fn generate_fragment_graph(&mut self, stream_node: StreamNode) -> Result<StreamFragmentGraph> {
+        let mut fragment_graph = StreamFragmentGraph::new();
+
         let stream_node = self.rewrite_stream_node(stream_node)?;
-        self.build_and_add_fragment(stream_node)?;
-        Ok(())
+        self.build_and_add_fragment(stream_node, &mut fragment_graph)?;
+        Ok(fragment_graph)
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    fn build_and_add_fragment(&mut self, stream_node: StreamNode) -> Result<StreamFragment> {
+    fn build_and_add_fragment(
+        &mut self,
+        stream_node: StreamNode,
+        fragment_graph: &mut StreamFragmentGraph,
+    ) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment();
-        let node = self.build_fragment(&mut fragment, stream_node)?;
+        let node = self.build_fragment(&mut fragment, stream_node, fragment_graph)?;
         fragment.seal_node(node);
-        self.fragment_graph.add_fragment(fragment.clone());
+        fragment_graph.add_fragment(fragment.clone());
         Ok(fragment)
     }
 
@@ -276,6 +280,7 @@ where
         &mut self,
         current_fragment: &mut StreamFragment,
         mut stream_node: StreamNode,
+        fragment_graph: &mut StreamFragmentGraph,
     ) -> Result<StreamNode> {
         // Update current fragment based on the node we're visiting.
         match stream_node.get_node()? {
@@ -337,9 +342,9 @@ where
                         let exchange_node = exchange_node.clone();
 
                         assert_eq!(child_node.input.len(), 1);
-                        let child_fragment =
-                            self.build_and_add_fragment(child_node.input.remove(0))?;
-                        self.fragment_graph.add_edge(
+                        let child_fragment = self
+                            .build_and_add_fragment(child_node.input.remove(0), fragment_graph)?;
+                        fragment_graph.add_edge(
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
                             StreamFragmentEdge {
@@ -358,7 +363,7 @@ where
                     }
 
                     // For other children, visit recursively.
-                    _ => self.build_fragment(current_fragment, child_node),
+                    _ => self.build_fragment(current_fragment, child_node, fragment_graph),
                 }
             })
             .try_collect()?;
@@ -391,12 +396,13 @@ where
         self.next_operator_id
     }
 
-    fn build_actor_graph_fragment(&mut self, fragment_id: LocalFragmentId) -> Result<()> {
-        let current_fragment = self
-            .fragment_graph
-            .get_fragment(fragment_id)
-            .unwrap()
-            .clone();
+    fn build_actor_graph_fragment(
+        &self,
+        stream_graph_builder: &mut StreamGraphBuilder,
+        fragment_graph: &StreamFragmentGraph,
+        fragment_id: LocalFragmentId,
+    ) -> Result<()> {
+        let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
 
         let parallel_degree = if current_fragment.is_singleton {
             1
@@ -412,13 +418,10 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            self.stream_graph_builder
-                .add_actor(*id, fragment_id, node.clone());
+            stream_graph_builder.add_actor(*id, fragment_id, node.clone());
         }
 
-        for (downstream_fragment_id, dispatch_edge) in
-            self.fragment_graph.get_downstreams(fragment_id)
-        {
+        for (downstream_fragment_id, dispatch_edge) in fragment_graph.get_downstreams(fragment_id) {
             let downstream_actors = self
                 .fragment_actors
                 .get(downstream_fragment_id)
@@ -429,7 +432,7 @@ where
                 | DispatcherType::Simple
                 | DispatcherType::Broadcast
                 | DispatcherType::NoShuffle) => {
-                    self.stream_graph_builder.add_link(
+                    stream_graph_builder.add_link(
                         &actor_ids,
                         downstream_actors,
                         dispatch_edge.link_id,
@@ -458,16 +461,20 @@ where
 
     /// Build actor graph from fragment graph using topological sort. Setup dispatcher in actor and
     /// generate actors by their parallelism.
-    fn build_actor_graph(&mut self) -> Result<()> {
+    fn build_actor_graph(
+        &self,
+        stream_graph_builder: &mut StreamGraphBuilder,
+        fragment_graph: &StreamFragmentGraph,
+    ) -> Result<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
         let mut actionable_fragment_id = VecDeque::new();
         let mut downstream_cnts = HashMap::new();
 
         // Iterate all fragments
-        for (fragment_id, _) in self.fragment_graph.fragments().iter() {
+        for (fragment_id, _) in fragment_graph.fragments().iter() {
             // Count how many downstreams we have for a given fragment
-            let downstream_cnt = self.fragment_graph.get_downstreams(*fragment_id).len();
+            let downstream_cnt = fragment_graph.get_downstreams(*fragment_id).len();
             if downstream_cnt == 0 {
                 actionable_fragment_id.push_back(*fragment_id);
             } else {
@@ -477,10 +484,10 @@ where
 
         while let Some(fragment_id) = actionable_fragment_id.pop_front() {
             // Build the actors corresponding to the fragment
-            self.build_actor_graph_fragment(fragment_id)?;
+            self.build_actor_graph_fragment(stream_graph_builder, fragment_graph, fragment_id)?;
 
             // Find if we can process more fragments
-            for upstream_id in self.fragment_graph.get_upstreams(fragment_id).keys() {
+            for upstream_id in fragment_graph.get_upstreams(fragment_id).keys() {
                 let downstream_cnt = downstream_cnts
                     .get_mut(upstream_id)
                     .expect("the upstream should exist");
