@@ -12,22 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::io::Cursor;
 
 use bytes::Bytes;
-use itertools::{EitherOrBoth, Itertools};
+use itertools::Itertools;
 use prost::Message;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, Level, LevelEntry, LevelType, SstableInfo, TableSetStatistics,
+    CompactMetrics, CompactTask, HummockVersion, Level, LevelEntry, LevelType, SstableInfo,
+    TableSetStatistics,
 };
 
-use crate::hummock::level_handler::{LevelHandler, SSTableStat};
+use crate::hummock::level_handler::{LevelHandler, SSTableInfo};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
 use crate::storage;
@@ -46,8 +48,8 @@ pub struct CompactStatus {
 impl CompactStatus {
     pub fn new() -> CompactStatus {
         let vec_handler_having_l0 = vec![
-            LevelHandler::Overlapping(vec![], vec![]),
-            LevelHandler::Nonoverlapping(vec![], vec![]),
+            LevelHandler::Overlapping(HashMap::new(), vec![]),
+            LevelHandler::Nonoverlapping(HashMap::new(), vec![]),
         ];
         CompactStatus {
             level_handlers: vec_handler_having_l0,
@@ -80,10 +82,21 @@ impl CompactStatus {
         }
     }
 
-    pub fn get_compact_task(&mut self) -> Option<CompactTask> {
+    pub fn get_compact_task(&mut self, levels: Vec<Level>) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
+
+        let get_level_ssts = |level_idx: usize| -> Vec<SSTableInfo> {
+            // Sort is required.
+            return levels[level_idx]
+                .table_infos
+                .iter()
+                .map_into::<SSTableInfo>()
+                .sorted_by(|l, r| l.key_range.cmp(&r.key_range))
+                .collect();
+        };
+
         let num_levels = self.level_handlers.len();
         let mut idle_levels = Vec::with_capacity(num_levels - 1);
         for (level_handler_idx, level_handler) in
@@ -118,15 +131,16 @@ impl CompactStatus {
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
         // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
-            LevelHandler::Overlapping(l_n, compacting_key_ranges)
-            | LevelHandler::Nonoverlapping(l_n, compacting_key_ranges) => {
+            LevelHandler::Overlapping(compacting_ssts_l_n, compacting_key_ranges_l_n)
+            | LevelHandler::Nonoverlapping(compacting_ssts_l_n, compacting_key_ranges_l_n) => {
+                let l_n = get_level_ssts(select_level as usize);
                 let l_n_len = l_n.len();
                 let mut polysst_candidates = Vec::with_capacity(l_n_len);
                 {
                     let mut sst_idx = 0;
                     while sst_idx < l_n_len {
                         let mut next_sst_idx = sst_idx + 1;
-                        let SSTableStat {
+                        let SSTableInfo {
                             key_range: sst_key_range,
                             table_id,
                             ..
@@ -142,10 +156,9 @@ impl CompactStatus {
                             next_sst_idx = sst_idx;
                             for (
                                 delta_idx,
-                                SSTableStat {
+                                SSTableInfo {
                                     key_range: other_key_range,
                                     table_id: other_table_id,
-                                    ..
                                 },
                             ) in l_n[sst_idx + 1..].iter().enumerate()
                             {
@@ -184,27 +197,29 @@ impl CompactStatus {
                 for ((sst_idx, next_sst_idx), select_level_inputs, key_range) in polysst_candidates
                 {
                     let mut is_select_idle = true;
-                    for SSTableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
-                        if compact_task.is_some() {
+                    for SSTableInfo { table_id, .. } in &l_n[sst_idx..next_sst_idx] {
+                        if compacting_ssts_l_n.contains_key(table_id) {
                             is_select_idle = false;
                             break;
                         }
                     }
 
                     if is_select_idle {
-                        let insert_point =
-                            compacting_key_ranges.partition_point(|(ongoing_key_range, _, _)| {
+                        let insert_point = compacting_key_ranges_l_n.partition_point(
+                            |(ongoing_key_range, _, _)| {
                                 user_key(&ongoing_key_range.right) < user_key(&key_range.left)
-                            });
+                            },
+                        );
                         // if following condition is not satisfied, it may result in two overlapping
                         // SSTs in target level
-                        if insert_point >= compacting_key_ranges.len()
-                            || user_key(&compacting_key_ranges[insert_point].0.left)
+                        if insert_point >= compacting_key_ranges_l_n.len()
+                            || user_key(&compacting_key_ranges_l_n[insert_point].0.left)
                                 > user_key(&key_range.right)
                         {
                             match posterior {
                                 LevelHandler::Overlapping(_, _) => unimplemented!(),
-                                LevelHandler::Nonoverlapping(l_n_suc, _) => {
+                                LevelHandler::Nonoverlapping(compacting_ssts_l_n_suc, _) => {
+                                    let l_n_suc = &get_level_ssts(target_level as usize);
                                     let mut overlap_all_idle = true;
                                     let overlap_begin = l_n_suc.partition_point(|table_status| {
                                         user_key(&table_status.key_range.right)
@@ -216,7 +231,9 @@ impl CompactStatus {
                                         && user_key(&l_n_suc[overlap_end].key_range.left)
                                             <= user_key(&key_range.right)
                                     {
-                                        if l_n_suc[overlap_end].compact_task.is_some() {
+                                        if compacting_ssts_l_n_suc
+                                            .contains_key(&l_n_suc[overlap_end].table_id)
+                                        {
                                             overlap_all_idle = false;
                                             break;
                                         }
@@ -224,7 +241,7 @@ impl CompactStatus {
                                     }
                                     if overlap_all_idle {
                                         // Here, we have known that `select_level_input` is valid
-                                        compacting_key_ranges.insert(
+                                        compacting_key_ranges_l_n.insert(
                                             insert_point,
                                             (
                                                 key_range,
@@ -250,7 +267,10 @@ impl CompactStatus {
 
                                         let mut overlap_idx = overlap_begin;
                                         while overlap_idx < overlap_end {
-                                            l_n_suc[overlap_idx].compact_task = Some(next_task_id);
+                                            compacting_ssts_l_n_suc.insert(
+                                                l_n_suc[overlap_idx].table_id,
+                                                next_task_id,
+                                            );
                                             suc_table_ids.push(l_n_suc[overlap_idx].table_id);
                                             if overlap_idx > overlap_begin {
                                                 // TODO: We do not need to add splits every time. We
@@ -283,25 +303,9 @@ impl CompactStatus {
                 }
                 match &found {
                     SearchResult::Found(select_ln_ids, _, _) => {
-                        let mut select_ln_iter = select_ln_ids.iter();
-                        if let Some(first_id) = select_ln_iter.next() {
-                            let mut current_id = first_id;
-                            for SSTableStat {
-                                table_id,
-                                compact_task,
-                                ..
-                            } in l_n
-                            {
-                                if table_id == current_id {
-                                    *compact_task = Some(next_task_id);
-                                    match select_ln_iter.next() {
-                                        Some(next_id) => {
-                                            current_id = next_id;
-                                        }
-                                        None => break,
-                                    }
-                                }
-                            }
+                        // Set compact task id for selected SSTs
+                        for table_id in select_ln_ids {
+                            compacting_ssts_l_n.insert(*table_id, next_task_id);
                         }
                     }
                     SearchResult::NotFound => {}
@@ -400,66 +404,37 @@ impl CompactStatus {
         }
     }
 
-    /// Return Some(Vec<table id to delete>) if succeeds.
-    /// Return None if the task has been processed previously.
-    #[allow(clippy::needless_collect)]
-    pub fn report_compact_task(
-        &mut self,
-        output_table_compact_entries: Vec<SSTableStat>,
-        compact_task: CompactTask,
-    ) -> Option<Vec<HummockSSTableId>> {
-        let mut delete_table_ids = vec![];
-        let task_result = compact_task.task_status;
-        match task_result {
-            true => {
-                for LevelEntry { level_idx, .. } in compact_task.input_ssts {
-                    delete_table_ids.extend(
-                        self.level_handlers[level_idx as usize]
-                            .pop_task_input(compact_task.task_id)
-                            .into_iter(),
-                    );
-                }
-                if delete_table_ids.is_empty() {
-                    // The task has been processed previously.
-                    return None;
-                }
-                match &mut self.level_handlers[compact_task.target_level as usize] {
-                    LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
-                        let old_ln = std::mem::take(l_n);
-                        *l_n = itertools::merge_join_by(
-                            old_ln,
-                            output_table_compact_entries,
-                            |l, r| l.key_range.cmp(&r.key_range),
-                        )
-                        .flat_map(|either_or_both| match either_or_both {
-                            EitherOrBoth::Both(a, b) => vec![a, b].into_iter(),
-                            EitherOrBoth::Left(a) => vec![a].into_iter(),
-                            EitherOrBoth::Right(b) => vec![b].into_iter(),
-                        })
-                        .collect();
-                    }
-                }
-                // The task is finished successfully.
-                Some(delete_table_ids)
-            }
-            false => {
-                if !self.cancel_compact_task(&compact_task) {
-                    // The task has been processed previously.
-                    return None;
-                }
-                // The task is cancelled successfully.
-                Some(vec![])
-            }
+    /// Declares a task is either finished or canceled.
+    pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
+        for LevelEntry { level_idx, .. } in &compact_task.input_ssts {
+            self.level_handlers[*level_idx as usize].remove_task(compact_task.task_id);
         }
     }
 
-    pub fn cancel_compact_task(&mut self, compact_task: &CompactTask) -> bool {
-        let mut changed = false;
-        for LevelEntry { level_idx, .. } in &compact_task.input_ssts {
-            changed = changed
-                || self.level_handlers[*level_idx as usize].unassign_task(compact_task.task_id);
+    /// Applies the compact task result and get a new hummock version.
+    pub fn apply_compact_result(
+        compact_task: &CompactTask,
+        based_hummock_version: HummockVersion,
+        new_version_id: HummockVersionId,
+    ) -> HummockVersion {
+        let mut new_version = based_hummock_version;
+        new_version.id = new_version_id;
+        new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
+        for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
+            new_version.levels[idx].table_infos.retain(|sst| {
+                input_level
+                    .level
+                    .as_ref()
+                    .unwrap()
+                    .table_infos
+                    .iter()
+                    .all(|stale| sst.id != stale.id)
+            });
         }
-        changed
+        new_version.levels[compact_task.target_level as usize]
+            .table_infos
+            .extend(compact_task.sorted_output_ssts.clone());
+        new_version
     }
 }
 
