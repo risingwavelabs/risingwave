@@ -15,8 +15,6 @@
 use drop_stream::*;
 use drop_table::*;
 use generic_exchange::*;
-use hash_agg::*;
-use limit::*;
 use merge_sort_exchange::*;
 use order_by::*;
 use projection::*;
