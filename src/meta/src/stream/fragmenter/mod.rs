@@ -419,8 +419,7 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
-            self.stream_graph.add_actor(actor_builder);
+            self.stream_graph.add_actor(*id, fragment_id, node.clone());
         }
 
         for (downstream_fragment_id, dispatch_edge) in
