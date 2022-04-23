@@ -16,6 +16,7 @@ mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
+use bytes::Buf;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
@@ -24,7 +25,7 @@ use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::{Keyspace, StateStore};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
@@ -94,14 +95,13 @@ impl JoinRowDeserializer {
     }
 
     /// Deserialize the row from a memcomparable bytes.
-    pub fn deserialize(&self, data: &[u8]) -> RwResult<JoinRow> {
+    pub fn deserialize(&self, mut data: &[u8]) -> RwResult<JoinRow> {
         let mut values = vec![];
         values.reserve(self.data_types.len());
-        let mut deserializer = value_encoding::Deserializer::new(data);
         for ty in &self.data_types {
-            values.push(deserialize_cell(&mut deserializer, ty)?);
+            values.push(deserialize_cell(&mut data, ty)?);
         }
-        let degree = u64::deserialize(deserializer.memcom_de())?;
+        let degree = data.get_u64_le();
         Ok(JoinRow {
             row: Row(values),
             degree,

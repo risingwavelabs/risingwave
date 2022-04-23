@@ -73,8 +73,7 @@ impl CellBasedRowDeserializer {
         }
 
         if let Some((column_desc, index)) = self.columns.get(&cell_id) {
-            let mut de = value_encoding::Deserializer::new(cell.clone());
-            if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
+            if let Some(datum) = deserialize_cell(&mut cell.clone(), &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
                 assert!(old.is_none());
             }

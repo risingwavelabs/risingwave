@@ -53,9 +53,9 @@ impl<S: StateStore> ManagedValueState<S> {
             let raw_data = keyspace.value(epoch).await?;
 
             // Decode the Datum from the value.
-            if let Some(raw_data) = raw_data {
-                let mut deserializer = value_encoding::Deserializer::new(raw_data);
-                Some(deserialize_cell(&mut deserializer, &agg_call.return_type)?)
+            if let Some(mut raw_data) = raw_data {
+                // let mut deserializer = value_encoding::Deserializer::new(raw_data);
+                Some(deserialize_cell(&mut raw_data, &agg_call.return_type)?)
             } else {
                 None
             }

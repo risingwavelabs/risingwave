@@ -306,9 +306,9 @@ where
                 .scan_strip_prefix(self.top_n_count, epoch)
                 .await?;
 
-            for (raw_key, raw_value) in all_data {
-                let mut deserializer = value_encoding::Deserializer::new(raw_value);
-                let value = deserialize_cell(&mut deserializer, &self.data_type)?;
+            for (raw_key, mut raw_value) in all_data {
+                // let mut deserializer = value_encoding::Deserializer::new(raw_value);
+                let value = deserialize_cell(&mut raw_value, &self.data_type)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -400,9 +400,9 @@ where
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         let mut result = vec![];
 
-        for (raw_key, raw_value) in all_data {
-            let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell(&mut deserializer, &self.data_type)?;
+        for (raw_key, mut raw_value) in all_data {
+            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
+            let value = deserialize_cell(&mut raw_value, &self.data_type)?;
             let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));
