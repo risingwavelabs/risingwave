@@ -131,8 +131,8 @@ impl CompactStatus {
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
         // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
-            LevelHandler::Overlapping(compacting_ssts, compacting_key_ranges)
-            | LevelHandler::Nonoverlapping(compacting_ssts, compacting_key_ranges) => {
+            LevelHandler::Overlapping(compacting_ssts_l_n, compacting_key_ranges_l_n)
+            | LevelHandler::Nonoverlapping(compacting_ssts_l_n, compacting_key_ranges_l_n) => {
                 let l_n = get_level_ssts(select_level as usize);
                 let l_n_len = l_n.len();
                 let mut polysst_candidates = Vec::with_capacity(l_n_len);
@@ -198,26 +198,27 @@ impl CompactStatus {
                 {
                     let mut is_select_idle = true;
                     for SSTableInfo { table_id, .. } in &l_n[sst_idx..next_sst_idx] {
-                        if compacting_ssts.contains_key(table_id) {
+                        if compacting_ssts_l_n.contains_key(table_id) {
                             is_select_idle = false;
                             break;
                         }
                     }
 
                     if is_select_idle {
-                        let insert_point =
-                            compacting_key_ranges.partition_point(|(ongoing_key_range, _, _)| {
+                        let insert_point = compacting_key_ranges_l_n.partition_point(
+                            |(ongoing_key_range, _, _)| {
                                 user_key(&ongoing_key_range.right) < user_key(&key_range.left)
-                            });
+                            },
+                        );
                         // if following condition is not satisfied, it may result in two overlapping
                         // SSTs in target level
-                        if insert_point >= compacting_key_ranges.len()
-                            || user_key(&compacting_key_ranges[insert_point].0.left)
+                        if insert_point >= compacting_key_ranges_l_n.len()
+                            || user_key(&compacting_key_ranges_l_n[insert_point].0.left)
                                 > user_key(&key_range.right)
                         {
                             match posterior {
                                 LevelHandler::Overlapping(_, _) => unimplemented!(),
-                                LevelHandler::Nonoverlapping(compacting_ssts, _) => {
+                                LevelHandler::Nonoverlapping(compacting_ssts_l_n_suc, _) => {
                                     let l_n_suc = &get_level_ssts(target_level as usize);
                                     let mut overlap_all_idle = true;
                                     let overlap_begin = l_n_suc.partition_point(|table_status| {
@@ -230,7 +231,7 @@ impl CompactStatus {
                                         && user_key(&l_n_suc[overlap_end].key_range.left)
                                             <= user_key(&key_range.right)
                                     {
-                                        if compacting_ssts
+                                        if compacting_ssts_l_n_suc
                                             .contains_key(&l_n_suc[overlap_end].table_id)
                                         {
                                             overlap_all_idle = false;
@@ -240,7 +241,7 @@ impl CompactStatus {
                                     }
                                     if overlap_all_idle {
                                         // Here, we have known that `select_level_input` is valid
-                                        compacting_key_ranges.insert(
+                                        compacting_key_ranges_l_n.insert(
                                             insert_point,
                                             (
                                                 key_range,
@@ -266,7 +267,7 @@ impl CompactStatus {
 
                                         let mut overlap_idx = overlap_begin;
                                         while overlap_idx < overlap_end {
-                                            compacting_ssts.insert(
+                                            compacting_ssts_l_n_suc.insert(
                                                 l_n_suc[overlap_idx].table_id,
                                                 next_task_id,
                                             );
@@ -304,7 +305,7 @@ impl CompactStatus {
                     SearchResult::Found(select_ln_ids, _, _) => {
                         // Set compact task id for selected SSTs
                         for table_id in select_ln_ids {
-                            compacting_ssts.insert(*table_id, next_task_id);
+                            compacting_ssts_l_n.insert(*table_id, next_task_id);
                         }
                     }
                     SearchResult::NotFound => {}
