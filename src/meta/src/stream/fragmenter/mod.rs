@@ -269,10 +269,7 @@ where
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    fn build_and_add_fragment(
-        &mut self,
-        stream_node: StreamNode,
-    ) -> Result<StreamFragment> {
+    fn build_and_add_fragment(&mut self, stream_node: StreamNode) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment();
         let node = self.build_fragment(&mut fragment, stream_node)?;
         fragment.seal_node(node);

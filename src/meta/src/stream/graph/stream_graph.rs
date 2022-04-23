@@ -411,6 +411,7 @@ impl StreamGraphBuilder {
             actor.nodes = Some(self.build_inner(
                 ctx,
                 actor.get_nodes()?,
+                actor_id,
                 &mut upstream_actors,
                 actor_id,
                 table_id_offset,
@@ -440,6 +441,7 @@ impl StreamGraphBuilder {
         &self,
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
+        actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         actor_id: LocalActorId,
         table_id_offset: u32,
@@ -497,6 +499,7 @@ impl StreamGraphBuilder {
                             new_stream_node.input[idx] = self.build_inner(
                                 ctx,
                                 input,
+                                actor_id,
                                 upstream_actor_id,
                                 actor_id,
                                 table_id_offset,
@@ -532,17 +535,15 @@ impl StreamGraphBuilder {
             );
 
             if ctx.is_legacy_frontend {
-                for up_id in &upstream_actor_ids {
+                for &up_id in &upstream_actor_ids {
                     ctx.dispatches
-                        .entry((*up_id, stream_node.get_operator_id()))
-                        .or_insert(Vec::new())
+                        .entry(up_id)
+                        .or_default()
                         .push(actor_id.as_global_id());
                 }
-
-                let chain_upstream_node_actors = self
-                    .table_node_actors
-                    .get(&table_id)
-                    .unwrap()
+                let chain_upstream_table_node_actors =
+                    self.table_node_actors.get(&table_id).unwrap();
+                let chain_upstream_node_actors = chain_upstream_table_node_actors
                     .iter()
                     .flat_map(|(node_id, actor_ids)| {
                         actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
@@ -553,7 +554,7 @@ impl StreamGraphBuilder {
                 for (node_id, actor_ids) in chain_upstream_node_actors {
                     ctx.upstream_node_actors
                         .entry(node_id)
-                        .or_insert(Vec::new())
+                        .or_default()
                         .extend(actor_ids.iter());
                 }
             }

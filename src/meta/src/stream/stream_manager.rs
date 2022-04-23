@@ -152,7 +152,7 @@ where
             for (node_id, actor_ids) in chain_upstream_node_actors {
                 ctx.upstream_node_actors
                     .entry(node_id)
-                    .or_insert(Vec::new())
+                    .or_default()
                     .extend(actor_ids.iter());
             }
 
@@ -179,8 +179,8 @@ where
 
             // finally, we should also build dispatcher infos here.
             ctx.dispatches
-                .entry((*upstream_actor_id, stream_node.get_operator_id()))
-                .or_insert(Vec::new())
+                .entry(*upstream_actor_id)
+                .or_default()
                 .push(actor_id);
         } else {
             // otherwise, recursively deal with input nodes
