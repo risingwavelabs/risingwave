@@ -74,12 +74,14 @@ impl<S> StreamFragmenter<S>
 where
     S: MetaStore,
 {
-    pub fn new(
+    pub async fn generate_graph(
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         parallel_degree: u32,
         is_legacy_frontend: bool,
-    ) -> Self {
+        stream_node: &StreamNode,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<BTreeMap<FragmentId, Fragment>> {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
             fragment_manager,
@@ -94,13 +96,15 @@ where
             distribution_keys: Vec::new(),
             is_legacy_frontend,
         }
+        .generate_graph_inner(stream_node, ctx)
+        .await
     }
 
     /// Build a stream graph in two steps:
     ///
     /// 1. Break the streaming plan into fragments with their dependency.
     /// 2. Duplicate each fragment as parallel actors.
-    pub async fn generate_graph(
+    async fn generate_graph_inner(
         mut self,
         stream_node: &StreamNode,
         ctx: &mut CreateMaterializedViewContext,
