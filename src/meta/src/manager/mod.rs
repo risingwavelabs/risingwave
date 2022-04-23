@@ -15,7 +15,7 @@
 mod catalog;
 mod catalog_v2;
 mod env;
-mod hash_dispatch;
+mod hash_mapping;
 mod id;
 mod notification;
 mod stream_clients;
@@ -23,7 +23,7 @@ mod stream_clients;
 pub use catalog::*;
 pub use catalog_v2::*;
 pub use env::*;
-pub use hash_dispatch::*;
+pub use hash_mapping::*;
 pub use id::*;
 pub use notification::*;
 pub use stream_clients::*;
