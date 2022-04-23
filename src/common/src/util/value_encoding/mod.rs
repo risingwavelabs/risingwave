@@ -122,20 +122,20 @@ fn serialize_naivetime(secs: u32, nano: u32, buf: &mut Vec<u8>) {
 }
 
 fn deserialize_datum<B: Buf>(ty: &DataType, data: &mut B) -> memcomparable::Result<Datum> {
-    Ok(Some(match ty {
-        &DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
-        &DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
-        &DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
-        &DataType::Float32 => ScalarImpl::Float32(OrderedF32::from(data.get_f32_le())),
-        &DataType::Float64 => ScalarImpl::Float64(OrderedF64::from(data.get_f64_le())),
-        &DataType::Varchar => ScalarImpl::Utf8(deserialize_str(data)?),
-        &DataType::Boolean => ScalarImpl::Bool(deserialize_bool(data)?),
-        &DataType::Decimal => ScalarImpl::Decimal(deserialize_decimal(data)?),
-        &DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
-        &DataType::Time => ScalarImpl::NaiveTime(deserialize_naivetime(data)?),
-        &DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
-        &DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
-        &DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
+    Ok(Some(match *ty {
+        DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
+        DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
+        DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Float32 => ScalarImpl::Float32(OrderedF32::from(data.get_f32_le())),
+        DataType::Float64 => ScalarImpl::Float64(OrderedF64::from(data.get_f64_le())),
+        DataType::Varchar => ScalarImpl::Utf8(deserialize_str(data)?),
+        DataType::Boolean => ScalarImpl::Bool(deserialize_bool(data)?),
+        DataType::Decimal => ScalarImpl::Decimal(deserialize_decimal(data)?),
+        DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
+        DataType::Time => ScalarImpl::NaiveTime(deserialize_naivetime(data)?),
+        DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
+        DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
         _ => {
             panic!("Type is unable to be deserialized.")
         }
