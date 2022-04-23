@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod graph;
+use graph::*;
 mod rewrite;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -29,22 +31,18 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
 };
 
-use super::graph::StreamFragmentEdge;
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{FragmentId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
-use crate::stream::graph::{
-    StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
-};
 
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
-    pub(super) fragment_graph: StreamFragmentGraph,
+    fragment_graph: StreamFragmentGraph,
 
     /// fragment manager, used to retrieve upstream table fragment infos (dist_keys, actor_ids).
-    pub(super) fragment_manager: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 
     /// stream graph builder, to build streaming DAG.
     stream_graph: StreamGraphBuilder,
