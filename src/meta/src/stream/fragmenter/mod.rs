@@ -417,13 +417,12 @@ where
         }
 
         for (downstream_fragment_id, dispatch_edge) in
-            self.fragment_graph.get_downstreams(fragment_id).iter()
+            self.fragment_graph.get_downstreams(fragment_id)
         {
             let downstream_actors = self
                 .fragment_actors
                 .get(downstream_fragment_id)
-                .expect("downstream fragment not processed yet")
-                .clone();
+                .expect("downstream fragment not processed yet");
 
             match dispatch_edge.dispatch_strategy.get_type()? {
                 ty @ (DispatcherType::Hash
