@@ -97,19 +97,17 @@ where
     }
 
     /// Build a stream graph in two steps:
-    /// (1) Break the streaming plan into fragments with their dependency.
-    /// (2) Duplicate each fragment as parallel actors.
-    ///
-    /// Return a pair of (1) all stream actors, and (2) the actor id of sources to be forcefully
-    /// round-robin scheduled.
+    /// 
+    /// 1. Break the streaming plan into fragments with their dependency.
+    /// 2. Duplicate each fragment as parallel actors.
     pub async fn generate_graph(
         mut self,
         stream_node: &StreamNode,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
-        let stream_node = stream_node.clone();
+        // Phase 1: Generate fragment graph and seal
 
-        // Generate fragment graph and seal
+        let stream_node = stream_node.clone();
         self.generate_fragment_graph(stream_node)?;
         // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
 
@@ -133,6 +131,8 @@ where
             .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
             .await? as _;
         self.fragment_graph.seal(offset, fragment_len);
+
+        // Phase 2: Generate stream graph
 
         // Generate actors of the streaming plan
         self.build_actor_graph()?;
