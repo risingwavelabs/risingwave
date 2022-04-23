@@ -33,6 +33,7 @@
 #![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
+#![feature(trusted_len)]
 
 #[macro_use]
 pub mod error;

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::TrustedLen;
+
 use super::Array;
 use crate::array::ArrayImpl;
 use crate::types::DatumRef;
@@ -27,6 +29,8 @@ impl<'a, A: Array> ArrayIterator<'a, A> {
     }
 }
 
+unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
+
 impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     type Item = Option<A::RefItem<'a>>;
 
@@ -38,6 +42,11 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
             self.pos += 1;
             Some(item)
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.data.len() - self.pos;
+        (size, Some(size))
     }
 }
 
@@ -52,6 +61,8 @@ impl<'a> ArrayImplIterator<'a> {
     }
 }
 
+unsafe impl<'a> TrustedLen for ArrayImplIterator<'a> {}
+
 impl<'a> Iterator for ArrayImplIterator<'a> {
     type Item = DatumRef<'a>;
 
@@ -63,5 +74,10 @@ impl<'a> Iterator for ArrayImplIterator<'a> {
             self.pos += 1;
             Some(item)
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.data.len() - self.pos;
+        (size, Some(size))
     }
 }
