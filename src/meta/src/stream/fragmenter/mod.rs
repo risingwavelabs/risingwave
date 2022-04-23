@@ -97,7 +97,7 @@ where
     }
 
     /// Build a stream graph in two steps:
-    /// 
+    ///
     /// 1. Break the streaming plan into fragments with their dependency.
     /// 2. Duplicate each fragment as parallel actors.
     pub async fn generate_graph(
