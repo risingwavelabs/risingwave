@@ -114,6 +114,7 @@ fi
 [tasks.link-standalone-binaries]
 category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
+condition = { env_not_set = [ "ENABLE_ALL_IN_ONE" ] }
 script = '''
 #!@shell
 set -e

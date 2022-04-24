@@ -112,6 +112,18 @@ struct Versioning {
     sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
 }
 
+impl Versioning {
+    pub fn current_version_ref(&self) -> &HummockVersion {
+        self.hummock_versions
+            .get(&self.current_version_id.id())
+            .expect("current version should always be available.")
+    }
+
+    pub fn current_version(&self) -> HummockVersion {
+        self.current_version_ref().clone()
+    }
+}
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -387,7 +399,6 @@ where
         current_version_id.increase();
         let mut new_hummock_version = hummock_versions
             .new_entry_txn_or_default(current_version_id.id(), current_hummock_version);
-
         new_hummock_version.id = current_version_id.id();
 
         // Create new_version by adding tables in UncommittedEpoch
@@ -599,7 +610,6 @@ where
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     pub async fn report_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
-        let compact_metrics = compact_task.metrics.clone();
         let mut compaction_guard = self.compaction.lock().await;
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
@@ -614,17 +624,12 @@ where
         if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
+            let old_version = versioning_guard.current_version();
             let versioning = versioning_guard.deref_mut();
             let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
             let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
             let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
             let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
-            let old_version = hummock_versions
-                .get(&current_version_id.id())
-                .unwrap()
-                .clone();
-            current_version_id.increase();
-
             let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
                 old_version.id,
                 HummockStaleSstables {
@@ -644,13 +649,10 @@ where
                         .collect_vec(),
                 );
             }
-
-            let new_version = CompactStatus::apply_compact_result(
-                &compact_task,
-                old_version,
-                current_version_id.id(),
-            );
-            hummock_versions.insert(current_version_id.id(), new_version);
+            let mut new_version = CompactStatus::apply_compact_result(&compact_task, old_version);
+            current_version_id.increase();
+            new_version.id = current_version_id.id();
+            hummock_versions.insert(new_version.id, new_version);
 
             for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
                 match sstable_id_infos.get_mut(sst_id) {
@@ -684,12 +686,16 @@ where
 
         tracing::info!(
             "Reported compact task. {}",
-            compact_task_to_string(compact_task)
+            compact_task_to_string(&compact_task)
         );
 
-        trigger_sst_stat(&self.metrics, &compaction_guard.compact_status);
-        if let Some(compact_task_metrics) = compact_metrics {
-            trigger_rw_stat(&self.metrics, &compact_task_metrics);
+        trigger_sst_stat(
+            &self.metrics,
+            &compaction_guard.compact_status,
+            self.versioning.read().await.current_version_ref(),
+        );
+        if let Some(ref compact_task_metrics) = compact_task.metrics {
+            trigger_rw_stat(&self.metrics, compact_task_metrics);
         }
 
         #[cfg(test)]
@@ -703,14 +709,14 @@ where
 
     pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
+        let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
-        let old_version_id = current_version_id.increase();
-        let new_version_id = current_version_id.id();
-        let old_version_copy = hummock_versions.get(&old_version_id).unwrap().clone();
+        current_version_id.increase();
         let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(new_version_id, old_version_copy);
+            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+        new_hummock_version.id = current_version_id.id();
         // TODO: return error instead of panic
         if epoch <= new_hummock_version.max_committed_epoch {
             panic!(
@@ -752,7 +758,6 @@ where
         }
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_hummock_version.max_committed_epoch = epoch;
-        new_hummock_version.id = new_version_id;
 
         let new_hummock_version_copy = new_hummock_version.clone();
         commit_multi_var!(self, None, new_hummock_version, current_version_id)?;
@@ -780,15 +785,16 @@ where
 
     pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
+        let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
-        let old_version_id = current_version_id.increase();
-        let new_version_id = current_version_id.id();
-        let old_hummock_version = hummock_versions.get(&old_version_id).unwrap().clone();
+        let old_version_id = old_version.id;
+        current_version_id.increase();
         let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(new_version_id, old_hummock_version);
+            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+        new_hummock_version.id = current_version_id.id();
 
         // Get and remove tables in the committing epoch
         let uncommitted_epoch = new_hummock_version
@@ -809,9 +815,6 @@ where
             version_stale_sstables
                 .id
                 .extend(epoch_info.tables.iter().map(|t| t.id));
-
-            // Create new_version
-            new_hummock_version.id = new_version_id;
 
             commit_multi_var!(
                 self,

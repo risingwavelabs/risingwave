@@ -14,7 +14,7 @@
 
 use risingwave_pb::hummock::CompactTask;
 
-pub fn compact_task_to_string(compact_task: CompactTask) -> String {
+pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "Compaction task id: {:?}, target level: {:?}\n",

@@ -15,6 +15,7 @@
 pub mod executor_wrapper;
 
 mod filter;
+mod hash_agg;
 mod insert;
 pub use filter::*;
 mod delete;
@@ -27,6 +28,7 @@ mod trace;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
+pub use hash_agg::*;
 pub use insert::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;

@@ -612,6 +612,7 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+    use crate::executor2::executor_wrapper::ExecutorWrapper;
 
     /// Test combine two chunk into one.
     #[test]
@@ -850,8 +851,11 @@ mod tests {
             let join_executor = self.create_join_executor();
             let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
             expected_mock_exec.add(expected);
-
-            diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
+            diff_executor_output(
+                Box::new(ExecutorWrapper::from(join_executor)),
+                Box::new(expected_mock_exec),
+            )
+            .await;
         }
     }
 
