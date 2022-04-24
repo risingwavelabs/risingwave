@@ -184,10 +184,11 @@ impl Binder {
                 desc,
             ))
         } else {
-            Err(
-                ErrorCode::BindError(format!("The field \"{}\" is not the nested column", desc.name))
-                    .into(),
-            )
+            Err(ErrorCode::BindError(format!(
+                "The field \"{}\" is not the nested column",
+                desc.name
+            ))
+            .into())
         }
     }
 
