@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::ensure;
@@ -36,12 +35,8 @@ const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
 
-const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
-const PROTOBUF_FILE_URL_SCHEME: &str = "file";
-
-#[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
+    fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
@@ -88,9 +83,8 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }
 
-#[async_trait]
 impl SourceManager for MemSourceManager {
-    async fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
+    fn create_source(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -246,9 +240,6 @@ mod tests {
 
     use crate::*;
 
-    const KAFKA_TOPIC_KEY: &str = "kafka.topic";
-    const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
-
     #[tokio::test]
     #[ignore] // ignored because the test involves aws credentials, remove this line after changing to other
               // connector
@@ -274,7 +265,7 @@ mod tests {
         let source_id = TableId::default();
 
         let mem_source_manager = MemSourceManager::new();
-        let source = mem_source_manager.create_source(&source_id, info).await;
+        let source = mem_source_manager.create_source(&source_id, info);
 
         assert!(source.is_ok());
 

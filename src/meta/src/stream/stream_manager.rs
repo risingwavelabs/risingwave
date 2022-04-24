@@ -126,7 +126,9 @@ where
             )
             .await;
         if nodes.is_empty() {
-            return Err(InternalError("no available node exist".to_string()).into());
+            return Err(
+                InternalError("no available compute node in the cluster".to_string()).into(),
+            );
         }
 
         let mut locations = ScheduledLocations::new();

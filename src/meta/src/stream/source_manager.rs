@@ -150,6 +150,7 @@ where
         Ok(all_stream_clients)
     }
 
+    /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
         let futures = self
             .all_stream_clients()
