@@ -14,6 +14,10 @@ env:
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
 
+permissions:
+      id-token: write
+      contents: read    # This is required for actions/checkout
+
 jobs:
   # Start 2 runners (a/b) to run build and test in parallel. Note that we also have runner C in main for release build.
   start-runner-a:

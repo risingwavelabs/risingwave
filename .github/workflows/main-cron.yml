@@ -19,6 +19,9 @@ env:
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
+permissions:
+  id-token: write
+  contents: read
 jobs:
   start-runner-a:
     name: ec2-start-a
