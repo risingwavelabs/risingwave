@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::Future;
@@ -53,8 +54,10 @@ impl BlockHolder {
     }
 }
 
-impl AsRef<Block> for BlockHolder {
-    fn as_ref(&self) -> &Block {
+impl Deref for BlockHolder {
+    type Target = Block;
+
+    fn deref(&self) -> &Self::Target {
         unsafe { &(*self.block) }
     }
 }
