@@ -394,11 +394,12 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                         } else {
                             unreachable!()
                         };
-                        // let state_cache = self.state_cache.take().unwrap();
-                        // self.state_store
-                        //     .take_snapshot(vec![state_cache], epoch_prev)
-                        //     .await
-                        //     .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+                        if let Some(state) = &self.state_cache {
+                            self.state_store
+                            .take_snapshot(vec![state.clone()], epoch_prev)
+                            .await
+                            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+                        }
                         message
                     }
 
