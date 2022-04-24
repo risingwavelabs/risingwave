@@ -14,7 +14,7 @@
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{JoinConstraint, JoinOperator, TableWithJoins};
 
 use crate::binder::{Binder, Relation};

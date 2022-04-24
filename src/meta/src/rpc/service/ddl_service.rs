@@ -22,7 +22,7 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::plan::TableRefId;
+use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
 use tonic::{Request, Response, Status};

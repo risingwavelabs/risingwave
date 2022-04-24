@@ -4,7 +4,7 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
-import com.risingwave.proto.plan.OrderType;
+import com.risingwave.proto.plan_common.OrderType;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.proto.streaming.plan.TopNNode;
 import java.util.ArrayList;

@@ -18,8 +18,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};

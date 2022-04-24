@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};

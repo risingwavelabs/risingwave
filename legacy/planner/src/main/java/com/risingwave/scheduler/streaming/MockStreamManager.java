@@ -1,7 +1,7 @@
 package com.risingwave.scheduler.streaming;
 
 import com.google.inject.Inject;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan_common.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -20,7 +20,7 @@ public class ColumnDesc {
     this.encoding = encoding;
   }
 
-  public ColumnDesc(com.risingwave.proto.plan.ColumnDesc desc) {
+  public ColumnDesc(com.risingwave.proto.plan_common.ColumnDesc desc) {
     this(RisingWaveTypeFactory.INSTANCE.createDataType(desc.getColumnType()));
   }
 
