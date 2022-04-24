@@ -25,7 +25,6 @@ pub use dispatch::*;
 pub use filter::*;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
-pub use hash_join::*;
 pub use local_simple_agg::*;
 pub use merge::*;
 pub use monitor::*;
@@ -36,7 +35,8 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
-    BoxedExecutor, Executor, HopWindowExecutorBuilder, LookupExecutorBuilder, UnionExecutorBuilder,
+    BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
+    LookupExecutorBuilder, UnionExecutorBuilder,
 };
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
@@ -48,7 +48,6 @@ mod dispatch;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
-mod hash_join;
 mod local_simple_agg;
 pub(crate) mod managed_state;
 mod merge;
