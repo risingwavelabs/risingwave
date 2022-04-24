@@ -396,9 +396,9 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                         };
                         if let Some(state) = &self.state_cache {
                             self.state_store
-                            .take_snapshot(vec![state.clone()], epoch_prev)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+                                .take_snapshot(vec![state.clone()], epoch_prev)
+                                .await
+                                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
                         }
                         message
                     }
