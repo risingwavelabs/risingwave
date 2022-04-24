@@ -39,7 +39,7 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectionExecutor2, TraceExecutor2,
+    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2, TraceExecutor2,
     ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
@@ -189,7 +189,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor2,
+            NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
@@ -218,7 +218,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor2,
+            NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
