@@ -114,6 +114,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         self.ht.values().any(|state| state.is_dirty())
     }
 
+    #[allow(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -282,6 +283,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Epoch
     epoch: u64,
 
+    #[allow(dead_code)]
     /// Logical Operator Info
     op_info: String,
 
