@@ -15,9 +15,9 @@
 use assert_matches::assert_matches;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{I32Array, Op, StreamChunk};
+use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::column_nonnull;
 use risingwave_common::types::{deserialize_datum_from, DataType};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
@@ -33,14 +33,14 @@ use crate::executor_v2::{
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
         ColumnDesc {
-            data_type: DataType::Int32,
+            data_type: DataType::Int64,
             column_id: ColumnId::new(1),
             name: "rowid_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         },
         ColumnDesc {
-            data_type: DataType::Int32,
+            data_type: DataType::Int64,
             column_id: ColumnId::new(2),
             name: "join_column".to_string(),
             field_descs: vec![],
@@ -86,22 +86,19 @@ async fn create_arrangement(
     let column_ids = columns.iter().map(|c| c.column_id).collect_vec();
 
     // Prepare source chunks.
-    let chunk1 = StreamChunk::new(
-        vec![Op::Insert, Op::Insert, Op::Insert, Op::Insert],
-        vec![
-            column_nonnull! { I32Array, [2331, 2332, 2333, 2334] },
-            column_nonnull! { I32Array, [4, 5, 6, 6] },
-        ],
-        None,
+    let chunk1 = StreamChunk::from_pretty(
+        "    I I
+        + 2331 4
+        + 2332 5
+        + 2333 6
+        + 2334 6",
     );
 
-    let chunk2 = StreamChunk::new(
-        vec![Op::Insert, Op::Insert, Op::Delete],
-        vec![
-            column_nonnull! { I32Array, [2335, 2337, 2333] },
-            column_nonnull! { I32Array, [6, 8, 6] },
-        ],
-        None,
+    let chunk2 = StreamChunk::from_pretty(
+        "    I I
+        + 2335 6
+        + 2337 8
+        - 2333 6",
     );
 
     // Prepare stream executors.
@@ -149,14 +146,14 @@ async fn create_arrangement(
 async fn create_source() -> Box<dyn Executor + Send> {
     let columns = vec![
         ColumnDesc {
-            data_type: DataType::Int32,
+            data_type: DataType::Int64,
             column_id: ColumnId::new(1),
             name: "join_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         },
         ColumnDesc {
-            data_type: DataType::Int32,
+            data_type: DataType::Int64,
             column_id: ColumnId::new(2),
             name: "rowid_column".to_string(),
             field_descs: vec![],
@@ -165,22 +162,13 @@ async fn create_source() -> Box<dyn Executor + Send> {
     ];
 
     // Prepare source chunks.
-    let chunk1 = StreamChunk::new(
-        vec![Op::Insert],
-        vec![
-            column_nonnull! { I32Array, [6] },
-            column_nonnull! { I32Array, [1] },
-        ],
-        None,
+    let chunk1 = StreamChunk::from_pretty(
+        " I I
+        + 6 1",
     );
-
-    let chunk2 = StreamChunk::new(
-        vec![Op::Delete],
-        vec![
-            column_nonnull! { I32Array, [6] },
-            column_nonnull! { I32Array, [1] },
-        ],
-        None,
+    let chunk2 = StreamChunk::from_pretty(
+        " I I
+        - 6 1",
     );
 
     // Prepare stream executors.
@@ -234,10 +222,10 @@ async fn test_lookup_this_epoch() {
         arrange_join_key_indices: vec![1],
         column_mapping: vec![2, 3, 0, 1],
         schema: Schema::new(vec![
-            Field::with_name(DataType::Int32, "join_column"),
-            Field::with_name(DataType::Int32, "rowid_column"),
-            Field::with_name(DataType::Int32, "rowid_column"),
-            Field::with_name(DataType::Int32, "join_column"),
+            Field::with_name(DataType::Int64, "join_column"),
+            Field::with_name(DataType::Int64, "rowid_column"),
+            Field::with_name(DataType::Int64, "rowid_column"),
+            Field::with_name(DataType::Int64, "join_column"),
         ]),
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -254,7 +242,7 @@ async fn test_lookup_this_epoch() {
         println!(
             "{:?} => {:?}",
             k,
-            deserialize_datum_from(&DataType::Int32, &mut deserializer).unwrap()
+            deserialize_datum_from(&DataType::Int64, &mut deserializer).unwrap()
         );
     }
 
@@ -266,29 +254,18 @@ async fn test_lookup_this_epoch() {
     assert_matches!(msgs[4], Message::Barrier(_));
 
     let chunk1 = msgs[1].as_chunk().unwrap();
-    let expected_chunk1 = StreamChunk::new(
-        vec![Op::Insert, Op::Insert],
-        vec![
-            column_nonnull! { I32Array, [2333, 2334] },
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [1, 1] },
-        ],
-        None,
+    let expected_chunk1 = StreamChunk::from_pretty(
+        "    I I I I
+        + 2333 6 6 1
+        + 2334 6 6 1",
     );
-
     check_chunk_eq(chunk1, &expected_chunk1);
 
     let chunk2 = msgs[3].as_chunk().unwrap();
-    let expected_chunk2 = StreamChunk::new(
-        vec![Op::Delete, Op::Delete],
-        vec![
-            column_nonnull! { I32Array, [2334, 2335] },
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [1, 1] },
-        ],
-        None,
+    let expected_chunk2 = StreamChunk::from_pretty(
+        "    I I I I
+        - 2334 6 6 1
+        - 2335 6 6 1",
     );
     check_chunk_eq(chunk2, &expected_chunk2);
 }
@@ -311,10 +288,10 @@ async fn test_lookup_last_epoch() {
         arrange_join_key_indices: vec![1],
         column_mapping: vec![0, 1, 2, 3],
         schema: Schema::new(vec![
-            Field::with_name(DataType::Int32, "rowid_column"),
-            Field::with_name(DataType::Int32, "join_column"),
-            Field::with_name(DataType::Int32, "join_column"),
-            Field::with_name(DataType::Int32, "rowid_column"),
+            Field::with_name(DataType::Int64, "rowid_column"),
+            Field::with_name(DataType::Int64, "join_column"),
+            Field::with_name(DataType::Int64, "join_column"),
+            Field::with_name(DataType::Int64, "rowid_column"),
         ]),
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -339,15 +316,10 @@ async fn test_lookup_last_epoch() {
     assert_eq!(chunk1.cardinality(), 0);
 
     let chunk2 = msgs[3].as_chunk().unwrap();
-    let expected_chunk2 = StreamChunk::new(
-        vec![Op::Delete, Op::Delete],
-        vec![
-            column_nonnull! { I32Array, [6, 6] },
-            column_nonnull! { I32Array, [1, 1] },
-            column_nonnull! { I32Array, [2333, 2334] },
-            column_nonnull! { I32Array, [6, 6] },
-        ],
-        None,
+    let expected_chunk2 = StreamChunk::from_pretty(
+        " I I    I I
+        - 6 1 2333 6
+        - 6 1 2334 6",
     );
     check_chunk_eq(chunk2, &expected_chunk2);
 }

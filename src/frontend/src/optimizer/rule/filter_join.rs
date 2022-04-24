@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::Rule;

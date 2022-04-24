@@ -2,11 +2,17 @@ syntax = "proto3";
 
 package data;
 
+import "common.proto";
+
 option java_multiple_files = true;
 option java_package = "com.risingwave.proto.data";
 option optimize_for = SPEED;
 
-import "common.proto";
+message IntervalUnit {
+  int32 months = 1;
+  int32 days = 2;
+  int64 ms = 3;
+}
 
 message Buffer {
   enum CompressionType {

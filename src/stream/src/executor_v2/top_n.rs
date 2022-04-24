@@ -439,10 +439,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, I64Array, Op};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -451,44 +449,36 @@ mod tests {
     use crate::executor_v2::{Barrier, Message};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert; 6],
-            vec![
-                column_nonnull! { I64Array, [1, 2, 3, 10, 9, 8] },
-                column_nonnull! { I64Array, [0, 1, 2, 3, 4, 5] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_pretty(
+            "  I I
+            +  1 0
+            +  2 1
+            +  3 2
+            + 10 3
+            +  9 4
+            +  8 5",
         );
-        let chunk2 = StreamChunk::new(
-            vec![
-                Op::Insert,
-                Op::Delete,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ],
-            vec![
-                column_nonnull! { I64Array, [7, 3, 1, 5, 2, 11] },
-                column_nonnull! { I64Array, [6, 2, 0, 7, 1, 8] },
-            ],
-            None,
+        let chunk2 = StreamChunk::from_pretty(
+            "  I I
+            +  7 6
+            -  3 2
+            -  1 0
+            +  5 7
+            -  2 1
+            + 11 8",
         );
-        let chunk3 = StreamChunk::new(
-            vec![Op::Insert; 4],
-            vec![
-                column_nonnull! { I64Array, [6, 12, 13, 14] },
-                column_nonnull! { I64Array, [9, 10, 11, 12] },
-            ],
-            None,
+        let chunk3 = StreamChunk::from_pretty(
+            "  I  I
+            +  6  9
+            + 12 10
+            + 13 11
+            + 14 12",
         );
-        let chunk4 = StreamChunk::new(
-            vec![Op::Delete; 3],
-            vec![
-                column_nonnull! { I64Array, [5, 6, 11]},
-                column_nonnull! { I64Array, [7, 9, 8]},
-            ],
-            None,
+        let chunk4 = StreamChunk::from_pretty(
+            "  I  I
+            -  5  7
+            -  6  9
+            - 11  8",
         );
         vec![chunk1, chunk2, chunk3, chunk4]
     }
@@ -550,20 +540,15 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(10), Some(9), Some(8)];
-            let expected_ops = vec![Op::Insert, Op::Insert, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                + 10 3
+                +  9 4
+                +  8 5"
+            )
+        );
         // Now (1, 2, 3) -> (8, 9, 10)
         // Barrier
         assert_matches!(
@@ -571,23 +556,19 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(7), Some(7), Some(8), Some(8), Some(8), Some(11)];
-            let expected_ops = vec![
-                Op::Insert,
-                Op::Delete,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.column_at(0).array_ref().as_int64().iter().collect_vec(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  7 6
+                -  7 6
+                -  8 5
+                +  8 5
+                -  8 5
+                + 11 8"
+            )
+        );
+
         // (5, 7, 8) -> (9, 10, 11)
         // barrier
         assert_matches!(
@@ -596,20 +577,16 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8), Some(12), Some(13), Some(14)];
-            let expected_ops = vec![Op::Insert; 4];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I  I
+                +  8  5
+                + 12 10
+                + 13 11
+                + 14 12"
+            )
+        );
         // (5, 6, 7) -> (8, 9, 10, 11, 12, 13, 14)
         // barrier
         assert_matches!(
@@ -618,20 +595,15 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8), Some(9), Some(11)];
-            let expected_ops = vec![Op::Delete, Op::Delete, Op::Delete];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  8 5
+                -  9 4
+                - 11 8"
+            )
+        );
         // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(
@@ -664,38 +636,20 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![
-                Some(1),
-                Some(2),
-                Some(3),
-                Some(10),
-                Some(10),
-                Some(9),
-                Some(9),
-                Some(8),
-            ];
-            let expected_ops = vec![
-                Op::Insert,
-                Op::Insert,
-                Op::Insert,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  1 0
+                +  2 1
+                +  3 2
+                + 10 3
+                - 10 3
+                +  9 4
+                -  9 4
+                +  8 5"
+            )
+        );
         // now () -> (1, 2, 3, 8) -> (9, 10)
 
         // barrier
@@ -704,42 +658,23 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![
-                Some(8),
-                Some(7),
-                Some(3),
-                Some(8),
-                Some(1),
-                Some(9),
-                Some(9),
-                Some(5),
-                Some(2),
-                Some(9),
-            ];
-            let expected_ops = vec![
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  8 5
+                +  7 6
+                -  3 2
+                +  8 5
+                -  1 0
+                +  9 4
+                -  9 4
+                +  5 7
+                -  2 1
+                +  9 4"
+            )
+        );
+
         // () -> (5, 7, 8, 9) -> (10, 11)
         // barrier
         assert_matches!(
@@ -748,20 +683,14 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(9), Some(6)];
-            let expected_ops = vec![Op::Delete, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  9 4
+                +  6 9"
+            )
+        );
         // () -> (5, 6, 7, 8) -> (9, 10, 11, 12, 13, 14)
         // barrier
         assert_matches!(
@@ -770,20 +699,16 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(5), Some(9), Some(6), Some(10)];
-            let expected_ops = vec![Op::Delete, Op::Insert, Op::Delete, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  5 7
+                +  9 4
+                -  6 9
+                + 10 3"
+            )
+        );
         // () -> (7, 8, 9, 10) -> (13, 14)
         // barrier
         assert_matches!(
@@ -816,20 +741,15 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(10), Some(9), Some(8)];
-            let expected_ops = vec![Op::Insert, Op::Insert, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                + 10 3
+                +  9 4
+                +  8 5"
+            )
+        );
         // now (1, 2, 3) -> (8, 9, 10, _) -> ()
 
         // barrier
@@ -838,27 +758,18 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(7), Some(7), Some(8), Some(8), Some(8), Some(11)];
-            let expected_ops = vec![
-                Op::Insert,
-                Op::Delete,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  7 6
+                -  7 6
+                -  8 5
+                +  8 5
+                -  8 5
+                + 11 8"
+            )
+        );
         // (5, 7, 8) -> (9, 10, 11, _) -> ()
         // barrier
         assert_matches!(
@@ -867,20 +778,13 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8)];
-            let expected_ops = vec![Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  8 5"
+            )
+        );
         // (5, 6, 7) -> (8, 9, 10, 11) -> (12, 13, 14)
         // barrier
         assert_matches!(
@@ -889,27 +793,19 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8), Some(12), Some(9), Some(13), Some(11), Some(14)];
-            let expected_ops = vec![
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I  I
+                -  8  5 
+                + 12 10
+                -  9  4 
+                + 13 11
+                - 11  8 
+                + 14 12"
+            )
+        );
+
         // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(

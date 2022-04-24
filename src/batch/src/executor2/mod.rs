@@ -13,16 +13,30 @@
 // limitations under the License.
 
 pub mod executor_wrapper;
+
+mod delete;
 mod filter;
-pub use filter::*;
-mod values;
-pub use values::*;
+mod hash_agg;
+mod insert;
+mod limit;
+mod project;
+mod top_n;
 mod trace;
+mod values;
+
+pub use delete::*;
+pub use filter::*;
 use futures::stream::BoxStream;
+pub use hash_agg::*;
+pub use insert::*;
+pub use limit::*;
+pub use project::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+pub use top_n::*;
 pub use trace::*;
+pub use values::*;
 
 use crate::executor::executor2_wrapper::Executor2Wrapper;
 use crate::executor::{BoxedExecutor, ExecutorBuilder};

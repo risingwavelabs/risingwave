@@ -19,12 +19,12 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::common::HostAddress;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
+use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClient;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};

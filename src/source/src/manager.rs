@@ -23,7 +23,8 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::Properties;
-use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
+use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::plan_common::RowFormatType;
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
@@ -234,7 +235,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_connector::kinesis::config::kinesis_demo_properties;
     use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::plan::ColumnCatalog;
+    use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
 

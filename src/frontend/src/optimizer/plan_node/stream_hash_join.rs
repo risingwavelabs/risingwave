@@ -15,17 +15,17 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::HashJoinNode;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
-/// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
+/// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
 #[derive(Debug, Clone)]
@@ -37,7 +37,9 @@ pub struct StreamHashJoin {
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 
-    /// Whether to use delta join for this join node.
+    /// Whether to force use delta join for this join node. If this is true, then indexes will
+    /// be create automatically when building the executors on meta service. For testing purpose
+    /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 }
 
@@ -81,12 +83,17 @@ impl StreamHashJoin {
         }
     }
 
+    /// Get join type
+    pub fn join_type(&self) -> JoinType {
+        self.logical.join_type()
+    }
+
     /// Get a reference to the batch hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }
 
-    fn derive_dist(
+    pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
         predicate: &EqJoinPredicate,
@@ -101,6 +108,11 @@ impl StreamHashJoin {
             }
             (_, _) => panic!(),
         }
+    }
+
+    /// Convert this hash join to a delta join plan
+    pub fn to_delta_join(&self) -> StreamDeltaJoin {
+        StreamDeltaJoin::new(self.logical.clone(), self.eq_join_predicate.clone())
     }
 }
 
@@ -159,7 +171,7 @@ impl ToStreamProst for StreamHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_protobuf()),
+                .map(|x| x.to_expr_proto()),
             distribution_keys: self
                 .base
                 .dist
@@ -168,6 +180,7 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|idx| *idx as i32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
+            ..Default::default()
         })
     }
 }

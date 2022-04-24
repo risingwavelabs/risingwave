@@ -204,8 +204,6 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
-        let mut min_interval = tokio::time::interval(self.interval);
-        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut unfinished = UnfinishedNotifiers::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
@@ -226,6 +224,8 @@ where
             state.update(self.env.meta_store()).await.unwrap();
         }
 
+        let mut min_interval = tokio::time::interval(self.interval);
+        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -242,6 +242,15 @@ where
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
+            // When there's no actors exist in the cluster, we don't need to send the barrier. This
+            // is an advance optimization. Besides if another barrier comes immediately,
+            // it may send a same epoch and fail the epoch check.
+            if info.nothing_to_do() {
+                let mut notifiers = notifiers;
+                notifiers.iter_mut().for_each(Notifier::notify_to_send);
+                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                continue;
+            }
             let new_epoch = Epoch::now();
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(

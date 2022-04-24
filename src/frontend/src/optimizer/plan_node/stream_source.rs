@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::TableRefId;
+use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 

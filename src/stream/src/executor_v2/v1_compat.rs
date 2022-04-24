@@ -17,22 +17,23 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnId;
 pub use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
+use super::error::StreamExecutorError;
 use super::filter::SimpleFilterExecutor;
 use super::project::SimpleProjectExecutor;
 use super::{
     BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
     HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
+    RearrangedChainExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::executor_v2::aggregation::AggCall;
@@ -150,7 +151,7 @@ impl Executor for ExecutorV1AsV2 {
 }
 
 impl ExecutorV1AsV2 {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         loop {
             let msg = self.0.next().await;
@@ -207,6 +208,27 @@ impl ProjectExecutor {
             input,
             inner: SimpleProjectExecutor::new(info, exprs, executor_id),
         }
+    }
+}
+
+impl RearrangedChainExecutor {
+    pub fn new_from_v1(
+        snapshot: BoxedExecutor,
+        mview: BoxedExecutor,
+        notifier: FinishCreateMviewNotifier,
+        schema: Schema,
+        column_idxs: Vec<usize>,
+        _op_info: String,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: mview.pk_indices().to_owned(),
+            identity: "RearrangedChain".to_owned(),
+        };
+
+        let actor_id = notifier.actor_id;
+
+        Self::new(snapshot, mview, column_idxs, notifier, actor_id, info)
     }
 }
 
@@ -304,7 +326,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         _op_info: String,
         key_indices: Vec<usize>,
-        parallel_info: BatchParallelInfo,
+        hash_filter: Bitmap,
     ) -> Self {
         let schema = table.schema().clone();
         let info = ExecutorInfo {
@@ -318,7 +340,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             Self::DEFAULT_BATCH_SIZE,
             info,
             key_indices,
-            parallel_info,
+            hash_filter,
         )
     }
 }

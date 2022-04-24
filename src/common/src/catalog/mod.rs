@@ -98,8 +98,8 @@ impl fmt::Display for TableId {
 }
 
 // TODO: replace boilerplate code
-impl From<&Option<risingwave_pb::plan::DatabaseRefId>> for DatabaseId {
-    fn from(option: &Option<risingwave_pb::plan::DatabaseRefId>) -> Self {
+impl From<&Option<risingwave_pb::plan_common::DatabaseRefId>> for DatabaseId {
+    fn from(option: &Option<risingwave_pb::plan_common::DatabaseRefId>) -> Self {
         match option {
             Some(pb) => DatabaseId {
                 database_id: pb.database_id,
@@ -112,15 +112,15 @@ impl From<&Option<risingwave_pb::plan::DatabaseRefId>> for DatabaseId {
 }
 
 // TODO: replace boilerplate code
-impl From<&Option<risingwave_pb::plan::SchemaRefId>> for SchemaId {
-    fn from(option: &Option<risingwave_pb::plan::SchemaRefId>) -> Self {
+impl From<&Option<risingwave_pb::plan_common::SchemaRefId>> for SchemaId {
+    fn from(option: &Option<risingwave_pb::plan_common::SchemaRefId>) -> Self {
         match option {
             Some(pb) => SchemaId {
                 database_ref_id: DatabaseId::from(&pb.database_ref_id),
                 schema_id: pb.schema_id,
             },
             None => {
-                let pb = risingwave_pb::plan::SchemaRefId::default();
+                let pb = risingwave_pb::plan_common::SchemaRefId::default();
                 SchemaId {
                     database_ref_id: DatabaseId::from(&pb.database_ref_id),
                     schema_id: pb.schema_id,
@@ -131,14 +131,14 @@ impl From<&Option<risingwave_pb::plan::SchemaRefId>> for SchemaId {
 }
 
 // TODO: replace boilerplate code
-impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
-    fn from(option: &Option<risingwave_pb::plan::TableRefId>) -> Self {
+impl From<&Option<risingwave_pb::plan_common::TableRefId>> for TableId {
+    fn from(option: &Option<risingwave_pb::plan_common::TableRefId>) -> Self {
         match option {
             Some(pb) => TableId {
                 table_id: pb.table_id as u32,
             },
             None => {
-                let pb = risingwave_pb::plan::TableRefId::default();
+                let pb = risingwave_pb::plan_common::TableRefId::default();
                 TableId {
                     table_id: pb.table_id as u32,
                 }
@@ -148,19 +148,19 @@ impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
 }
 
 // TODO: replace boilerplate code
-impl From<&DatabaseId> for risingwave_pb::plan::DatabaseRefId {
+impl From<&DatabaseId> for risingwave_pb::plan_common::DatabaseRefId {
     fn from(database_id: &DatabaseId) -> Self {
-        risingwave_pb::plan::DatabaseRefId {
+        risingwave_pb::plan_common::DatabaseRefId {
             database_id: database_id.database_id,
         }
     }
 }
 
 // TODO: replace boilerplate code
-impl From<&SchemaId> for risingwave_pb::plan::SchemaRefId {
+impl From<&SchemaId> for risingwave_pb::plan_common::SchemaRefId {
     fn from(schema_id: &SchemaId) -> Self {
-        risingwave_pb::plan::SchemaRefId {
-            database_ref_id: Some(risingwave_pb::plan::DatabaseRefId::from(
+        risingwave_pb::plan_common::SchemaRefId {
+            database_ref_id: Some(risingwave_pb::plan_common::DatabaseRefId::from(
                 &schema_id.database_ref_id,
             )),
             schema_id: schema_id.schema_id,
@@ -169,9 +169,9 @@ impl From<&SchemaId> for risingwave_pb::plan::SchemaRefId {
 }
 
 // TODO: replace boilerplate code
-impl From<&TableId> for risingwave_pb::plan::TableRefId {
+impl From<&TableId> for risingwave_pb::plan_common::TableRefId {
     fn from(table_id: &TableId) -> Self {
-        risingwave_pb::plan::TableRefId {
+        risingwave_pb::plan_common::TableRefId {
             schema_ref_id: None,
             table_id: table_id.table_id as i32,
         }
@@ -180,7 +180,7 @@ impl From<&TableId> for risingwave_pb::plan::TableRefId {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+    use risingwave_pb::plan_common::{DatabaseRefId, SchemaRefId, TableRefId};
 
     use crate::catalog::{DatabaseId, SchemaId, TableId};
 

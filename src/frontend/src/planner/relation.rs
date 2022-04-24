@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundSource, BoundWindowTableFunction, Relation,
@@ -44,6 +44,11 @@ impl Planner {
         LogicalScan::create(
             base_table.name,
             Rc::new(base_table.table_catalog.table_desc()),
+            base_table
+                .table_indexes
+                .iter()
+                .map(|x| Rc::new(x.table_desc()))
+                .collect(),
             self.ctx(),
         )
     }
@@ -101,21 +106,17 @@ impl Planner {
                     exprs.push(InputRef::new(idx, col.data_type().clone()).into());
                     expr_aliases.push(None);
                 }
-                let window_start =
-                    ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                        ExprType::TumbleStart,
-                        vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
-                        DataType::Timestamp,
-                    )));
+                let window_start: ExprImpl = FunctionCall::new(
+                    ExprType::TumbleStart,
+                    vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
+                )?
+                .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
                 // `tumble_start`, or we can depends on common expression
                 // optimization.
                 let window_end =
-                    ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                        ExprType::Add,
-                        vec![window_start.clone(), window_size],
-                        DataType::Timestamp,
-                    )));
+                    FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size])?
+                        .into();
                 exprs.push(window_start);
                 exprs.push(window_end);
                 expr_aliases.push(Some("window_start".to_string()));

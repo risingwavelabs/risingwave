@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::mview::ManagedMViewState;
 use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
@@ -62,7 +62,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         }
     }
 
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let input = self.input.execute();
         #[for_await]
@@ -112,7 +112,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     self.local_state
                         .flush(b.epoch.prev)
                         .await
-                        .map_err(StreamExecutorError::ExecutorV1)?;
+                        .map_err(StreamExecutorError::executor_v1)?;
                     Message::Barrier(b)
                 }
             }
@@ -151,9 +151,9 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 mod tests {
 
     use futures::stream::StreamExt;
-    use risingwave_common::array::{I32Array, Op, Row};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
@@ -176,21 +176,16 @@ mod tests {
         let column_ids = vec![0.into(), 1.into()];
 
         // Prepare source chunks.
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I32Array, [1, 2, 3] },
-                column_nonnull! { I32Array, [4, 5, 6] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4
+            + 2 5
+            + 3 6",
         );
-        let chunk2 = StreamChunk::new(
-            vec![Op::Insert, Op::Delete],
-            vec![
-                column_nonnull! { I32Array, [7, 3] },
-                column_nonnull! { I32Array, [8, 6] },
-            ],
-            None,
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 7 8
+            - 3 6",
         );
 
         // Prepare stream executors.

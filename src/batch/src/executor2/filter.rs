@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
@@ -49,7 +49,7 @@ impl FilterExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
-            DataChunkBuilder::new_with_default_size(self.child.schema().data_types());
+            DataChunkBuilder::with_default_size(self.child.schema().data_types());
 
         #[for_await]
         for data_chunk in self.child.execute() {

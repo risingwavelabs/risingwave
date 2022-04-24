@@ -43,12 +43,12 @@ impl ArrayBuilder for StructArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Result<Self> {
-        panic!("Must use new_with_meta.")
+        panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
-        Self::new_with_meta(
+        Self::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: Arc::new([]),
@@ -56,7 +56,7 @@ impl ArrayBuilder for StructArrayBuilder {
         )
     }
 
-    fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::Struct { children } = meta {
             let children_array = children
                 .iter()
@@ -181,7 +181,7 @@ impl Array for StructArray {
     }
 
     fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
-        let array_builder = StructArrayBuilder::new_with_meta(
+        let array_builder = StructArrayBuilder::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
@@ -425,7 +425,7 @@ mod tests {
             ]
         );
 
-        let mut builder = StructArrayBuilder::new_with_meta(
+        let mut builder = StructArrayBuilder::with_meta(
             4,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Int32, DataType::Float32]),

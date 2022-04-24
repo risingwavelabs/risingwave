@@ -37,7 +37,7 @@ use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::plan::PlanNode as BatchPlanProst;
+use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
 use super::property::{Distribution, Order};
@@ -191,6 +191,7 @@ impl dyn PlanNode {
             operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
             pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
+            append_only: self.append_only(),
         }
     }
 }
@@ -220,6 +221,7 @@ mod batch_project;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_topn;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
@@ -234,6 +236,7 @@ mod logical_scan;
 mod logical_source;
 mod logical_topn;
 mod logical_values;
+mod stream_delta_join;
 mod stream_exchange;
 mod stream_filter;
 mod stream_hash_agg;
@@ -244,6 +247,7 @@ mod stream_project;
 mod stream_simple_agg;
 mod stream_source;
 mod stream_table_scan;
+mod stream_topn;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -256,6 +260,7 @@ pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_topn::BatchTopN;
 pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
@@ -270,6 +275,7 @@ pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
+pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_agg::StreamHashAgg;
@@ -280,6 +286,7 @@ pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
@@ -326,6 +333,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
+            ,{ Batch, TopN }
             ,{ Stream, Project }
             ,{ Stream, Filter }
             ,{ Stream, TableScan }
@@ -335,7 +343,9 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
+            ,{ Stream, TopN }
             ,{ Stream, HopWindow }
+            ,{ Stream, DeltaJoin }
         }
     };
 }
@@ -380,6 +390,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Values }
             ,{ Batch, Limit }
             ,{ Batch, Sort }
+            ,{ Batch, TopN }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }
             ,{ Batch, Delete }
@@ -402,7 +413,9 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
+            ,{ Stream, TopN }
             ,{ Stream, HopWindow }
+            ,{ Stream, DeltaJoin }
         }
     };
 }

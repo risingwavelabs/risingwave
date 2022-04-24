@@ -23,7 +23,7 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::BoxedExecutorBuilder;
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};

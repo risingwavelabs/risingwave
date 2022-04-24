@@ -42,8 +42,8 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::AnyShard,
-            false, // TODO: determine the `append-only` field of table scan
+            Distribution::AnyShard, // Mark as `AnyShard` cause we don't know the distribution yet.
+            false,                  // TODO: determine the `append-only` field of table scan
         );
         Self {
             base,
@@ -55,7 +55,12 @@ impl StreamTableScan {
     pub fn table_name(&self) -> &str {
         self.logical.table_name()
     }
+
+    pub fn logical(&self) -> &LogicalScan {
+        &self.logical
+    }
 }
+
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
@@ -78,7 +83,7 @@ impl ToStreamProst for StreamTableScan {
 
 impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
-        use risingwave_pb::plan::*;
+        use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
@@ -100,10 +105,12 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            // TODO: add the distribution key from tableCatalog
+            /// StreamTableScan should follow the same distribution as upstream materialize node.
+            /// So this will be filled in meta.
             distribution_keys: vec![],
             // Will fill when resolving chain node.
-            parallel_info: None,
+            hash_mapping: None,
+            parallel_unit_id: 0,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
@@ -127,9 +134,11 @@ impl StreamTableScan {
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
+                    append_only: true,
                 },
             ],
             node: Some(ProstStreamNode::ChainNode(ChainNode {
+                disable_rearrange: false,
                 table_ref_id: Some(TableRefId {
                     table_id: self.logical.table_desc().table_id.table_id as i32,
                     schema_ref_id: None, // TODO: fill schema ref id
@@ -164,6 +173,7 @@ impl StreamTableScan {
             } else {
                 "".into()
             },
+            append_only: self.append_only(),
         }
     }
 }
