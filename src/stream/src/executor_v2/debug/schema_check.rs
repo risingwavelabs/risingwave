@@ -80,9 +80,8 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, StreamExt};
-    use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -91,13 +90,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_ok() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { F64Array, [200.0, 14.0, 300.0] },
-            ],
-            None,
+        let chunk = StreamChunk::from_str(
+            "   I     F
+            + 100 200.0
+            +  10  14.0
+            +   4 300.0",
         );
         let schema = Schema {
             fields: vec![
@@ -120,13 +117,11 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_schema_bad() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { I64Array, [200, 14, 300] },
-            ],
-            None,
+        let chunk = StreamChunk::from_str(
+            "   I   I
+            + 100 200
+            +  10  14
+            +   4 300",
         );
         let schema = Schema {
             fields: vec![

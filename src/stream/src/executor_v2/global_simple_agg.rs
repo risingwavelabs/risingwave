@@ -279,16 +279,13 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use global_simple_agg::*;
-    use risingwave_common::array::{I64Array, Op, Row};
     use risingwave_common::catalog::Field;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
 
     use crate::executor_v2::aggregation::AggArgs;
     use crate::executor_v2::test_utils::*;
     use crate::executor_v2::*;
-    use crate::*;
 
     #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {
@@ -296,25 +293,18 @@ mod tests {
     }
 
     async fn test_local_simple_aggregation(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { I64Array, [200, 14, 300] },
-                // primary key column
-                column_nonnull! { I64Array, [1001, 1002, 1003] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_str(
+            "   I   I    I
+            + 100 200 1001
+            +  10  14 1002
+            +   4 300 1003",
         );
-        let chunk2 = StreamChunk::new(
-            vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4, 104] },
-                column_nonnull! { I64Array, [200, 14, 300, 500] },
-                // primary key column
-                column_nonnull! { I64Array, [1001, 1002, 1003, 1004] },
-            ],
-            Some((vec![true, false, true, true]).try_into().unwrap()),
+        let chunk2 = StreamChunk::from_str(
+            "   I   I    I
+            - 100 200 1001
+            -  10  14 1002 D
+            -   4 300 1003
+            + 104 500 1004",
         );
         let schema = Schema {
             fields: vec![
@@ -366,45 +356,26 @@ mod tests {
         simple_agg.next().await.unwrap().unwrap();
         // Consume stream chunk
         let msg = simple_agg.next().await.unwrap().unwrap();
-        if let Message::Chunk(chunk) = msg {
-            let (data_chunk, ops) = chunk.into_parts();
-            let rows = ops
-                .into_iter()
-                .zip_eq(data_chunk.rows().map(Row::from))
-                .collect_vec();
-            let expected_rows = [(Op::Insert, row_nonnull![3_i64, 114_i64, 514_i64, 4_i64])];
-
-            assert_eq!(rows, expected_rows);
-        } else {
-            unreachable!("unexpected message {:?}", msg);
-        }
-
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_str(
+                " I   I   I  I
+                + 3 114 514  4"
+            )
+        );
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
             Message::Barrier { .. }
         );
 
         let msg = simple_agg.next().await.unwrap().unwrap();
-        if let Message::Chunk(chunk) = msg {
-            let (data_chunk, ops) = chunk.into_parts();
-            let rows = ops
-                .into_iter()
-                .zip_eq(data_chunk.rows().map(Row::from))
-                .collect_vec();
-            let expected_rows = [
-                (
-                    Op::UpdateDelete,
-                    row_nonnull![3_i64, 114_i64, 514_i64, 4_i64],
-                ),
-                (
-                    Op::UpdateInsert,
-                    row_nonnull![2_i64, 114_i64, 514_i64, 10_i64],
-                ),
-            ];
-
-            assert_eq!(rows, expected_rows);
-        } else {
-            unreachable!("unexpected message {:?}", msg);
-        }
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_str(
+                "  I   I   I  I
+                U- 3 114 514  4
+                U+ 2 114 514 10"
+            )
+        );
     }
 }
