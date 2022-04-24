@@ -21,7 +21,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::TableRefId;
+use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 use risingwave_pb::ProstFieldNotFound;

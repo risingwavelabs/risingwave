@@ -22,7 +22,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::ColumnOrder;
+use risingwave_pb::plan_common::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::Field;
+use risingwave_pb::plan_common::Field;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     ArrangeNode, DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, StreamNode, UnionNode,

@@ -14,9 +14,9 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::values_node::ExprTuple;
-use risingwave_pb::plan::ValuesNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::values_node::ExprTuple;
+use risingwave_pb::batch_plan::ValuesNode;
 
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
@@ -91,13 +91,14 @@ fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
 #[cfg(test)]
 mod tests {
 
+    use risingwave_pb::batch_plan::plan_node::NodeBody;
+    use risingwave_pb::batch_plan::values_node::ExprTuple;
+    use risingwave_pb::batch_plan::ValuesNode;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::{ConstantValue, ExprNode};
-    use risingwave_pb::plan::plan_node::NodeBody;
-    use risingwave_pb::plan::values_node::ExprTuple;
-    use risingwave_pb::plan::{Field, ValuesNode};
+    use risingwave_pb::plan_common::Field;
 
     use crate::expr::ExprType;
     use crate::test_utils::LocalFrontend;

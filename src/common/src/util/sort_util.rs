@@ -16,7 +16,7 @@ use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
+use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;

@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::BoundSelect;
 use crate::expr::{

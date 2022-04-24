@@ -21,8 +21,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::PlanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 use sort_agg::*;
 use top_n::*;
@@ -249,7 +249,7 @@ impl<'a> ExecutorBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::PlanNode;
+    use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
     use crate::task::{BatchEnvironment, TaskId};

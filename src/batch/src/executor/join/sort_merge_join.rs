@@ -21,8 +21,8 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::OrderType as OrderTypeProst;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;

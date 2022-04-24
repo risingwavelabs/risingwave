@@ -19,7 +19,7 @@ use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::{
     CreateRequest, CreateResponse, DropRequest, DropResponse, GetCatalogRequest, GetCatalogResponse,
 };
-use risingwave_pb::plan::DatabaseRefId;
+use risingwave_pb::plan_common::DatabaseRefId;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv, StoredCatalogManagerRef};

@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::{build_from_prost, RowExpression};
-use risingwave_pb::plan::JoinType as JoinTypeProto;
+use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
