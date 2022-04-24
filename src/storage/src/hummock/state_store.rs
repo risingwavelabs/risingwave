@@ -212,9 +212,6 @@ impl StateStore for HummockStorage {
                 // Query shared buffer. Return the value without iterating SSTs if found
                 for shared_buffer in read_version.shared_buffer {
                     for batch in shared_buffer.get_overlap_batches(&(key..=key), false) {
-                        if batch.start_user_key() > key {
-                            continue;
-                        }
                         match batch.get(key) {
                             Some(v) => {
                                 self.stats.get_shared_buffer_hit_counts.inc();
