@@ -6,9 +6,9 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.computenode";
 option optimize_for = SPEED;
 
+import "batch_plan.proto";
 import "common.proto";
 import "data.proto";
-import "batch_plan.proto";
 
 // Task is a running instance of Stage.
 message TaskId {
