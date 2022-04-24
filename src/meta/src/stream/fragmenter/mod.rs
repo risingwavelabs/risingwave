@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+mod rewrite;
+
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -28,7 +31,6 @@ use risingwave_pb::stream_plan::{
 
 use super::graph::StreamFragmentEdge;
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
-use crate::cluster::ParallelUnitId;
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{FragmentId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
@@ -41,14 +43,14 @@ pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
     pub(super) fragment_graph: StreamFragmentGraph,
 
+    /// fragment manager, used to retrieve upstream table fragment infos (dist_keys, actor_ids).
+    pub(super) fragment_manager: FragmentManagerRef<S>,
+
     /// stream graph builder, to build streaming DAG.
-    stream_graph: StreamGraphBuilder<S>,
+    stream_graph: StreamGraphBuilder,
 
     /// id generator, used to generate actor id.
     id_gen_manager: IdGeneratorManagerRef<S>,
-
-    /// hash mapping, used for hash dispatcher
-    hash_mapping: Vec<ParallelUnitId>,
 
     /// local fragment id
     next_local_fragment_id: u32,
@@ -63,6 +65,15 @@ pub struct StreamFragmenter<S> {
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
 
+    /// degree of parallelism
+    parallel_degree: u32,
+
+    /// dependent table ids
+    dependent_table_ids: HashSet<TableId>,
+
+    /// upstream dispatch keys
+    distribution_keys: Vec<i32>,
+
     // TODO: remove this when we deprecate Java frontend.
     is_legacy_frontend: bool,
 }
@@ -74,18 +85,21 @@ where
     pub fn new(
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        hash_mapping: Vec<ParallelUnitId>,
+        parallel_degree: u32,
         is_legacy_frontend: bool,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
-            stream_graph: StreamGraphBuilder::new(fragment_manager),
+            fragment_manager,
+            stream_graph: Default::default(),
             id_gen_manager,
-            hash_mapping,
             next_local_fragment_id: 0,
             next_local_actor_id: 0,
             next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
+            parallel_degree,
+            dependent_table_ids: HashSet::new(),
+            distribution_keys: Vec::new(),
             is_legacy_frontend,
         }
     }
@@ -107,6 +121,19 @@ where
         self.generate_fragment_graph(stream_node)?;
         // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
 
+        // save distribution key and dependent table ids in ctx
+        ctx.distribution_keys = self.distribution_keys.clone();
+        ctx.dependent_table_ids = self.dependent_table_ids.clone();
+
+        // resolve upstream table infos first
+        // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
+        // stream manager and remove dependency on fragment manager.
+        let info = self
+            .fragment_manager
+            .get_build_graph_info(&self.dependent_table_ids)
+            .await?;
+        self.stream_graph.fill_info(info);
+
         let fragment_len = self.fragment_graph.fragment_len() as u32;
         assert_eq!(fragment_len, self.next_local_fragment_id);
         let offset = self
@@ -125,7 +152,29 @@ where
             .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
             .await? as _;
 
-        let stream_graph = self.stream_graph.build(ctx, start_actor_id, actor_len)?;
+        // Compute how many table ids should be allocated for all actors.
+        let mut table_ids_cnt = 0;
+        for (local_fragment_id, fragment) in self.fragment_graph.fragments() {
+            let num_of_actors = self
+                .fragment_actors
+                .get(local_fragment_id)
+                .expect("Fragment should have at least one actor")
+                .len();
+            // Total table ids number equals to table ids cnt in all actors.
+            table_ids_cnt += num_of_actors * fragment.table_ids_cnt;
+        }
+        let start_table_id = self
+            .id_gen_manager
+            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+            .await? as _;
+
+        let stream_graph = self.stream_graph.build(
+            ctx,
+            start_actor_id,
+            actor_len,
+            start_table_id,
+            table_ids_cnt as u32,
+        )?;
 
         // Serialize the graph
         stream_graph
@@ -185,7 +234,7 @@ where
                             r#type: DispatcherType::NoShuffle.into(),
                             column_indices: vec![],
                         };
-
+                        let append_only = child_node.append_only;
                         StreamNode {
                             pk_indices: child_node.pk_indices.clone(),
                             fields: child_node.fields.clone(),
@@ -195,6 +244,7 @@ where
                             operator_id: self.gen_operator_id() as u64,
                             input: vec![child_node],
                             identity: "Exchange (NoShuffle)".to_string(),
+                            append_only,
                         }
                     } else {
                         self.rewrite_stream_node_inner(child_node, true)?
@@ -219,10 +269,7 @@ where
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    pub(super) fn build_and_add_fragment(
-        &mut self,
-        stream_node: StreamNode,
-    ) -> Result<StreamFragment> {
+    fn build_and_add_fragment(&mut self, stream_node: StreamNode) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment();
         let node = self.build_fragment(&mut fragment, stream_node)?;
         fragment.seal_node(node);
@@ -231,7 +278,8 @@ where
     }
 
     /// Build new fragment and link dependencies by visiting children recursively, update
-    /// `is_singleton` and `fragment_type` properties for current fragment.
+    /// `is_singleton` and `fragment_type` properties for current fragment. While traversing the
+    /// tree, count how many table ids should be allocated in this fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
         &mut self,
@@ -242,19 +290,46 @@ where
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
 
-            Node::MaterializeNode(_) => current_fragment.fragment_type = FragmentType::Sink,
+            Node::MaterializeNode(ref node) => {
+                current_fragment.fragment_type = FragmentType::Sink;
+                // store distribution keys, later it will be persisted with `TableFragment`
+                assert!(self.distribution_keys.is_empty()); // should have only one sink node.
+                self.distribution_keys = node.distribution_keys.clone();
+            }
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
 
-            // TODO: Remove this when we deprecate Java frontend.
-            Node::ChainNode(_) => current_fragment.is_singleton = self.is_legacy_frontend,
+            Node::ChainNode(ref node) => {
+                // TODO: Remove this when we deprecate Java frontend.
+                current_fragment.is_singleton = self.is_legacy_frontend;
+
+                // memorize table id for later use
+                self.dependent_table_ids
+                    .insert(TableId::from(&node.table_ref_id));
+            }
 
             _ => {}
         };
 
-        let inputs = std::mem::take(&mut stream_node.input);
+        // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+        // with only equal conditions
+        if let Node::HashJoinNode(hash_join_node) = stream_node.get_node()? {
+            current_fragment.table_ids_cnt += 2;
+            if hash_join_node.is_delta_join {
+                if hash_join_node.get_join_type()? == JoinType::Inner
+                    && hash_join_node.condition.is_none()
+                {
+                    return self.build_delta_join(current_fragment, stream_node);
+                } else {
+                    panic!(
+                        "only inner join without non-equal condition is supported for delta joins"
+                    );
+                }
+            }
+        }
 
+        let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
         let inputs = inputs
             .into_iter()
@@ -288,22 +363,7 @@ where
                         if is_simple_dispatcher {
                             current_fragment.is_singleton = true;
                         }
-
                         Ok(child_node)
-                    }
-
-                    // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-                    // with only equal conditions
-                    Node::HashJoinNode(hash_join_node)
-                        if hash_join_node.get_join_type()? == JoinType::Inner
-                            && hash_join_node.condition.is_none() =>
-                    {
-                        const ENABLE_DELTA_JOIN: bool = false;
-                        if ENABLE_DELTA_JOIN {
-                            self.build_delta_join(current_fragment, child_node)
-                        } else {
-                            self.build_fragment(current_fragment, child_node)
-                        }
                     }
 
                     // For other children, visit recursively.
@@ -335,7 +395,7 @@ where
     }
 
     /// Generate an operator id
-    pub(super) fn gen_operator_id(&mut self) -> u32 {
+    fn gen_operator_id(&mut self) -> u32 {
         self.next_operator_id -= 1;
         self.next_operator_id
     }
@@ -350,7 +410,7 @@ where
         let parallel_degree = if current_fragment.is_singleton {
             1
         } else {
-            self.hash_mapping.iter().unique().count() as u32
+            self.parallel_degree
         };
 
         let node = Arc::new(current_fragment.get_node().clone());
@@ -361,8 +421,7 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            let actor_builder =
-                StreamActorBuilder::new(*id, fragment_id, node.clone(), parallel_degree);
+            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
             self.stream_graph.add_actor(actor_builder);
         }
 
@@ -376,52 +435,8 @@ where
                 .clone();
 
             match dispatch_edge.dispatch_strategy.get_type()? {
-                // Construct a consistent hash mapping of actors based on that of parallel units.
-                // Set the new mapping into hash dispatchers.
-                DispatcherType::Hash => {
-                    // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as
-                    // the number of its downstream actors. However, since the
-                    // frontend optimizer is still WIP, there exists some
-                    // unoptimized situation where a hash dispatcher has ONLY
-                    // ONE downstream actor, which makes it behave like a simple dispatcher. As an
-                    // expedient, we specially compute the consistent hash mapping here. The `if`
-                    // branch could be removed after the optimizer has been fully implemented.
-
-                    let streaming_hash_mapping = if downstream_actors.len() == 1 {
-                        Some(vec![downstream_actors[0]; self.hash_mapping.len()])
-                    } else {
-                        let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
-                        assert_eq!(downstream_actors.len(), hash_parallel_units.len());
-                        let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
-                            .into_iter()
-                            .zip_eq(downstream_actors.iter().copied())
-                            .collect();
-                        Some(
-                            self.hash_mapping
-                                .iter()
-                                .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
-                                .collect_vec(),
-                        )
-                    };
-
-                    let dispatcher = Dispatcher {
-                        r#type: DispatcherType::Hash.into(),
-                        column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
-                        hash_mapping: None,
-                        downstream_actor_id: vec![],
-                    };
-
-                    self.stream_graph.add_link(
-                        &actor_ids,
-                        &downstream_actors,
-                        dispatch_edge.link_id,
-                        dispatcher,
-                        dispatch_edge.same_worker_node,
-                        streaming_hash_mapping,
-                    );
-                }
-
-                ty @ (DispatcherType::Simple
+                ty @ (DispatcherType::Hash
+                | DispatcherType::Simple
                 | DispatcherType::Broadcast
                 | DispatcherType::NoShuffle) => {
                     self.stream_graph.add_link(
@@ -435,7 +450,6 @@ where
                             downstream_actor_id: vec![],
                         },
                         dispatch_edge.same_worker_node,
-                        None,
                     );
                 }
                 DispatcherType::Invalid => unreachable!(),
@@ -460,7 +474,7 @@ where
         let mut actionable_fragment_id = VecDeque::new();
         let mut downstream_cnts = HashMap::new();
 
-        // Iterator all fragments
+        // Iterate all fragments
         for (fragment_id, _) in self.fragment_graph.fragments().iter() {
             // Count how many downstreams we have for a given fragment
             let downstream_cnt = self.fragment_graph.get_downstreams(*fragment_id).len();

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -49,7 +49,6 @@ impl Binder {
             let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
-                "like" => ExprType::Like,
                 "upper" => ExprType::Upper,
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
@@ -57,13 +56,6 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
-                "case" => ExprType::Case,
-                "is true" => ExprType::IsTrue,
-                "is not true" => ExprType::IsNotTrue,
-                "is false" => ExprType::IsFalse,
-                "is not false" => ExprType::IsNotFalse,
-                "is null" => ExprType::IsNull,
-                "is not null" => ExprType::IsNotNull,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -76,10 +68,7 @@ impl Binder {
                     .into())
                 }
             };
-            Ok(FunctionCall::new_or_else(function_type, inputs, |args| {
-                Self::err_unsupported_func(&function_name, args)
-            })?
-            .into())
+            Ok(FunctionCall::new(function_type, inputs)?.into())
         } else {
             Err(ErrorCode::NotImplemented(
                 format!("unsupported function: {:?}", f.name),
@@ -87,18 +76,6 @@ impl Binder {
             )
             .into())
         }
-    }
-
-    fn err_unsupported_func(function_name: &str, inputs: &[ExprImpl]) -> RwError {
-        let args = inputs
-            .iter()
-            .map(|i| format!("{:?}", i.return_type()))
-            .join(",");
-        ErrorCode::NotImplemented(
-            format!("function {}({}) doesn't exist", function_name, args),
-            112.into(),
-        )
-        .into()
     }
 
     /// Rewrite the arguments to be consistent with the `round` signature:

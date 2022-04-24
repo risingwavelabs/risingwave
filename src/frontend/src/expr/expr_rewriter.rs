@@ -34,7 +34,7 @@ pub trait ExprRewriter {
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+        FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let (func_type, inputs) = agg_call.decompose();

@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 
-use super::error::TracedStreamExecutorError;
+use super::error::StreamExecutorError;
 use super::{Barrier, Executor, Message, Mutation, PkIndices, StreamChunk};
 
 pub struct MockSource {
@@ -96,7 +96,7 @@ impl MockSource {
 }
 
 impl MockSource {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let mut epoch = 0;
 

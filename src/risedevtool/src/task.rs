@@ -27,17 +27,21 @@ mod prometheus_service;
 mod task_configure_grpc_node;
 mod task_configure_minio;
 mod task_etcd_ready_check;
+mod task_kafka_ready_check;
 mod zookeeper_service;
 
 use std::env;
+use std::io::Read;
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
-use isahc::Body;
+use isahc::prelude::*;
+use isahc::Request;
 use tempfile::TempDir;
 
 pub use self::compute_node_service::*;
@@ -55,9 +59,10 @@ pub use self::prometheus_service::*;
 pub use self::task_configure_grpc_node::*;
 pub use self::task_configure_minio::*;
 pub use self::task_etcd_ready_check::*;
+pub use self::task_kafka_ready_check::*;
 pub use self::zookeeper_service::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
-use crate::wait_tcp::{wait_http, wait_http_with_cb, wait_tcp, wait_tcp_available};
+use crate::wait::{wait, wait_tcp_available};
 
 pub trait Task: 'static + Send {
     /// Execute the task
@@ -156,8 +161,12 @@ where
     }
 
     pub fn wait_tcp(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        wait_tcp(
-            server,
+        let addr = server.as_ref().parse()?;
+        wait(
+            || {
+                TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
+                Ok(())
+            },
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
@@ -168,8 +177,21 @@ where
     }
 
     pub fn wait_http(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        wait_http(
-            server,
+        let server = server.as_ref();
+        wait(
+            || {
+                let resp = Request::get(server)
+                    .connect_timeout(Duration::from_secs(1))
+                    .timeout(Duration::from_secs(1))
+                    .body("")
+                    .unwrap()
+                    .send()?;
+                if resp.status().is_success() {
+                    Ok(())
+                } else {
+                    Err(anyhow!("http failed with status: {}", resp.status()))
+                }
+            },
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
@@ -181,27 +203,65 @@ where
     pub fn wait_http_with_cb(
         &mut self,
         server: impl AsRef<str>,
-        cb: impl Fn(Body) -> bool,
+        cb: impl Fn(&str) -> bool,
     ) -> anyhow::Result<()> {
-        wait_http_with_cb(
-            server,
+        let server = server.as_ref();
+        wait(
+            || {
+                let resp = Request::get(server)
+                    .connect_timeout(Duration::from_secs(1))
+                    .timeout(Duration::from_secs(1))
+                    .body("")
+                    .unwrap()
+                    .send()?;
+                if resp.status().is_success() {
+                    let mut data = String::new();
+                    resp.into_body().read_to_string(&mut data)?;
+                    if cb(&data) {
+                        Ok(())
+                    } else {
+                        Err(anyhow!(
+                            "http health check callback failed with body: {:?}",
+                            data
+                        ))
+                    }
+                } else {
+                    Err(anyhow!("http failed with status: {}", resp.status()))
+                }
+            },
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
             Some(Duration::from_secs(30)),
             true,
-            cb,
         )
     }
 
+    pub fn wait(&mut self, wait_func: impl FnMut() -> Result<()>) -> anyhow::Result<()> {
+        wait(
+            wait_func,
+            &mut self.log,
+            self.status_file.as_ref().unwrap(),
+            self.id.as_ref().unwrap(),
+            Some(Duration::from_secs(30)),
+            true,
+        )
+    }
+
+    /// Wait for a TCP port to close
     pub fn wait_tcp_close(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
         wait_tcp_available(server, Some(Duration::from_secs(30)))?;
         Ok(())
     }
 
+    /// Wait for a user-managed service to be available
     pub fn wait_tcp_user(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
-        wait_tcp(
-            server,
+        let addr = server.as_ref().parse()?;
+        wait(
+            || {
+                TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
+                Ok(())
+            },
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
