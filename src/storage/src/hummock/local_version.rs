@@ -55,7 +55,7 @@ impl LocalVerion {
     pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
         self.shared_buffer
             .entry(epoch)
-            .or_insert(Arc::new(RwLock::new(SharedBuffer::default())))
+            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::default())))
             .clone()
     }
 
