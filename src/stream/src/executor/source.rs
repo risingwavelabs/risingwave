@@ -394,11 +394,11 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                         } else {
                             unreachable!()
                         };
-                        let state_cache = self.state_cache.take().unwrap();
-                        self.state_store
-                            .take_snapshot(vec![state_cache], epoch_prev)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+                        // let state_cache = self.state_cache.take().unwrap();
+                        // self.state_store
+                        //     .take_snapshot(vec![state_cache], epoch_prev)
+                        //     .await
+                        //     .map_err(|e| RwError::from(InternalError(e.to_string())))?;
                         message
                     }
 
@@ -510,7 +510,10 @@ mod tests {
             panic!()
         };
         assert_eq!(store_splits.len(), 1);
-        assert_eq!(store_splits[0].to_string()?, source_split.to_string()?);
+        assert_eq!(
+            store_splits[0].to_json_bytes()?,
+            source_split.to_json_bytes()?
+        );
 
         // let state = KafkaSplit::new(0, Some(1), None, "demo_topic".to_string());
         let state = ConnectorState {
@@ -536,8 +539,8 @@ mod tests {
         };
 
         assert_eq!(
-            store_splits.to_string().unwrap(),
-            state.to_string().unwrap()
+            store_splits.to_json_bytes().unwrap(),
+            state.to_json_bytes().unwrap()
         );
 
         Ok(())

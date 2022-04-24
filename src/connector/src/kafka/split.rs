@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
@@ -30,8 +31,10 @@ impl SplitMetaData for KafkaSplit {
         format!("{}", self.partition)
     }
 
-    fn to_string(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    fn to_json_bytes(&self) -> anyhow::Result<Bytes> {
+        Ok(Bytes::from(
+            serde_json::to_string(self).map_err(|e| anyhow!(e))?,
+        ))
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {

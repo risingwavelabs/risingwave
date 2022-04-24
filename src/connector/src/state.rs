@@ -117,9 +117,9 @@ impl<S: StateStore> SourceStateHandler<S> {
             states.iter().for_each(|state| {
                 // state inner key format (state_identifier | epoch)
                 let inner_key = StateStoredKey::new(state.id(), epoch).build_stored_key();
-                let value: String = state.to_string().unwrap();
+                let value: Bytes = state.to_json_bytes().unwrap();
                 // TODO(Yuanxin): Implement value meta
-                local_batch.put(inner_key, StorageValue::new_default_put(Bytes::from(value)));
+                local_batch.put(inner_key, StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
             let ingest_rs = write_batch.ingest(epoch).await;
@@ -191,8 +191,10 @@ mod tests {
             self.partition.clone()
         }
 
-        fn to_string(&self) -> Result<String> {
-            serde_json::to_string(self).map_err(|e| anyhow!(e))
+        fn to_json_bytes(&self) -> Result<Bytes> {
+            Ok(Bytes::from(
+                serde_json::to_string(self).map_err(|e| anyhow!(e))?,
+            ))
         }
 
         fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
@@ -249,7 +251,7 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
 
-        let encode_value = Bytes::from(state_instance.to_string()?);
+        let encode_value = state_instance.to_json_bytes()?;
         let decode_value = TestSourceState::restore_from_bytes(encode_value.as_ref())?;
         assert_eq!(offset, decode_value.offset);
         assert_eq!(partition, decode_value.partition);

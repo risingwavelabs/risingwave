@@ -50,7 +50,7 @@ pub struct SourceMessage {
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
-    fn to_string(&self) -> Result<String>;
+    fn to_json_bytes(&self) -> Result<Bytes>;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
@@ -67,8 +67,10 @@ impl SplitMetaData for ConnectorState {
         String::from_utf8(self.identifier.to_vec()).unwrap()
     }
 
-    fn to_string(&self) -> Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    fn to_json_bytes(&self) -> Result<Bytes> {
+        Ok(Bytes::from(
+            serde_json::to_string(self).map_err(|e| anyhow!(e))?,
+        ))
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
@@ -154,11 +156,11 @@ impl SplitImpl {
         }
     }
 
-    pub fn to_string(&self) -> Result<String> {
+    pub fn to_json_bytes(&self) -> Result<Bytes> {
         match self {
-            SplitImpl::Kafka(k) => k.to_string(),
-            SplitImpl::Pulsar(p) => p.to_string(),
-            SplitImpl::Kinesis(k) => k.to_string(),
+            SplitImpl::Kafka(k) => k.to_json_bytes(),
+            SplitImpl::Pulsar(p) => p.to_json_bytes(),
+            SplitImpl::Kinesis(k) => k.to_json_bytes(),
         }
     }
 
@@ -223,8 +225,8 @@ mod tests {
             start_offset: "".to_string(),
             end_offset: "".to_string(),
         };
-        println!("state: {:?}", state.to_string()?);
-        let state_to_byte = Bytes::from(state.to_string()?);
+        println!("state: {:?}", state.to_json_bytes()?);
+        let state_to_byte = state.to_json_bytes()?;
         let recover_state = ConnectorState::restore_from_bytes(&state_to_byte)?;
         assert_eq!(recover_state.id(), state.id());
         Ok(())
