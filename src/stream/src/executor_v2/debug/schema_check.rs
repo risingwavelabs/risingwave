@@ -80,6 +80,7 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, StreamExt};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -90,7 +91,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_ok() {
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             "   I     F
             + 100 200.0
             +  10  14.0
@@ -117,7 +118,7 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_schema_bad() {
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             "   I   I
             + 100 200
             +  10  14

@@ -174,6 +174,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -187,14 +188,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter() {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             " I I
             + 1 4
             + 5 2
             + 6 6
             - 7 5",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             "  I I
             U- 5 3  // true -> true
             U+ 7 5  // expect UpdateDelete, UpdateInsert
@@ -227,7 +228,7 @@ mod tests {
         let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(
             chunk,
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I
                 + 1 4 D
                 + 5 2
@@ -239,7 +240,7 @@ mod tests {
         let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(
             chunk,
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 U- 5 3
                 U+ 7 5

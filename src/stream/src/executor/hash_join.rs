@@ -712,6 +712,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> StatefulExecutorV1
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::Key64;
@@ -790,24 +791,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 3 10
              + 6 11",
@@ -822,7 +823,10 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the init barrier for left and right
         MockAsyncSource::push_barrier(&mut tx_l, 1, false);
@@ -832,14 +836,17 @@ mod tests {
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 2 5 2 7"
             )
@@ -850,7 +857,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 3 6 3 10"
             )
@@ -859,24 +866,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join_with_barrier() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 6 8
              + 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 3 10
              + 6 11",
@@ -891,7 +898,10 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push a barrier to left side
         MockAsyncSource::push_barrier(&mut tx_l, 2, false);
@@ -906,7 +916,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 2 5 2 7"
             )
@@ -930,7 +940,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 6 8 6 9"
             )
@@ -941,7 +951,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 3 6 3 10
                 + 3 8 3 10
@@ -952,24 +962,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_left_join() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 3 10
              + 6 11",
@@ -986,7 +996,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 1 4 . .
                 + 2 5 . .
@@ -999,7 +1009,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
                 - 3 8 . ."
@@ -1011,7 +1021,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I I
                 U- 2 5 . .
                 U+ 2 5 2 7"
@@ -1023,7 +1033,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I I
                 U- 3 6 . .
                 U+ 3 6 3 10"
@@ -1033,24 +1043,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_right_join() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 5 10
              - 5 10",
@@ -1066,19 +1076,25 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 2 5 2 7
                 + . . 4 8
@@ -1091,7 +1107,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
                 - . . 5 10"
@@ -1101,24 +1117,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_full_outer_join() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 5 10
              - 5 10",
@@ -1135,7 +1151,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 1 4 . .
                 + 2 5 . .
@@ -1148,7 +1164,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
                 - 3 8 . ."
@@ -1160,7 +1176,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I I
                 U- 2 5 . .
                 U+ 2 5 2 7
@@ -1174,7 +1190,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
                 - . . 5 10"
@@ -1184,24 +1200,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 5
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 6
              + 4 8
              + 3 4",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 5 10
              - 5 10",
@@ -1218,7 +1234,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 1 4 . .
                 + 2 5 . .
@@ -1231,7 +1247,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
                 - 3 8 . ."
@@ -1243,7 +1259,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I I
                 U- 2 5 . .
                 U+ 2 5 2 6
@@ -1257,7 +1273,7 @@ mod tests {
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
                 - . . 5 10"
@@ -1267,24 +1283,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join_with_nonequi_condition() {
-        let chunk_l1 = StreamChunk::from_str(
+        let chunk_l1 = StreamChunk::from_pretty(
             "  I I
              + 1 4
              + 2 10
              + 3 6",
         );
-        let chunk_l2 = StreamChunk::from_str(
+        let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
              - 3 8",
         );
-        let chunk_r1 = StreamChunk::from_str(
+        let chunk_r1 = StreamChunk::from_pretty(
             "  I I
              + 2 7
              + 4 8
              + 6 9",
         );
-        let chunk_r2 = StreamChunk::from_str(
+        let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 3 10
              + 6 11",
@@ -1299,24 +1315,33 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         let chunk = hash_join.next().await.unwrap();
-        assert_eq!(*chunk.as_chunk().unwrap(), StreamChunk::from_str("I I I I"));
+        assert_eq!(
+            *chunk.as_chunk().unwrap(),
+            StreamChunk::from_pretty("I I I I")
+        );
 
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         let chunk = hash_join.next().await.unwrap();
         assert_eq!(
             *chunk.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 3 6 3 10"
             )

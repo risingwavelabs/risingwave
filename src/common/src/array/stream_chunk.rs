@@ -88,123 +88,6 @@ impl StreamChunk {
         StreamChunk { ops, data }
     }
 
-    /// Parse a chunk from string.
-    ///
-    /// # Format
-    ///
-    /// The first line is a header indicating the column types.
-    /// The following lines indicate rows within the chunk.
-    /// Each line starts with an operation followed by values.
-    /// NULL values are represented as `.`.
-    ///
-    /// # Example
-    /// ```
-    /// use risingwave_common::array::StreamChunk;
-    /// let chunk = StreamChunk::from_str(
-    ///     "  I I I I      // type chars
-    ///     U- 2 5 . .      // '.' means NULL
-    ///     U+ 2 5 2 6 D    // 'D' means deleted in visibility
-    ///     +  . . 4 8      // ^ comments are ignored
-    ///     -  . . 3 4",
-    /// );
-    /// //  ^ operations:
-    /// //     +: Insert
-    /// //     -: Delete
-    /// //    U+: UpdateInsert
-    /// //    U-: UpdateDelete
-    ///
-    /// // type chars:
-    /// //     I: i64
-    /// //     i: i32
-    /// //     F: f64
-    /// //     f: f32
-    /// //    TS: Timestamp
-    /// ```
-    pub fn from_str(s: &str) -> Self {
-        use crate::types::ScalarImpl;
-
-        let mut lines = s.split('\n');
-        let mut ops = vec![];
-        // initialize array builders from the first line
-        let header = lines.next().unwrap().trim();
-        let mut array_builders = header
-            .split_ascii_whitespace()
-            .take_while(|c| *c != "//")
-            .map(|c| match c {
-                "I" => DataType::Int64,
-                "i" => DataType::Int32,
-                "F" => DataType::Float64,
-                "f" => DataType::Float32,
-                "TS" => DataType::Timestamp,
-                _ => todo!("unsupported type: {c:?}"),
-            })
-            .map(|ty| ty.create_array_builder(1))
-            .collect::<Result<Vec<_>>>()
-            .unwrap();
-        let mut visibility = vec![];
-        for mut line in lines {
-            line = line.trim();
-            let mut token = line.split_ascii_whitespace();
-            let op = match token.next().expect("missing operation") {
-                "+" => Op::Insert,
-                "-" => Op::Delete,
-                "U+" => Op::UpdateInsert,
-                "U-" => Op::UpdateDelete,
-                t => panic!("invalid op: {t:?}"),
-            };
-            ops.push(op);
-            for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
-                let datum = match val_str {
-                    "." => None,
-                    s if matches!(builder, ArrayBuilderImpl::Int32(_)) => Some(ScalarImpl::Int32(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int32: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Int64(_)) => Some(ScalarImpl::Int64(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int64: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
-                        Some(ScalarImpl::Float64(
-                            s.parse()
-                                .map_err(|_| panic!("invalid float64: {s:?}"))
-                                .unwrap(),
-                        ))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::NaiveDateTime(_)) => {
-                        Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                            s.parse()
-                                .map_err(|_| panic!("invalid datetime: {s:?}"))
-                                .unwrap(),
-                        )))
-                    }
-                    _ => panic!("invalid data type"),
-                };
-                builder
-                    .append_datum(&datum)
-                    .expect("failed to append datum");
-            }
-            let visible = match token.next() {
-                None | Some("//") => true,
-                Some("D") => false,
-                Some(t) => panic!("invalid token: {t:?}"),
-            };
-            visibility.push(visible);
-        }
-        let columns = array_builders
-            .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
-            .collect();
-        let visibility = if visibility.iter().all(|b| *b) {
-            None
-        } else {
-            Some(Bitmap::try_from(visibility).unwrap())
-        };
-        StreamChunk::new(ops, columns, visibility)
-    }
-
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
     pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Result<Self> {
@@ -387,6 +270,130 @@ impl fmt::Debug for StreamChunk {
             self.capacity(),
             self.to_pretty_string()
         )
+    }
+}
+
+/// Test utilities for [`StreamChunk`].
+pub trait StreamChunkTestExt {
+    fn from_pretty(s: &str) -> Self;
+}
+
+impl StreamChunkTestExt for StreamChunk {
+    /// Parse a chunk from string.
+    ///
+    /// # Format
+    ///
+    /// The first line is a header indicating the column types.
+    /// The following lines indicate rows within the chunk.
+    /// Each line starts with an operation followed by values.
+    /// NULL values are represented as `.`.
+    ///
+    /// # Example
+    /// ```
+    /// use risingwave_common::array::StreamChunk;
+    /// let chunk = StreamChunk::from_str(
+    ///     "  I I I I      // type chars
+    ///     U- 2 5 . .      // '.' means NULL
+    ///     U+ 2 5 2 6 D    // 'D' means deleted in visibility
+    ///     +  . . 4 8      // ^ comments are ignored
+    ///     -  . . 3 4",
+    /// );
+    /// //  ^ operations:
+    /// //     +: Insert
+    /// //     -: Delete
+    /// //    U+: UpdateInsert
+    /// //    U-: UpdateDelete
+    ///
+    /// // type chars:
+    /// //     I: i64
+    /// //     i: i32
+    /// //     F: f64
+    /// //     f: f32
+    /// //    TS: Timestamp
+    /// ```
+    fn from_pretty(s: &str) -> Self {
+        use crate::types::ScalarImpl;
+
+        let mut lines = s.split('\n');
+        let mut ops = vec![];
+        // initialize array builders from the first line
+        let header = lines.next().unwrap().trim();
+        let mut array_builders = header
+            .split_ascii_whitespace()
+            .take_while(|c| *c != "//")
+            .map(|c| match c {
+                "I" => DataType::Int64,
+                "i" => DataType::Int32,
+                "F" => DataType::Float64,
+                "f" => DataType::Float32,
+                "TS" => DataType::Timestamp,
+                _ => todo!("unsupported type: {c:?}"),
+            })
+            .map(|ty| ty.create_array_builder(1))
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let mut visibility = vec![];
+        for mut line in lines {
+            line = line.trim();
+            let mut token = line.split_ascii_whitespace();
+            let op = match token.next().expect("missing operation") {
+                "+" => Op::Insert,
+                "-" => Op::Delete,
+                "U+" => Op::UpdateInsert,
+                "U-" => Op::UpdateDelete,
+                t => panic!("invalid op: {t:?}"),
+            };
+            ops.push(op);
+            for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
+                let datum = match val_str {
+                    "." => None,
+                    s if matches!(builder, ArrayBuilderImpl::Int32(_)) => Some(ScalarImpl::Int32(
+                        s.parse()
+                            .map_err(|_| panic!("invalid int32: {s:?}"))
+                            .unwrap(),
+                    )),
+                    s if matches!(builder, ArrayBuilderImpl::Int64(_)) => Some(ScalarImpl::Int64(
+                        s.parse()
+                            .map_err(|_| panic!("invalid int64: {s:?}"))
+                            .unwrap(),
+                    )),
+                    s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
+                        Some(ScalarImpl::Float64(
+                            s.parse()
+                                .map_err(|_| panic!("invalid float64: {s:?}"))
+                                .unwrap(),
+                        ))
+                    }
+                    s if matches!(builder, ArrayBuilderImpl::NaiveDateTime(_)) => {
+                        Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                            s.parse()
+                                .map_err(|_| panic!("invalid datetime: {s:?}"))
+                                .unwrap(),
+                        )))
+                    }
+                    _ => panic!("invalid data type"),
+                };
+                builder
+                    .append_datum(&datum)
+                    .expect("failed to append datum");
+            }
+            let visible = match token.next() {
+                None | Some("//") => true,
+                Some("D") => false,
+                Some(t) => panic!("invalid token: {t:?}"),
+            };
+            visibility.push(visible);
+        }
+        let columns = array_builders
+            .into_iter()
+            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .collect();
+        let visibility = if visibility.iter().all(|b| *b) {
+            None
+        } else {
+            Some(Bitmap::try_from(visibility).unwrap())
+        };
+        StreamChunk::new(ops, columns, visibility)
     }
 }
 

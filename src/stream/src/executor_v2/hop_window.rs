@@ -251,6 +251,7 @@ impl HopWindowExecutor {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, IntervalUnit};
 
@@ -265,7 +266,7 @@ mod tests {
         let schema = Schema::new(vec![field1, field2, field3]);
         let pk_indices = vec![0];
 
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             &"I I TS
             + 1 1 ^10:00:00
             + 2 3 ^10:05:00
@@ -304,7 +305,7 @@ mod tests {
         let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(
             chunk,
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 &"I I TS        TS        TS
                 + 1 1 ^10:00:00 ^09:45:00 ^10:15:00
                 + 2 3 ^10:05:00 ^09:45:00 ^10:15:00
@@ -321,7 +322,7 @@ mod tests {
         let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(
             chunk,
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 &"I I TS        TS        TS
                 + 1 1 ^10:00:00 ^10:00:00 ^10:30:00
                 + 2 3 ^10:05:00 ^10:00:00 ^10:30:00

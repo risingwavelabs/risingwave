@@ -431,6 +431,7 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::data_chunk_iter::Row;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
@@ -512,13 +513,13 @@ mod tests {
     }
 
     async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             " I
             + 1
             + 2
             + 2",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             " I
             - 1
             - 2 D
@@ -564,7 +565,7 @@ mod tests {
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.into_chunk().unwrap().sorted_rows(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 1 1 1 1
                 + 2 2 2 2"
@@ -580,7 +581,7 @@ mod tests {
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.into_chunk().unwrap().sorted_rows(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I I
                 -  1 1 1 1
                 U- 2 2 2 2
@@ -591,13 +592,13 @@ mod tests {
     }
 
     async fn test_global_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             " I I I
             + 1 1 1
             + 2 2 2
             + 2 2 2",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             " I I I
             - 1 1 1
             - 2 2 2 D
@@ -656,7 +657,7 @@ mod tests {
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.into_chunk().unwrap().sorted_rows(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I I I
                 + 1 1 1 1
                 + 2 2 4 4"
@@ -672,7 +673,7 @@ mod tests {
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.into_chunk().unwrap().sorted_rows(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I I
                 -  1 1 1 1
                 U- 2 2 4 4
@@ -684,13 +685,13 @@ mod tests {
     }
 
     async fn test_local_hash_aggregation_max(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             " I     I    I
             + 1   233 1001
             + 1 23333 1002
             + 2  2333 1003",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             " I     I    I
             - 1   233 1001
             - 1 23333 1002 D
@@ -738,7 +739,7 @@ mod tests {
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.into_chunk().unwrap().sorted_rows(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I I    I
                 + 1 2  233
                 + 2 1 2333"
@@ -754,7 +755,7 @@ mod tests {
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.into_chunk().unwrap().sorted_rows(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I     I
                 -  2 1  2333
                 U- 1 2   233

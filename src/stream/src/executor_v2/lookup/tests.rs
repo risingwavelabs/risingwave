@@ -15,6 +15,7 @@
 use assert_matches::assert_matches;
 use futures::StreamExt;
 use itertools::Itertools;
+use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::{deserialize_datum_from, DataType};
@@ -85,7 +86,7 @@ async fn create_arrangement(
     let column_ids = columns.iter().map(|c| c.column_id).collect_vec();
 
     // Prepare source chunks.
-    let chunk1 = StreamChunk::from_str(
+    let chunk1 = StreamChunk::from_pretty(
         "    I I
         + 2331 4
         + 2332 5
@@ -93,7 +94,7 @@ async fn create_arrangement(
         + 2334 6",
     );
 
-    let chunk2 = StreamChunk::from_str(
+    let chunk2 = StreamChunk::from_pretty(
         "    I I
         + 2335 6
         + 2337 8
@@ -161,11 +162,11 @@ async fn create_source() -> Box<dyn Executor + Send> {
     ];
 
     // Prepare source chunks.
-    let chunk1 = StreamChunk::from_str(
+    let chunk1 = StreamChunk::from_pretty(
         " I I
         + 6 1",
     );
-    let chunk2 = StreamChunk::from_str(
+    let chunk2 = StreamChunk::from_pretty(
         " I I
         - 6 1",
     );
@@ -253,7 +254,7 @@ async fn test_lookup_this_epoch() {
     assert_matches!(msgs[4], Message::Barrier(_));
 
     let chunk1 = msgs[1].as_chunk().unwrap();
-    let expected_chunk1 = StreamChunk::from_str(
+    let expected_chunk1 = StreamChunk::from_pretty(
         "    I I I I
         + 2333 6 6 1
         + 2334 6 6 1",
@@ -261,7 +262,7 @@ async fn test_lookup_this_epoch() {
     check_chunk_eq(chunk1, &expected_chunk1);
 
     let chunk2 = msgs[3].as_chunk().unwrap();
-    let expected_chunk2 = StreamChunk::from_str(
+    let expected_chunk2 = StreamChunk::from_pretty(
         "    I I I I
         - 2334 6 6 1
         - 2335 6 6 1",
@@ -315,7 +316,7 @@ async fn test_lookup_last_epoch() {
     assert_eq!(chunk1.cardinality(), 0);
 
     let chunk2 = msgs[3].as_chunk().unwrap();
-    let expected_chunk2 = StreamChunk::from_str(
+    let expected_chunk2 = StreamChunk::from_pretty(
         " I I    I I
         - 6 1 2333 6
         - 6 1 2334 6",

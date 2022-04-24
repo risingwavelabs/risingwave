@@ -439,6 +439,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -448,7 +449,7 @@ mod tests {
     use crate::executor_v2::{Barrier, Message};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             "  I I
             +  1 0
             +  2 1
@@ -457,7 +458,7 @@ mod tests {
             +  9 4
             +  8 5",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             "  I I
             +  7 6
             -  3 2
@@ -466,14 +467,14 @@ mod tests {
             -  2 1
             + 11 8",
         );
-        let chunk3 = StreamChunk::from_str(
+        let chunk3 = StreamChunk::from_pretty(
             "  I  I
             +  6  9
             + 12 10
             + 13 11
             + 14 12",
         );
-        let chunk4 = StreamChunk::from_str(
+        let chunk4 = StreamChunk::from_pretty(
             "  I  I
             -  5  7
             -  6  9
@@ -541,7 +542,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 + 10 3
                 +  9 4
@@ -557,7 +558,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 +  7 6
                 -  7 6
@@ -578,7 +579,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I  I
                 +  8  5
                 + 12 10
@@ -596,7 +597,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 -  8 5
                 -  9 4
@@ -637,7 +638,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 +  1 0
                 +  2 1
@@ -659,7 +660,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 -  8 5
                 +  7 6
@@ -684,7 +685,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 -  9 4
                 +  6 9"
@@ -700,7 +701,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 -  5 7
                 +  9 4
@@ -742,7 +743,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 + 10 3
                 +  9 4
@@ -759,7 +760,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 +  7 6
                 -  7 6
@@ -779,7 +780,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I
                 +  8 5"
             )
@@ -794,7 +795,7 @@ mod tests {
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I  I
                 -  8  5 
                 + 12 10

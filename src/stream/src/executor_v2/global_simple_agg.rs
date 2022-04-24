@@ -279,6 +279,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use global_simple_agg::*;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
@@ -293,13 +294,13 @@ mod tests {
     }
 
     async fn test_local_simple_aggregation(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
             -  10  14 1002 D
@@ -358,7 +359,7 @@ mod tests {
         let msg = simple_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I   I   I  I
                 + 3 114 514  4"
             )
@@ -371,7 +372,7 @@ mod tests {
         let msg = simple_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I   I   I  I
                 U- 3 114 514  4
                 U+ 2 114 514 10"

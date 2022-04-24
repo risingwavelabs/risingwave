@@ -758,6 +758,7 @@ mod tests {
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VIRTUAL_NODE_COUNT;
@@ -820,7 +821,7 @@ mod tests {
             hash_mapping,
         );
 
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             "  I I I
             +  4 6 8
             +  5 7 9
@@ -835,7 +836,7 @@ mod tests {
 
         assert_eq!(
             *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I
                 +  4 6 8 D
                 +  5 7 9 D
@@ -849,7 +850,7 @@ mod tests {
         );
         assert_eq!(
             *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I
                 +  4 6 8
                 +  5 7 9

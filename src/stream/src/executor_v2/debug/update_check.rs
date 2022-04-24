@@ -60,6 +60,7 @@ mod tests {
     use std::iter::once;
 
     use futures::{pin_mut, StreamExt};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
 
     use super::*;
@@ -69,7 +70,7 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_not_next_to_each_other() {
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             "     I
             U-  114 
             U-  514
@@ -89,7 +90,7 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_first_one_update_insert() {
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             "     I
             U+  114",
         );
@@ -106,7 +107,7 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_last_one_update_delete() {
-        let chunk = StreamChunk::from_str(
+        let chunk = StreamChunk::from_pretty(
             "        I
             U-     114 
             U+     514

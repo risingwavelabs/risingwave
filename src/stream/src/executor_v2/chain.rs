@@ -137,6 +137,7 @@ mod test {
     use std::sync::Arc;
 
     use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -155,8 +156,8 @@ mod test {
                 schema.clone(),
                 PkIndices::new(),
                 vec![
-                    StreamChunk::from_str("I\n + 1"),
-                    StreamChunk::from_str("I\n + 2"),
+                    StreamChunk::from_pretty("I\n + 1"),
+                    StreamChunk::from_pretty("I\n + 2"),
                 ],
             )
             .stop_on_finish(false),
@@ -167,8 +168,8 @@ mod test {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(StreamChunk::from_str("I\n + 3")),
-                Message::Chunk(StreamChunk::from_str("I\n + 4")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],
         ));
 
@@ -196,7 +197,7 @@ mod test {
         let mut count = 0;
         while let Some(Message::Chunk(ck)) = chain.next().await.transpose().unwrap() {
             count += 1;
-            assert_eq!(ck, StreamChunk::from_str(&format!("I\n + {count}")));
+            assert_eq!(ck, StreamChunk::from_pretty(&format!("I\n + {count}")));
         }
     }
 }

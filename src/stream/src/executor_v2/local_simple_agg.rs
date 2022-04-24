@@ -171,6 +171,7 @@ impl LocalSimpleAggExecutor {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::error::Result;
@@ -222,13 +223,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_simple_agg() -> Result<()> {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
             -  10  14 1002 D
@@ -277,7 +278,7 @@ mod tests {
         let msg = simple_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I   I   I
                 + 3 114 514"
             )
@@ -291,7 +292,7 @@ mod tests {
         let msg = simple_agg.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I I I
                 + -1 0 0"
             )

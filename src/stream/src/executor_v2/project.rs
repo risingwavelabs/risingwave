@@ -121,6 +121,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -134,13 +135,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_projection() {
-        let chunk1 = StreamChunk::from_str(
+        let chunk1 = StreamChunk::from_pretty(
             " I I
             + 1 4
             + 2 5
             + 3 6",
         );
-        let chunk2 = StreamChunk::from_str(
+        let chunk2 = StreamChunk::from_pretty(
             " I I
             + 7 8
             - 3 6",
@@ -168,7 +169,7 @@ mod tests {
         let msg = project.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 " I
                 + 5
                 + 7
@@ -179,7 +180,7 @@ mod tests {
         let msg = project.next().await.unwrap().unwrap();
         assert_eq!(
             *msg.as_chunk().unwrap(),
-            StreamChunk::from_str(
+            StreamChunk::from_pretty(
                 "  I
                 + 15
                 -  9"
