@@ -32,7 +32,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashDispatchManager, HashDispatchManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
+    HashMappingManager, HashMappingManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -69,7 +69,7 @@ pub struct ClusterManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     max_heartbeat_interval: Duration,
-    dispatch_manager: HashDispatchManagerRef<S>,
+    hash_mapping_manager: HashMappingManagerRef<S>,
 
     core: RwLock<ClusterManagerCore>,
 }
@@ -82,12 +82,11 @@ where
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
         let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
-        let dispatch_manager =
-            Arc::new(HashDispatchManager::new(&compute_nodes, meta_store).await?);
+        let dispatch_manager = Arc::new(HashMappingManager::new(&compute_nodes, meta_store).await?);
 
         Ok(Self {
             env,
-            dispatch_manager,
+            hash_mapping_manager: dispatch_manager,
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
@@ -134,8 +133,8 @@ where
 
                 // Alter consistent hash mapping.
                 if r#type == WorkerType::ComputeNode {
-                    self.dispatch_manager
-                        .add_worker_mapping(&worker_node)
+                    self.hash_mapping_manager
+                        .add_worker_node(&worker_node)
                         .await?;
                 }
 
@@ -207,8 +206,8 @@ where
                 let worker_node = worker.to_protobuf();
                 // Alter consistent hash mapping.
                 if worker_type == WorkerType::ComputeNode {
-                    self.dispatch_manager
-                        .delete_worker_mapping(&worker.worker_node)
+                    self.hash_mapping_manager
+                        .delete_worker_node(&worker.worker_node)
                         .await?;
                 }
 
@@ -360,7 +359,7 @@ where
     }
 
     pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-        self.dispatch_manager.get_worker_mapping().await
+        self.hash_mapping_manager.get_default_mapping().await
     }
 
     async fn generate_cn_parallel_units(
@@ -591,7 +590,10 @@ mod tests {
         }
         assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
 
-        let mapping = cluster_manager.dispatch_manager.get_worker_mapping().await;
+        let mapping = cluster_manager
+            .hash_mapping_manager
+            .get_default_mapping()
+            .await;
         let unique_parallel_units = HashSet::<ParallelUnitId>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),
