@@ -10,7 +10,8 @@ If you have questions, please [create a Github issue](https://github.com/singula
   - [Setting Up Development Environment](#setting-up-development-environment)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
     - [Additional Components](#additional-components)
-    - [Start All-In-One Process](#start-all-in-one-process)
+    - [Start Playground with RiseDev](#start-playground-with-risedev)
+    - [Start Playground with cargo](#start-playground-with-cargo)
   - [Testing and Lint](#testing-and-lint)
     - [Lint](#lint)
     - [Unit Tests](#unit-tests)
@@ -149,7 +150,7 @@ Sometimes, developers might not need to start a full cluster to develop. `./rise
 
 For more information, refer to `README.md` under `src/risedevtool`.
 
-### Start Playground with `cargo`
+### Start Playground with cargo
 
 To start an all-in-one process from IDE or command line, you may also use
 
