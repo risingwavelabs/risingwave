@@ -344,6 +344,8 @@ impl StreamChunkTestExt for StreamChunk {
                 t => panic!("invalid op: {t:?}"),
             };
             ops.push(op);
+            // allow `zip` since `token` may longer than `array_builders`
+            #[allow(clippy::disallowed_methods)]
             for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
                 let datum = match val_str {
                     "." => None,
