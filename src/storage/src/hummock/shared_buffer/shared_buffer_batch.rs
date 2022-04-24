@@ -100,6 +100,10 @@ impl SharedBufferBatch {
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
 }
 
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {

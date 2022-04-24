@@ -19,7 +19,6 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::*;
-use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::StorageValue;
@@ -68,7 +67,6 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         64 << 20,
     ));
     let hummock_options = Arc::new(default_config_for_test());
-    let vm = Arc::new(LocalVersionManager::new(hummock_options.clone()));
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -79,12 +77,12 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        vm.clone(),
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+    let vm = hummock_storage.local_version_manager().clone();
 
     let epoch1: u64 = 1;
     hummock_storage
@@ -163,7 +161,6 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         64 << 20,
     ));
     let hummock_options = Arc::new(default_config_for_test());
-    let vm = Arc::new(LocalVersionManager::new(hummock_options.clone()));
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -173,12 +170,12 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        vm.clone(),
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+    let vm = hummock_storage.local_version_manager();
 
     let epoch: u64 = 1;
 
@@ -226,7 +223,6 @@ async fn test_snapshot_reverse_range_scan_inner(enable_sync: bool, enable_commit
         64 << 20,
     ));
     let hummock_options = Arc::new(default_config_for_test());
-    let vm = Arc::new(LocalVersionManager::new(hummock_options.clone()));
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -236,12 +232,12 @@ async fn test_snapshot_reverse_range_scan_inner(enable_sync: bool, enable_commit
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options.clone(),
         sstable_store.clone(),
-        vm.clone(),
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+    let vm = hummock_storage.local_version_manager();
 
     let epoch = 1;
     hummock_storage

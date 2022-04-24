@@ -24,7 +24,7 @@ mod tests {
     use risingwave_rpc_client::HummockMetaClient;
 
     use crate::hummock::compactor::{Compactor, CompactorContext};
-    use crate::hummock::{HummockStorage, LocalVersionManager, SstableStore};
+    use crate::hummock::{HummockStorage, SstableStore};
     use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStoreImpl};
     use crate::storage_value::StorageValue;
@@ -53,11 +53,9 @@ mod tests {
             block_cache_capacity,
             meta_cache_capacity,
         ));
-        let local_version_manager = Arc::new(LocalVersionManager::new(options.clone()));
         let storage = HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
-            local_version_manager.clone(),
             hummock_meta_client.clone(),
             Arc::new(StateStoreMetrics::unused()),
         )

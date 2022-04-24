@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
 use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
-use crate::hummock::local_version_manager::PinnedVersion;
+use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
