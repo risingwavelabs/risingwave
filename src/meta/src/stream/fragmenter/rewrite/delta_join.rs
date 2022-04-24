@@ -20,8 +20,7 @@ use risingwave_pb::stream_plan::{
     ArrangeNode, DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, StreamNode, UnionNode,
 };
 
-use super::super::{StreamFragment, StreamFragmentEdge};
-use crate::stream::fragmenter::BuildFragmentGraphState;
+use crate::stream::fragmenter::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
 use crate::stream::StreamFragmenter;
 
 impl StreamFragmenter {
