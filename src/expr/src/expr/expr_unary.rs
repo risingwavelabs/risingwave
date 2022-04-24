@@ -543,10 +543,7 @@ mod tests {
         assert_castible(DataType::Float64, 3.0_f64);
         assert_castible(DataType::Decimal, Decimal::from_f32(3.15_f32).unwrap());
         assert_castible(DataType::Varchar, "abc".to_string());
-        assert_castible(
-            DataType::Date,
-            NaiveDateWrapper::with_days(100).unwrap(),
-        );
+        assert_castible(DataType::Date, NaiveDateWrapper::with_days(100).unwrap());
         assert_castible(
             DataType::Time,
             NaiveTimeWrapper::with_secs_nano(1, 1).unwrap(),

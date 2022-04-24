@@ -134,8 +134,7 @@ impl NaiveTimeWrapper {
     pub fn from_protobuf(timestamp_micro: i64) -> Result<Self> {
         let secs = (timestamp_micro / 1_000_000) as u32;
         let nano = (timestamp_micro % 1_000_000) as u32 * 1000;
-        Self::with_secs_nano(secs, nano)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+        Self::with_secs_nano(secs, nano).map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 }
 
@@ -161,8 +160,7 @@ impl NaiveDateTimeWrapper {
     pub fn from_protobuf(timestamp_micro: i64) -> Result<Self> {
         let secs = timestamp_micro / 1_000_000;
         let nsecs = (timestamp_micro % 1_000_000) as u32 * 1000;
-        Self::with_secs_nsecs(secs, nsecs)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+        Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 }
 

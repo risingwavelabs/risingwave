@@ -246,9 +246,7 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(
-                        NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok(),
-                    )
+                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok())
                     .unwrap();
             } else {
                 builder.append(None).unwrap();
