@@ -192,7 +192,6 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        // let mut update_delete_keys = HashSet::new();
         let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
         for (pk, row_op) in buffer {
             let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
@@ -201,16 +200,17 @@ impl<S: StateStore> CellBasedTable<S> {
                     let bytes = self
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, row, &self.column_ids)
-                        .unwrap();
+                        .map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_default_put(value))
                     }
                 }
                 RowOp::Delete(old_value) => {
+                    // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, old_value, &self.column_ids)
-                        .unwrap();
+                        .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete(key);
                     }
@@ -219,11 +219,11 @@ impl<S: StateStore> CellBasedTable<S> {
                     let old_bytes = self
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, old_row, &self.column_ids)
-                        .unwrap();
+                        .map_err(err)?;
                     let new_bytes = self
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, new_row, &self.column_ids)
-                        .unwrap();
+                        .map_err(err)?;
                     let mut put_keys = Vec::new();
 
                     for (key, value) in new_bytes {

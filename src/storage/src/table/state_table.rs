@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::error::RwError;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
 use super::mem_table::MemTable;
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::{Keyspace, StateStore};
 
@@ -51,7 +52,7 @@ impl<S: StateStore> StateTable<S> {
 
     /// read methods
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        let mem_table_res = self.mem_table.get_row(pk).unwrap();
+        let mem_table_res = self.mem_table.get_row(pk).map_err(err)?;
         match mem_table_res {
             Some(row) => Ok(Some(row.clone())),
             None => self.cell_based_table.get_row(pk, epoch).await,
@@ -106,6 +107,10 @@ impl<S: StateStore> StateTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
         todo!()
     }
+}
+
+fn err(rw: impl Into<RwError>) -> StorageError {
+    StorageError::StateTable(rw.into())
 }
 
 #[cfg(test)]

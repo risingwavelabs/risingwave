@@ -70,6 +70,8 @@ impl MemTable {
                     if let RowOp::Delete(ref mut old_value) = x {
                         let old_val = std::mem::take(old_value);
                         e.insert(RowOp::Update((old_val, value)));
+                    } else {
+                        unreachable!();
                     }
                 }
 
