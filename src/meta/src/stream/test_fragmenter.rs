@@ -266,15 +266,16 @@ async fn test_fragmenter() -> Result<()> {
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let parallel_degree = 4;
-    let fragmenter = StreamFragmenter::new(
+    let mut ctx = CreateMaterializedViewContext::default();
+    let graph = StreamFragmenter::generate_graph(
         env.id_gen_manager_ref(),
         fragment_manager,
         parallel_degree,
         false,
-    );
-
-    let mut ctx = CreateMaterializedViewContext::default();
-    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
+        &stream_node,
+        &mut ctx,
+    )
+    .await?;
     let table_fragments = TableFragments::new(TableId::default(), graph, vec![]);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();

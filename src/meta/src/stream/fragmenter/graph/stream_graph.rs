@@ -32,7 +32,7 @@ use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext};
 
 /// A list of actors with order.
 #[derive(Debug, Clone)]
-pub struct OrderedActorLink(pub Vec<LocalActorId>);
+struct OrderedActorLink(pub Vec<LocalActorId>);
 
 impl OrderedActorLink {
     pub fn to_global_ids(&self, actor_id_offset: u32, actor_id_len: u32) -> Self {
@@ -53,7 +53,7 @@ impl OrderedActorLink {
     }
 }
 
-pub struct StreamActorDownstream {
+struct StreamActorDownstream {
     /// Dispatcher
     /// TODO: refactor to `DispatchStrategy`.
     dispatcher: Dispatcher,
@@ -65,7 +65,7 @@ pub struct StreamActorDownstream {
     same_worker_node: bool,
 }
 
-pub struct StreamActorUpstream {
+struct StreamActorUpstream {
     /// Upstream actors
     actors: OrderedActorLink,
 
@@ -74,7 +74,7 @@ pub struct StreamActorUpstream {
 }
 
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
-pub struct StreamActorBuilder {
+struct StreamActorBuilder {
     /// actor id field
     actor_id: LocalActorId,
 
@@ -108,10 +108,6 @@ impl StreamActorBuilder {
             upstreams: HashMap::new(),
             sealed: false,
         }
-    }
-
-    pub fn get_id(&self) -> LocalActorId {
-        self.actor_id
     }
 
     pub fn get_fragment_id(&self) -> LocalFragmentId {
@@ -273,8 +269,16 @@ impl StreamGraphBuilder {
     }
 
     /// Insert new generated actor.
-    pub fn add_actor(&mut self, actor: StreamActorBuilder) {
-        self.actor_builders.insert(actor.get_id(), actor);
+    pub fn add_actor(
+        &mut self,
+        actor_id: LocalActorId,
+        fragment_id: LocalFragmentId,
+        node: Arc<StreamNode>,
+    ) {
+        self.actor_builders.insert(
+            actor_id,
+            StreamActorBuilder::new(actor_id, fragment_id, node),
+        );
     }
 
     /// Number of actors in the graph builder
@@ -436,7 +440,7 @@ impl StreamGraphBuilder {
     /// 2. ignore root node when it's `ExchangeNode`.
     /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
     /// ids if it is a `ChainNode`.
-    pub fn build_inner(
+    fn build_inner(
         &self,
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
