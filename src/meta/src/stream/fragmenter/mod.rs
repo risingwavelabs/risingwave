@@ -132,8 +132,6 @@ impl StreamFragmenter {
     where
         S: MetaStore,
     {
-        // Phase 1: Generate fragment graph and seal
-
         // The stream node might be rewritten in `generate_fragment_graph`.
         // So we `clone` and move it to prevent it from being used later.
         let stream_node = stream_node.clone();
@@ -162,9 +160,7 @@ impl StreamFragmenter {
             fragment_graph.seal(offset);
             fragment_graph
         };
-        // `state.fragment_graph` is immutable from now on.
 
-        // Phase 2: Generate stream graph
         let stream_graph = {
             let BuildActorGraphState {
                 stream_graph_builder,
@@ -181,8 +177,6 @@ impl StreamFragmenter {
                 state.stream_graph_builder.fill_info(info);
 
                 // Generate actors of the streaming plan
-                // `self.stream_graph_builder.add_actor/add_edge` is called.
-                // `self.fragment_actors` is also built here.
                 self.build_actor_graph(&mut state, &fragment_graph)?;
                 state
             };
