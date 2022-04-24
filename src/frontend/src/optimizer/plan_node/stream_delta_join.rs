@@ -41,10 +41,10 @@ impl StreamDeltaJoin {
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match logical.join_type() {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
-            _ => panic!("delta join only supports inner join for now"),
+            _ => todo!("delta join only supports inner join for now"),
         };
         if eq_join_predicate.has_non_eq() {
-            panic!("non-eq condition not supported for delta join");
+            todo!("non-eq condition not supported for delta join");
         }
         let dist = StreamHashJoin::derive_dist(
             logical.left().distribution(),
@@ -79,7 +79,7 @@ impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamDeltaHashJoin {{ type: {:?}, predicate: {} }}",
+            "StreamDeltaJoin {{ type: {:?}, predicate: {} }}",
             self.logical.join_type(),
             self.eq_join_predicate()
         )

@@ -8,7 +8,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, v5, _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
       StreamExchange { dist: HashShard([2, 6]) }
-        StreamDeltaHashJoin { type: Inner, predicate: $0 = $3 }
+        StreamDeltaJoin { type: Inner, predicate: $0 = $3 }
           StreamExchange { dist: HashShard([0]) }
             StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
           StreamExchange { dist: HashShard([0]) }
