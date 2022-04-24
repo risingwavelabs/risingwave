@@ -20,18 +20,18 @@ use risingwave_pb::stream_plan::{
     ArrangeNode, DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, StreamNode, UnionNode,
 };
 
-use super::super::{StreamFragment, StreamFragmentEdge};
-use crate::storage::MetaStore;
+use crate::stream::fragmenter::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
 use crate::stream::StreamFragmenter;
 
-impl<S> StreamFragmenter<S>
-where
-    S: MetaStore,
-{
+impl StreamFragmenter {
     /// All exchanges inside delta join is one-to-one exchange.
-    fn build_exchange_for_delta_join(&mut self, upstream: &StreamNode) -> StreamNode {
+    fn build_exchange_for_delta_join(
+        &self,
+        state: &mut BuildFragmentGraphState,
+        upstream: &StreamNode,
+    ) -> StreamNode {
         StreamNode {
-            operator_id: self.gen_operator_id() as u64,
+            operator_id: state.gen_operator_id() as u64,
             identity: "Exchange (Lookup and Merge)".into(),
             fields: upstream.fields.clone(),
             pk_indices: upstream.pk_indices.clone(),
@@ -48,7 +48,8 @@ where
     /// We should shuffle upstream data to make sure it meets the distribution requirement of hash
     /// join.
     fn build_input_with_exchange(
-        &mut self,
+        &self,
+        state: &mut BuildFragmentGraphState,
         mut upstream: StreamNode,
     ) -> Result<(StreamFragmentEdge, StreamFragment, StreamNode)> {
         match &upstream.node {
@@ -57,7 +58,7 @@ where
                 let exchange_node = exchange_node.clone();
                 assert_eq!(upstream.input.len(), 1);
                 let child_node = upstream.input.remove(0);
-                let child_fragment = self.build_and_add_fragment(child_node)?;
+                let child_fragment = self.build_and_add_fragment(state, child_node)?;
                 Ok((
                     StreamFragmentEdge {
                         dispatch_strategy: exchange_node.get_strategy()?.clone(),
@@ -74,7 +75,7 @@ where
             // Otherwise, use 1-to-1 exchange
             _ => {
                 let strategy = Self::dispatch_no_shuffle();
-                let operator_id = self.gen_operator_id() as u64;
+                let operator_id = state.gen_operator_id() as u64;
                 let node = StreamNode {
                     input: vec![],
                     identity: "Exchange (Arrange)".into(),
@@ -87,7 +88,7 @@ where
                     append_only: upstream.append_only,
                 };
 
-                let child_fragment = self.build_and_add_fragment(upstream)?;
+                let child_fragment = self.build_and_add_fragment(state, upstream)?;
 
                 Ok((
                     StreamFragmentEdge {
@@ -103,12 +104,14 @@ where
     }
 
     fn build_arrange_for_delta_join(
-        &mut self,
+        &self,
+        state: &mut BuildFragmentGraphState,
+
         exchange_node: &StreamNode,
         arrange_key_indexes: Vec<i32>,
     ) -> StreamNode {
         StreamNode {
-            operator_id: self.gen_operator_id() as u64,
+            operator_id: state.gen_operator_id() as u64,
             identity: "Arrange".into(),
             fields: exchange_node.fields.clone(),
             pk_indices: exchange_node.pk_indices.clone(),
@@ -128,13 +131,14 @@ where
     }
 
     fn build_lookup_for_delta_join(
-        &mut self,
+        &self,
+        state: &mut BuildFragmentGraphState,
         (exchange_node_arrangement, exchange_node_stream): (&StreamNode, &StreamNode),
         (output_fields, output_pk_indices): (Vec<Field>, Vec<u32>),
         lookup_node: LookupNode,
     ) -> StreamNode {
         StreamNode {
-            operator_id: self.gen_operator_id() as u64,
+            operator_id: state.gen_operator_id() as u64,
             identity: "Lookup".into(),
             fields: output_fields,
             pk_indices: output_pk_indices,
@@ -147,8 +151,9 @@ where
         }
     }
 
-    pub fn build_delta_join(
-        &mut self,
+    pub(in super::super) fn build_delta_join(
+        &self,
+        state: &mut BuildFragmentGraphState,
         current_fragment: &mut StreamFragment,
         mut node: StreamNode,
     ) -> Result<StreamNode> {
@@ -180,41 +185,48 @@ where
         //
         // TODO: support multi-way join.
 
-        let exchange_a0l0 = self.build_exchange_for_delta_join(&node.input[0]);
-        let exchange_a0l1 = self.build_exchange_for_delta_join(&node.input[0]);
-        let exchange_a1l0 = self.build_exchange_for_delta_join(&node.input[1]);
-        let exchange_a1l1 = self.build_exchange_for_delta_join(&node.input[1]);
+        let exchange_a0l0 = self.build_exchange_for_delta_join(state, &node.input[0]);
+        let exchange_a0l1 = self.build_exchange_for_delta_join(state, &node.input[0]);
+        let exchange_a1l0 = self.build_exchange_for_delta_join(state, &node.input[1]);
+        let exchange_a1l1 = self.build_exchange_for_delta_join(state, &node.input[1]);
 
         let i0_length = node.input[0].fields.len();
         let i1_length = node.input[1].fields.len();
 
         let (link_i1a1, input_1_frag, exchange_i1a1) =
-            self.build_input_with_exchange(node.input.remove(1))?;
+            self.build_input_with_exchange(state, node.input.remove(1))?;
 
         let (link_i0a0, input_0_frag, exchange_i0a0) =
-            self.build_input_with_exchange(node.input.remove(0))?;
+            self.build_input_with_exchange(state, node.input.remove(0))?;
 
-        let arrange_0 =
-            self.build_arrange_for_delta_join(&exchange_i0a0, hash_join_node.left_key.clone());
-        let arrange_1 =
-            self.build_arrange_for_delta_join(&exchange_i1a1, hash_join_node.right_key.clone());
+        let arrange_0 = self.build_arrange_for_delta_join(
+            state,
+            &exchange_i0a0,
+            hash_join_node.left_key.clone(),
+        );
+        let arrange_1 = self.build_arrange_for_delta_join(
+            state,
+            &exchange_i1a1,
+            hash_join_node.right_key.clone(),
+        );
 
-        let arrange_0_frag = self.build_and_add_fragment(arrange_0)?;
-        let arrange_1_frag = self.build_and_add_fragment(arrange_1)?;
+        let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
+        let arrange_1_frag = self.build_and_add_fragment(state, arrange_1)?;
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             input_0_frag.fragment_id,
             arrange_0_frag.fragment_id,
             link_i0a0,
         );
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             input_1_frag.fragment_id,
             arrange_1_frag.fragment_id,
             link_i1a1,
         );
 
         let lookup_0 = self.build_lookup_for_delta_join(
+            state,
             (&exchange_a1l0, &exchange_a0l0),
             (node.fields.clone(), node.pk_indices.clone()),
             LookupNode {
@@ -233,6 +245,7 @@ where
         );
 
         let lookup_1 = self.build_lookup_for_delta_join(
+            state,
             (&exchange_a0l1, &exchange_a1l1),
             (node.fields.clone(), node.pk_indices.clone()),
             LookupNode {
@@ -247,10 +260,10 @@ where
             },
         );
 
-        let lookup_0_frag = self.build_and_add_fragment(lookup_0)?;
-        let lookup_1_frag = self.build_and_add_fragment(lookup_1)?;
+        let lookup_0_frag = self.build_and_add_fragment(state, lookup_0)?;
+        let lookup_1_frag = self.build_and_add_fragment(state, lookup_1)?;
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             arrange_0_frag.fragment_id,
             lookup_0_frag.fragment_id,
             StreamFragmentEdge {
@@ -260,7 +273,7 @@ where
             },
         );
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             arrange_0_frag.fragment_id,
             lookup_1_frag.fragment_id,
             StreamFragmentEdge {
@@ -270,7 +283,7 @@ where
             },
         );
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             arrange_1_frag.fragment_id,
             lookup_0_frag.fragment_id,
             StreamFragmentEdge {
@@ -280,7 +293,7 @@ where
             },
         );
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             arrange_1_frag.fragment_id,
             lookup_1_frag.fragment_id,
             StreamFragmentEdge {
@@ -290,11 +303,11 @@ where
             },
         );
 
-        let exchange_l0m = self.build_exchange_for_delta_join(&node);
-        let exchange_l1m = self.build_exchange_for_delta_join(&node);
+        let exchange_l0m = self.build_exchange_for_delta_join(state, &node);
+        let exchange_l1m = self.build_exchange_for_delta_join(state, &node);
 
         let union = StreamNode {
-            operator_id: self.gen_operator_id() as u64,
+            operator_id: state.gen_operator_id() as u64,
             identity: "Union".into(),
             fields: node.fields.clone(),
             pk_indices: node.pk_indices.clone(),
@@ -303,7 +316,7 @@ where
             append_only: node.append_only,
         };
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             lookup_0_frag.fragment_id,
             current_fragment.fragment_id,
             StreamFragmentEdge {
@@ -313,7 +326,7 @@ where
             },
         );
 
-        self.fragment_graph.add_edge(
+        state.fragment_graph.add_edge(
             lookup_1_frag.fragment_id,
             current_fragment.fragment_id,
             StreamFragmentEdge {

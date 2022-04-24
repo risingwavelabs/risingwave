@@ -101,6 +101,7 @@ impl StreamFragment {
 }
 
 /// [`StreamFragmentGraph`] stores a fragment graph (DAG).
+#[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
     fragments: HashMap<LocalFragmentId, StreamFragment>,
@@ -116,15 +117,6 @@ pub struct StreamFragmentGraph {
 }
 
 impl StreamFragmentGraph {
-    pub fn new() -> Self {
-        Self {
-            fragments: HashMap::new(),
-            downstreams: HashMap::new(),
-            upstreams: HashMap::new(),
-            sealed: false,
-        }
-    }
-
     pub fn fragments(&self) -> &HashMap<LocalFragmentId, StreamFragment> {
         &self.fragments
     }
