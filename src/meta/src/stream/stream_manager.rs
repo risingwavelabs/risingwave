@@ -110,99 +110,6 @@ where
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn resolve_chain_node_inner(
-        &self,
-        stream_node: &mut StreamNode,
-        actor_id: ActorId,
-        locations: &ScheduledLocations,
-        upstream_parallel_unit_info: &HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
-        tables_node_actors: &HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-        hash_mapping: &Vec<ParallelUnitId>,
-        dispatches: &mut HashMap<ActorId, Vec<ActorId>>,
-        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
-    ) -> Result<()> {
-        // if node is chain node, we insert upstream ids into chain's input(merge)
-        if let Some(Node::ChainNode(ref mut chain)) = stream_node.node {
-            // get upstream table id
-            let table_id = TableId::from(&chain.table_ref_id);
-
-            let (upstream_actor_id, parallel_unit_id) = {
-                // 1. use table id to get upstream parallel_unit->actor_id mapping
-                let upstream_parallel_actor_mapping =
-                    upstream_parallel_unit_info.get(&table_id).unwrap();
-                // 2. use our actor id to get our parallel unit id
-                let parallel_unit_id = locations.actor_locations.get(&actor_id).unwrap().id;
-                // 3. and use our parallel unit id to get upstream actor id
-                (
-                    upstream_parallel_actor_mapping
-                        .get(&parallel_unit_id)
-                        .unwrap(),
-                    parallel_unit_id,
-                )
-            };
-
-            // fill upstream node-actor info for later use
-            let upstream_table_node_actors = tables_node_actors.get(&table_id).unwrap();
-
-            let chain_upstream_node_actors = upstream_table_node_actors
-                .iter()
-                .flat_map(|(node_id, actor_ids)| {
-                    actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
-                })
-                .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
-                .into_group_map();
-            for (node_id, actor_ids) in chain_upstream_node_actors {
-                upstream_node_actors
-                    .entry(node_id)
-                    .or_default()
-                    .extend(actor_ids.iter());
-            }
-
-            // deal with merge and batch query node, setting upstream infos.
-            let merge_stream_node = &mut stream_node.input[0];
-            if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
-                merge.upstream_actor_id.push(*upstream_actor_id);
-            } else {
-                unreachable!("chain's input[0] should always be merge");
-            }
-            let batch_stream_node = &mut stream_node.input[1];
-            if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
-                // TODO: we can also insert distribution keys here, make fragmenter
-                // even simpler.
-                let (original_indices, data) = compress_data(hash_mapping);
-                batch_query.hash_mapping = Some(ParallelUnitMapping {
-                    original_indices,
-                    data,
-                });
-                batch_query.parallel_unit_id = parallel_unit_id;
-            } else {
-                unreachable!("chain's input[1] should always be batch query");
-            }
-
-            // finally, we should also build dispatcher infos here.
-            dispatches
-                .entry(*upstream_actor_id)
-                .or_default()
-                .push(actor_id);
-        } else {
-            // otherwise, recursively deal with input nodes
-            for input in &mut stream_node.input {
-                self.resolve_chain_node_inner(
-                    input,
-                    actor_id,
-                    locations,
-                    upstream_parallel_unit_info,
-                    tables_node_actors,
-                    hash_mapping,
-                    dispatches,
-                    upstream_node_actors,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
     async fn resolve_chain_node(
         &self,
         table_fragments: &mut TableFragments,
@@ -212,15 +119,116 @@ where
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
-        let upstream_parallel_unit_info = self
+        // The closure environment. Used to simulate recursive closure.
+        struct Env<'a> {
+            hash_mapping: &'a Vec<ParallelUnitId>,
+            upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
+            tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
+            locations: &'a ScheduledLocations,
+
+            dispatches: &'a mut HashMap<ActorId, Vec<ActorId>>,
+            upstream_node_actors: &'a mut HashMap<WorkerId, Vec<ActorId>>,
+        }
+
+        impl Env<'_> {
+            fn resolve_chain_node_inner(
+                &mut self,
+                stream_node: &mut StreamNode,
+                actor_id: ActorId,
+            ) -> Result<()> {
+                // if node is chain node, we insert upstream ids into chain's input(merge)
+                if let Some(Node::ChainNode(ref mut chain)) = stream_node.node {
+                    // get upstream table id
+                    let table_id = TableId::from(&chain.table_ref_id);
+
+                    let (upstream_actor_id, parallel_unit_id) = {
+                        // 1. use table id to get upstream parallel_unit->actor_id mapping
+                        let upstream_parallel_actor_mapping =
+                            self.upstream_parallel_unit_info.get(&table_id).unwrap();
+                        // 2. use our actor id to get our parallel unit id
+                        let parallel_unit_id =
+                            self.locations.actor_locations.get(&actor_id).unwrap().id;
+                        // 3. and use our parallel unit id to get upstream actor id
+                        (
+                            upstream_parallel_actor_mapping
+                                .get(&parallel_unit_id)
+                                .unwrap(),
+                            parallel_unit_id,
+                        )
+                    };
+
+                    // fill upstream node-actor info for later use
+                    let upstream_table_node_actors =
+                        self.tables_node_actors.get(&table_id).unwrap();
+
+                    let chain_upstream_node_actors = upstream_table_node_actors
+                        .iter()
+                        .flat_map(|(node_id, actor_ids)| {
+                            actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                        })
+                        .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
+                        .into_group_map();
+                    for (node_id, actor_ids) in chain_upstream_node_actors {
+                        self.upstream_node_actors
+                            .entry(node_id)
+                            .or_default()
+                            .extend(actor_ids.iter());
+                    }
+
+                    // deal with merge and batch query node, setting upstream infos.
+                    let merge_stream_node = &mut stream_node.input[0];
+                    if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
+                        merge.upstream_actor_id.push(*upstream_actor_id);
+                    } else {
+                        unreachable!("chain's input[0] should always be merge");
+                    }
+                    let batch_stream_node = &mut stream_node.input[1];
+                    if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
+                        // TODO: we can also insert distribution keys here, make fragmenter
+                        // even simpler.
+                        let (original_indices, data) = compress_data(self.hash_mapping);
+                        batch_query.hash_mapping = Some(ParallelUnitMapping {
+                            original_indices,
+                            data,
+                        });
+                        batch_query.parallel_unit_id = parallel_unit_id;
+                    } else {
+                        unreachable!("chain's input[1] should always be batch query");
+                    }
+
+                    // finally, we should also build dispatcher infos here.
+                    self.dispatches
+                        .entry(*upstream_actor_id)
+                        .or_default()
+                        .push(actor_id);
+                } else {
+                    // otherwise, recursively deal with input nodes
+                    for input in &mut stream_node.input {
+                        self.resolve_chain_node_inner(input, actor_id)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        let upstream_parallel_unit_info = &self
             .fragment_manager
             .get_sink_parallel_unit_ids(dependent_table_ids)
             .await?;
 
-        let tables_node_actors = self
+        let tables_node_actors = &self
             .fragment_manager
             .get_tables_node_actors(dependent_table_ids)
             .await?;
+
+        let mut env = Env {
+            hash_mapping,
+            upstream_parallel_unit_info,
+            tables_node_actors,
+            locations,
+            dispatches,
+            upstream_node_actors,
+        };
 
         for fragment in table_fragments.fragments.values_mut() {
             // TODO: currently materialize and chain node will be in separate fragments, but they
@@ -230,16 +238,7 @@ where
             if fragment.fragment_type == FragmentType::Others as i32 {
                 for actor in &mut fragment.actors {
                     if let Some(ref mut stream_node) = actor.nodes {
-                        self.resolve_chain_node_inner(
-                            stream_node,
-                            actor.actor_id,
-                            locations,
-                            &upstream_parallel_unit_info,
-                            &tables_node_actors,
-                            hash_mapping,
-                            dispatches,
-                            upstream_node_actors,
-                        )?;
+                        env.resolve_chain_node_inner(stream_node, actor.actor_id)?;
                     }
                 }
             }
