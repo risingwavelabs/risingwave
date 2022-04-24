@@ -309,6 +309,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     i: i32
     /// //     F: f64
     /// //     f: f32
+    /// //     T: str
     /// //    TS: Timestamp
     /// ```
     fn from_pretty(s: &str) -> Self {
@@ -327,6 +328,7 @@ impl StreamChunkTestExt for StreamChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "T" => DataType::Varchar,
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
@@ -372,6 +374,9 @@ impl StreamChunkTestExt for StreamChunk {
                                 .map_err(|_| panic!("invalid datetime: {s:?}"))
                                 .unwrap(),
                         )))
+                    }
+                    s if matches!(builder, ArrayBuilderImpl::Utf8(_)) => {
+                        Some(ScalarImpl::Utf8(s.into()))
                     }
                     _ => panic!("invalid data type"),
                 };
