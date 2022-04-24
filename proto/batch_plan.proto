@@ -2,14 +2,14 @@ syntax = "proto3";
 
 package batch_plan;
 
+import "common.proto";
+import "expr.proto";
+import "plan_common.proto";
+
 option java_multiple_files = true;
 // TODO: java_package will be removed later, so we don't rename it to batch_plan here.
 option java_package = "com.risingwave.proto.plan";
 option optimize_for = SPEED;
-
-import "common.proto";
-import "expr.proto";
-import "plan_common.proto";
 
 message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
@@ -59,6 +59,7 @@ message CreateTableNode {
   repeated plan_common.ColumnDesc column_descs = 2;
   // Other fields not included yet:
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
+
 
   // We re-use the CreateTableNode for creating materialized views.
   oneof info {
