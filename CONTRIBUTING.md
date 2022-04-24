@@ -154,7 +154,7 @@ For more information, refer to `README.md` under `src/risedevtool`.
 To start an all-in-one process from IDE or command line, you may also use
 
 ```shell
-cargo run --bin risingwave --features all-in-one -- playground
+cargo run --bin risingwave -- playground
 ```
 
 Then, connect to the playground instance via
@@ -387,10 +387,11 @@ We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are 
 
 ## To check-in PRs from forks...
 
-Use
-
 ```
-bors try
+gh pr checkout <PR id>
+git checkout -b forks/<PR id>
+git push origin HEAD -u
 ```
 
-in PR to run tests in forks. Note that we don't use bors to merge PRs.
+After that, CI checks will begin on branches of RisingWave's main repo,
+and the status will be automatically updated to PRs from forks.

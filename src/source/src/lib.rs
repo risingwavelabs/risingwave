@@ -78,13 +78,6 @@ pub enum SourceStreamReaderImpl {
 
 #[async_trait]
 impl StreamSourceReader for SourceStreamReaderImpl {
-    async fn open(&mut self) -> Result<()> {
-        match self {
-            SourceStreamReaderImpl::TableV2(t) => t.open().await,
-            SourceStreamReaderImpl::Connector(c) => c.open().await,
-        }
-    }
-
     async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)> {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await,
@@ -137,9 +130,6 @@ pub trait Source: Send + Sync + 'static {
 
 #[async_trait]
 pub trait StreamSourceReader: Send + Sync + 'static {
-    /// `init` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
     async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)>;

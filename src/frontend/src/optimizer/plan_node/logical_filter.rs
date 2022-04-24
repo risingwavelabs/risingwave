@@ -91,7 +91,9 @@ impl PlanTreeNodeUnary for LogicalFilter {
         (Self::new(input, predicate), input_col_change)
     }
 }
+
 impl_plan_tree_node_for_unary! {LogicalFilter}
+
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "LogicalFilter {{ predicate: {} }}", self.predicate)

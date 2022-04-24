@@ -99,17 +99,25 @@ impl StreamMaterialize {
     }
 
     /// Create a materialize node.
+    ///
+    /// When creating index, `is_index` should be true. Then, materialize will distribute keys
+    /// using order by columns, instead of pk.
     pub fn create(
         input: PlanRef,
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        is_index_on: Option<TableId>,
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
         let input = match input.distribution() {
             Distribution::Single => input,
-            _ => Distribution::HashShard(input.pk_indices().to_vec())
-                .enforce_if_not_satisfies(input, Order::any()),
+            _ => Distribution::HashShard(if is_index_on.is_some() {
+                user_order_by.field_order.iter().map(|x| x.index).collect()
+            } else {
+                input.pk_indices().to_vec()
+            })
+            .enforce_if_not_satisfies(input, Order::any()),
         };
 
         let base = Self::derive_plan_base(&input)?;
@@ -158,6 +166,7 @@ impl StreamMaterialize {
             name: mv_name,
             columns,
             pk_desc,
+            is_index_on,
         };
 
         Ok(Self { base, input, table })

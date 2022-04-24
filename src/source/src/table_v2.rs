@@ -127,10 +127,6 @@ pub struct TableV2StreamReader {
 
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     async fn next(&mut self) -> Result<(StreamChunk, HashMap<String, String>)> {
         let (chunk, notifier) = self
             .rx
@@ -231,8 +227,6 @@ mod tests {
         }
 
         write_chunk!(0);
-
-        reader.open().await?;
 
         macro_rules! check_next_chunk {
             ($i: expr) => {

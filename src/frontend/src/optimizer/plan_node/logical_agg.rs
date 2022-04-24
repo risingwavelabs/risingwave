@@ -60,11 +60,7 @@ impl PlanAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
-            args: self
-                .inputs
-                .iter()
-                .map(InputRef::to_agg_arg_protobuf)
-                .collect(),
+            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             // TODO: support distinct
             distinct: false,
         }
@@ -235,7 +231,7 @@ impl ExprRewriter for ExprHandler {
                 .into_iter()
                 .map(|expr| self.rewrite_expr(expr))
                 .collect();
-            FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+            FunctionCall::new_unchecked(func_type, inputs, ret).into()
         }
     }
 

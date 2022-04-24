@@ -15,11 +15,8 @@
 use drop_stream::*;
 use drop_table::*;
 use generic_exchange::*;
-use hash_agg::*;
-use limit::*;
 use merge_sort_exchange::*;
 use order_by::*;
-use projection::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -33,43 +30,39 @@ use top_n::*;
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-pub use crate::executor::delete::DeleteExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
-pub use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
 use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
-use crate::executor::values::ValuesExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
-use crate::executor2::{BoxedExecutor2, BoxedExecutor2Builder, FilterExecutor2, TraceExecutor2};
+use crate::executor2::{
+    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2,
+    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectionExecutor2, TraceExecutor2,
+    ValuesExecutor2,
+};
 use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
 mod create_table;
-mod delete;
 mod drop_stream;
 mod drop_table;
 pub mod executor2_wrapper;
 mod fuse;
 mod generate_series;
 mod generic_exchange;
-mod hash_agg;
-mod insert;
 mod join;
-mod limit;
 mod merge_sort_exchange;
 pub mod monitor;
 mod order_by;
-mod projection;
 mod row_seq_scan;
 mod sort_agg;
 mod stream_scan;
+#[cfg(test)]
 pub mod test_utils;
 mod top_n;
 mod trace;
-mod values;
 
 /// `Executor` is an operator in the query execution.
 #[async_trait::async_trait]
@@ -116,7 +109,7 @@ pub trait BoxedExecutorBuilder {
 
 pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
-    task_id: &'a TaskId,
+    pub task_id: &'a TaskId,
     env: BatchEnvironment,
     epoch: u64,
 }
@@ -191,24 +184,24 @@ impl<'a> ExecutorBuilder<'a> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
-            NodeBody::Insert => InsertExecutor,
-            NodeBody::Delete => DeleteExecutor,
+            NodeBody::Insert => InsertExecutor2,
+            NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor,
+            NodeBody::Project => ProjectionExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
             NodeBody::TopN => TopNExecutor,
-            NodeBody::Limit => LimitExecutor,
-            NodeBody::Values => ValuesExecutor,
+            NodeBody::Limit => LimitExecutor2,
+            NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutorBuilder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::DropSource => DropStreamExecutor,
-            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;
@@ -220,24 +213,24 @@ impl<'a> ExecutorBuilder<'a> {
         let real_executor = build_executor2! { self,
             NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
-            NodeBody::Insert => InsertExecutor,
-            NodeBody::Delete => DeleteExecutor,
+            NodeBody::Insert => InsertExecutor2,
+            NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor,
+            NodeBody::Project => ProjectionExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
             NodeBody::TopN => TopNExecutor,
-            NodeBody::Limit => LimitExecutor,
-            NodeBody::Values => ValuesExecutor,
+            NodeBody::Limit => LimitExecutor2,
+            NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutorBuilder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::DropSource => DropStreamExecutor,
-            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;
