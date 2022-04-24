@@ -764,7 +764,7 @@ mod tests {
         let (tx_r, rx_r) = unbounded_channel();
 
         let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
-        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema, rx_r, vec![0, 1]);
 
         let cond = with_condition.then(create_cond);
 
@@ -778,7 +778,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
-            vec![],
+            vec![1],
             1,
             cond,
             "HashJoinExecutor".to_string(),
