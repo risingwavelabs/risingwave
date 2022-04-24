@@ -770,7 +770,7 @@ jobs:
         env:
           YQ_VERSION: v4.16.1
           BINARY: yq_linux_amd64
-          BUF_VERSION: 1.0.0-rc6
+          BUF_VERSION: "1.4.0"
       - name: Check CI workflows are up-to-date
         run: |
           ./.github/workflow-template/generate.sh --check
