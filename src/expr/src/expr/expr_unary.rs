@@ -545,15 +545,15 @@ mod tests {
         assert_castible(DataType::Varchar, "abc".to_string());
         assert_castible(
             DataType::Date,
-            NaiveDateWrapper::new_with_days(100).unwrap(),
+            NaiveDateWrapper::with_days(100).unwrap(),
         );
         assert_castible(
             DataType::Time,
-            NaiveTimeWrapper::new_with_secs_nano(1, 1).unwrap(),
+            NaiveTimeWrapper::with_secs_nano(1, 1).unwrap(),
         );
         assert_castible(
             DataType::Timestamp,
-            NaiveDateTimeWrapper::new_with_secs_nsecs(1, 1).unwrap(),
+            NaiveDateTimeWrapper::with_secs_nsecs(1, 1).unwrap(),
         );
     }
 }

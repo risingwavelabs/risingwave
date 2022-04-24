@@ -73,7 +73,7 @@ impl RandValue for NaiveDateWrapper {
         let max_day = chrono::MAX_DATE.num_days_from_ce();
         let min_day = chrono::MIN_DATE.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
-        NaiveDateWrapper::new_with_days(days).unwrap()
+        NaiveDateWrapper::with_days(days).unwrap()
     }
 }
 

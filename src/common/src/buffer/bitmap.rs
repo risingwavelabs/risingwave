@@ -131,7 +131,7 @@ impl Bitmap {
     pub fn new(num_bits: usize) -> Result<Self> {
         let len = Bitmap::num_of_bytes(num_bits);
         Ok(Bitmap {
-            bits: Buffer::new_with_default(len)?,
+            bits: Buffer::with_default(len)?,
             num_bits,
             num_high_bits: 0,
         })

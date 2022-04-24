@@ -204,7 +204,7 @@ impl SortMergeJoinExecutor {
     ) -> Self {
         Self {
             join_type,
-            chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types()),
+            chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
             schema,
             probe_side_source,
             build_side_source,

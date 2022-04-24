@@ -44,12 +44,12 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Result<Self> {
-        panic!("Must use new_with_meta.")
+        panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
-        Self::new_with_meta(
+        Self::with_meta(
             capacity,
             ArrayMeta::List {
                 // Default datatype
@@ -58,7 +58,7 @@ impl ArrayBuilder for ListArrayBuilder {
         )
     }
 
-    fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::List { datatype } = meta {
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
@@ -179,7 +179,7 @@ impl Array for ListArray {
     }
 
     fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
-        let array_builder = ListArrayBuilder::new_with_meta(
+        let array_builder = ListArrayBuilder::with_meta(
             capacity,
             ArrayMeta::List {
                 datatype: Box::new(self.value_type.clone()),
@@ -416,7 +416,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::new_with_meta(
+        let mut builder = ListArrayBuilder::with_meta(
             4,
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
@@ -451,7 +451,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut builder = ListArrayBuilder::new_with_meta(
+        let mut builder = ListArrayBuilder::with_meta(
             4,
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
@@ -563,7 +563,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::new_with_meta(
+        let mut builder = ListArrayBuilder::with_meta(
             3,
             ArrayMeta::List {
                 datatype: Box::new(DataType::List {
