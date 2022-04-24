@@ -110,6 +110,7 @@ where
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve_chain_node_inner(
         &self,
         stream_node: &mut StreamNode,
