@@ -2,15 +2,15 @@ syntax = "proto3";
 
 package meta;
 
-option java_multiple_files = true;
-option java_package = "com.risingwave.proto.metanode";
-option optimize_for = SPEED;
-
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
 import "plan_common.proto";
 import "stream_plan.proto";
+
+option java_multiple_files = true;
+option java_package = "com.risingwave.proto.metanode";
+option optimize_for = SPEED;
 
 // Hash mapping for meta. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {

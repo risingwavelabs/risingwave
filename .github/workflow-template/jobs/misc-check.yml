@@ -13,9 +13,6 @@ jobs:
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
           sudo apt install -y protobuf-compiler -o Acquire::Retries=3
           curl -sSL \
-            https://github.com/uber/prototool/releases/download/v1.8.0/prototool-$(uname -s)-$(uname -m).tar.gz | \
-            sudo tar -C /usr/local --strip-components 1 -xz
-          curl -sSL \
             "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m).tar.gz" | \
             sudo tar -xvzf - -C /usr/local --strip-components 1
         env:
@@ -34,7 +31,7 @@ jobs:
 
       - name: Check protobuf code format
         run: |
-          prototool format -d
+          buf format -d --exit-code
         working-directory: proto
 
       - name: Lint protobuf
