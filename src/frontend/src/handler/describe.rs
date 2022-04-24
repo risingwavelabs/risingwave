@@ -27,7 +27,7 @@ use crate::session::OptimizerContext;
 pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
     let mut rows = vec![];
     for col in columns {
-        rows.extend(&mut col.get_column_descs().into_iter().map(|c| {
+        rows.extend(col.get_column_descs().into_iter().map(|c| {
             let type_name = {
                 // If datatype is struct, use type name as struct name
                 if let DataType::Struct { fields: _f } = c.data_type {
