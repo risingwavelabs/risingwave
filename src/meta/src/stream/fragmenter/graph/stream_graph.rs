@@ -390,7 +390,7 @@ impl StreamGraphBuilder {
 
     /// Build final stream DAG with dependencies with current actor builders.
     pub fn build(
-        &mut self,
+        mut self,
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,

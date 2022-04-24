@@ -15,6 +15,7 @@ bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
+derivative = "2"
 either = "1"
 etcd-client = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
