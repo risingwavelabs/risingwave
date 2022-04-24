@@ -32,6 +32,7 @@ pub struct TableCatalog {
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
     pub pk_desc: Vec<OrderedColumnDesc>,
+    pub is_index_on: Option<TableId>,
 }
 
 impl TableCatalog {
@@ -94,6 +95,8 @@ impl TableCatalog {
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+            is_index: self.is_index_on.is_some(),
+            index_on_id: self.is_index_on.unwrap_or_default().table_id(),
         }
     }
 }
@@ -139,6 +142,11 @@ impl From<ProstTable> for TableCatalog {
             name,
             pk_desc,
             columns,
+            is_index_on: if tb.is_index {
+                Some(tb.index_on_id.into())
+            } else {
+                None
+            },
         }
     }
 }
@@ -165,6 +173,8 @@ mod tests {
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
+            is_index: false,
+            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -206,6 +216,7 @@ mod tests {
         assert_eq!(
             table,
             TableCatalog {
+                is_index_on: None,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),

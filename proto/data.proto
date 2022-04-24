@@ -8,6 +8,12 @@ option optimize_for = SPEED;
 
 import "common.proto";
 
+message IntervalUnit {
+  int32 months = 1;
+  int32 days = 2;
+  int64 ms = 3;
+}
+
 message Buffer {
   enum CompressionType {
     INVALID = 0;

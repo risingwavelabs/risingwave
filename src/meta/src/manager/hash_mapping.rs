@@ -14,47 +14,51 @@
 
 #![allow(dead_code)]
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::try_match_expand;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
+use risingwave_pb::meta::ParallelUnitMapping;
 use tokio::sync::Mutex;
 
 use crate::cluster::ParallelUnitId;
-use crate::model::{ConsistentHashMapping, MetadataModel};
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
-pub type HashDispatchManagerRef<S> = Arc<HashDispatchManager<S>>;
+pub type HashMappingManagerRef<S> = Arc<HashMappingManager<S>>;
 
-/// `HashDispatchManager` maintains a load-balanced hash mapping based on consistent hash.
+/// `HashMappingManager` maintains a load-balanced hash mapping based on consistent hash.
 /// The mapping changes when one or more nodes enter or leave the cluster.
-pub struct HashDispatchManager<S> {
-    core: Mutex<HashDispatchManagerCore<S>>,
+pub struct HashMappingManager<S> {
+    core: Mutex<HashMappingManagerCore<S>>,
 }
 
-impl<S> HashDispatchManager<S>
+impl<S> HashMappingManager<S>
 where
     S: MetaStore,
 {
     pub async fn new(compute_nodes: &[WorkerNode], meta_store: Arc<S>) -> Result<Self> {
-        let mut core = HashDispatchManagerCore::new(meta_store);
-        if !compute_nodes.is_empty() {
+        let mut core = HashMappingManagerCore::new(meta_store).await?;
+        if core.total_hash_parallels == 0 && !compute_nodes.is_empty() {
             let parallel_units = compute_nodes
                 .iter()
                 .flat_map(|node| node.parallel_units.to_owned())
                 .filter(|parallel_unit| parallel_unit.r#type == ParallelUnitType::Hash as i32)
                 .collect_vec();
-            core.add_worker_mapping_from_empty(&parallel_units).await?;
+            core.add_worker_node_from_empty(&parallel_units).await?;
         }
         Ok(Self {
             core: Mutex::new(core),
         })
     }
 
-    pub async fn add_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
+    pub async fn add_worker_node(&self, compute_node: &WorkerNode) -> Result<()> {
         assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
         let hash_parallel_units = compute_node
@@ -64,17 +68,16 @@ where
             .filter(|parallel_unit| parallel_unit.r#type == ParallelUnitType::Hash as i32)
             .collect_vec();
         if core.load_balancer.is_empty() {
-            core.add_worker_mapping_from_empty(&hash_parallel_units)
-                .await
+            core.add_worker_node_from_empty(&hash_parallel_units).await
         } else {
-            core.add_worker_mapping(&hash_parallel_units).await
+            core.add_worker_node(&hash_parallel_units).await
         }
     }
 
-    pub async fn delete_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
+    pub async fn delete_worker_node(&self, compute_node: &WorkerNode) -> Result<()> {
         assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
-        core.delete_worker_mapping(
+        core.delete_worker_node(
             &compute_node
                 .parallel_units
                 .clone()
@@ -85,66 +88,112 @@ where
         .await
     }
 
-    pub async fn get_worker_mapping(&self) -> Vec<ParallelUnitId> {
+    pub async fn get_default_mapping(&self) -> Vec<ParallelUnitId> {
         let core = self.core.lock().await;
-        core.vnode_mapping.get_mapping()
+        core.vnode_mapping.clone()
+    }
+
+    pub async fn get_table_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
+        let core = self.core.lock().await;
+        core.table_mappings.get(table_id).cloned()
+    }
+
+    pub async fn build_table_mapping(&self, table_id: TableId) -> Result<()> {
+        let mut core = self.core.lock().await;
+        core.build_table_mapping(table_id)
     }
 }
 
-/// [`HashDispatchManagerCore`] contains the core logic for mapping change when one or more nodes
+/// [`HashMappingManagerCore`] contains the core logic for mapping change when one or more nodes
 /// enter or leave the cluster.
-struct HashDispatchManagerCore<S> {
+struct HashMappingManagerCore<S> {
     /// Total number of hash parallel units in cluster.
     total_hash_parallels: usize,
-    /// Mapping from virtual node to parallel unit, which is persistent.
-    vnode_mapping: ConsistentHashMapping,
-    /// Mapping from parallel unit to virtual node, which is volatile.
+    /// Hash mapping from virtual node to parallel unit. Currently, hash mappings for all
+    /// relational state tables are identical.
+    vnode_mapping: Vec<ParallelUnitId>,
+    /// Mapping from parallel unit to virtual node.
     owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>>,
     /// Mapping from vnode count to parallel unit, aiming to maintain load balance.
     load_balancer: BTreeMap<usize, Vec<ParallelUnitId>>,
     /// Meta store used for persistence.
     meta_store: Arc<S>,
+    /// Mapping from relational state table to hash mapping. Currently all tables shares the same
+    /// mapping.
+    table_mappings: HashMap<TableId, Vec<ParallelUnitId>>,
 }
 
 // FIXME:
-// 1. IO: Currently, `HashDispatchManager` only supports adding or deleting compute node one by one.
+// 1. IO: Currently, `HashMappingManager` only supports adding or deleting compute node one by one.
 // Namely, IO occurs when each node is added or deleted, rather than flushing when the whole cluster
 // has been updated. Therefore, the upper layer might need to provide an API for batch change of
 // cluster.
-// 2. Transaction: The logic in `HashDispatchManager` is just part of a transaction, but it is not
+// 2. Transaction: The logic in `HashMappingManager` is just part of a transaction, but it is not
 // currently supported.
-// 3. Scale Out: Mapping should increase its number of slots when the cluster becomes too large, so
-// that new nodes can still get some virtual node slots.
-impl<S> HashDispatchManagerCore<S>
+impl<S> HashMappingManagerCore<S>
 where
     S: MetaStore,
 {
-    fn new(meta_store: Arc<S>) -> Self {
-        let vnode_mapping = ConsistentHashMapping::new();
-        let owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-        let load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
+    async fn new(meta_store: Arc<S>) -> Result<Self> {
+        let mappings = try_match_expand!(
+            ParallelUnitMapping::list(&*meta_store).await,
+            Ok,
+            "ParallelUnitMapping::list fail"
+        )?;
+        let mut vnode_mapping = Vec::new();
+        let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
+        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
+        let mut table_mappings = HashMap::new();
 
-        Self {
-            total_hash_parallels: 0,
+        // Currently all tables share one hash mapping, so the first one could be directly applied
+        // to default.
+        if let Some(mapping) = mappings.first() {
+            vnode_mapping = mapping.hash_mapping.clone();
+            vnode_mapping
+                .iter()
+                .enumerate()
+                .for_each(|(vnode, parallel_unit)| {
+                    owner_mapping
+                        .entry(*parallel_unit)
+                        .or_default()
+                        .push(vnode as VirtualNode);
+                });
+            owner_mapping.iter().for_each(|(parallel_unit, vnodes)| {
+                load_balancer
+                    .entry(vnodes.len())
+                    .or_default()
+                    .push(*parallel_unit);
+            });
+
+            mappings.into_iter().for_each(|mapping| {
+                table_mappings.insert(TableId::new(mapping.table_id), mapping.hash_mapping);
+            });
+        }
+
+        Ok(Self {
+            total_hash_parallels: owner_mapping.keys().len(),
             vnode_mapping,
             owner_mapping,
             load_balancer,
             meta_store,
-        }
+            table_mappings,
+        })
     }
 
-    async fn add_worker_mapping_from_empty(
-        &mut self,
-        parallel_units: &[ParallelUnit],
-    ) -> Result<()> {
-        let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
+    async fn add_worker_node_from_empty(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
+        assert!(
+            self.table_mappings.is_empty(),
+            "tables are not allowed to be created without compute node"
+        );
+
+        self.vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
         self.total_hash_parallels = parallel_units.len();
         let hash_shard_size = VIRTUAL_NODE_COUNT / self.total_hash_parallels;
         let mut init_bound = hash_shard_size;
 
         parallel_units.iter().for_each(|parallel_unit| {
             let parallel_unit_id = parallel_unit.id;
-            vnode_mapping.resize(init_bound, parallel_unit_id);
+            self.vnode_mapping.resize(init_bound, parallel_unit_id);
             let vnodes = (init_bound - hash_shard_size..init_bound)
                 .map(|id| id as VirtualNode)
                 .collect();
@@ -155,7 +204,7 @@ where
         let mut parallel_unit_iter = parallel_units.iter().cycle();
         for vnode in init_bound - hash_shard_size..VIRTUAL_NODE_COUNT {
             let id = parallel_unit_iter.next().unwrap().id;
-            vnode_mapping.push(id);
+            self.vnode_mapping.push(id);
             self.owner_mapping
                 .entry(id)
                 .or_default()
@@ -174,17 +223,15 @@ where
 
         assert!(
             !self.load_balancer.is_empty(),
-            "Cannot construct consistent hash mapping on cluster initialization."
+            "cannot construct consistent hash mapping on cluster initialization"
         );
 
-        self.vnode_mapping.set_mapping(vnode_mapping)?;
-
-        self.vnode_mapping.insert(&*self.meta_store).await?;
+        // At this time, no tables have been created. Therefore, table mappings need not update.
 
         Ok(())
     }
 
-    async fn add_worker_mapping(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
+    async fn add_worker_node(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
         self.total_hash_parallels += parallel_units.len();
 
         let hash_shard_size =
@@ -196,29 +243,34 @@ where
             let mut entry = self
                 .load_balancer
                 .last_entry()
-                .expect("HashDispatcherManager: load balancer should have at least one entry.");
+                .expect("load balancer should have at least one entry.");
             let load_count = *entry.key();
 
             // Delete candidate parallel unit from load balancer
             let candidate_parallel_unit = entry.get_mut().pop().unwrap_or_else(|| {
-                panic!("HashDispatcherManager: expect to get some candidate parallel unit.");
+                panic!("expect to get some candidate parallel unit.");
             });
             if entry.get().is_empty() {
                 self.load_balancer.pop_last();
             }
 
-            let candidate_vnodes = self.owner_mapping
+            let candidate_vnodes = self
+                .owner_mapping
                 .get_mut(&candidate_parallel_unit)
                 .unwrap_or_else(|| {
-                    panic!("HashDispatcherManager: expect virtual nodes owned by parallel unit {} but got nothing.", candidate_parallel_unit);
+                    panic!(
+                        "expect virtual nodes owned by parallel unit {} but got nothing.",
+                        candidate_parallel_unit
+                    );
                 });
 
             // Delete candidate vnode from owner mapping
-            let candidate_vnode = candidate_vnodes
-                .pop()
-                .unwrap_or_else(|| {
-                    panic!("HashDispatcherManager: expect parallel units that own {} virtual nodes but got nothing.", candidate_parallel_unit);
-                });
+            let candidate_vnode = candidate_vnodes.pop().unwrap_or_else(|| {
+                panic!(
+                    "expect parallel units that own {} virtual nodes but got nothing.",
+                    candidate_parallel_unit
+                );
+            });
 
             // Add candidate vnode to new vnodes for future vnode allocation
             new_vnodes.push(candidate_vnode);
@@ -239,7 +291,7 @@ where
 
             // Update vnode mapping
             for vnode in allocated_vnodes.clone() {
-                self.vnode_mapping.update_mapping(vnode, parallel_unit_id)?;
+                self.vnode_mapping[vnode as usize] = parallel_unit_id;
             }
 
             // Add new vnodes to owner mapping
@@ -253,16 +305,25 @@ where
                 .push(parallel_unit_id);
         }
 
-        // Persist mapping
-        self.vnode_mapping.insert(&*self.meta_store).await?;
+        // Update table mappings
+        self.table_mappings
+            .values_mut()
+            .for_each(|mapping| mapping.clone_from(&self.vnode_mapping));
+        for (table_id, mapping) in &self.table_mappings {
+            let mapping_model = ParallelUnitMapping {
+                table_id: table_id.table_id,
+                hash_mapping: mapping.clone(),
+            };
+            mapping_model.insert(&*self.meta_store).await?;
+        }
 
         Ok(())
     }
 
-    async fn delete_worker_mapping(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
+    async fn delete_worker_node(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
         assert!(
             !self.owner_mapping.is_empty(),
-            "HashDispatcherManager: mapping is currently empty, cannot delete worker mapping."
+            "mapping is currently empty, cannot delete worker mapping."
         );
 
         let mut released_vnodes = Vec::new();
@@ -277,11 +338,21 @@ where
             self.load_balancer
                 .get_mut(&owned_vnode_count)
                 .unwrap_or_else(|| {
-                    panic!("HashDispatcherManager: expect parallel units that own {} virtual nodes but got nothing.", owned_vnode_count);
+                    panic!(
+                        "expect parallel units that own {} virtual nodes but got nothing.",
+                        owned_vnode_count
+                    );
                 })
-                .retain(|&candidate_parallel_unit_id| candidate_parallel_unit_id != parallel_unit_id);
+                .retain(|&candidate_parallel_unit_id| {
+                    candidate_parallel_unit_id != parallel_unit_id
+                });
 
-            if self.load_balancer.get(&owned_vnode_count).unwrap().is_empty() {
+            if self
+                .load_balancer
+                .get(&owned_vnode_count)
+                .unwrap()
+                .is_empty()
+            {
                 self.load_balancer.remove(&owned_vnode_count);
             }
 
@@ -291,7 +362,7 @@ where
 
         // All compute nodes have been deleted from the cluster.
         if self.load_balancer.is_empty() {
-            self.vnode_mapping.clear_mapping();
+            self.vnode_mapping.clear();
             return Ok(());
         }
 
@@ -299,21 +370,20 @@ where
             let mut entry = self
                 .load_balancer
                 .first_entry()
-                .expect("HashDispatcherManager: load balancer should have at least one entry.");
+                .expect("load balancer should have at least one entry");
             let load_count = *entry.key();
             let candidate_parallel_units = entry.get_mut();
 
             // Delete candidate parallel unit from load balancer
-            let candidate_parallel_unit = candidate_parallel_units.pop().expect(
-                "HashDispatcherManager: expect a parallel unit for virtual node allocation.",
-            );
+            let candidate_parallel_unit = candidate_parallel_units
+                .pop()
+                .expect("expect a parallel unit for virtual node allocation");
             if candidate_parallel_units.is_empty() {
                 self.load_balancer.pop_first();
             }
 
             // Update vnode mapping
-            self.vnode_mapping
-                .update_mapping(released_vnode, candidate_parallel_unit)?;
+            self.vnode_mapping[released_vnode as usize] = candidate_parallel_unit;
 
             // Update owner mapping
             self.owner_mapping
@@ -328,12 +398,34 @@ where
                 .push(candidate_parallel_unit);
         }
 
-        // Persist mapping
-        self.vnode_mapping.insert(&*self.meta_store).await?;
-
         self.total_hash_parallels -= parallel_units.len();
 
+        // Update table mappings
+        self.table_mappings
+            .values_mut()
+            .for_each(|mapping| mapping.clone_from(&self.vnode_mapping));
+        for (table_id, mapping) in &self.table_mappings {
+            let mapping_model = ParallelUnitMapping {
+                table_id: table_id.table_id,
+                hash_mapping: mapping.clone(),
+            };
+            mapping_model.insert(&*self.meta_store).await?;
+        }
+
         Ok(())
+    }
+
+    fn build_table_mapping(&mut self, table_id: TableId) -> Result<()> {
+        if self.total_hash_parallels == 0 {
+            Err(RwError::from(ErrorCode::InternalError(
+                "Tables are not allowed to be created without compute node.".to_string(),
+            )))
+        } else {
+            if let Entry::Vacant(entry) = self.table_mappings.entry(table_id) {
+                entry.insert(self.vnode_mapping.clone());
+            }
+            Ok(())
+        }
     }
 }
 
@@ -350,6 +442,7 @@ mod tests {
     #[tokio::test]
     async fn test_hash_dispatch_manager() -> Result<()> {
         let meta_store = Arc::new(MemStore::default());
+        let tables = [TableId::new(3), TableId::new(7)];
         let mut current_id = 0u32;
         let worker_count = 10u32;
         let parallel_unit_per_node = 3u32;
@@ -380,47 +473,83 @@ mod tests {
             })
             .collect_vec();
 
-        let hash_dispatch_manager = HashDispatchManager::new(&[], meta_store).await?;
+        let hash_mapping_manager = HashMappingManager::new(&[], meta_store).await?;
+
+        for table_id in tables {
+            assert_eq!(
+                hash_mapping_manager.build_table_mapping(table_id).await,
+                Err(RwError::from(ErrorCode::InternalError(
+                    "Tables are not allowed to be created without compute node.".to_string()
+                )))
+            );
+        }
 
         for node in &worker_nodes {
-            hash_dispatch_manager.add_worker_mapping(node).await?;
-            assert_core(&hash_dispatch_manager).await;
+            hash_mapping_manager.add_worker_node(node).await?;
+            assert_core(&hash_mapping_manager).await;
         }
-        assert_parallel_unit_count(
-            &hash_dispatch_manager,
-            worker_count * parallel_unit_per_node,
-        )
-        .await;
+        assert_parallel_unit_count(&hash_mapping_manager, worker_count * parallel_unit_per_node)
+            .await;
+
+        // Table mappings
+        for table_id in tables {
+            assert_eq!(
+                hash_mapping_manager.get_table_mapping(&table_id).await,
+                None
+            );
+            hash_mapping_manager
+                .build_table_mapping(table_id)
+                .await
+                .unwrap();
+            assert_eq!(
+                hash_mapping_manager
+                    .get_table_mapping(&table_id)
+                    .await
+                    .unwrap(),
+                hash_mapping_manager.get_default_mapping().await
+            );
+        }
 
         // Delete half of the nodes
         let mut deleted_count = 0u32;
         for node in &worker_nodes {
             if node.get_id() % 2 == 0 {
-                hash_dispatch_manager.delete_worker_mapping(node).await?;
+                hash_mapping_manager.delete_worker_node(node).await?;
                 deleted_count += 1;
                 if deleted_count != worker_count {
-                    assert_core(&hash_dispatch_manager).await;
+                    assert_core(&hash_mapping_manager).await;
                 }
             }
         }
         assert_parallel_unit_count(
-            &hash_dispatch_manager,
+            &hash_mapping_manager,
             (worker_count - deleted_count) * parallel_unit_per_node,
         )
         .await;
 
+        // Table mappings
+        for table_id in tables {
+            assert_eq!(
+                hash_mapping_manager
+                    .get_table_mapping(&table_id)
+                    .await
+                    .unwrap(),
+                hash_mapping_manager.get_default_mapping().await
+            );
+        }
+
         // Delete the rest of the nodes
         for node in &worker_nodes {
             if node.get_id() % 2 == 1 {
-                hash_dispatch_manager.delete_worker_mapping(node).await?;
+                hash_mapping_manager.delete_worker_node(node).await?;
                 deleted_count += 1;
                 if deleted_count != worker_count {
-                    assert_core(&hash_dispatch_manager).await;
+                    assert_core(&hash_mapping_manager).await;
                 }
             }
         }
         assert_parallel_unit_count(
-            &hash_dispatch_manager,
+            &hash_mapping_manager,
             (worker_count - deleted_count) * parallel_unit_per_node,
         )
         .await;
@@ -461,8 +590,7 @@ mod tests {
             })
             .collect_vec();
 
-        let hash_dispatch_manager =
-            HashDispatchManager::new(&init_worker_nodes, meta_store).await?;
+        let hash_dispatch_manager = HashMappingManager::new(&init_worker_nodes, meta_store).await?;
         assert_core(&hash_dispatch_manager).await;
         assert_parallel_unit_count(
             &hash_dispatch_manager,
@@ -496,7 +624,7 @@ mod tests {
             .collect_vec();
 
         for node in &worker_nodes {
-            hash_dispatch_manager.add_worker_mapping(node).await?;
+            hash_dispatch_manager.add_worker_node(node).await?;
             assert_core(&hash_dispatch_manager).await;
         }
         assert_parallel_unit_count(
@@ -509,7 +637,7 @@ mod tests {
         Ok(())
     }
 
-    async fn assert_core(hash_dispatch_manager: &HashDispatchManager<MemStore>) {
+    async fn assert_core(hash_dispatch_manager: &HashMappingManager<MemStore>) {
         let core = hash_dispatch_manager.core.lock().await;
         assert_eq!(
             core.owner_mapping
@@ -525,7 +653,7 @@ mod tests {
                 .sum::<usize>(),
             VIRTUAL_NODE_COUNT
         );
-        let vnode_mapping = core.vnode_mapping.get_mapping();
+        let vnode_mapping = &core.vnode_mapping;
         let load_balancer = &core.load_balancer;
         let owner_mapping = &core.owner_mapping;
         for (&load_count, parallel_units) in load_balancer {
@@ -546,7 +674,7 @@ mod tests {
     }
 
     async fn assert_parallel_unit_count(
-        hash_dispatch_manager: &HashDispatchManager<MemStore>,
+        hash_dispatch_manager: &HashMappingManager<MemStore>,
         parallel_unit_count: u32,
     ) {
         let core = hash_dispatch_manager.core.lock().await;

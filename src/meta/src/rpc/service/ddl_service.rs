@@ -419,14 +419,16 @@ where
             hash_mapping,
             ..Default::default()
         };
-        let fragmenter = StreamFragmenter::new(
+        let graph = StreamFragmenter::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
             false,
-        );
-        let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
-        let table_fragments = TableFragments::new(mview_id, graph);
+            &stream_node,
+            &mut ctx,
+        )
+        .await?;
+        let table_fragments = TableFragments::new(mview_id, graph, ctx.distribution_keys.clone());
 
         // Create on compute node.
         self.stream_manager

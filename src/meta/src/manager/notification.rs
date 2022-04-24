@@ -20,7 +20,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio::time;
 use tonic::Status;
 
@@ -38,42 +38,113 @@ pub enum LocalNotification {
 /// Interval before retry when notify fail.
 const NOTIFY_RETRY_INTERVAL: Duration = Duration::from_micros(10);
 
+#[derive(Debug)]
+enum Target {
+    Frontend,
+    Compute,
+}
+
+#[derive(Debug)]
+struct Task {
+    target: Target,
+    callback_tx: Option<oneshot::Sender<NotificationVersion>>,
+    operation: Operation,
+    info: Info,
+}
+
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
 pub struct NotificationManager {
-    core: Mutex<NotificationManagerCore>,
-    /// Sender used `Self::delete_sender` method.
+    core: Arc<Mutex<NotificationManagerCore>>,
+    /// Sender used to add a notification into the waiting queue.
+    task_tx: UnboundedSender<Task>,
+    /// Sender used in `Self::delete_sender` method.
     /// Tell `NotificationManagerCore` to skip some retry and delete senders.
-    tx: UnboundedSender<WorkerKey>,
+    stop_retry_tx: UnboundedSender<WorkerKey>,
 }
 
 pub type NotificationManagerRef = Arc<NotificationManager>;
 
 impl NotificationManager {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
+        // notification waiting queue.
+        let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
+        let (stop_retry_tx, stop_retry_rx) = mpsc::unbounded_channel();
+        let core = Arc::new(Mutex::new(NotificationManagerCore::new(stop_retry_rx)));
+        let core_clone = core.clone();
+
+        tokio::spawn(async move {
+            while let Some(task) = task_rx.recv().await {
+                let version = match task.target {
+                    Target::Frontend => {
+                        core.lock()
+                            .await
+                            .notify_frontend(task.operation, &task.info)
+                            .await
+                    }
+                    Target::Compute => {
+                        core.lock()
+                            .await
+                            .notify_compute(task.operation, &task.info)
+                            .await
+                    }
+                };
+                if let Some(tx) = task.callback_tx {
+                    tx.send(version).unwrap();
+                }
+            }
+        });
+
         Self {
-            core: Mutex::new(NotificationManagerCore::new(rx)),
-            tx,
+            core: core_clone,
+            task_tx,
+            stop_retry_tx,
         }
     }
 
-    /// Send a `SubscribeResponse` to frontends.
-    pub async fn notify_frontend(&self, operation: Operation, info: &Info) -> NotificationVersion {
-        let mut core_guard = self.core.lock().await;
-        core_guard.notify_frontend(operation, info).await
+    /// Add a notifcation to the waiting queue and return immediately
+    fn notify_asynchronously(&self, target: Target, operation: Operation, info: Info) {
+        let task = Task {
+            target,
+            callback_tx: None,
+            operation,
+            info,
+        };
+        self.task_tx.send(task).unwrap();
     }
 
-    /// Send a `SubscribeResponse` to compute nodes.
-    pub async fn notify_compute(&self, operation: Operation, info: &Info) -> NotificationVersion {
-        let mut core_guard = self.core.lock().await;
-        core_guard.notify_compute(operation, info).await
+    /// Add a notification to the waiting queue, and will not return until the notification is
+    /// sent successfully
+    async fn notify(
+        &self,
+        target: Target,
+        operation: Operation,
+        info: Info,
+    ) -> NotificationVersion {
+        let (callback_tx, callback_rx) = oneshot::channel();
+        let task = Task {
+            target,
+            callback_tx: Some(callback_tx),
+            operation,
+            info,
+        };
+        self.task_tx.send(task).unwrap();
+        callback_rx.await.unwrap()
     }
 
-    /// Send a `SubscribeResponse` to frontends and compute nodes.
-    pub async fn notify_all(&self, operation: Operation, info: &Info) {
-        let mut core_guard = self.core.lock().await;
-        core_guard.notify_frontend(operation, info).await;
-        core_guard.notify_compute(operation, info).await;
+    pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(Target::Frontend, operation, info);
+    }
+
+    pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify(Target::Frontend, operation, info).await
+    }
+
+    pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(Target::Compute, operation, info);
+    }
+
+    pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify(Target::Compute, operation, info).await
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
@@ -89,7 +160,7 @@ impl NotificationManager {
 
     /// Tell `NotificationManagerCore` to skip some retry and delete senders.
     pub fn delete_sender(&self, worker_key: WorkerKey) {
-        self.tx.send(worker_key).unwrap();
+        self.stop_retry_tx.send(worker_key).unwrap();
     }
 
     pub async fn insert_frontend_sender(
@@ -136,19 +207,19 @@ struct NotificationManagerCore {
     local_senders: Vec<UnboundedSender<LocalNotification>>,
     /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
     /// `StoredClusterManager::start_heartbeat_checker`.
-    rx: UnboundedReceiver<WorkerKey>,
+    stop_retry_rx: UnboundedReceiver<WorkerKey>,
 
     /// The current notification version.
     current_version: NotificationVersion,
 }
 
 impl NotificationManagerCore {
-    fn new(rx: UnboundedReceiver<WorkerKey>) -> Self {
+    fn new(stop_retry_rx: UnboundedReceiver<WorkerKey>) -> Self {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             local_senders: vec![],
-            rx,
+            stop_retry_rx,
             current_version: 0,
         }
     }
@@ -161,7 +232,7 @@ impl NotificationManagerCore {
                 // Heartbeat may delete worker.
                 // We assume that after a worker is disconnected, before it recalls subscribe, we
                 // will call notify.
-                while let Ok(x) = self.rx.try_recv() {
+                while let Ok(x) = self.stop_retry_rx.try_recv() {
                     keys.insert(x);
                 }
                 if keys.contains(worker_key) {
@@ -193,7 +264,7 @@ impl NotificationManagerCore {
                 // Heartbeat may delete worker.
                 // We assume that after a worker is disconnected, before it recalls subscribe, we
                 // will call notify.
-                while let Ok(x) = self.rx.try_recv() {
+                while let Ok(x) = self.stop_retry_rx.try_recv() {
                     keys.insert(x);
                 }
                 if keys.contains(worker_key) {

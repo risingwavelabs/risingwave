@@ -17,8 +17,8 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00 }
         LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, _row_id#0(hidden), window_start, window_end], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([2]) }
+    StreamMaterialize { columns: [id, created_at, _row_id#0(hidden), window_start, window_end], pk_columns: [_row_id#0, window_start] }
+      StreamExchange { dist: HashShard([2, 3]) }
         StreamHopWindow { time_col: $1, slide: IntervalUnit { months: 0, days: 1, ms: 0 }, size: IntervalUnit { months: 0, days: 3, ms: 0 }, .. }
           StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
 - sql: |
@@ -29,8 +29,8 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00 }
         LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([3]) }
+    StreamMaterialize { columns: [id, created_at, window_start, _row_id#0(hidden)], pk_columns: [_row_id#0, window_start] }
+      StreamExchange { dist: HashShard([3, 2]) }
         StreamProject { exprs: [$0, $1, $3, $2], expr_alias: [id, created_at, window_start,  ] }
           StreamHopWindow { time_col: $1, slide: IntervalUnit { months: 0, days: 1, ms: 0 }, size: IntervalUnit { months: 0, days: 3, ms: 0 }, .. }
             StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
@@ -42,9 +42,9 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00 }
         LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_end, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([3]) }
-        StreamProject { exprs: [$0, $1, $4, $2], expr_alias: [id, created_at, window_end,  ] }
+    StreamMaterialize { columns: [id, created_at, window_end, _row_id#0(hidden), window_start(hidden)], pk_columns: [_row_id#0, window_start] }
+      StreamExchange { dist: HashShard([3, 4]) }
+        StreamProject { exprs: [$0, $1, $4, $2, $3], expr_alias: [id, created_at, window_end,  ,  ] }
           StreamHopWindow { time_col: $1, slide: IntervalUnit { months: 0, days: 1, ms: 0 }, size: IntervalUnit { months: 0, days: 3, ms: 0 }, .. }
             StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
 - sql: |
@@ -55,8 +55,8 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00 }
         LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([2]) }
-        StreamProject { exprs: [$0, $1, $2], expr_alias: [id, created_at,  ] }
+    StreamMaterialize { columns: [id, created_at, _row_id#0(hidden), window_start(hidden)], pk_columns: [_row_id#0, window_start] }
+      StreamExchange { dist: HashShard([2, 3]) }
+        StreamProject { exprs: [$0, $1, $2, $3], expr_alias: [id, created_at,  ,  ] }
           StreamHopWindow { time_col: $1, slide: IntervalUnit { months: 0, days: 1, ms: 0 }, size: IntervalUnit { months: 0, days: 3, ms: 0 }, .. }
             StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }

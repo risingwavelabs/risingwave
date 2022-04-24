@@ -51,7 +51,7 @@ pub use debug::DebugExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
-pub use hop_window::HopWindowExecutor;
+pub use hop_window::{HopWindowExecutor, HopWindowExecutorBuilder};
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use merge::MergeExecutor;
