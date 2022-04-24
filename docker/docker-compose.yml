@@ -25,19 +25,26 @@ services:
     container_name: metanode_container
     network_mode: host
     image: ghcr.io/singularity-data/risingwave:latest
-    command: /bin/bash -c /risingwave/bin/meta-node --host 127.0.0.1:5690 --dashboard-host 127.0.0.1:5691 --prometheus-host 127.0.0.1:1250
+    command: /risingwave/bin/meta-node --host 127.0.0.1:5690 --dashboard-host 127.0.0.1:5691 --prometheus-host 127.0.0.1:1250
   computenode:
     container_name: computenode_container
     network_mode: host
     image: ghcr.io/singularity-data/risingwave:latest
-    command: /bin/bash -c /risingwave/bin/compute-node --config-path /risingwave/config/risingwave.toml --host 127.0.0.1:5688 --prometheus-listener-addr 127.0.0.1:1222 --metrics-level 1 --state-store hummock+minio://hummock:12345678@127.0.0.1:9000/hummock001 --meta-address http://127.0.0.1:5690
+    command: /risingwave/bin/compute-node --config-path /risingwave/config/risingwave.toml --host 127.0.0.1:5688 --prometheus-listener-addr 127.0.0.1:1222 --metrics-level 1 --state-store hummock+minio://hummock:12345678@127.0.0.1:9000/hummock001 --meta-address http://127.0.0.1:5690
+    volumes:
+      - ./src/config:/risingwave/config
     depends_on:
       - metanode
   frontend:
     container_name: frontend_container
     network_mode: host
     image: ghcr.io/singularity-data/risingwave:latest
-    command: /bin/bash -c /risingwave/bin/frontend-v2 --host 127.0.0.1:4566 --meta-addr http://127.0.0.1:5690
+    command: /risingwave/bin/frontend-v2 --host 127.0.0.1:4566 --meta-addr http://127.0.0.1:5690
     depends_on:
       - metanode
       - computenode
+  redpanda:
+    container_name: redpanda_container
+    network_mode: host
+    image: docker.vectorized.io/vectorized/redpanda:latest
+    command: redpanda start --smp 1 --reserve-memory 0M --overprovisioned --node-id 0 --kafka-addr PLAINTEXT://0.0.0.0:9092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:9092
