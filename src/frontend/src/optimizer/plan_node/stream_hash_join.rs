@@ -159,7 +159,7 @@ impl ToStreamProst for StreamHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_protobuf()),
+                .map(|x| x.to_expr_proto()),
             distribution_keys: self
                 .base
                 .dist

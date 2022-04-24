@@ -62,7 +62,7 @@ impl Expr for Literal {
         self.data_type.clone()
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::*;
         ExprNode {
             expr_type: self.get_expr_type() as i32,

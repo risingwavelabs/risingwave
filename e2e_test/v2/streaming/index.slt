@@ -35,12 +35,10 @@ select v4, v1, v3, v5 from iii_index;
 4 3 3 3
 5 2 2 2
 
-halt
-
 # TODO: support drop index
 
 statement ok
-drop index iii_index_t1;
+drop materialized view iii_index;
 
 statement ok
 drop materialized view iii_mv1;

@@ -78,7 +78,7 @@ impl Expr for Subquery {
         }
     }
 
-    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         unreachable!("Subquery {:?} has not been unnested", self)
     }
 }

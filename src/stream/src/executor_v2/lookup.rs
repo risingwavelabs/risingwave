@@ -27,7 +27,9 @@ use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
 use crate::task::{unique_operator_id, ExecutorParams, LocalStreamManagerCore};
 
+mod cache;
 mod sides;
+use self::cache::LookupCache;
 use self::sides::*;
 mod impl_;
 
@@ -82,6 +84,9 @@ pub struct LookupExecutor<S: StateStore> {
     ///
     /// This vector records such mapping.
     key_indices_mapping: Vec<usize>,
+
+    /// The cache for arrangement side.
+    lookup_cache: LookupCache,
 }
 
 #[async_trait]

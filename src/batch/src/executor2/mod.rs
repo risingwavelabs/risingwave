@@ -21,6 +21,8 @@ mod delete;
 mod values;
 pub use values::*;
 mod top_n;
+mod limit;
+pub use limit::*;
 mod trace;
 pub use delete::*;
 pub use filter::*;

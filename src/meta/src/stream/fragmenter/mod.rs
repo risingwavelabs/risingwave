@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+mod rewrite;
+
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -40,8 +43,11 @@ pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
     pub(super) fragment_graph: StreamFragmentGraph,
 
+    /// fragment manager, used to retrieve upstream table fragment infos (dist_keys, actor_ids).
+    pub(super) fragment_manager: FragmentManagerRef<S>,
+
     /// stream graph builder, to build streaming DAG.
-    stream_graph: StreamGraphBuilder<S>,
+    stream_graph: StreamGraphBuilder,
 
     /// id generator, used to generate actor id.
     id_gen_manager: IdGeneratorManagerRef<S>,
@@ -62,6 +68,12 @@ pub struct StreamFragmenter<S> {
     /// degree of parallelism
     parallel_degree: u32,
 
+    /// dependent table ids
+    dependent_table_ids: HashSet<TableId>,
+
+    /// upstream dispatch keys
+    distribution_keys: Vec<i32>,
+
     // TODO: remove this when we deprecate Java frontend.
     is_legacy_frontend: bool,
 }
@@ -78,13 +90,16 @@ where
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
-            stream_graph: StreamGraphBuilder::new(fragment_manager),
+            fragment_manager,
+            stream_graph: Default::default(),
             id_gen_manager,
             next_local_fragment_id: 0,
             next_local_actor_id: 0,
             next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
             parallel_degree,
+            dependent_table_ids: HashSet::new(),
+            distribution_keys: Vec::new(),
             is_legacy_frontend,
         }
     }
@@ -105,6 +120,19 @@ where
         // Generate fragment graph and seal
         self.generate_fragment_graph(stream_node)?;
         // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
+
+        // save distribution key and dependent table ids in ctx
+        ctx.distribution_keys = self.distribution_keys.clone();
+        ctx.dependent_table_ids = self.dependent_table_ids.clone();
+
+        // resolve upstream table infos first
+        // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
+        // stream manager and remove dependency on fragment manager.
+        let info = self
+            .fragment_manager
+            .get_build_graph_info(&self.dependent_table_ids)
+            .await?;
+        self.stream_graph.fill_info(info);
 
         let fragment_len = self.fragment_graph.fragment_len() as u32;
         assert_eq!(fragment_len, self.next_local_fragment_id);
@@ -241,10 +269,7 @@ where
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    pub(super) fn build_and_add_fragment(
-        &mut self,
-        stream_node: StreamNode,
-    ) -> Result<StreamFragment> {
+    fn build_and_add_fragment(&mut self, stream_node: StreamNode) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment();
         let node = self.build_fragment(&mut fragment, stream_node)?;
         fragment.seal_node(node);
@@ -265,13 +290,24 @@ where
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
 
-            Node::MaterializeNode(_) => current_fragment.fragment_type = FragmentType::Sink,
+            Node::MaterializeNode(ref node) => {
+                current_fragment.fragment_type = FragmentType::Sink;
+                // store distribution keys, later it will be persisted with `TableFragment`
+                assert!(self.distribution_keys.is_empty()); // should have only one sink node.
+                self.distribution_keys = node.distribution_keys.clone();
+            }
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
 
-            // TODO: Remove this when we deprecate Java frontend.
-            Node::ChainNode(_) => current_fragment.is_singleton = self.is_legacy_frontend,
+            Node::ChainNode(ref node) => {
+                // TODO: Remove this when we deprecate Java frontend.
+                current_fragment.is_singleton = self.is_legacy_frontend;
+
+                // memorize table id for later use
+                self.dependent_table_ids
+                    .insert(TableId::from(&node.table_ref_id));
+            }
 
             _ => {}
         };
@@ -359,7 +395,7 @@ where
     }
 
     /// Generate an operator id
-    pub(super) fn gen_operator_id(&mut self) -> u32 {
+    fn gen_operator_id(&mut self) -> u32 {
         self.next_operator_id -= 1;
         self.next_operator_id
     }
@@ -385,8 +421,7 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            let actor_builder =
-                StreamActorBuilder::new(*id, fragment_id, node.clone(), parallel_degree);
+            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
             self.stream_graph.add_actor(actor_builder);
         }
 
