@@ -140,12 +140,16 @@ impl ColumnDesc {
 
     /// Find `column_desc` in `field_descs` by name.
     pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
-        for (index, col) in self.field_descs.iter().enumerate() {
-            if col.name == *name {
-                return Ok((col.clone(), index as i32));
+        if let DataType::Struct {..} = self.data_type{
+            for (index, col) in self.field_descs.iter().enumerate() {
+                if col.name == *name {
+                    return Ok((col.clone(), index as i32));
+                }
             }
+            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
+        }else{
+            Err(ErrorCode::ItemNotFound(format!("Cannot get field from non nested column: {}", self.name)).into())
         }
-        Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
     }
 
     #[cfg(test)]
