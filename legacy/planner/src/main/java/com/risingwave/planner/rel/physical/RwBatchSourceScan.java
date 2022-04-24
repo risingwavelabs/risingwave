@@ -7,7 +7,7 @@ import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SourceScanNode;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan_common.TableRefId;
 import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;

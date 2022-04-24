@@ -9,6 +9,7 @@ import com.risingwave.planner.rel.streaming.RwStreamMaterialize;
 import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.*;
+import com.risingwave.proto.plan_common.*;
 import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -44,8 +45,8 @@ public class TableNodeSerializer {
 
       // Add columns.
       for (Pair<String, ColumnDesc> pair : root.getColumns()) {
-        com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
-            com.risingwave.proto.plan.ColumnDesc.newBuilder();
+        com.risingwave.proto.plan_common.ColumnDesc.Builder columnDescBuilder =
+            com.risingwave.proto.plan_common.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(pair.getKey())
             .setColumnType(pair.getValue().getDataType().getProtobufType());
@@ -127,8 +128,8 @@ public class TableNodeSerializer {
       }
 
       for (var column : allColumns) {
-        com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
-            com.risingwave.proto.plan.ColumnDesc.newBuilder();
+        com.risingwave.proto.plan_common.ColumnDesc.Builder columnDescBuilder =
+            com.risingwave.proto.plan_common.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(column.getName())
             .setColumnType(column.getDesc().getDataType().getProtobufType())

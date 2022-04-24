@@ -5,7 +5,7 @@ import static com.google.common.base.Verify.verify;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
-import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan_common.Field;
 import com.risingwave.proto.streaming.plan.DispatchStrategy;
 import com.risingwave.proto.streaming.plan.DispatcherType;
 import com.risingwave.proto.streaming.plan.ExchangeNode;

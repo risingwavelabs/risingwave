@@ -6,7 +6,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
-import com.risingwave.proto.plan.RowFormatType;
+import com.risingwave.proto.plan_common.RowFormatType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

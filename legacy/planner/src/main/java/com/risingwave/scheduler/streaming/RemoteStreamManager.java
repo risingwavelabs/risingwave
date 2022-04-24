@@ -10,7 +10,7 @@ import com.risingwave.proto.metanode.DropMaterializedViewRequest;
 import com.risingwave.proto.metanode.DropMaterializedViewResponse;
 import com.risingwave.proto.metanode.FlushRequest;
 import com.risingwave.proto.metanode.FlushResponse;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan_common.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.MetaClient;
 

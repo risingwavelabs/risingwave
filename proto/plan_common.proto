@@ -3,7 +3,7 @@ syntax = "proto3";
 package plan_common;
 
 option java_multiple_files = true;
-option java_package = "com.risingwave.proto.plan_base";
+option java_package = "com.risingwave.proto.plan_common";
 option optimize_for = SPEED;
 
 import "data.proto";
