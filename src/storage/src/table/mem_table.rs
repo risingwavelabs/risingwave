@@ -46,16 +46,8 @@ impl MemTable {
     }
 
     /// read methods
-    pub fn get_row(&self, pk: &Row) -> StorageResult<Option<&Row>> {
-        let res = self.buffer.get(pk);
-        match res {
-            Some(row_op) => match row_op {
-                RowOp::Insert(row) => Ok(Some(row)),
-                RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, new_row)) => Ok(Some(new_row)),
-            },
-            None => Ok(None),
-        }
+    pub fn get_row(&self, pk: &Row) -> StorageResult<Option<&RowOp>> {
+        Ok(self.buffer.get(pk))
     }
 
     /// write methods
@@ -95,7 +87,7 @@ impl MemTable {
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 RowOp::Insert(original_value) => {
-                    assert_eq!(original_value, &old_value);
+                    debug_assert_eq!(original_value, &old_value);
                     e.remove();
                 }
                 RowOp::Delete(_) => {
@@ -107,9 +99,9 @@ impl MemTable {
                 }
                 x @ RowOp::Update(_) => {
                     if let RowOp::Update(ref mut value) = x {
-                        let (_, original_new_value) = std::mem::take(value);
-                        assert_eq!(original_new_value, old_value);
-                        e.insert(RowOp::Delete(old_value));
+                        let (original_old_value, original_new_value) = std::mem::take(value);
+                        debug_assert_eq!(original_new_value, old_value);
+                        e.insert(RowOp::Delete(original_old_value));
                     }
                 }
             },
