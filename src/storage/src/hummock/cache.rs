@@ -931,4 +931,34 @@ mod tests {
             cache.release(old_entry);
         }
     }
+
+    #[test]
+    fn test_write_request_pending() {
+        let cache = Arc::new(LruCache::new(0, 5, 5));
+        {
+            let mut shard = cache.shards[0].lock();
+            insert(&mut *shard, "a", "v1");
+            assert!(lookup(&mut *shard, "a"));
+        }
+        let ret = cache.lookup_for_request(0, "a".to_string());
+        match ret {
+            LookupResult::Cached(_) => (),
+            _ => panic!(),
+        }
+        let ret1 = cache.lookup_for_request(0, "b".to_string());
+        match ret1 {
+            LookupResult::Miss => (),
+            _ => panic!(),
+        }
+        let ret2 = cache.lookup_for_request(0, "b".to_string());
+        match ret2 {
+            LookupResult::WaitPendingRequest(mut recv) => {
+                assert!(recv.try_recv().unwrap().is_none());
+                cache.insert("b".to_string(), 0, 1, "v2".to_string());
+                let v = recv.try_recv().unwrap().unwrap();
+                assert_eq!(v.value(), "v2");
+            }
+            _ => panic!(),
+        }
+    }
 }
