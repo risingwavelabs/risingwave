@@ -174,10 +174,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{I64Array, Op, StreamChunk};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
@@ -189,30 +188,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter() {
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
-            vec![
-                column_nonnull! { I64Array, [1, 5, 6, 7] },
-                column_nonnull! { I64Array, [4, 2, 6, 5] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_pretty(
+            " I I
+            + 1 4
+            + 5 2
+            + 6 6
+            - 7 5",
         );
-        let chunk2 = StreamChunk::new(
-            vec![
-                Op::UpdateDelete, // true -> true
-                Op::UpdateInsert, // expect UpdateDelete, UpdateInsert
-                Op::UpdateDelete, // true -> false
-                Op::UpdateInsert, // expect Delete
-                Op::UpdateDelete, // false -> true
-                Op::UpdateInsert, // expect Insert
-                Op::UpdateDelete, // false -> false
-                Op::UpdateInsert, // expect nothing
-            ],
-            vec![
-                column_nonnull! { I64Array, [5, 7, 5, 3, 3, 5, 3, 4] },
-                column_nonnull! { I64Array, [3, 5, 3, 5, 5, 3, 5, 6] },
-            ],
-            None,
+        let chunk2 = StreamChunk::from_pretty(
+            "  I I
+            U- 5 3  // true -> true
+            U+ 7 5  // expect UpdateDelete, UpdateInsert
+            U- 5 3  // true -> false
+            U+ 3 5  // expect Delete
+            U- 3 5  // false -> true
+            U+ 5 3  // expect Insert
+            U- 3 5  // false -> false
+            U+ 4 6  // expect nothing",
         );
         let schema = Schema {
             fields: vec![
@@ -233,42 +225,33 @@ mod tests {
         let filter = Box::new(FilterExecutor::new(Box::new(source), test_expr, 1));
         let mut filter = filter.execute();
 
-        if let Message::Chunk(chunk) = filter.next().await.unwrap().unwrap() {
-            assert_eq!(
-                chunk.ops(),
-                vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete]
-            );
-            assert_eq!(chunk.columns().len(), 2);
-            assert_eq!(
-                chunk.visibility().as_ref().unwrap().iter().collect_vec(),
-                vec![false, true, false, true]
-            );
-        } else {
-            unreachable!();
-        }
+        let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I
+                + 1 4 D
+                + 5 2
+                + 6 6 D
+                - 7 5",
+            )
+        );
 
-        if let Message::Chunk(chunk) = filter.next().await.unwrap().unwrap() {
-            assert_eq!(chunk.columns().len(), 2);
-            assert_eq!(
-                chunk.visibility().as_ref().unwrap().iter().collect_vec(),
-                vec![true, true, true, false, false, true, false, false]
-            );
-            assert_eq!(
-                chunk.ops(),
-                vec![
-                    Op::UpdateDelete,
-                    Op::UpdateInsert,
-                    Op::Delete,
-                    Op::UpdateInsert,
-                    Op::UpdateDelete,
-                    Op::Insert,
-                    Op::UpdateDelete,
-                    Op::UpdateInsert,
-                ]
-            );
-        } else {
-            unreachable!();
-        }
+        let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                "  I I
+                U- 5 3
+                U+ 7 5
+                -  5 3
+                U+ 3 5 D
+                U- 3 5 D
+                +  5 3
+                U- 3 5 D
+                U+ 4 6 D",
+            )
+        );
 
         assert!(filter.next().await.unwrap().unwrap().is_stop());
     }
