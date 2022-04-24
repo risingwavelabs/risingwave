@@ -387,10 +387,11 @@ We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are 
 
 ## To check-in PRs from forks...
 
-Use
-
 ```
-bors try
+gh pr checkout <PR id>
+git checkout -b forks/<PR id>
+git push origin HEAD -u
 ```
 
-in PR to run tests in forks. Note that we don't use bors to merge PRs.
+After that, CI checks will begin on branches of RisingWave's main repo,
+and the status will be automatically updated to PRs from forks.
