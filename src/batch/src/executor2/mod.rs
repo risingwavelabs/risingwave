@@ -16,6 +16,7 @@ pub mod executor_wrapper;
 
 mod delete;
 mod filter;
+mod hash_agg;
 mod insert;
 mod limit;
 mod projection;
@@ -24,6 +25,7 @@ mod values;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
+pub use hash_agg::*;
 pub use insert::*;
 pub use limit::*;
 pub use projection::*;
