@@ -19,52 +19,39 @@ use risingwave_pb::plan::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::HashJoinNode;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::Distribution;
-use crate::utils::ColIndexMapping;
 
-/// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
-/// from inner (right-side) relation and probes with data from outer (left-side) relation to
-/// get output rows.
+/// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
+/// inputs to be indexes.
 #[derive(Debug, Clone)]
-pub struct StreamHashJoin {
+pub struct StreamDeltaJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
-
-    /// Whether to force use delta join for this join node. If this is true, then indexes will
-    /// be create automatically when building the executors on meta service. For testing purpose
-    /// only. Will remove after we have fully support shared state and index.
-    is_delta: bool,
 }
 
-pub static DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
-
-impl StreamHashJoin {
+impl StreamDeltaJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match logical.join_type() {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
-            _ => false,
+            _ => todo!("delta join only supports inner join for now"),
         };
-        let dist = Self::derive_dist(
+        if eq_join_predicate.has_non_eq() {
+            todo!("non-eq condition not supported for delta join");
+        }
+        let dist = StreamHashJoin::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
             &eq_join_predicate,
             &logical.l2o_col_mapping(),
         );
-
-        let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
-            config.is_set(false)
-        } else {
-            false
-        };
 
         // TODO: derive from input
         let base = PlanBase::new_stream(
@@ -79,60 +66,27 @@ impl StreamHashJoin {
             base,
             logical,
             eq_join_predicate,
-            is_delta: force_delta,
         }
-    }
-
-    /// Get join type
-    pub fn join_type(&self) -> JoinType {
-        self.logical.join_type()
     }
 
     /// Get a reference to the batch hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }
-
-    pub(super) fn derive_dist(
-        left: &Distribution,
-        right: &Distribution,
-        predicate: &EqJoinPredicate,
-        l2o_mapping: &ColIndexMapping,
-    ) -> Distribution {
-        match (left, right) {
-            (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
-                assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
-                l2o_mapping.rewrite_provided_distribution(left)
-            }
-            (_, _) => panic!(),
-        }
-    }
-
-    /// Convert this hash join to a delta join plan
-    pub fn to_delta_join(&self) -> StreamDeltaJoin {
-        StreamDeltaJoin::new(self.logical.clone(), self.eq_join_predicate.clone())
-    }
 }
 
-impl fmt::Display for StreamHashJoin {
+impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{} {{ type: {:?}, predicate: {} }}",
-            if self.is_delta {
-                "StreamDeltaHashJoin"
-            } else {
-                "StreamHashJoin"
-            },
+            "StreamDeltaJoin {{ type: {:?}, predicate: {} }}",
             self.logical.join_type(),
             self.eq_join_predicate()
         )
     }
 }
 
-impl PlanTreeNodeBinary for StreamHashJoin {
+impl PlanTreeNodeBinary for StreamDeltaJoin {
     fn left(&self) -> PlanRef {
         self.logical.left()
     }
@@ -149,10 +103,12 @@ impl PlanTreeNodeBinary for StreamHashJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamHashJoin }
+impl_plan_tree_node_for_binary! { StreamDeltaJoin }
 
-impl ToStreamProst for StreamHashJoin {
+impl ToStreamProst for StreamDeltaJoin {
     fn to_stream_prost_body(&self) -> Node {
+        // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
+        // don't need an intermediate representation.
         Node::HashJoinNode(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: self
@@ -179,7 +135,7 @@ impl ToStreamProst for StreamHashJoin {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            is_delta_join: self.is_delta,
+            is_delta_join: true,
             ..Default::default()
         })
     }

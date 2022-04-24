@@ -55,7 +55,12 @@ impl StreamTableScan {
     pub fn table_name(&self) -> &str {
         self.logical.table_name()
     }
+
+    pub fn logical(&self) -> &LogicalScan {
+        &self.logical
+    }
 }
+
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
