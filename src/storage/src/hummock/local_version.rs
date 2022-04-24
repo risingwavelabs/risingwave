@@ -53,11 +53,10 @@ impl LocalVerion {
     }
 
     pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
-        let new_shared_buffer = Arc::new(RwLock::new(SharedBuffer::default()));
-        let res = self.shared_buffer.insert(epoch, new_shared_buffer.clone());
-        // Epoch should not exist before
-        assert!(res.is_none());
-        new_shared_buffer
+        self.shared_buffer
+            .entry(epoch)
+            .or_insert(Arc::new(RwLock::new(SharedBuffer::default())))
+            .clone()
     }
 
     pub fn add_uncommitted_ssts(&mut self, epoch: HummockEpoch, ssts: Vec<SstableInfo>) {
