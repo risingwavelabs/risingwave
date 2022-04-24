@@ -31,8 +31,8 @@ const IN_LRU: u8 = 2;
 #[cfg(debug_assertions)]
 const REVERSE_IN_LRU: u8 = !IN_LRU;
 
-pub trait LruKey: PartialEq + Send + Sync {}
-impl<T: PartialEq + Send + Sync> LruKey for T {}
+pub trait LruKey: Eq + Send + Hash {}
+impl<T: Eq + Send + Hash> LruKey for T {}
 
 pub trait LruValue: Send + Sync {}
 impl<T: Send + Sync> LruValue for T {}
@@ -526,7 +526,6 @@ impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
 }
 
 pub struct LruCache<K: LruKey, T: LruValue> {
-    num_shard_bits: usize,
     shards: Vec<Mutex<LruCacheShard<K, T>>>,
     shard_usages: Vec<Arc<AtomicUsize>>,
     shard_lru_usages: Vec<Arc<AtomicUsize>>,
@@ -547,12 +546,10 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shards.push(Mutex::new(shard));
         }
         Self {
-            num_shard_bits,
             shards,
             shard_usages,
             shard_lru_usages,
         }
-        Self { shards }
     }
 
     pub fn lookup(self: &Arc<Self>, hash: u64, key: &K) -> Option<CachableEntry<K, T>> {
