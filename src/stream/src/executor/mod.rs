@@ -168,6 +168,11 @@ impl Barrier {
         }
     }
 
+    #[must_use]
+    pub fn with_stop(self) -> Self {
+        self.with_mutation(Mutation::Stop(HashSet::default()))
+    }
+
     // TODO: The barrier should always contain trace info after we migrated barrier generation to
     // meta service.
     #[must_use]
