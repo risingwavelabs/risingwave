@@ -32,7 +32,7 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
 #[allow(unused_imports)]
-use risingwave_connector::SourceSplit;
+use risingwave_connector::SplitMetaData;
 use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -473,8 +473,8 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
-    use bytes::Bytes;
 
+    use bytes::Bytes;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
@@ -513,10 +513,10 @@ mod tests {
         assert_eq!(store_splits[0].to_string()?, source_split.to_string()?);
 
         // let state = KafkaSplit::new(0, Some(1), None, "demo_topic".to_string());
-        let state = ConnectorState{
+        let state = ConnectorState {
             identifier: Bytes::from("0"),
             start_offset: "233".to_string(),
-            end_offset: "".to_string() 
+            end_offset: "".to_string(),
         };
         state_store.take_snapshot(vec![state.clone()], 1).await?;
 

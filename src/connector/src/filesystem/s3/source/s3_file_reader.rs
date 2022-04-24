@@ -32,7 +32,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::base::{SourceMessage, SourceSplit, SplitReader};
+use crate::base::{SourceMessage, SplitMetaData, SplitReader};
 use crate::filesystem::file_common::{EntryStat, StatusWatch};
 use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::filesystem::s3::s3_dir::{
@@ -114,7 +114,7 @@ impl S3FileSplit {
     }
 }
 
-impl SourceSplit for S3FileSplit {
+impl SplitMetaData for S3FileSplit {
     fn id(&self) -> String {
         format!("{}/{}", self.bucket, self.s3_file.object.path)
     }

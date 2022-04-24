@@ -22,7 +22,7 @@ use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
-use crate::SourceSplit;
+use crate::SplitMetaData;
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -106,7 +106,7 @@ impl<S: StateStore> SourceStateHandler<S> {
     /// The caller should ensure that the passed parameters are not empty.
     pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> Result<()>
     where
-        SS: SourceSplit,
+        SS: SplitMetaData,
     {
         if states.is_empty() {
             // TODO should be a clear Error Code
@@ -186,7 +186,7 @@ mod tests {
         }
     }
 
-    impl SourceSplit for TestSourceState {
+    impl SplitMetaData for TestSourceState {
         fn id(&self) -> String {
             self.partition.clone()
         }

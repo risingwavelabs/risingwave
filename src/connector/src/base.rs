@@ -48,7 +48,7 @@ pub struct SourceMessage {
 }
 
 /// The metadata of a split.
-pub trait SourceSplit: Sized {
+pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
     fn to_string(&self) -> Result<String>;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
@@ -62,7 +62,7 @@ pub struct ConnectorState {
     pub end_offset: String,
 }
 
-impl SourceSplit for ConnectorState {
+impl SplitMetaData for ConnectorState {
     fn id(&self) -> String {
         String::from_utf8(self.identifier.to_vec()).unwrap()
     }
@@ -123,7 +123,7 @@ impl SplitReaderImpl {
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator {
-    type Split: SourceSplit + Send + Sync;
+    type Split: SplitMetaData + Send + Sync;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 

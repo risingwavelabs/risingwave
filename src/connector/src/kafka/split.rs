@@ -15,7 +15,7 @@
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use crate::base::SourceSplit;
+use crate::base::SplitMetaData;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct KafkaSplit {
@@ -25,7 +25,7 @@ pub struct KafkaSplit {
     pub(crate) stop_offset: Option<i64>,
 }
 
-impl SourceSplit for KafkaSplit {
+impl SplitMetaData for KafkaSplit {
     fn id(&self) -> String {
         format!("{}", self.partition)
     }

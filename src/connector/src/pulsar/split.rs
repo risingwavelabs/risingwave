@@ -15,7 +15,7 @@
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use crate::base::SourceSplit;
+use crate::base::SplitMetaData;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PulsarOffset {
@@ -41,7 +41,7 @@ impl PulsarSplit {
     }
 }
 
-impl SourceSplit for PulsarSplit {
+impl SplitMetaData for PulsarSplit {
     fn id(&self) -> String {
         self.sub_topic.clone()
     }
