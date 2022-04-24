@@ -48,7 +48,7 @@ pub struct StreamFragmenter<S> {
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
     /// dependent table ids
     dependent_table_ids: HashSet<TableId>,
-    /// upstream dispatch keys
+    /// current materialize view's distribution keys
     distribution_keys: Vec<i32>,
 
     // ==== Local IDs ====
