@@ -21,6 +21,7 @@ mod hash_agg;
 mod insert;
 mod limit;
 mod project;
+pub mod sort_agg;
 mod top_n;
 mod trace;
 mod values;

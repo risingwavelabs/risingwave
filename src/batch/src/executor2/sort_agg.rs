@@ -14,19 +14,20 @@
 
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use super::BoxedExecutorBuilder;
-use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, where tuples
 /// belonging to the same group are continuous because they are sorted by the
@@ -34,25 +35,24 @@ use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};
 ///
 /// As a special case, simple aggregate without groups satisfies the requirement
 /// automatically because all tuples should be aggregated together.
-pub(super) struct SortAggExecutor {
+pub(crate) struct SortAggExecutor2 {
     agg_states: Vec<BoxedAggState>,
     group_exprs: Vec<BoxedExpression>,
     sorted_groupers: Vec<BoxedSortedGrouper>,
-    child: BoxedExecutor,
-    child_done: bool,
+    child: BoxedExecutor2,
     schema: Schema,
     identity: String,
 }
 
-impl BoxedExecutorBuilder for SortAggExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for SortAggExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
             .plan_node()
             .get_children()
             .get(0)
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build2()?;
 
         let sort_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -83,32 +83,34 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(
-            Self {
-                agg_states,
-                group_exprs,
-                sorted_groupers,
-                child,
-                child_done: false,
-                schema: Schema { fields },
-                identity: source.plan_node().get_identity().clone(),
-            }
-            .fuse(),
-        ))
+        Ok(Box::new(Self {
+            agg_states,
+            group_exprs,
+            sorted_groupers,
+            child,
+            schema: Schema { fields },
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 
-#[async_trait::async_trait]
-impl Executor for SortAggExecutor {
-    async fn open(&mut self) -> Result<()> {
-        self.child.open().await
+impl Executor2 for SortAggExecutor2 {
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.child_done {
-            return Ok(None);
-        }
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl SortAggExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
         let cardinality = 1;
         let mut group_builders = self
             .group_exprs
@@ -121,7 +123,9 @@ impl Executor for SortAggExecutor {
             .map(|e| e.return_type().create_array_builder(cardinality))
             .collect::<Result<Vec<_>>>()?;
 
-        while let Some(child_chunk) = self.child.next().await? {
+        #[for_await]
+        for child_chunk in self.child.execute() {
+            let child_chunk = child_chunk?;
             let group_arrays = self
                 .group_exprs
                 .iter_mut()
@@ -151,7 +155,6 @@ impl Executor for SortAggExecutor {
                     state.update_and_output_with_sorted_groups(&child_chunk, builder, &groups)
                 })?;
         }
-        self.child_done = true;
 
         self.sorted_groupers
             .iter()
@@ -168,30 +171,15 @@ impl Executor for SortAggExecutor {
             .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
             .collect::<Result<Vec<_>>>()?;
 
-        let ret = DataChunk::builder().columns(columns).build();
-
-        if ret.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(ret))
-        }
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.child.close().await
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
+        let output = DataChunk::builder().columns(columns).build();
+        yield output;
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+    use futures::StreamExt;
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
@@ -244,7 +232,7 @@ mod tests {
             .chain(agg_states.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
-        let mut executor = SortAggExecutor {
+        let executor = Box::new(SortAggExecutor2 {
             agg_states,
             group_exprs: vec![],
             sorted_groupers: vec![],
@@ -252,16 +240,14 @@ mod tests {
             child_done: false,
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
-        };
+        });
 
-        executor.open().await?;
-        let o = executor.next().await?.unwrap();
-        if executor.next().await?.is_some() {
-            panic!("simple agg should have no more than 1 output.");
-        }
-        executor.close().await?;
+        let mut stream = executor.execute();
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+        assert_matches!(stream.next().await, None);
 
-        let actual = o.column_at(0).array();
+        let actual = res?.column_at(0).array();
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(6)]);
@@ -342,7 +328,7 @@ mod tests {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let mut executor = SortAggExecutor {
+        let executor = Box::new(SortAggExecutor2 {
             agg_states,
             group_exprs,
             sorted_groupers,
@@ -350,30 +336,40 @@ mod tests {
             child_done: false,
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
-        };
+        });
 
-        executor.open().await?;
         let fields = &executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
         assert_eq!(fields[1].data_type, DataType::Int32);
         assert_eq!(fields[2].data_type, DataType::Int64);
-        let o = executor.next().await?.unwrap();
-        if executor.next().await?.is_some() {
-            panic!("simple agg should have no more than 1 output.");
-        }
-        executor.close().await?;
 
-        let actual = o.column_at(2).array();
+        let mut stream = executor.execute();
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+        assert_matches!(stream.next().await, None);
+
+        let chunk = res?;
+        let actual = chunk.column_at(2).array();
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(1), Some(2), Some(4), Some(5)]);
 
         assert_eq!(
-            o.column_at(0).array().as_int32().iter().collect::<Vec<_>>(),
+            chunk
+                .column_at(0)
+                .array()
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
             vec![Some(1), Some(1), Some(3), Some(4)]
         );
         assert_eq!(
-            o.column_at(1).array().as_int32().iter().collect::<Vec<_>>(),
+            chunk
+                .column_at(1)
+                .array()
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
             vec![Some(7), Some(8), Some(8), Some(8)]
         );
 
