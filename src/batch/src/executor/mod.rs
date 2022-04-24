@@ -18,7 +18,6 @@ use generic_exchange::*;
 use hash_agg::*;
 use merge_sort_exchange::*;
 use order_by::*;
-use projection::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -41,7 +40,7 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2, InsertExecutor2,
-    LimitExecutor2, TraceExecutor2, ValuesExecutor2,
+    LimitExecutor2, ProjectionExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -58,7 +57,6 @@ mod join;
 mod merge_sort_exchange;
 pub mod monitor;
 mod order_by;
-mod projection;
 mod row_seq_scan;
 mod sort_agg;
 mod stream_scan;
@@ -191,7 +189,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor,
+            NodeBody::Project => ProjectionExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
@@ -220,7 +218,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor,
+            NodeBody::Project => ProjectionExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
