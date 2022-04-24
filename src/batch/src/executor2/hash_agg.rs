@@ -204,51 +204,47 @@ impl<K: HashKey + Send + Sync> HashAggExecutor2<K> {
             }
         }
 
-        // the aggregated result set
-        let mut result = Some(groups.into_iter());
-
         // generate output data chunks
-        if let Some(res) = result.as_mut() {
-            let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
-            loop {
-                let mut group_builders = self
-                    .group_key_types
-                    .iter()
-                    .map(|datatype| datatype.create_array_builder(cardinality))
-                    .collect::<Result<Vec<_>>>()?;
+        let mut result = groups.into_iter();
+        let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
+        loop {
+            let mut group_builders = self
+                .group_key_types
+                .iter()
+                .map(|datatype| datatype.create_array_builder(cardinality))
+                .collect::<Result<Vec<_>>>()?;
 
-                let mut agg_builders = self
-                    .agg_factories
-                    .iter()
-                    .map(|agg_factory| {
-                        agg_factory
-                            .get_return_type()
-                            .create_array_builder(cardinality)
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+            let mut agg_builders = self
+                .agg_factories
+                .iter()
+                .map(|agg_factory| {
+                    agg_factory
+                        .get_return_type()
+                        .create_array_builder(cardinality)
+                })
+                .collect::<Result<Vec<_>>>()?;
 
-                let mut has_next = false;
-                for (key, states) in res.take(cardinality) {
-                    has_next = true;
-                    key.deserialize_to_builders(&mut group_builders[..])?;
-                    states
-                        .into_iter()
-                        .zip_eq(&mut agg_builders)
-                        .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
-                }
-                if !has_next {
-                    break; // exit loop
-                }
-
-                let columns = group_builders
+            let mut has_next = false;
+            for (key, states) in result.by_ref().take(cardinality) {
+                has_next = true;
+                key.deserialize_to_builders(&mut group_builders[..])?;
+                states
                     .into_iter()
-                    .chain(agg_builders)
-                    .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-                    .collect::<Result<Vec<_>>>()?;
-
-                let output = DataChunk::builder().columns(columns).build();
-                yield output;
+                    .zip_eq(&mut agg_builders)
+                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
             }
+            if !has_next {
+                break; // exit loop
+            }
+
+            let columns = group_builders
+                .into_iter()
+                .chain(agg_builders)
+                .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
+                .collect::<Result<Vec<_>>>()?;
+
+            let output = DataChunk::builder().columns(columns).build();
+            yield output;
         }
     }
 }
