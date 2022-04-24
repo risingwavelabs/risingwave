@@ -258,7 +258,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                                 join_expr,
                                 join_type,
                                 state: join_state,
-                                chunk_builder: DataChunkBuilder::new_with_default_size(
+                                chunk_builder: DataChunkBuilder::with_default_size(
                                     schema.data_types(),
                                 ),
                                 schema,
@@ -659,7 +659,7 @@ mod tests {
             join_expr: Box::new(InputRefExpression::new(DataType::Int32, 0)),
             join_type: JoinType::Inner,
             state: NestedLoopJoinState::Build,
-            chunk_builder: DataChunkBuilder::new_with_default_size(probe_side_schema.data_types()),
+            chunk_builder: DataChunkBuilder::with_default_size(probe_side_schema.data_types()),
             schema: Schema { fields: vec![] },
             last_chunk: None,
             probe_side_schema: probe_side_schema.data_types(),
@@ -836,7 +836,7 @@ mod tests {
                 join_type,
                 state: NestedLoopJoinState::Build,
                 schema: schema.clone(),
-                chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types()),
+                chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
                 last_chunk: None,
                 probe_side_schema,
                 probe_side_source: RowLevelIter::new(left_child),

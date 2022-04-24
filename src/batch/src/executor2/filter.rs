@@ -49,7 +49,7 @@ impl FilterExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
-            DataChunkBuilder::new_with_default_size(self.child.schema().data_types());
+            DataChunkBuilder::with_default_size(self.child.schema().data_types());
 
         #[for_await]
         for data_chunk in self.child.execute() {

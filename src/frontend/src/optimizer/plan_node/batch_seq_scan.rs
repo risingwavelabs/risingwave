@@ -42,7 +42,7 @@ impl BatchSeqScan {
         Self::new_inner(logical, Distribution::Any)
     }
 
-    pub fn new_with_dist(logical: LogicalScan) -> Self {
+    pub fn with_dist(logical: LogicalScan) -> Self {
         Self::new_inner(logical, Distribution::AnyShard)
     }
 
@@ -68,7 +68,7 @@ impl fmt::Display for BatchSeqScan {
 
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> PlanRef {
-        Self::new_with_dist(self.logical.clone()).into()
+        Self::with_dist(self.logical.clone()).into()
     }
 }
 

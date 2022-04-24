@@ -93,10 +93,10 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Create a new builder with `capacity`.
     fn new(capacity: usize) -> Result<Self> {
         // No metadata by default.
-        Self::new_with_meta(capacity, ArrayMeta::Simple)
+        Self::with_meta(capacity, ArrayMeta::Simple)
     }
 
-    fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self>;
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self>;
 
     /// Append a value to builder.
     fn append(
@@ -212,7 +212,7 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
         use itertools::Itertools;
-        let mut builder = A::Builder::new_with_meta(cardinality, self.array_meta())?;
+        let mut builder = A::Builder::with_meta(cardinality, self.array_meta())?;
         for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
             if visible {
                 builder.append(elem)?;
@@ -598,7 +598,7 @@ mod tests {
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::new_with_meta(data.len(), data.array_meta())?;
+        let mut builder = A::Builder::with_meta(data.len(), data.array_meta())?;
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i))?;
