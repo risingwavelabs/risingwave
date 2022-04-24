@@ -14,25 +14,26 @@
 
 pub mod executor_wrapper;
 
-mod filter;
-mod insert;
-pub use filter::*;
 mod delete;
-mod values;
-pub use values::*;
+mod filter;
 mod hash_agg;
-pub use hash_agg::*;
+mod insert;
 mod limit;
-pub use limit::*;
+mod projection;
 mod trace;
+mod values;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
+pub use hash_agg::*;
 pub use insert::*;
+pub use limit::*;
+pub use projection::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 pub use trace::*;
+pub use values::*;
 
 use crate::executor::executor2_wrapper::Executor2Wrapper;
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
