@@ -232,8 +232,14 @@ impl<S: StateStore> CellBasedTable<S> {
                     loop {
                         if delete_idx < delete_len && insert_idx < insert_len {
                             let delete_pk = &delete_bytes[delete_idx].0;
-                            let (_, delete_cell_id) = delete_pk.split_at(delete_pk.len() - 4);
                             let insert_pk = &insert_bytes[insert_idx].0;
+                            let (_, delete_cell_id) = delete_pk.split_at(delete_pk.len() - 4);
+                            if delete_pk.len() < 4 || insert_pk.len() < 4 {
+                                return Err(StorageError::CellBasedTable(
+                                    ErrorCode::InternalError("corrupted key".to_owned()).into(),
+                                ));
+                            }
+
                             let insert_value = &insert_bytes[insert_idx].1;
                             let (_, insert_cell_id) = insert_pk.split_at(insert_pk.len() - 4);
                             match delete_cell_id.cmp(insert_cell_id) {
