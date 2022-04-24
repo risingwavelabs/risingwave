@@ -124,6 +124,29 @@ NULL NULL NULL 2 4 6
 2 3 3 NULL NULL NULL
 
 statement ok
+create table t11 (v1 int, v2 int, v3 int not null);
+
+statement ok
+create table t12 (v1 int, v2 int, v3 int not null);
+
+statement ok
+create materialized view mv_null_match as select * from t11 JOIN t12 ON t11.v1=t12.v1 and t11.v2 = t12.v2;
+
+statement ok
+insert into t11 values (1,null,2);
+
+statement ok
+insert into t12 values (1,null,5);
+
+statement ok
+flush;
+
+query IIIIII
+select v1, v2, v3, v10, v20, v30 from mv_null_match;
+----
+
+
+statement ok
 drop materialized view mv1
 
 statement ok
@@ -137,6 +160,9 @@ drop materialized view mv4
 
 statement ok
 drop materialized view mv_full_outer_cond
+
+statement ok
+drop materialized view mv_null_match
 
 statement ok
 drop table t1
@@ -167,3 +193,9 @@ drop table t9
 
 statement ok
 drop table t10
+
+statement ok
+drop table t11
+
+statement ok
+drop table t12
