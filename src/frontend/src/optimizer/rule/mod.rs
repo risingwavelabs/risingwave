@@ -18,7 +18,7 @@ use super::PlanRef;
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.
-pub trait Rule: Send + Sync + 'static {
+pub trait Rule: Send + Sync {
     /// return err(()) if not match
     fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
 }
@@ -43,3 +43,5 @@ mod unnest_agg_for_loj;
 pub use unnest_agg_for_loj::*;
 mod pull_up_correlated_predicate;
 pub use pull_up_correlated_predicate::*;
+mod index_delta_join;
+pub use index_delta_join::*;
