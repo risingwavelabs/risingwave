@@ -23,7 +23,7 @@ use rand::thread_rng;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, LevelEntry, LevelType, SstableInfo,
     TableSetStatistics,
@@ -415,10 +415,8 @@ impl CompactStatus {
     pub fn apply_compact_result(
         compact_task: &CompactTask,
         based_hummock_version: HummockVersion,
-        new_version_id: HummockVersionId,
     ) -> HummockVersion {
         let mut new_version = based_hummock_version;
-        new_version.id = new_version_id;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
         for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
             new_version.levels[idx].table_infos.retain(|sst| {
