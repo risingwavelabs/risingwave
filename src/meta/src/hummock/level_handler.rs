@@ -24,38 +24,6 @@ use risingwave_pb::hummock::SstableInfo;
 pub struct SSTableInfo {
     pub key_range: KeyRange,
     pub table_id: u64,
-    pub compact_task: Option<u64>,
-}
-
-impl From<&SstableInfo> for SSTableStat {
-    fn from(info: &SstableInfo) -> Self {
-        SSTableStat {
-            key_range: info.key_range.as_ref().unwrap().into(),
-            table_id: info.id,
-            compact_task: None,
-        }
-    }
-}
-
-impl From<SSTableStat> for SstableInfo {
-    fn from(stat: SSTableStat) -> SstableInfo {
-        SstableInfo {
-            key_range: Some(stat.key_range.into()),
-            id: stat.table_id,
-        }
-    }
-}
-
-impl From<&SSTableStat> for risingwave_pb::hummock::SstableStat {
-    fn from(stat: &SSTableStat) -> Self {
-        risingwave_pb::hummock::SstableStat {
-            key_range: Some(stat.key_range.clone().into()),
-            table_id: stat.table_id,
-            compact_task: stat
-                .compact_task
-                .map(|it| risingwave_pb::hummock::sstable_stat::CompactTaskId { id: it }),
-        }
-    }
 }
 
 impl From<&SstableInfo> for SSTableInfo {
@@ -64,6 +32,21 @@ impl From<&SstableInfo> for SSTableInfo {
             key_range: sst.key_range.as_ref().unwrap().into(),
             table_id: sst.id,
         }
+    }
+}
+
+impl From<SSTableInfo> for SstableInfo {
+    fn from(info: SSTableInfo) -> Self {
+        SstableInfo {
+            key_range: Some(info.key_range.into()),
+            id: info.table_id,
+        }
+    }
+}
+
+impl From<&SSTableInfo> for SstableInfo {
+    fn from(info: &SSTableInfo) -> Self {
+        SstableInfo::from(info.clone())
     }
 }
 

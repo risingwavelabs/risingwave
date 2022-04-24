@@ -141,20 +141,19 @@ impl CompactStatus {
                     while sst_idx < l_n_len {
                         let mut next_sst_idx = sst_idx + 1;
                         let sst_key_range = l_n[sst_idx].key_range.clone();
-                        let mut select_level_inputs: Vec<SstableInfo> =
-                            vec![l_n[sst_idx].clone().into()];
+                        let mut select_level_inputs = vec![l_n[sst_idx].clone().into()];
                         // Must ensure that there exists no SSTs in `select_level` which have
                         // overlapping user key with `select_level_inputs`
                         let key_range = if !is_select_level_leveling {
                             let mut tier_key_range = sst_key_range.clone();
 
                             next_sst_idx = sst_idx;
-                            for (delta_idx, stat) in l_n[sst_idx + 1..].iter().enumerate() {
-                                if user_key(&stat.key_range.left) <= user_key(&tier_key_range.right)
-
+                            for (delta_idx, other) in l_n[sst_idx + 1..].iter().enumerate() {
+                                if user_key(&other.key_range.left)
+                                    <= user_key(&tier_key_range.right)
                                 {
-                                    tier_key_range.full_key_extend(&stat.key_range);
-                                    select_level_inputs.push(stat.clone().into());
+                                    select_level_inputs.push(other.into());
+                                    tier_key_range.full_key_extend(&other.key_range);
                                 } else {
                                     next_sst_idx = sst_idx + 1 + delta_idx;
                                     break;
@@ -172,7 +171,7 @@ impl CompactStatus {
                         polysst_candidates.push((
                             (sst_idx, next_sst_idx),
                             select_level_inputs,
-                            key_range,
+                            key_range.clone(),
                         ));
 
                         sst_idx = next_sst_idx;
@@ -255,9 +254,11 @@ impl CompactStatus {
 
                                         let mut overlap_idx = overlap_begin;
                                         while overlap_idx < overlap_end {
-                                            l_n_suc[overlap_idx].compact_task = Some(next_task_id);
+                                            compacting_ssts_l_n_suc.insert(
+                                                l_n_suc[overlap_idx].table_id,
+                                                next_task_id,
+                                            );
                                             suc_table_ids.push(l_n_suc[overlap_idx].clone().into());
-
                                             if overlap_idx > overlap_begin {
                                                 // TODO: We do not need to add splits every time. We
                                                 // can add every K SSTs.
@@ -290,8 +291,8 @@ impl CompactStatus {
                 match &found {
                     SearchResult::Found(select_ln_ids, _, _) => {
                         // Set compact task id for selected SSTs
-                        for table_id in select_ln_ids {
-                            compacting_ssts_l_n.insert(*table_id, next_task_id);
+                        for table in select_ln_ids {
+                            compacting_ssts_l_n.insert(table.id, next_task_id);
                         }
                     }
                     SearchResult::NotFound => {}
