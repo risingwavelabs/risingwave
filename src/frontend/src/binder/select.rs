@@ -227,21 +227,13 @@ impl Binder {
         if is_field_select {
             let mut visitor = GetFieldDesc::new(self.context.columns.clone());
             visitor.visit_expr(item);
-            match visitor.collect() {
-                None => {
-                    return Err(ErrorCode::BindError(format!(
-                        "Not find field_descs for struct return expr {:?}",
-                        item
-                    ))
-                    .into());
-                }
-                Some(column) => Ok(Field::with_struct(
-                    item.return_type(),
-                    name,
-                    column.field_descs.iter().map(|f| f.into()).collect_vec(),
-                    column.type_name,
-                )),
-            }
+            let column = visitor.collect()?;
+            Ok(Field::with_struct(
+                item.return_type(),
+                name,
+                column.field_descs.iter().map(|f| f.into()).collect_vec(),
+                column.type_name,
+            ))
         } else {
             Ok(Field::with_name(item.return_type(), name))
         }

@@ -17,7 +17,7 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
-use crate::expr::{AggCall, ExprType};
+use crate::expr::{AggCall, Expr, ExprType};
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
@@ -295,6 +295,7 @@ macro_rules! assert_input_ref {
 }
 pub(crate) use assert_input_ref;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::error::{ErrorCode, Result};
 
 use crate::binder::bind_context::ColumnBinding;
 
@@ -341,6 +342,7 @@ impl CollectInputRef {
 /// `Field{Field,Literal(i32)}`.
 pub struct GetFieldDesc {
     field_desc: Option<ColumnDesc>,
+    err: Option<ErrorCode>,
     column_bindings: Vec<ColumnBinding>,
 }
 
@@ -372,12 +374,18 @@ impl ExprVisitor for GetFieldDesc {
                 self.visit_input_ref(input);
             }
             _ => {
-                unreachable!()
+                self.err = Some(
+                    ErrorCode::BindError(format!(
+                        "The first input of Field function must be FunctionCall or InputRef, now is {:?}",
+                        func_call
+                    )
+                ));
+                return;
             }
         }
         let column = match &self.field_desc {
             None => {
-                unreachable!()
+                return;
             }
             Some(column) => column,
         };
@@ -389,15 +397,25 @@ impl ExprVisitor for GetFieldDesc {
                         self.field_desc = Some(desc.clone());
                     }
                     None => {
-                        panic!("Index out of field_desc bound");
+                        self.err = Some(ErrorCode::BindError(format!(
+                            "Index {} out of field_desc bound {}",
+                            *i,
+                            column.field_descs.len()
+                        )));
                     }
                 },
                 _ => {
-                    unreachable!()
+                    self.err = Some(ErrorCode::BindError(format!(
+                        "The Literal in Field Function only accept i32 type, now is {:?}",
+                        literal.return_type()
+                    )));
                 }
             }
         } else {
-            unreachable!()
+            self.err = Some(ErrorCode::BindError(format!(
+                "The second input of Field function must be Literal, now is {:?}",
+                expr
+            )));
         }
     }
 }
@@ -407,13 +425,23 @@ impl GetFieldDesc {
     pub fn new(columns: Vec<ColumnBinding>) -> Self {
         GetFieldDesc {
             field_desc: None,
+            err: None,
             column_bindings: columns,
         }
     }
 
     /// Returns the `field_desc` by the `GetFieldDesc`.
-    pub fn collect(self) -> Option<ColumnDesc> {
-        self.field_desc
+    pub fn collect(self) -> Result<ColumnDesc> {
+        match self.err {
+            Some(err) => Err(err.into()),
+            None => match self.field_desc {
+                Some(desc) => Ok(desc),
+                None => Err(ErrorCode::BindError(
+                    "Not find field_desc for struct item".to_string(),
+                )
+                .into()),
+            },
+        }
     }
 }
 
