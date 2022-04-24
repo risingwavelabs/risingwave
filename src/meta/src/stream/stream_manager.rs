@@ -110,6 +110,7 @@ where
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn resolve_chain_node_inner(
         &self,
         stream_node: &mut StreamNode,
@@ -117,7 +118,9 @@ where
         locations: &ScheduledLocations,
         upstream_parallel_unit_info: &HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
         tables_node_actors: &HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-        ctx: &mut CreateMaterializedViewContext,
+        hash_mapping: &Vec<ParallelUnitId>,
+        dispatches: &mut HashMap<ActorId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
     ) -> Result<()> {
         // if node is chain node, we insert upstream ids into chain's input(merge)
         if let Some(Node::ChainNode(ref mut chain)) = stream_node.node {
@@ -150,7 +153,7 @@ where
                 .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
                 .into_group_map();
             for (node_id, actor_ids) in chain_upstream_node_actors {
-                ctx.upstream_node_actors
+                upstream_node_actors
                     .entry(node_id)
                     .or_default()
                     .extend(actor_ids.iter());
@@ -167,7 +170,7 @@ where
             if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
                 // TODO: we can also insert distribution keys here, make fragmenter
                 // even simpler.
-                let (original_indices, data) = compress_data(&ctx.hash_mapping);
+                let (original_indices, data) = compress_data(hash_mapping);
                 batch_query.hash_mapping = Some(ParallelUnitMapping {
                     original_indices,
                     data,
@@ -178,7 +181,7 @@ where
             }
 
             // finally, we should also build dispatcher infos here.
-            ctx.dispatches
+            dispatches
                 .entry(*upstream_actor_id)
                 .or_default()
                 .push(actor_id);
@@ -191,7 +194,9 @@ where
                     locations,
                     upstream_parallel_unit_info,
                     tables_node_actors,
-                    ctx,
+                    hash_mapping,
+                    dispatches,
+                    upstream_node_actors,
                 )?;
             }
         }
@@ -201,17 +206,20 @@ where
     async fn resolve_chain_node(
         &self,
         table_fragments: &mut TableFragments,
-        ctx: &mut CreateMaterializedViewContext,
+        dependent_table_ids: &HashSet<TableId>,
+        hash_mapping: &Vec<ParallelUnitId>,
+        dispatches: &mut HashMap<ActorId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
         let upstream_parallel_unit_info = self
             .fragment_manager
-            .get_sink_parallel_unit_ids(&ctx.dependent_table_ids)
+            .get_sink_parallel_unit_ids(dependent_table_ids)
             .await?;
 
         let tables_node_actors = self
             .fragment_manager
-            .get_tables_node_actors(&ctx.dependent_table_ids)
+            .get_tables_node_actors(dependent_table_ids)
             .await?;
 
         for fragment in table_fragments.fragments.values_mut() {
@@ -228,7 +236,9 @@ where
                             locations,
                             &upstream_parallel_unit_info,
                             &tables_node_actors,
-                            ctx,
+                            hash_mapping,
+                            dispatches,
+                            upstream_node_actors,
                         )?;
                     }
                 }
@@ -250,7 +260,17 @@ where
     pub async fn create_materialized_view(
         &self,
         mut table_fragments: TableFragments,
-        mut ctx: CreateMaterializedViewContext,
+        CreateMaterializedViewContext {
+            mut dispatches,
+            mut upstream_node_actors,
+            table_sink_map,
+            dependent_table_ids,
+            affiliated_source,
+            hash_mapping,
+            distribution_keys: _,
+            next_local_table_id: _,
+            is_legacy_frontend,
+        }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
             .cluster_manager
@@ -280,9 +300,16 @@ where
         // 1. insert upstream actor id in merge node
         // 2. insert parallel unit id in batch query node
         // note: this only works for Rust frontend.
-        if !ctx.is_legacy_frontend {
-            self.resolve_chain_node(&mut table_fragments, &mut ctx, &locations)
-                .await?;
+        if !is_legacy_frontend {
+            self.resolve_chain_node(
+                &mut table_fragments,
+                &dependent_table_ids,
+                &hash_mapping,
+                &mut dispatches,
+                &mut upstream_node_actors,
+                &locations,
+            )
+            .await?;
         }
 
         // Fill hash dispatcher's mapping with scheduled locations.
@@ -306,7 +333,7 @@ where
                             // `if` branch could be removed after the optimizer
                             // has been fully implemented.
                             let streaming_hash_mapping = if downstream_actors.len() == 1 {
-                                vec![downstream_actors[0]; ctx.hash_mapping.len()]
+                                vec![downstream_actors[0]; hash_mapping.len()]
                             } else {
                                 // extract "parallel unit -> downstream actor" mapping from
                                 // locations.
@@ -320,7 +347,7 @@ where
                                     })
                                     .collect::<HashMap<_, _>>();
 
-                                ctx.hash_mapping
+                                hash_mapping
                                     .iter()
                                     .map(|parallel_unit_id| {
                                         parallel_unit_actor_map[parallel_unit_id]
@@ -379,7 +406,7 @@ where
 
         let split_assignment = self
             .source_manager
-            .schedule_split_for_actors(source_actors_group_by_fragment, ctx.affiliated_source)
+            .schedule_split_for_actors(source_actors_group_by_fragment, affiliated_source)
             .await?;
 
         // patch source actors with splits
@@ -414,7 +441,7 @@ where
         // includes such information. It contains: 1. actors in the current create
         // materialized view request. 2. all upstream actors.
         let mut actor_infos_to_broadcast = locations.actor_infos();
-        actor_infos_to_broadcast.extend(ctx.upstream_node_actors.iter().flat_map(
+        actor_infos_to_broadcast.extend(upstream_node_actors.iter().flat_map(
             |(node_id, upstreams)| {
                 upstreams.iter().map(|up_id| ActorInfo {
                     actor_id: *up_id,
@@ -427,8 +454,7 @@ where
 
         let node_actors = locations.node_actors();
 
-        let dispatches = ctx
-            .dispatches
+        let dispatches = dispatches
             .iter()
             .map(|(up_id, down_ids)| {
                 (
@@ -446,8 +472,7 @@ where
             })
             .collect::<HashMap<_, _>>();
 
-        let mut node_hanging_channels = ctx
-            .upstream_node_actors
+        let mut node_hanging_channels = upstream_node_actors
             .iter()
             .map(|(node_id, up_ids)| {
                 (
@@ -550,7 +575,7 @@ where
         self.barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
-                table_sink_map: ctx.table_sink_map,
+                table_sink_map,
                 dispatches,
             })
             .await?;
