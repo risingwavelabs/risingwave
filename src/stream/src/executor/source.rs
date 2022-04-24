@@ -95,7 +95,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     source_identify: String,
     state_store: SourceStateHandler<S>,
-    state_cache: Option<ConnectorState>,
+    state_cache: Option<Vec<ConnectorState>>,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -396,7 +396,7 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                         };
                         if let Some(state) = &self.state_cache {
                             self.state_store
-                                .take_snapshot(vec![state.clone()], epoch_prev)
+                                .take_snapshot(state.clone(), epoch_prev)
                                 .await
                                 .map_err(|e| RwError::from(InternalError(e.to_string())))?;
                         }
