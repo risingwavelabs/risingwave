@@ -20,7 +20,7 @@ use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan_common::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
@@ -286,7 +286,7 @@ mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_pb::plan_common::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 

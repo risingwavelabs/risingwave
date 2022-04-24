@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::plan::{
+use risingwave_pb::plan_common::{
     ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
     OrderedColumnDesc as ProstOrderedColumnDesc,
 };
@@ -272,7 +272,7 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
+    use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
     use crate::catalog::ColumnDesc;
     use crate::types::DataType;

@@ -23,8 +23,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_rpc_client::ExchangeSource;
 
 use crate::executor::{

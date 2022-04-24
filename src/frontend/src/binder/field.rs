@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Scalar};
+use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Expr, Ident};
 
 use crate::binder::bind_context::ColumnBinding;
 use crate::binder::Binder;
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{
+    Expr as _, ExprImpl, ExprType, ExprVisitor, FunctionCall, GetFieldDesc, InputRef, Literal,
+};
 
 impl Binder {
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
@@ -185,6 +188,52 @@ impl Binder {
                 ErrorCode::BindError(format!("The field {} is not the nested column", desc.name))
                     .into(),
             )
+        }
+    }
+
+    /// Only struct return type need to transfer to Field.
+    /// Now we accept `InputRef`, Field `FunctionCall` and Min and Max `AggCall` to return struct.
+    /// Use `GetFieldDesc Visitor` to find `field_desc`.
+    pub fn expr_to_field(&self, item: &ExprImpl, name: String) -> Result<Field> {
+        let err = Err(ErrorCode::BindError(format!(
+            "Not support this expr {:?} type to return struct data_type",
+            item
+        ))
+        .into());
+        let is_field_select = {
+            if let DataType::Struct { .. } = item.return_type() {
+                match item {
+                    ExprImpl::InputRef(_) => true,
+                    ExprImpl::FunctionCall(function) => match function.get_expr_type() {
+                        ExprType::Field => true,
+                        _ => {
+                            return err;
+                        }
+                    },
+                    ExprImpl::AggCall(agg) => match agg.agg_kind() {
+                        AggKind::Max | AggKind::Min => true,
+                        _ => {
+                            return err;
+                        }
+                    },
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        };
+        if is_field_select {
+            let mut visitor = GetFieldDesc::new(self.context.columns.clone());
+            visitor.visit_expr(item);
+            let column = visitor.collect()?;
+            Ok(Field::with_struct(
+                item.return_type(),
+                name,
+                column.field_descs.iter().map(|f| f.into()).collect_vec(),
+                column.type_name,
+            ))
+        } else {
+            Ok(Field::with_name(item.return_type(), name))
         }
     }
 }

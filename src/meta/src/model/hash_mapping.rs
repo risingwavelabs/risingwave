@@ -12,29 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
-use risingwave_common::error::Result;
-use risingwave_common::hash::VirtualNode;
 use risingwave_pb::meta::ParallelUnitMapping;
 
 use super::MetadataModel;
-use crate::cluster::ParallelUnitId;
 
 /// Column family name for hash mapping.
 const HASH_MAPPING_CF_NAME: &str = "cf/hash_mapping";
-/// Hardcoded key for mapping storage.
-const HASH_MAPPING_KEY: &str = "consistent_hash_mapping";
 
-/// `ConsistentHashMapping` stores the hash mapping from `VirtualNode` to `ParallelUnitId` based
-/// on consistent hash, which serves for load balance of the cluster. Specifically, `Dispatcher`
-/// dispatches compute tasks to downstream actors in a load balanced way according to the
-/// mapping. When the mapping changes, every compute node in the cluster should be informed.
-#[derive(Debug, Clone)]
-pub struct ConsistentHashMapping(ParallelUnitMapping);
-
-impl MetadataModel for ConsistentHashMapping {
-    type KeyType = String;
+/// `ParallelUnitMapping` stores the hash mapping from `VirtualNode` to `ParallelUnitId` based
+/// on consistent hash.
+impl MetadataModel for ParallelUnitMapping {
+    type KeyType = u32;
     type ProstType = ParallelUnitMapping;
 
     fn cf_name() -> String {
@@ -42,52 +30,14 @@ impl MetadataModel for ConsistentHashMapping {
     }
 
     fn to_protobuf(&self) -> Self::ProstType {
-        self.0.clone()
+        self.clone()
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        Self(prost)
+        prost
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(HASH_MAPPING_KEY.to_string())
-    }
-}
-
-impl ConsistentHashMapping {
-    pub fn new() -> Self {
-        Self(ParallelUnitMapping {
-            hash_mapping: Vec::new(),
-        })
-    }
-
-    pub fn update_mapping(
-        &mut self,
-        vnode: VirtualNode,
-        parallel_unit_id: ParallelUnitId,
-    ) -> Result<ParallelUnitId> {
-        let vnode = vnode as usize;
-        assert!(
-            vnode < self.0.get_hash_mapping().len(),
-            "Cannot update virtual node {} because there are only {} slots.",
-            vnode,
-            self.0.get_hash_mapping().len()
-        );
-        let old_id = self.0.hash_mapping[vnode];
-        self.0.hash_mapping[vnode] = parallel_unit_id;
-        Ok(old_id)
-    }
-
-    pub fn set_mapping(&mut self, parallel_unit_ids: Vec<ParallelUnitId>) -> Result<()> {
-        self.0.hash_mapping = parallel_unit_ids;
-        Ok(())
-    }
-
-    pub fn get_mapping(&self) -> Vec<ParallelUnitId> {
-        self.0.hash_mapping.clone()
-    }
-
-    pub fn clear_mapping(&mut self) {
-        self.0.hash_mapping.clear();
+        Ok(self.table_id)
     }
 }

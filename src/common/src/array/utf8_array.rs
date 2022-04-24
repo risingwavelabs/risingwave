@@ -145,7 +145,7 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
         Ok(Self {

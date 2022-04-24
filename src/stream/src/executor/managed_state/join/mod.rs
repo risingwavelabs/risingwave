@@ -21,6 +21,7 @@ pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result as RwResult;
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::{Keyspace, StateStore};
@@ -112,14 +113,15 @@ impl JoinRowDeserializer {
 type PkType = Row;
 
 pub type StateValueType = JoinRow;
-pub type HashKeyType = Row;
 pub type HashValueType<S> = JoinEntryState<S>;
 
-pub struct JoinHashMap<S: StateStore> {
+pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Store the join states.
-    inner: EvictableHashMap<HashKeyType, HashValueType<S>>,
+    inner: EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher>,
     /// Data types of the columns
     data_types: Arc<[DataType]>,
+    /// Data types of the columns
+    join_key_data_types: Arc<[DataType]>,
     /// Data types of primary keys
     pk_data_types: Arc<[DataType]>,
     /// The keyspace to operate on.
@@ -128,11 +130,12 @@ pub struct JoinHashMap<S: StateStore> {
     current_epoch: u64,
 }
 
-impl<S: StateStore> JoinHashMap<S> {
+impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     pub fn new(
         target_cap: usize,
         pk_indices: Vec<usize>,
+        join_key_indices: Vec<usize>,
         data_types: Vec<DataType>,
         keyspace: Keyspace<S>,
     ) -> Self {
@@ -140,10 +143,15 @@ impl<S: StateStore> JoinHashMap<S> {
             .iter()
             .map(|idx| data_types[*idx].clone())
             .collect_vec();
+        let join_key_data_types = join_key_indices
+            .iter()
+            .map(|idx| data_types[*idx].clone())
+            .collect_vec();
 
         Self {
-            inner: EvictableHashMap::new(target_cap),
+            inner: EvictableHashMap::with_hasher(target_cap, PrecomputedBuildHasher),
             data_types: data_types.into(),
+            join_key_data_types: join_key_data_types.into(),
             pk_data_types: pk_data_types.into(),
             keyspace,
             current_epoch: 0,
@@ -154,16 +162,17 @@ impl<S: StateStore> JoinHashMap<S> {
         self.current_epoch = epoch;
     }
 
-    fn get_state_keyspace(&self, key: &HashKeyType) -> Keyspace<S> {
+    fn get_state_keyspace(&self, key: &K) -> RwResult<Keyspace<S>> {
         // TODO: in pure in-memory engine, we should not do this serialization.
+        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
         let key_encoded = key.serialize().unwrap();
-        self.keyspace.append(key_encoded)
+        Ok(self.keyspace.append(key_encoded))
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
     #[allow(dead_code)]
-    pub async fn get(&mut self, key: &HashKeyType) -> Option<&HashValueType<S>> {
+    pub async fn get(&mut self, key: &K) -> Option<&HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -180,7 +189,7 @@ impl<S: StateStore> JoinHashMap<S> {
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut(&mut self, key: &HashKeyType) -> Option<&mut HashValueType<S>> {
+    pub async fn get_mut(&mut self, key: &K) -> Option<&mut HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -200,14 +209,14 @@ impl<S: StateStore> JoinHashMap<S> {
     /// exist, return None.
     pub async fn get_mut_without_cached(
         &mut self,
-        key: &HashKeyType,
-    ) -> Option<&mut HashValueType<S>> {
+        key: &K,
+    ) -> RwResult<Option<&mut HashValueType<S>>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
-            Some(_) => self.inner.get_mut(key),
+            Some(_) => Ok(self.inner.get_mut(key)),
             None => {
-                let keyspace = self.get_state_keyspace(key);
+                let keyspace = self.get_state_keyspace(key)?;
                 let all_data = keyspace
                     .scan_strip_prefix(None, self.current_epoch)
                     .await
@@ -220,9 +229,9 @@ impl<S: StateStore> JoinHashMap<S> {
                         self.pk_data_types.clone(),
                     );
                     self.inner.put(key.clone(), state);
-                    Some(self.inner.get_mut(key).unwrap())
+                    Ok(Some(self.inner.get_mut(key).unwrap()))
                 } else {
-                    None
+                    Ok(None)
                 }
             }
         }
@@ -230,7 +239,7 @@ impl<S: StateStore> JoinHashMap<S> {
 
     /// Returns true if the key in the memory or remote storage, otherwise false.
     #[allow(dead_code)]
-    pub async fn contains(&mut self, key: &HashKeyType) -> bool {
+    pub async fn contains(&mut self, key: &K) -> bool {
         let contains = self.inner.contains(key);
         if contains {
             true
@@ -247,8 +256,8 @@ impl<S: StateStore> JoinHashMap<S> {
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    async fn fetch_cached_state(&self, key: &HashKeyType) -> RwResult<Option<JoinEntryState<S>>> {
-        let keyspace = self.get_state_keyspace(key);
+    async fn fetch_cached_state(&self, key: &K) -> RwResult<Option<JoinEntryState<S>>> {
+        let keyspace = self.get_state_keyspace(key)?;
         JoinEntryState::with_cached_state(
             keyspace,
             self.data_types.clone(),
@@ -260,8 +269,8 @@ impl<S: StateStore> JoinHashMap<S> {
 
     /// Create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
-    pub async fn init_without_cache(&mut self, key: &HashKeyType) -> RwResult<()> {
-        let keyspace = self.get_state_keyspace(key);
+    pub async fn init_without_cache(&mut self, key: &K) -> RwResult<()> {
+        let keyspace = self.get_state_keyspace(key)?;
         let state = JoinEntryState::new(
             keyspace,
             self.data_types.clone(),
@@ -273,10 +282,7 @@ impl<S: StateStore> JoinHashMap<S> {
 
     /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
-    pub async fn get_or_init_without_cache(
-        &mut self,
-        key: &HashKeyType,
-    ) -> RwResult<&mut JoinEntryState<S>> {
+    pub async fn get_or_init_without_cache(&mut self, key: &K) -> RwResult<&mut JoinEntryState<S>> {
         // TODO: we should probably implement a entry function for `LruCache`
         let contains = self.inner.contains(key);
         if contains {
@@ -288,15 +294,15 @@ impl<S: StateStore> JoinHashMap<S> {
     }
 }
 
-impl<S: StateStore> Deref for JoinHashMap<S> {
-    type Target = EvictableHashMap<HashKeyType, HashValueType<S>>;
+impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
+    type Target = EvictableHashMap<K, HashValueType<S>, PrecomputedBuildHasher>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<S: StateStore> DerefMut for JoinHashMap<S> {
+impl<K: HashKey, S: StateStore> DerefMut for JoinHashMap<K, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }

@@ -121,10 +121,9 @@ impl SimpleExecutor for SimpleProjectExecutor {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{I64Array, *};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
@@ -136,21 +135,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_projection() {
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [1, 2, 3] },
-                column_nonnull! { I64Array, [4, 5, 6] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_pretty(
+            " I I
+            + 1 4
+            + 2 5
+            + 3 6",
         );
-        let chunk2 = StreamChunk::new(
-            vec![Op::Insert, Op::Delete],
-            vec![
-                column_nonnull! { I64Array, [7, 3] },
-                column_nonnull! { I64Array, [8, 6] },
-            ],
-            Some((vec![true, true]).try_into().unwrap()),
+        let chunk2 = StreamChunk::from_pretty(
+            " I I
+            + 7 8
+            - 3 6",
         );
         let schema = Schema {
             fields: vec![
@@ -172,37 +166,26 @@ mod tests {
         let project = Box::new(ProjectExecutor::new(Box::new(source), vec![test_expr], 1));
         let mut project = project.execute();
 
-        if let Message::Chunk(chunk) = project.next().await.unwrap().unwrap() {
-            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
-            assert_eq!(chunk.columns().len(), 1);
-            assert_eq!(
-                chunk
-                    .column_at(0)
-                    .array_ref()
-                    .as_int64()
-                    .iter()
-                    .collect_vec(),
-                vec![Some(5), Some(7), Some(9)]
-            );
-        } else {
-            unreachable!();
-        }
+        let msg = project.next().await.unwrap().unwrap();
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 5
+                + 7
+                + 9"
+            )
+        );
 
-        if let Message::Chunk(chunk) = project.next().await.unwrap().unwrap() {
-            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
-            assert_eq!(chunk.columns().len(), 1);
-            assert_eq!(
-                chunk
-                    .column_at(0)
-                    .array_ref()
-                    .as_int64()
-                    .iter()
-                    .collect_vec(),
-                vec![Some(15), Some(9)]
-            );
-        } else {
-            unreachable!();
-        }
+        let msg = project.next().await.unwrap().unwrap();
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I
+                + 15
+                -  9"
+            )
+        );
 
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }

@@ -758,10 +758,9 @@ mod tests {
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::column_nonnull;
     use risingwave_common::hash::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
@@ -822,75 +821,47 @@ mod tests {
             hash_mapping,
         );
 
-        let chunk = StreamChunk::new(
-            vec![
-                Op::Insert,
-                Op::Insert,
-                Op::Insert,
-                Op::Delete,
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-            ],
-            vec![
-                column_nonnull! { I64Array, [4, 5, 0, 1, 2, 2, 3, 3] },
-                column_nonnull! { I64Array, [6, 7, 0, 1, 0, 0, 3, 3] },
-                column_nonnull! { I64Array, [8, 9, 0, 1, 2, 2, 2, 4] },
-            ],
-            Some(Bitmap::try_from(vec![true, true, true, false, true, true, true, true]).unwrap()),
+        let chunk = StreamChunk::from_pretty(
+            "  I I I
+            +  4 6 8
+            +  5 7 9
+            +  0 0 0
+            -  1 1 1 D
+            U- 2 0 2
+            U+ 2 0 2
+            U- 3 3 2
+            U+ 3 3 4",
         );
-
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
-        {
-            let guard = output_data_vecs[0].lock().unwrap();
-            match guard[0] {
-                Message::Chunk(ref chunk1) => {
-                    assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 5);
-                    assert!(chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
-                    assert_eq!(
-                        chunk1.ops()[6],
-                        Op::Delete,
-                        "Should rewrite UpdateDelete to Delete"
-                    );
-                }
-                _ => unreachable!(),
-            }
-        }
-        {
-            let guard = output_data_vecs[1].lock().unwrap();
-            match guard[0] {
-                Message::Chunk(ref chunk1) => {
-                    assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 2);
-                    assert!(
-                        !chunk1.visibility().as_ref().unwrap().is_set(3).unwrap(),
-                        "Should keep original invisible mark"
-                    );
-                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
-
-                    assert_eq!(
-                        chunk1.ops()[4],
-                        Op::UpdateDelete,
-                        "Should keep UpdateDelete"
-                    );
-                    assert_eq!(
-                        chunk1.ops()[5],
-                        Op::UpdateInsert,
-                        "Should keep UpdateInsert"
-                    );
-
-                    assert_eq!(
-                        chunk1.ops()[7],
-                        Op::Insert,
-                        "Should rewrite UpdateInsert to Insert"
-                    );
-                }
-                _ => unreachable!(),
-            }
-        }
+        assert_eq!(
+            *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I
+                +  4 6 8 D
+                +  5 7 9 D
+                +  0 0 0
+                -  1 1 1 D
+                U- 2 0 2
+                U+ 2 0 2
+                -  3 3 2    // Should rewrite UpdateDelete to Delete
+                +  3 3 4    // Should rewrite UpdateInsert to Insert",
+            )
+        );
+        assert_eq!(
+            *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I
+                +  4 6 8
+                +  5 7 9
+                +  0 0 0 D
+                -  1 1 1 D  // Should keep original invisible mark
+                U- 2 0 2 D  // Should keep UpdateDelete
+                U+ 2 0 2 D  // Should keep UpdateInsert
+                -  3 3 2 D  // Should rewrite UpdateDelete to Delete
+                +  3 3 4 D  // Should rewrite UpdateInsert to Insert",
+            )
+        );
     }
 
     fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {

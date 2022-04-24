@@ -15,6 +15,7 @@ import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
 import com.risingwave.proto.plan.*;
+import com.risingwave.proto.plan_common.*;
 import com.risingwave.rpc.Messages;
 import com.risingwave.sql.node.SqlCreateSource;
 import com.risingwave.sql.node.SqlTableOption;
@@ -50,8 +51,8 @@ public class CreateSourceHandler implements SqlHandler {
     }
 
     for (ColumnCatalog columnCatalog : allColumns) {
-      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+      com.risingwave.proto.plan_common.ColumnDesc.Builder columnDescBuilder =
+          com.risingwave.proto.plan_common.ColumnDesc.newBuilder();
 
       columnDescBuilder
           .setName(columnCatalog.getName())

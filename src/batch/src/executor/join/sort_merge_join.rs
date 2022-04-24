@@ -21,8 +21,8 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::OrderType as OrderTypeProst;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
@@ -204,7 +204,7 @@ impl SortMergeJoinExecutor {
     ) -> Self {
         Self {
             join_type,
-            chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types()),
+            chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
             schema,
             probe_side_source,
             build_side_source,
@@ -316,6 +316,7 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+    use crate::executor2::executor_wrapper::ExecutorWrapper;
 
     struct TestFixture {
         left_types: Vec<DataType>,
@@ -474,7 +475,11 @@ mod tests {
             let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
             expected_mock_exec.add(expected);
 
-            diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
+            diff_executor_output(
+                Box::new(ExecutorWrapper::from(join_executor)),
+                Box::new(expected_mock_exec),
+            )
+            .await;
         }
     }
 

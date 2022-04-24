@@ -5,6 +5,7 @@ import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.Schema;
 import com.risingwave.proto.metanode.Table;
 import com.risingwave.proto.plan.*;
+import com.risingwave.proto.plan_common.*;
 import java.util.ArrayList;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
@@ -63,8 +64,8 @@ public class CatalogCast {
 
     // ColumnDesc
     for (var columns : createTableInfo.getColumns()) {
-      com.risingwave.proto.plan.ColumnDesc.Builder colBuilder =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+      com.risingwave.proto.plan_common.ColumnDesc.Builder colBuilder =
+          com.risingwave.proto.plan_common.ColumnDesc.newBuilder();
       colBuilder.setName(columns.left);
       colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
@@ -213,7 +214,7 @@ public class CatalogCast {
         throw new SerializationException("table info not set or not supported");
     }
 
-    for (com.risingwave.proto.plan.ColumnDesc desc : table.getColumnDescsList()) {
+    for (com.risingwave.proto.plan_common.ColumnDesc desc : table.getColumnDescsList()) {
       builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));
     }
     return builder.build();

@@ -373,7 +373,7 @@ impl HashKeySerDe<'_> for NaiveDateWrapper {
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
         let days = i32::from_ne_bytes(value[0..4].try_into().unwrap());
-        NaiveDateWrapper::new_with_days(days).unwrap()
+        NaiveDateWrapper::with_days(days).unwrap()
     }
 }
 
@@ -392,7 +392,7 @@ impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
         let value = Self::read_fixed_size_bytes::<R, 12>(source);
         let secs = i64::from_ne_bytes(value[0..8].try_into().unwrap());
         let nsecs = u32::from_ne_bytes(value[8..12].try_into().unwrap());
-        NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs).unwrap()
+        NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs).unwrap()
     }
 }
 
@@ -411,7 +411,7 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
-        NaiveTimeWrapper::new_with_secs_nano(secs, nano).unwrap()
+        NaiveTimeWrapper::with_secs_nano(secs, nano).unwrap()
     }
 }
 
