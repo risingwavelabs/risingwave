@@ -236,6 +236,7 @@ mod logical_scan;
 mod logical_source;
 mod logical_topn;
 mod logical_values;
+mod stream_delta_join;
 mod stream_exchange;
 mod stream_filter;
 mod stream_hash_agg;
@@ -274,6 +275,7 @@ pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
+pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_agg::StreamHashAgg;
@@ -343,6 +345,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, Materialize }
             ,{ Stream, TopN }
             ,{ Stream, HopWindow }
+            ,{ Stream, DeltaJoin }
         }
     };
 }
@@ -412,6 +415,7 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, Materialize }
             ,{ Stream, TopN }
             ,{ Stream, HopWindow }
+            ,{ Stream, DeltaJoin }
         }
     };
 }

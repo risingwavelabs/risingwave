@@ -23,7 +23,9 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_mv, create_source, create_table, drop_table};
+use risingwave_frontend::handler::{
+    create_index, create_mv, create_source, create_table, drop_table,
+};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -252,6 +254,15 @@ impl TestCase {
                     stmt,
                 } => {
                     create_source::handle_create_source(context, is_materialized, stmt).await?;
+                }
+                Statement::CreateIndex {
+                    name,
+                    table_name,
+                    columns,
+                    // TODO: support unique and if_not_exist in planner test
+                    ..
+                } => {
+                    create_index::handle_create_index(context, name, table_name, columns).await?;
                 }
                 Statement::CreateView {
                     materialized: true,

@@ -30,6 +30,7 @@ use risingwave_common::error::Result;
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
+use crate::catalog::TableId;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
@@ -179,8 +180,9 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    fn gen_create_index_stream_plan(&mut self) -> PlanRef {
-        match self.plan.convention() {
+    /// Generate create index or create materialize view plan.
+    fn gen_stream_plan(&mut self) -> PlanRef {
+        let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream();
@@ -198,30 +200,43 @@ impl PlanRoot {
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
             _ => unreachable!(),
-        }
+        };
+
+        // Rewrite joins with index to delta join
+        let plan = {
+            let rules = vec![IndexDeltaJoinRule::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        plan
     }
 
     /// Optimize and generate a create materialize view plan.
     pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_create_index_stream_plan();
+        let stream_plan = self.gen_stream_plan();
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
-            false,
+            None,
         )
     }
 
     /// Optimize and generate a create index plan.
-    pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_create_index_stream_plan();
+    pub fn gen_create_index_plan(
+        &mut self,
+        mv_name: String,
+        index_on: TableId,
+    ) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_stream_plan();
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
-            true,
+            Some(index_on),
         )
     }
 

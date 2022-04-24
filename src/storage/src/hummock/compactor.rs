@@ -181,7 +181,7 @@ impl Compactor {
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) {
         tracing::debug!(
             "Ready to handle compaction task: \n{}",
-            compact_task_to_string(compact_task.clone())
+            compact_task_to_string(&compact_task)
         );
 
         // Number of splits (key ranges) is equal to number of compaction tasks
