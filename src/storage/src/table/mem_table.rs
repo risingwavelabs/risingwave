@@ -25,7 +25,7 @@ pub enum RowOp {
     Delete(Row),
     Update((Row, Row)),
 }
-/// `MemTable` is a buffer for modify operations without encoding
+/// `MemTable` is a buffer for modify operations without encoding.
 #[derive(Clone)]
 pub struct MemTable {
     pub buffer: BTreeMap<Row, RowOp>,
