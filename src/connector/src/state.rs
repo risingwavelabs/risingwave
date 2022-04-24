@@ -19,6 +19,10 @@ use bytes::Bytes;
 use log::error;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
+#[allow(unused_imports)]
+use serde::{Deserialize, Serialize};
+
+use crate::SplitMetaData;
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -102,7 +106,7 @@ impl<S: StateStore> SourceStateHandler<S> {
     /// The caller should ensure that the passed parameters are not empty.
     pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> Result<()>
     where
-        SS: SourceState,
+        SS: SplitMetaData,
     {
         if states.is_empty() {
             // TODO should be a clear Error Code
@@ -112,8 +116,8 @@ impl<S: StateStore> SourceStateHandler<S> {
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 // state inner key format (state_identifier | epoch)
-                let inner_key = StateStoredKey::new(state.identifier(), epoch).build_stored_key();
-                let value = state.encode();
+                let inner_key = StateStoredKey::new(state.id(), epoch).build_stored_key();
+                let value = state.to_json_bytes().unwrap();
                 // TODO(Yuanxin): Implement value meta
                 local_batch.put(inner_key, StorageValue::new_default_put(value));
             });
@@ -162,7 +166,7 @@ impl<S: StateStore> SourceStateHandler<S> {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Buf;
+    
     use itertools::Itertools;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -171,7 +175,7 @@ mod tests {
     const TEST_EPOCH: u64 = 1000_u64;
     const TEST_STATE_IDENTIFIER: &str = "t-p01";
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestSourceState {
         partition: String,
         offset: i64,
@@ -183,20 +187,19 @@ mod tests {
         }
     }
 
-    impl SourceState for TestSourceState {
-        fn identifier(&self) -> String {
+    impl SplitMetaData for TestSourceState {
+        fn id(&self) -> String {
             self.partition.clone()
         }
 
-        fn encode(&self) -> Bytes {
-            let bytes = self.offset.to_le_bytes();
-            Bytes::copy_from_slice(bytes.clone().as_ref())
-            // Bytes::from(self.offset.clone().to_string())
+        fn to_json_bytes(&self) -> Result<Bytes> {
+            Ok(Bytes::from(
+                serde_json::to_string(self).map_err(|e| anyhow!(e))?,
+            ))
         }
 
-        fn decode(&self, mut values: Bytes) -> Self {
-            let offset_from_decode = values.get_i64_le();
-            TestSourceState::new(self.partition.clone(), offset_from_decode)
+        fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+            serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
         }
     }
 
@@ -241,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn test_state_encode() {
+    fn test_state_encode() -> Result<()> {
         let offset = 100_i64;
         // default little-endian byte order
         let offset_bytes = offset.to_le_bytes();
@@ -250,15 +253,17 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
-        let encode_value = state_instance.encode();
+        let encode_value = state_instance.to_json_bytes()?;
         assert_eq!(
             encode_value,
             Bytes::copy_from_slice(offset_bytes.clone().as_ref())
         );
-        let decode_value = state_instance.decode(encode_value);
+        let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);
         assert_eq!(partition, decode_value.partition);
+
+        Ok(())
     }
 
     fn new_test_keyspace() -> Keyspace<MemoryStateStore> {
@@ -316,15 +321,23 @@ mod tests {
             .0;
 
         for state in saved_states {
-            let identifier = state.identifier();
+            let identifier = state.id();
             let state_pair = state_store_handler
                 .restore_states(identifier)
                 .await
                 .unwrap();
             println!("source_state_handler restore state_pair={:?}", state_pair);
             state_pair.into_iter().for_each(|s| {
-                assert_eq!(state.offset, state.decode(s.clone().1).offset);
-                assert_eq!(state.partition, state.decode(s.1).partition);
+                assert_eq!(
+                    state.offset,
+                    TestSourceState::restore_from_bytes(&s.1)
+                        .unwrap()
+                        .offset
+                );
+                assert_eq!(
+                    state.partition,
+                    TestSourceState::restore_from_bytes(&s.1).unwrap().partition
+                );
             });
         }
     }

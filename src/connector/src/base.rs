@@ -47,18 +47,34 @@ pub struct SourceMessage {
 }
 
 /// The metadata of a split.
-pub trait SourceSplit: Sized {
+pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
-    fn to_string(&self) -> Result<String>;
+    fn to_json_bytes(&self) -> Result<Bytes>;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
 /// The persistent state of the connector.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectorState {
     pub identifier: Bytes,
     pub start_offset: String,
     pub end_offset: String,
+}
+
+impl SplitMetaData for ConnectorState {
+    fn id(&self) -> String {
+        String::from_utf8(self.identifier.to_vec()).unwrap()
+    }
+
+    fn to_json_bytes(&self) -> Result<Bytes> {
+        Ok(Bytes::from(
+            serde_json::to_string(self).map_err(|e| anyhow!(e))?,
+        ))
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -108,7 +124,7 @@ impl SplitReaderImpl {
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator {
-    type Split: SourceSplit + Send + Sync;
+    type Split: SplitMetaData + Send + Sync;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
@@ -139,11 +155,11 @@ impl SplitImpl {
         }
     }
 
-    pub fn to_string(&self) -> Result<String> {
+    pub fn to_json_bytes(&self) -> Result<Bytes> {
         match self {
-            SplitImpl::Kafka(k) => k.to_string(),
-            SplitImpl::Pulsar(p) => p.to_string(),
-            SplitImpl::Kinesis(k) => k.to_string(),
+            SplitImpl::Kafka(k) => k.to_json_bytes(),
+            SplitImpl::Pulsar(p) => p.to_json_bytes(),
+            SplitImpl::Kinesis(k) => k.to_json_bytes(),
         }
     }
 
