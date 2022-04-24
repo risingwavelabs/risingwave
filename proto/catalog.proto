@@ -59,6 +59,7 @@ message Table {
     uint32 associated_source_id = 9;
   }
   bool is_index = 10;
+  uint32 index_on_id = 11;
 }
 
 message Schema {

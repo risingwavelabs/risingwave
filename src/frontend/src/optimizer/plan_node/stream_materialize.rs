@@ -107,12 +107,12 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
-        is_index: bool,
+        is_index_on: Option<TableId>,
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
         let input = match input.distribution() {
             Distribution::Single => input,
-            _ => Distribution::HashShard(if is_index {
+            _ => Distribution::HashShard(if is_index_on.is_some() {
                 user_order_by.field_order.iter().map(|x| x.index).collect()
             } else {
                 input.pk_indices().to_vec()
@@ -166,7 +166,7 @@ impl StreamMaterialize {
             name: mv_name,
             columns,
             pk_desc,
-            is_index,
+            is_index_on,
         };
 
         Ok(Self { base, input, table })
