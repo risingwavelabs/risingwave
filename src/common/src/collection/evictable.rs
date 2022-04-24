@@ -29,13 +29,13 @@ pub struct EvictableHashMap<K, V, S = DefaultHasher> {
 impl<K: Hash + Eq, V> EvictableHashMap<K, V> {
     /// Create a [`EvictableHashMap`] with the given target capacity.
     pub fn new(target_cap: usize) -> EvictableHashMap<K, V> {
-        EvictableHashMap::new_with_hasher(target_cap, DefaultHasher::new())
+        EvictableHashMap::with_hasher(target_cap, DefaultHasher::new())
     }
 }
 
 impl<K: Hash + Eq, V, S: BuildHasher> EvictableHashMap<K, V, S> {
     /// Create a [`EvictableHashMap`] with the given target capacity and haser.
-    pub fn new_with_hasher(target_cap: usize, hasher: S) -> Self {
+    pub fn with_hasher(target_cap: usize, hasher: S) -> Self {
         Self {
             inner: LruCache::unbounded_with_hasher(hasher),
             target_cap,

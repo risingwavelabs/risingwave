@@ -149,7 +149,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .collect_vec();
 
         Self {
-            inner: EvictableHashMap::new_with_hasher(target_cap, PrecomputedBuildHasher),
+            inner: EvictableHashMap::with_hasher(target_cap, PrecomputedBuildHasher),
             data_types: data_types.into(),
             join_key_data_types: join_key_data_types.into(),
             pk_data_types: pk_data_types.into(),
