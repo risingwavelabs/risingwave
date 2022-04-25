@@ -79,7 +79,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
+        let keyspace = Keyspace::shared_executor_root(store, params.operator_id);
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()
