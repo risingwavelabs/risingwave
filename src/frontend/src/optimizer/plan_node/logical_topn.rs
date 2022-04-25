@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
@@ -110,10 +110,8 @@ impl fmt::Display for LogicalTopN {
 }
 
 impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
-        let mut input_required_cols = required_cols.clone();
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let mut input_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
         self.order
             .field_order
             .iter()
@@ -133,12 +131,13 @@ impl ColPrunable for LogicalTopN {
         };
         let new_input = self.input.prune_col(required_cols);
         let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
+        let input_required_cols: Vec<_> = input_required_cols.ones().collect();
 
-        if *required_cols == input_required_cols {
+        if required_cols == input_required_cols {
             top_n
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(top_n.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            remaining_columns.extend(required_cols.iter().map(|i| mapping.map(*i)));
             LogicalProject::with_mapping(
                 top_n,
                 ColIndexMapping::with_remaining_columns(&remaining_columns),

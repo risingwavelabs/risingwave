@@ -140,7 +140,8 @@ impl PlanRoot {
         };
 
         // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
+        let out_fields: Vec<_> = self.out_fields.ones().collect();
+        plan = plan.prune_col(&out_fields);
 
         plan = {
             let rules = vec![

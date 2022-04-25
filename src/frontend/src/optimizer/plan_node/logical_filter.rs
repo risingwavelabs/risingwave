@@ -17,8 +17,8 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
-    ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
@@ -101,24 +101,22 @@ impl fmt::Display for LogicalFilter {
 }
 
 impl ColPrunable for LogicalFilter {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
-        let mut visitor = CollectInputRef::new(required_cols.clone());
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let required_col_bitset = FixedBitSet::with_capacity(self.input.schema().len());
+        let mut visitor = CollectInputRef::new(required_col_bitset);
         self.predicate.visit_expr(&mut visitor);
-        let input_required_cols = visitor.collect();
+        let input_required_cols: FixedBitSet = visitor.into();
+        let input_required_cols: Vec<_> = input_required_cols.ones().collect();
+        let filter = LogicalFilter::new(
+            self.input.prune_col(&input_required_cols),
+            self.predicate.clone(),
+        );
 
-        let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
-        predicate = predicate.rewrite_expr(&mut mapping);
-
-        let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
-
-        if required_cols == &input_required_cols {
+        if required_cols == input_required_cols {
             filter.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            remaining_columns.extend(required_cols.iter().copied());
             LogicalProject::with_mapping(
                 filter.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
@@ -200,8 +198,7 @@ mod tests {
         let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(3);
-        required_cols.insert(2);
+        let required_cols = vec![2];
         let plan = filter.prune_col(&required_cols);
 
         // Check the result
@@ -266,9 +263,7 @@ mod tests {
         let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(3);
-        required_cols.insert(1);
-        required_cols.insert(2);
+        let required_cols = vec![1, 2];
         let plan = filter.prune_col(&required_cols);
 
         // Check the result

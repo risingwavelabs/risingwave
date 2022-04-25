@@ -328,10 +328,11 @@ impl CollectInputRef {
             input_bits: FixedBitSet::with_capacity(capacity),
         }
     }
+}
 
-    /// Returns the collected indexes by the `CollectInputRef`.
-    pub fn collect(self) -> FixedBitSet {
-        self.input_bits
+impl From<CollectInputRef> for FixedBitSet {
+    fn from(s: CollectInputRef) -> Self {
+        s.input_bits
     }
 }
 

@@ -19,8 +19,8 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamHopWindow,
-    ToBatch, ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch,
+    ToStream,
 };
 use crate::expr::InputRef;
 use crate::utils::ColIndexMapping;
@@ -139,14 +139,15 @@ impl fmt::Display for LogicalHopWindow {
 }
 
 impl ColPrunable for LogicalHopWindow {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-        let require_win_start = required_cols.contains(self.window_start_col_idx());
-        let require_win_end = required_cols.contains(self.window_end_col_idx());
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let required_cola_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
+        let require_win_start = required_cols.contains(&self.window_start_col_idx());
+        let require_win_end = required_cols.contains(&self.window_end_col_idx());
 
         let o2i = self.o2i_col_mapping();
-        let input_required_cols = o2i.rewrite_bitset(required_cols);
-        let input = self.input.prune_col(&input_required_cols);
+        let input_required_cols = o2i.rewrite_bitset(&required_cola_bitset);
+        let input_required_cols_vec: Vec<_> = input_required_cols.ones().collect();
+        let input = self.input.prune_col(&input_required_cols_vec);
         let input_change = ColIndexMapping::with_remaining_columns(&input_required_cols);
         let (new_hop, _) = self.rewrite_with_input(input, input_change);
         match (require_win_start, require_win_end) {

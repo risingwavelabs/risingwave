@@ -19,12 +19,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
-    ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    StreamHashJoin, ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
@@ -288,27 +288,24 @@ impl PlanTreeNodeBinary for LogicalJoin {
 impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let left_len = self.left.schema().fields.len();
-
-        let mut visitor = CollectInputRef::new(required_cols.clone());
+        let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
+        let mut visitor = CollectInputRef::new(required_cols_bitset.clone());
         self.on.visit_expr(&mut visitor);
-        let left_right_required_cols = visitor.collect();
+        let left_right_required_cols: FixedBitSet = visitor.into();
 
         let mut on = self.on.clone();
         let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
         on = on.rewrite_expr(&mut mapping);
 
-        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
-        let mut right_required_cols =
-            FixedBitSet::with_capacity(self.right.schema().fields().len());
+        let mut left_required_cols = Vec::new();
+        let mut right_required_cols = Vec::new();
         left_right_required_cols.ones().for_each(|i| {
             if i < left_len {
-                left_required_cols.insert(i);
+                left_required_cols.push(i);
             } else {
-                right_required_cols.insert(i - left_len);
+                right_required_cols.push(i - left_len);
             }
         });
 
@@ -319,11 +316,11 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &left_right_required_cols {
+        if required_cols_bitset == left_right_required_cols {
             join.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            remaining_columns.extend(required_cols.iter().map(|&i| mapping.map(i)));
             LogicalProject::with_mapping(
                 join.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
@@ -480,8 +477,7 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(6);
-        required_cols.extend(vec![2, 3]);
+        let required_cols = vec![2, 3];
         let plan = join.prune_col(&required_cols);
 
         // Check the result
@@ -560,8 +556,7 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(6);
-        required_cols.extend(vec![1, 3]);
+        let required_cols = vec![1, 3];
         let plan = join.prune_col(&required_cols);
 
         // Check the result
