@@ -35,6 +35,22 @@
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))], expr_alias: [ ] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
+    /* in-list with aligned types */
+    SELECT 1::real in (3, 1.0, 2);
+  batch_plan: |
+    BatchProject { exprs: [In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32)], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    /* not in-list with aligned types */
+    SELECT 1::real not in (3, 1.0, 2);
+  batch_plan: |
+    BatchProject { exprs: [Not(In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32))], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    /* in-list with misaligned types */
+    SELECT true in (3, 1.0, 2);
+  binder_error: 'Bind error: types Boolean and Int32 cannot be matched'
+- sql: |
     select +1.0, -2.0;
   batch_plan: |
     BatchProject { exprs: [1.0:Decimal, Neg(2.0:Decimal)], expr_alias: [ ,  ] }
@@ -73,6 +89,7 @@
       BatchFilter { predicate: Like('12':Varchar, '%1':Varchar) }
         BatchValues { rows: [[]] }
 - sql: |
+    /* case searched form with else */
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
   batch_plan: |
@@ -84,3 +101,29 @@
       StreamExchange { dist: HashShard([1]) }
         StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1], expr_alias: [ ,  ] }
           StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+- sql: |
+    /* case searched form without else */
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2.1 end) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2.1:Decimal)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* case simple form */
+    create table t (v1 int);
+    select (case v1 when 1 then 1 when 2.0 then 2 else 0.0 end) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2.0:Decimal), 2:Int32::Decimal, 0.0:Decimal)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* case misaligned result types */
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2 else true end) from t;
+  binder_error: 'Bind error: types Int32 and Boolean cannot be matched'
+- sql: |
+    /* case misaligned value types */
+    create table t (v1 int);
+    select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
+  binder_error: 'Feature is not yet implemented: Equal[Int32, Boolean], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'

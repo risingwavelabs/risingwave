@@ -19,9 +19,8 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
-use crate::binder::expr::align_types;
 use crate::binder::Binder;
-use crate::expr::ExprImpl;
+use crate::expr::{align_types, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {

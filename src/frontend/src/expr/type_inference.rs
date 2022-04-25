@@ -18,11 +18,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
-use itertools::iproduct;
+use itertools::{iproduct, Itertools};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use crate::expr::ExprType;
+use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// `DataTypeName` is designed for type derivation here. In other scenarios,
 /// use `DataType` instead.
@@ -315,6 +315,9 @@ lazy_static::lazy_static! {
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
 /// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
+///
+/// If you also need to cast them to this type, and there are more than 2 exprs, check out
+/// [`align_types`].
 pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     if lhs == rhs {
         Ok(lhs)
@@ -325,6 +328,32 @@ pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     } else {
         Err(ErrorCode::BindError(format!("types {:?} and {:?} cannot be matched", lhs, rhs)).into())
     }
+}
+
+/// Find the `least_restrictive` type over a list of `exprs`, and add implicit cast when necessary.
+/// Used by `VALUES`, `CASE`, `UNION`, etc. See [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
+pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<DataType> {
+    use std::mem::swap;
+
+    let exprs = exprs.collect_vec();
+    // Essentially a filter_map followed by a try_reduce, which is unstable.
+    let mut ret_type = None;
+    for e in &exprs {
+        if e.is_null() {
+            continue;
+        }
+        ret_type = match ret_type {
+            None => Some(e.return_type()),
+            Some(t) => Some(least_restrictive(t, e.return_type())?),
+        };
+    }
+    let ret_type = ret_type.unwrap_or(DataType::Varchar);
+    for e in exprs {
+        let mut dummy = ExprImpl::literal_bool(false);
+        swap(&mut dummy, e);
+        *e = dummy.cast_implicit(ret_type.clone())?;
+    }
+    Ok(ret_type)
 }
 
 /// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
