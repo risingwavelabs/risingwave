@@ -103,7 +103,7 @@ mod tests {
     use futures::stream::StreamExt;
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
@@ -114,9 +114,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {
-        let col1 = column_nonnull! {I32Array, [1, 2, 33333, 4, 5]};
-        let col2 = column_nonnull! {I32Array, [7, 8, 66666, 4, 3]};
-        let chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        let chunk = DataChunk::from_pretty(
+            "
+            i     i
+            1     7
+            2     8
+            33333 66666
+            4     4
+            5     3
+        ",
+        );
 
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
