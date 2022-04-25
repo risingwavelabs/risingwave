@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
@@ -33,6 +34,7 @@ pub struct BoundSelect {
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
+    pub schema: Schema,
 }
 
 impl BoundSelect {
@@ -96,6 +98,16 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
+        // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
+        let fields = select_items
+            .iter()
+            .zip_eq(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                self.expr_to_field(s, name)
+            })
+            .collect::<Result<Vec<Field>>>()?;
+
         Ok(BoundSelect {
             distinct: select.distinct,
             select_items,
@@ -103,6 +115,7 @@ impl Binder {
             from,
             where_clause: selection,
             group_by,
+            schema: Schema { fields },
         })
     }
 
@@ -115,15 +128,21 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let alias = match &expr {
-                        Expr::Identifier(ident) => Some(ident.value.clone()),
-                        Expr::CompoundIdentifier(idents) => {
-                            idents.last().map(|ident| ident.value.clone())
+                    let (select_expr, alias) = match &expr.clone() {
+                        Expr::Identifier(ident) => {
+                            (self.bind_expr(expr)?, Some(ident.value.clone()))
                         }
-                        _ => None,
+                        Expr::CompoundIdentifier(idents) => (
+                            self.bind_expr(expr)?,
+                            idents.last().map(|ident| ident.value.clone()),
+                        ),
+                        Expr::FieldIdentifier(field_expr, idents) => (
+                            self.bind_single_field_column(*field_expr.clone(), idents)?,
+                            idents.last().map(|ident| ident.value.clone()),
+                        ),
+                        _ => (self.bind_expr(expr)?, None),
                     };
-                    let expr = self.bind_expr(expr)?;
-                    select_list.push(expr);
+                    select_list.push(select_expr);
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
@@ -138,13 +157,20 @@ impl Binder {
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
-                    let (exprs, names) = Self::bind_columns(&self.context.columns[*begin..*end])?;
+                    let (exprs, names) =
+                        Self::iter_bound_columns(self.context.columns[*begin..*end].iter());
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::ExprQualifiedWildcard(_, _) => todo!(),
+                SelectItem::ExprQualifiedWildcard(expr, idents) => {
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents.0)?;
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+                }
                 SelectItem::Wildcard => {
-                    let (exprs, names) = Self::bind_visible_columns(&self.context.columns[..])?;
+                    let (exprs, names) = Self::iter_bound_columns(
+                        self.context.columns[..].iter().filter(|c| !c.is_hidden),
+                    );
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -153,35 +179,16 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
-    pub fn bind_columns(columns: &[ColumnBinding]) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let bound_columns = columns
-            .iter()
-            .map(|column| {
+    pub fn iter_bound_columns<'a>(
+        column_binding: impl Iterator<Item = &'a ColumnBinding>,
+    ) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+        column_binding
+            .map(|c| {
                 (
-                    InputRef::new(column.index, column.data_type.clone()).into(),
-                    Some(column.column_name.clone()),
+                    InputRef::new(c.index, c.desc.data_type.clone()).into(),
+                    Some(c.desc.name.clone()),
                 )
             })
-            .unzip();
-        Ok(bound_columns)
-    }
-
-    pub fn bind_visible_columns(
-        columns: &[ColumnBinding],
-    ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let bound_columns = columns
-            .iter()
-            .filter_map(|column| {
-                if !column.is_hidden {
-                    Some((
-                        InputRef::new(column.index, column.data_type.clone()).into(),
-                        Some(column.column_name.clone()),
-                    ))
-                } else {
-                    None
-                }
-            })
-            .unzip();
-        Ok(bound_columns)
+            .unzip()
     }
 }

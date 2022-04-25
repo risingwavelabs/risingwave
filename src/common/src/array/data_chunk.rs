@@ -62,7 +62,7 @@ impl DataChunkBuilder {
 }
 
 /// `DataChunk` is a collection of arrays with visibility mask.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct DataChunk {
     columns: Vec<Column>,
     visibility: Option<Bitmap>,

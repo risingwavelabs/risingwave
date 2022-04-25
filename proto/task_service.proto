@@ -2,13 +2,28 @@ syntax = "proto3";
 
 package task_service;
 
+import "batch_plan.proto";
+import "common.proto";
+import "data.proto";
+
 option java_multiple_files = true;
 option java_package = "com.risingwave.proto.computenode";
 option optimize_for = SPEED;
 
-import "common.proto";
-import "data.proto";
-import "plan.proto";
+// Task is a running instance of Stage.
+message TaskId {
+  string query_id = 1;
+  uint32 stage_id = 2;
+  uint32 task_id = 3;
+}
+
+// Every task will create N buffers (channels) for parent operators to fetch results from,
+// where N is the parallelism of parent stage.
+message TaskOutputId {
+  TaskId task_id = 1;
+  // The id of output channel to fetch from
+  uint32 output_id = 2;
+}
 
 message TaskInfo {
   enum TaskStatus {
@@ -20,13 +35,13 @@ message TaskInfo {
     FINISHED = 5;
     FAILED = 6;
   }
-  plan.TaskId task_id = 1;
+  batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
 }
 
 message CreateTaskRequest {
-  plan.TaskId task_id = 1;
-  plan.PlanFragment plan = 2;
+  batch_plan.TaskId task_id = 1;
+  batch_plan.PlanFragment plan = 2;
   uint64 epoch = 3;
 }
 
@@ -35,7 +50,7 @@ message CreateTaskResponse {
 }
 
 message AbortTaskRequest {
-  plan.TaskId task_id = 1;
+  batch_plan.TaskId task_id = 1;
   bool force = 2;
 }
 
@@ -44,7 +59,7 @@ message AbortTaskResponse {
 }
 
 message GetTaskInfoRequest {
-  plan.TaskId task_id = 1;
+  batch_plan.TaskId task_id = 1;
 }
 
 message GetTaskInfoResponse {
@@ -69,7 +84,7 @@ service TaskService {
 }
 
 message GetDataRequest {
-  plan.TaskOutputId task_output_id = 1;
+  batch_plan.TaskOutputId task_output_id = 1;
 }
 
 message GetStreamResponse {

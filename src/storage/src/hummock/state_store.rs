@@ -138,7 +138,7 @@ impl HummockStorage {
                 ReverseMergeIterator::new(overlapped_backward_sstable_iters, self.stats.clone())
             };
 
-            DirectedUserIterator::Backward(ReverseUserIterator::new_with_epoch(
+            DirectedUserIterator::Backward(ReverseUserIterator::with_epoch(
                 reverse_merge_iterator,
                 (
                     key_range.end_bound().map(|b| b.as_ref().to_owned()),

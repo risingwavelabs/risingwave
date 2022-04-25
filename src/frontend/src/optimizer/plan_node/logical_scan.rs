@@ -32,7 +32,10 @@ pub struct LogicalScan {
     pub base: PlanBase,
     table_name: String, // explain-only
     required_col_idx: Vec<usize>,
+    // Descriptor of the table
     table_desc: Rc<TableDesc>,
+    // Descriptors of all indexes on this table
+    indexes: Vec<Rc<TableDesc>>,
 }
 
 impl LogicalScan {
@@ -41,6 +44,7 @@ impl LogicalScan {
         table_name: String,           // explain-only
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
+        indexes: Vec<Rc<TableDesc>>,
         ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
@@ -74,6 +78,7 @@ impl LogicalScan {
             table_name,
             required_col_idx,
             table_desc,
+            indexes,
         }
     }
 
@@ -81,12 +86,14 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
+        indexes: Vec<Rc<TableDesc>>,
         ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
             table_name,
             (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
+            indexes,
             ctx,
         )
         .into())
@@ -118,6 +125,12 @@ impl LogicalScan {
             .map(|i| self.table_desc.columns[*i].clone())
             .collect()
     }
+
+    /// Get all indexes on this table
+    #[must_use]
+    pub fn indexes(&self) -> &[Rc<TableDesc>] {
+        &self.indexes
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
@@ -145,6 +158,7 @@ impl ColPrunable for LogicalScan {
             self.table_name.clone(),
             required_col_idx,
             self.table_desc.clone(),
+            self.indexes.clone(),
             self.base.ctx.clone(),
         )
         .into()
@@ -189,6 +203,7 @@ impl ToStream for LogicalScan {
                         self.table_name.clone(),
                         required_col_idx,
                         self.table_desc.clone(),
+                        self.indexes.clone(),
                         self.base.ctx.clone(),
                     )
                     .into(),

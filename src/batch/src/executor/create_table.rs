@@ -15,9 +15,9 @@
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_pb::plan::create_table_node::Info;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ColumnDesc as ColumnDescProto;
+use risingwave_pb::batch_plan::create_table_node::Info;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::ColumnDesc as ColumnDescProto;
 use risingwave_source::SourceManagerRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};

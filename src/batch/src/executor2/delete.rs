@@ -21,7 +21,7 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilde
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
 use crate::executor::ExecutorBuilder;

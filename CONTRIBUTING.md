@@ -10,7 +10,8 @@ If you have questions, please [create a Github issue](https://github.com/singula
   - [Setting Up Development Environment](#setting-up-development-environment)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
     - [Additional Components](#additional-components)
-    - [Start All-In-One Process](#start-all-in-one-process)
+    - [Start Playground with RiseDev](#start-playground-with-risedev)
+    - [Start Playground with cargo](#start-playground-with-cargo)
   - [Testing and Lint](#testing-and-lint)
     - [Lint](#lint)
     - [Unit Tests](#unit-tests)
@@ -31,9 +32,9 @@ If you have questions, please [create a Github issue](https://github.com/singula
     - [Pull Request Description](#pull-request-description)
     - [CLA](#cla)
   - [Update CI Workflow](#update-ci-workflow)
-  - [When adding new files...](#when-adding-new-files)
-  - [When adding new dependencies...](#when-adding-new-dependencies)
-  - [To check-in PRs from forks...](#to-check-in-prs-from-forks)
+  - [When adding new files](#when-adding-new-files)
+  - [When adding new dependencies](#when-adding-new-dependencies)
+  - [To check-in PRs from forks](#to-check-in-prs-from-forks)
 
 ## Code Structure
 
@@ -149,7 +150,7 @@ Sometimes, developers might not need to start a full cluster to develop. `./rise
 
 For more information, refer to `README.md` under `src/risedevtool`.
 
-### Start Playground with `cargo`
+### Start Playground with cargo
 
 To start an all-in-one process from IDE or command line, you may also use
 
@@ -300,10 +301,10 @@ brew install shellcheck
 shellcheck <new file>
 ```
 
-For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototool-format) and [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rule, please run the commands:
+For Protobufs, we rely on [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rule, please run the commands:
 
 ```shell
-prototool format -d
+buf format -d --exit-code
 buf lint
 ```
 
@@ -364,16 +365,16 @@ After that, run `apply-ci-template` to update the final workflow config.
 ./risedev apply-ci-template
 ```
 
-## When adding new files...
+## When adding new files
 
 We use [skywalking-eyes](https://github.com/apache/skywalking-eyes) to manage license headers.
 If you added new files, please follow the installation guide and run:
 
-```
+```shell
 license-eye -c .licenserc.yaml header fix
 ```
 
-## When adding new dependencies...
+## When adding new dependencies
 
 To avoid rebuild some common dependencies across different crates in workspace, we use
 [cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
@@ -385,12 +386,13 @@ workspace.
 
 We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
-## To check-in PRs from forks...
+## To check-in PRs from forks
 
-Use
-
+```shell
+gh pr checkout <PR id>
+git checkout -b forks/<PR id>
+git push origin HEAD -u
 ```
-bors try
-```
 
-in PR to run tests in forks. Note that we don't use bors to merge PRs.
+After that, CI checks will begin on branches of RisingWave's main repo,
+and the status will be automatically updated to PRs from forks.

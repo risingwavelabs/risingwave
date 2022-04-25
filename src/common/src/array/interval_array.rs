@@ -112,7 +112,7 @@ impl Array for IntervalArray {
 impl ArrayBuilder for IntervalArrayBuilder {
     type ArrayType = IntervalArray;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             interval_buffer: Vec::with_capacity(capacity),

@@ -14,7 +14,7 @@
 
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};

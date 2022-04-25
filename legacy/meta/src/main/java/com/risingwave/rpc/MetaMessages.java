@@ -7,9 +7,9 @@ import com.risingwave.proto.metanode.DropRequest;
 import com.risingwave.proto.metanode.HeartbeatRequest;
 import com.risingwave.proto.metanode.Schema;
 import com.risingwave.proto.metanode.Table;
-import com.risingwave.proto.plan.DatabaseRefId;
-import com.risingwave.proto.plan.SchemaRefId;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan_common.DatabaseRefId;
+import com.risingwave.proto.plan_common.SchemaRefId;
+import com.risingwave.proto.plan_common.TableRefId;
 
 /** Protobuf static helpers. */
 public class MetaMessages {
