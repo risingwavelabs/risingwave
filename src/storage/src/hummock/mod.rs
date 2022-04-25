@@ -34,6 +34,7 @@ mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
+mod local_version;
 pub mod local_version_manager;
 pub mod shared_buffer;
 #[cfg(test)]
@@ -48,7 +49,7 @@ pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
-pub use cache::{CachableEntry, LruCache};
+pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
 use value::*;
 
@@ -58,7 +59,6 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -71,9 +71,6 @@ pub struct HummockStorage {
 
     sstable_store: SstableStoreRef,
 
-    /// Manager for immutable shared buffers
-    shared_buffer_manager: Arc<SharedBufferManager>,
-
     /// Statistics
     stats: Arc<StateStoreMetrics>,
 }
@@ -83,42 +80,30 @@ impl HummockStorage {
     pub async fn with_default_stats(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
-        local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         hummock_metrics: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        Self::new(
-            options,
-            sstable_store,
-            local_version_manager,
-            hummock_meta_client,
-            hummock_metrics,
-        )
-        .await
+        Self::new(options, sstable_store, hummock_meta_client, hummock_metrics).await
     }
 
     /// Creates a [`HummockStorage`].
     pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
-        local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        let shared_buffer_manager = Arc::new(SharedBufferManager::new(
-            options.clone(),
-            local_version_manager.clone(),
-            sstable_store.clone(),
-            stats.clone(),
-            hummock_meta_client.clone(),
-        ));
+        let local_version_manager = Arc::new(LocalVersionManager::new(options.clone()));
 
         LocalVersionManager::start_workers(
+            options.clone(),
+            sstable_store.clone(),
             local_version_manager.clone(),
+            stats.clone(),
             hummock_meta_client.clone(),
-            shared_buffer_manager.clone(),
         );
+
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
 
@@ -127,7 +112,6 @@ impl HummockStorage {
             local_version_manager,
             hummock_meta_client,
             sstable_store,
-            shared_buffer_manager,
             stats,
         };
         Ok(instance)
@@ -146,11 +130,11 @@ impl HummockStorage {
 
     async fn get_from_table(
         &self,
-        table: Arc<Sstable>,
+        table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
     ) -> HummockResult<Option<Bytes>> {
-        if table.surely_not_have_user_key(key) {
+        if table.value().surely_not_have_user_key(key) {
             self.stats.bloom_filter_true_negative_counts.inc();
             return Ok(None);
         }
@@ -186,10 +170,6 @@ impl HummockStorage {
 
     pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
         &self.local_version_manager
-    }
-
-    pub fn shared_buffer_manager(&self) -> &SharedBufferManager {
-        &self.shared_buffer_manager
     }
 }
 

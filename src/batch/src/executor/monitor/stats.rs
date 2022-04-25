@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 use prometheus::{
-    histogram_opts, register_histogram_with_registry, Histogram, Registry, DEFAULT_BUCKETS,
+    exponential_buckets, histogram_opts, register_histogram_with_registry, Histogram, Registry,
 };
 
 pub struct BatchMetrics {
@@ -22,11 +22,10 @@ pub struct BatchMetrics {
 
 impl BatchMetrics {
     pub fn new(registry: Registry) -> Self {
-        let buckets = DEFAULT_BUCKETS.to_vec();
         let opts = histogram_opts!(
             "batch_row_seq_scan_next_duration",
             "Time spent deserializing into a row in cell based table.",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let row_seq_scan_next_duration = register_histogram_with_registry!(opts, registry).unwrap();
 

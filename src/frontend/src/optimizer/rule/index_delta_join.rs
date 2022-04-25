@@ -31,6 +31,7 @@ impl Rule for IndexDeltaJoinRule {
             return Some(plan);
         }
 
+        // FIXME: https://github.com/singularity-data/risingwave/issues/2098, so there won't be any exchange
         fn match_through_exchange(plan: PlanRef) -> Option<PlanRef> {
             if let Some(exchange) = plan.as_stream_exchange() {
                 match_through_exchange(exchange.input())
@@ -48,9 +49,9 @@ impl Rule for IndexDeltaJoinRule {
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
 
-        fn match_indexes(join_indices: &[usize], table_scan: &StreamTableScan) -> bool {
+        fn match_indexes(join_indices: &[usize], table_scan: &StreamTableScan) -> Option<PlanRef> {
             if table_scan.logical().indexes().is_empty() {
-                return false;
+                return None;
             }
             let column_descs = table_scan.logical().column_descs();
             // We assume column id of create index's MV is exactly the same as corresponding columns
@@ -60,7 +61,7 @@ impl Rule for IndexDeltaJoinRule {
                 .iter()
                 .map(|idx| column_descs[*idx].column_id)
                 .collect_vec();
-            for index in table_scan.logical().indexes() {
+            for (name, index) in table_scan.logical().indexes() {
                 // A HashSet containing remaining columns to match
                 let mut remaining_to_match =
                     columns_to_match.iter().copied().collect::<HashSet<_>>();
@@ -78,16 +79,44 @@ impl Rule for IndexDeltaJoinRule {
                 }
 
                 if remaining_to_match.is_empty() {
-                    return true;
+                    return Some(table_scan.to_index_scan(name, index).into());
                 }
             }
 
-            false
+            // FIXME: https://github.com/singularity-data/risingwave/issues/2099
+
+            None
         }
 
-        if match_indexes(&left_indices, input_left) && match_indexes(&right_indices, input_right) {
-            // TODO: rewrite child to stream index scan
-            Some(join.to_delta_join().into())
+        fn replace_across_exchange(plan: PlanRef, index_scan: PlanRef) -> PlanRef {
+            if let Some(exchange) = plan.as_stream_exchange() {
+                exchange
+                    .clone_with_input(replace_across_exchange(exchange.input(), index_scan))
+                    .into()
+            } else if plan.as_stream_table_scan().is_some() {
+                index_scan
+            } else {
+                unreachable!()
+            }
+        }
+
+        if let Some(index_scan_left) = match_indexes(&left_indices, input_left) {
+            if let Some(index_scan_right) = match_indexes(&right_indices, input_right) {
+                // TODO: rewrite child to stream index scan
+                Some(
+                    join.to_delta_join(
+                        input_left.logical().table_desc().table_id,
+                        input_right.logical().table_desc().table_id,
+                    )
+                    .clone_with_left_right(
+                        replace_across_exchange(Rc::clone(&join.inputs()[0]), index_scan_left),
+                        replace_across_exchange(Rc::clone(&join.inputs()[1]), index_scan_right),
+                    )
+                    .into(),
+                )
+            } else {
+                Some(plan)
+            }
         } else {
             Some(plan)
         }

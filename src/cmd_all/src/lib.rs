@@ -12,20 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(exit_status_error)]
-#![feature(let_chains)]
-#![feature(let_else)]
-
-mod config;
-pub use config::*;
-mod config_gen;
-pub use config_gen::*;
-mod preflight_check;
-pub use preflight_check::*;
-pub mod service_config;
-pub use service_config::*;
-
-mod task;
-pub mod util;
-mod wait;
-pub use task::*;
+pub mod playground;
+pub use playground::*;
