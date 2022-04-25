@@ -15,7 +15,6 @@
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 
-
 #[macro_export]
 /// `row_nonnull` builds a `Row` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
