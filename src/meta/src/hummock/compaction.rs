@@ -172,7 +172,7 @@ impl CompactStatus {
                         let mut next_sst_idx = sst_idx + 1;
                         let sst_key_range = l_n[sst_idx].key_range.clone();
                         let mut select_level_inputs = vec![l_n[sst_idx].clone().into()];
-                        let mut earliest_table_id = ln[sst_idx].table_id;
+                        let mut earliest_table_id = l_n[sst_idx].table_id;
                         // Must ensure that there exists no SSTs in `select_level` which have
                         // overlapping user key with `select_level_inputs`
                         let key_range = if !is_select_level_leveling {
@@ -183,13 +183,13 @@ impl CompactStatus {
                                 if user_key(&other.key_range.left)
                                     <= user_key(&tier_key_range.right)
                                 {
-                                    select_level_inputs.push(other.into());
-                                    tier_key_range.full_key_extend(&other.key_range);
-                                    if ord_table_id(*other.table_id, earliest_table_id)
+                                    if ord_table_id(other.table_id, earliest_table_id)
                                         == Ordering::Less
                                     {
-                                        earliest_table_id = *other_table_id;
+                                        earliest_table_id = other.table_id;
                                     }
+                                    tier_key_range.full_key_extend(&other.key_range);
+                                    select_level_inputs.push(other.into());
                                 } else {
                                     next_sst_idx = sst_idx + 1 + delta_idx;
                                     break;
