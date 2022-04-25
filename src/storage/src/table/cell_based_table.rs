@@ -233,14 +233,11 @@ impl<S: StateStore> CellBasedTable<S> {
                                 local.delete(delete_pk);
                                 delete_bytes_iter.next();
                             }
-                            (Some((insert_pk, insert_row)), None) => {
-                                local.put(
-                                    insert_pk,
-                                    StorageValue::new_default_put(insert_row.clone()),
-                                );
-                                insert_bytes_iter.next();
+                            (Some(_), None) => {
+                                let (insert_pk, insert_row) = insert_bytes_iter.next().unwrap();
+                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
                             }
-                            (Some((insert_pk, insert_row)), Some((delete_pk, _))) => {
+                            (Some((insert_pk, _)), Some((delete_pk, _))) => {
                                 let delete_cell_id = gengrate_cell_id_from_pk(delete_pk)?;
                                 let insert_cell_id = gengrate_cell_id_from_pk(insert_pk)?;
                                 match delete_cell_id.cmp(insert_cell_id) {
@@ -249,19 +246,22 @@ impl<S: StateStore> CellBasedTable<S> {
                                         delete_bytes_iter.next();
                                     }
                                     std::cmp::Ordering::Equal => {
+                                        let (insert_pk, insert_row) =
+                                            insert_bytes_iter.next().unwrap();
                                         local.put(
                                             insert_pk,
-                                            StorageValue::new_default_put(insert_row.clone()),
+                                            StorageValue::new_default_put(insert_row),
                                         );
-                                        insert_bytes_iter.next();
+
                                         delete_bytes_iter.next();
                                     }
                                     std::cmp::Ordering::Greater => {
+                                        let (insert_pk, insert_row) =
+                                            insert_bytes_iter.next().unwrap();
                                         local.put(
                                             insert_pk,
-                                            StorageValue::new_default_put(insert_row.clone()),
+                                            StorageValue::new_default_put(insert_row),
                                         );
-                                        insert_bytes_iter.next();
                                     }
                                 }
                             }
