@@ -149,10 +149,6 @@ impl<'a> ExecutorBuilder<'a> {
         }
     }
 
-    pub fn env(&self) -> &BatchEnvironment {
-        &self.env
-    }
-
     pub fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().map_err(|e| {
             InternalError(format!(

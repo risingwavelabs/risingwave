@@ -92,7 +92,7 @@ impl<CS: 'static + CreateSource> BoxedExecutor2Builder for GenericExchangeExecut
             NodeBody::Exchange
         )?;
 
-        let server_addr = source.env().server_address().clone();
+        let server_addr = source.global_batch_env().server_address().clone();
 
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
@@ -101,7 +101,7 @@ impl<CS: 'static + CreateSource> BoxedExecutor2Builder for GenericExchangeExecut
         Ok(Box::new(Self {
             sources,
             server_addr,
-            env: source.env().clone(),
+            env: source.global_batch_env().clone(),
             source_creator: PhantomData,
             source_idx: 0,
             current_source: None,
