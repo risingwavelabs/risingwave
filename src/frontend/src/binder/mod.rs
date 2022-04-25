@@ -15,9 +15,10 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-mod bind_context;
+pub mod bind_context;
 mod delete;
 pub(crate) mod expr;
+mod field;
 mod insert;
 mod query;
 mod relation;

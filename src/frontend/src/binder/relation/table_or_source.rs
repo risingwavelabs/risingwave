@@ -75,7 +75,6 @@ impl Binder {
 
         let (ret, columns) = {
             let catalog = &self.catalog;
-
             if let Ok(table_catalog) =
                 catalog.get_table_by_name(&self.db_name, schema_name, table_name)
             {
@@ -94,8 +93,7 @@ impl Binder {
                 (Relation::BaseTable(Box::new(table)), columns)
             } else if let Ok(s) = catalog.get_source_by_name(&self.db_name, schema_name, table_name)
             {
-                let source = s.clone().flatten();
-                (Relation::Source(Box::new((&source).into())), source.columns)
+                (Relation::Source(Box::new(s.into())), s.columns.clone())
             } else {
                 return Err(RwError::from(CatalogError::NotFound(
                     "table or source",
@@ -104,14 +102,7 @@ impl Binder {
             }
         };
 
-        self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.to_string(),
-            alias,
-        )?;
+        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
         Ok(ret)
     }
 
@@ -145,14 +136,7 @@ impl Binder {
 
         let columns = table_catalog.columns.clone();
 
-        self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.to_string(),
-            alias,
-        )?;
+        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
 
         Ok(BoundBaseTable {
             name: table_name.to_string(),
