@@ -21,13 +21,12 @@ use yaml_rust::{yaml, Yaml, YamlEmitter, YamlLoader};
 use self::dollar_expander::DollarExpander;
 use self::id_expander::IdExpander;
 use self::use_expander::UseExpander;
+use crate::ServiceConfig;
 
 mod dollar_expander;
 mod id_expander;
-pub mod service_config;
-mod use_expander;
-pub use service_config::*;
 mod provide_expander;
+mod use_expander;
 pub use provide_expander::*;
 
 pub struct ConfigExpander;

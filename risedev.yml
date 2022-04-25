@@ -71,7 +71,7 @@ risedev:
     - use: compute-node
     - use: frontend
       user-managed: true
-  
+
   full:
     - use: minio
     - use: etcd
@@ -84,6 +84,17 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
+
+  ##########################################
+  ### Configuration used for ./risedev p ###
+  ##########################################
+
+  playground:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
 
   #################################
   ### Configurations used on CI ###
