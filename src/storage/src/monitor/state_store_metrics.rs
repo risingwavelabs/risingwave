@@ -182,7 +182,7 @@ impl StateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_shared_buffer_to_l0_duration",
             "Histogram of time spent from compacting shared buffer to remote storage",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 3s
+            exponential_buckets(0.01, 2.0, 16).unwrap() // max 327s
         );
         let shared_buffer_to_l0_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
