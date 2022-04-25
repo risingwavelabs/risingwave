@@ -70,7 +70,7 @@ impl Task for EtcdService {
             .arg("--name")
             .arg("risedev-meta")
             .arg("--max-txn-ops")
-            .arg("0");
+            .arg("999999");
 
         if self.config.unsafe_no_fsync {
             cmd.arg("--unsafe-no-fsync");
