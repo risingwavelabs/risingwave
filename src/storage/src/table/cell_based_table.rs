@@ -205,11 +205,11 @@ impl<S: StateStore> CellBasedTable<S> {
                         local.put(key, StorageValue::new_default_put(value))
                     }
                 }
-                RowOp::Delete(old_value) => {
+                RowOp::Delete(old_row) => {
                     // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, old_value, &self.column_ids)
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
                         .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete(key);
@@ -224,64 +224,47 @@ impl<S: StateStore> CellBasedTable<S> {
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, new_row, &self.column_ids)
                         .map_err(err)?;
-
-                    let mut delete_idx = 0;
-                    let delete_len = delete_bytes.len();
-                    let mut insert_idx = 0;
-                    let insert_len = insert_bytes.len();
+                    let mut insert_bytes_iter = insert_bytes.into_iter().fuse().peekable();
+                    let mut delete_bytes_iter = delete_bytes.into_iter().fuse().peekable();
                     loop {
-                        if delete_idx < delete_len && insert_idx < insert_len {
-                            let delete_pk = &delete_bytes[delete_idx].0;
-                            let insert_pk = &insert_bytes[insert_idx].0;
-                            let (_, delete_cell_id) = delete_pk.split_at(delete_pk.len() - 4);
-                            if delete_pk.len() < 4 || insert_pk.len() < 4 {
-                                return Err(StorageError::CellBasedTable(
-                                    ErrorCode::InternalError("corrupted key".to_owned()).into(),
-                                ));
+                        match (insert_bytes_iter.peek(), delete_bytes_iter.peek()) {
+                            (None, None) => break,
+                            (None, Some((delete_pk, _))) => {
+                                local.delete(delete_pk);
+                                delete_bytes_iter.next();
                             }
-
-                            let insert_value = &insert_bytes[insert_idx].1;
-                            let (_, insert_cell_id) = insert_pk.split_at(insert_pk.len() - 4);
-                            match delete_cell_id.cmp(insert_cell_id) {
-                                std::cmp::Ordering::Less => {
-                                    local.delete(delete_pk);
-                                    delete_idx += 1;
-                                }
-                                std::cmp::Ordering::Equal => {
-                                    local.put(
-                                        insert_pk,
-                                        StorageValue::new_default_put(insert_value.clone()),
-                                    );
-                                    delete_idx += 1;
-                                    insert_idx += 1;
-                                }
-                                std::cmp::Ordering::Greater => {
-                                    local.put(
-                                        insert_pk,
-                                        StorageValue::new_default_put(insert_value.clone()),
-                                    );
-                                    insert_idx += 1;
+                            (Some((insert_pk, insert_row)), None) => {
+                                local.put(
+                                    insert_pk,
+                                    StorageValue::new_default_put(insert_row.clone()),
+                                );
+                                insert_bytes_iter.next();
+                            }
+                            (Some((insert_pk, insert_row)), Some((delete_pk, _))) => {
+                                let delete_cell_id = gengrate_cell_id_from_pk(delete_pk)?;
+                                let insert_cell_id = gengrate_cell_id_from_pk(insert_pk)?;
+                                match delete_cell_id.cmp(insert_cell_id) {
+                                    std::cmp::Ordering::Less => {
+                                        local.delete(delete_pk);
+                                        delete_bytes_iter.next();
+                                    }
+                                    std::cmp::Ordering::Equal => {
+                                        local.put(
+                                            insert_pk,
+                                            StorageValue::new_default_put(insert_row.clone()),
+                                        );
+                                        insert_bytes_iter.next();
+                                        delete_bytes_iter.next();
+                                    }
+                                    std::cmp::Ordering::Greater => {
+                                        local.put(
+                                            insert_pk,
+                                            StorageValue::new_default_put(insert_row.clone()),
+                                        );
+                                        insert_bytes_iter.next();
+                                    }
                                 }
                             }
-                        } else {
-                            break;
-                        }
-                    }
-                    loop {
-                        if delete_idx < delete_len {
-                            let delete_pk = &delete_bytes[delete_idx].0;
-                            local.delete(delete_pk);
-                            delete_idx += 1;
-                        } else if insert_idx < insert_len {
-                            let insert_pk = &insert_bytes[insert_idx].0;
-                            let insert_value = &insert_bytes[insert_idx].1;
-                            local.put(
-                                insert_pk,
-                                StorageValue::new_default_put(insert_value.clone()),
-                            );
-                            insert_idx += 1;
-                        } else {
-                            break;
                         }
                     }
                 }
@@ -309,6 +292,16 @@ impl<S: StateStore> CellBasedTable<S> {
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
+}
+
+fn gengrate_cell_id_from_pk(pk: &[u8]) -> StorageResult<&[u8]> {
+    if pk.len() < 4 {
+        return Err(StorageError::CellBasedTable(
+            ErrorCode::InternalError("corrupted key".to_owned()).into(),
+        ));
+    }
+    let (_, cell_id) = pk.split_at(pk.len() - 4);
+    Ok(cell_id)
 }
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
