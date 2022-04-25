@@ -346,7 +346,12 @@ impl CompactStatus {
         match found {
             SearchResult::Found(select_ln_ids, select_lnsuc_ids, splits) => {
                 self.next_compact_task_id += 1;
-                let level_type = if is_select_level_leveling {
+                let select_level_type = if is_select_level_leveling {
+                    LevelType::Nonoverlapping as i32
+                } else {
+                    LevelType::Overlapping as i32
+                };
+                let target_level_type = if is_target_level_leveling {
                     LevelType::Nonoverlapping as i32
                 } else {
                     LevelType::Overlapping as i32
@@ -356,14 +361,14 @@ impl CompactStatus {
                         LevelEntry {
                             level_idx: select_level,
                             level: Some(Level {
-                                level_type,
+                                level_type: select_level_type,
                                 table_infos: select_ln_ids,
                             }),
                         },
                         LevelEntry {
                             level_idx: target_level,
                             level: Some(Level {
-                                level_type,
+                                level_type: target_level_type,
                                 table_infos: select_lnsuc_ids,
                             }),
                         },
