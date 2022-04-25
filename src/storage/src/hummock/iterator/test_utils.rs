@@ -24,7 +24,9 @@ use sstable_store::{SstableStore, SstableStoreRef};
 
 use crate::hummock::iterator::BoxedForwardHummockIterator;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::test_utils::{gen_test_sstable, gen_test_sstable_inner};
+use crate::hummock::test_utils::{
+    create_small_table_cache, gen_test_sstable, gen_test_sstable_inner,
+};
 use crate::hummock::{
     sstable_store, CachePolicy, HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable,
 };
@@ -144,6 +146,7 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
     count: usize,
 ) -> Vec<BoxedForwardHummockIterator> {
     let sstable_store = mock_sstable_store();
+    let cache = create_small_table_cache();
     (0..count)
         .map(|i: usize| {
             let table = block_on(gen_iterator_test_sstable_base(
@@ -153,7 +156,8 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 sstable_store.clone(),
                 key_count,
             ));
-            Box::new(SSTableIterator::new(Arc::new(table), sstable_store.clone()))
+            let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+            Box::new(SSTableIterator::new(handle, sstable_store.clone()))
                 as BoxedForwardHummockIterator
         })
         .collect_vec()

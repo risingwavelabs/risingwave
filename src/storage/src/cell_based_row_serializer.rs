@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -34,9 +35,13 @@ impl CellBasedRowSerializer {
     pub fn serialize(
         &mut self,
         pk: &[u8],
-        row: Option<Row>,
+        row: Row,
         column_ids: &[ColumnId],
-    ) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
-        serialize_pk_and_row(pk, &row, column_ids)
+    ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
+        let res = serialize_pk_and_row(pk, &Some(row), column_ids)?
+            .into_iter()
+            .map(|(pk, value)| (pk, value.unwrap()))
+            .collect_vec();
+        Ok(res)
     }
 }

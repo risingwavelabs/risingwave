@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockIterator, HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
+use crate::hummock::{
+    BlockIterator, HummockResult, SSTableIteratorType, SstableStoreRef, TableHolder,
+};
 
 /// Reversely iterates on a table.
 pub struct ReverseSSTableIterator {
@@ -31,16 +32,16 @@ pub struct ReverseSSTableIterator {
     cur_idx: usize,
 
     /// Reference to the table
-    pub sst: Arc<Sstable>,
+    pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
 }
 
 impl ReverseSSTableIterator {
-    pub fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
-            cur_idx: table.meta.block_metas.len() - 1,
+            cur_idx: table.value().meta.block_metas.len() - 1,
             sst: table,
             sstable_store,
         }
@@ -48,12 +49,16 @@ impl ReverseSSTableIterator {
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.sst.block_count() as isize || idx < 0 {
+        if idx >= self.sst.value().block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
-                .get(&self.sst, idx as u64, crate::hummock::CachePolicy::Fill)
+                .get(
+                    self.sst.value(),
+                    idx as u64,
+                    crate::hummock::CachePolicy::Fill,
+                )
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
@@ -103,13 +108,14 @@ impl HummockIterator for ReverseSSTableIterator {
     /// Instead of setting idx to 0th block, a `ReverseSSTableIterator` rewinds to the last block in
     /// the table.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.sst.block_count() as isize - 1, None)
+        self.seek_idx(self.sst.value().block_count() as isize - 1, None)
             .await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
             .sst
+            .value()
             .meta
             .block_metas
             .partition_point(|block_meta| {
@@ -135,7 +141,7 @@ impl HummockIterator for ReverseSSTableIterator {
 impl SSTableIteratorType for ReverseSSTableIterator {
     type SSTableIterator = ReverseSSTableIterator;
 
-    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
+    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
         ReverseSSTableIterator::new(table, sstable_store)
     }
 }
@@ -151,8 +157,8 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
+        test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
@@ -165,8 +171,9 @@ mod tests {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
-
-        let mut sstable_iter = ReverseSSTableIterator::new(Arc::new(table), sstable_store);
+        let cache = create_small_table_cache();
+        let handle = cache.insert(0, 0, 1, Box::new(table));
+        let mut sstable_iter = ReverseSSTableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -191,8 +198,9 @@ mod tests {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
-        let table = Arc::new(table);
-        let mut sstable_iter = ReverseSSTableIterator::new(table.clone(), sstable_store);
+        let cache = create_small_table_cache();
+        let handle = cache.insert(0, 0, 1, Box::new(table));
+        let mut sstable_iter = ReverseSSTableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
