@@ -39,6 +39,7 @@ mod project;
 mod rearranged_chain;
 pub mod receiver;
 mod simple;
+mod source;
 #[cfg(test)]
 mod test_utils;
 mod top_n;
@@ -62,6 +63,7 @@ pub use mview::*;
 pub use project::ProjectExecutor;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
+pub use source::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::{UnionExecutor, UnionExecutorBuilder};
