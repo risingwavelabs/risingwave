@@ -99,9 +99,9 @@ impl<K> Default for HashJoinState<K> {
 
 pub(super) struct HashJoinExecutor2<K> {
     /// Probe side
-    left_child: BoxedExecutor2,
+    left_child: Option<BoxedExecutor2>,
     /// Build side
-    right_child: BoxedExecutor2,
+    right_child: Option<BoxedExecutor2>,
     state: HashJoinState<K>,
     schema: Schema,
     identity: String,
@@ -166,26 +166,27 @@ impl<K: HashKey + Send + Sync> Executor2 for HashJoinExecutor2<K> {
 impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut left_child_stream = self.left_child.execute();
-        let mut right_child_stream = self.right_child.execute();
+        let mut left_child_stream = self.left_child.take().unwrap().execute();
 
         match take(&mut self.state) {
-            HashJoinState::Build(build_table) => {
-                self.build(build_table, right_child_stream).await?
-            }
+            HashJoinState::Build(build_table) => self.build(build_table).await?,
             _ => unreachable!(),
         }
 
         loop {
             match take(&mut self.state) {
                 HashJoinState::FirstProbe(probe_table) => {
-                    let ret = self.probe(true, probe_table, left_child_stream).await?;
+                    let ret = self
+                        .probe(true, probe_table, &mut left_child_stream)
+                        .await?;
                     if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
                         yield data_chunk;
                     }
                 }
                 HashJoinState::Probe(probe_table) => {
-                    let ret = self.probe(false, probe_table, left_child_stream).await?;
+                    let ret = self
+                        .probe(false, probe_table, &mut left_child_stream)
+                        .await?;
                     if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
                         yield data_chunk;
                     }
@@ -204,11 +205,8 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
 }
 
 impl<K: HashKey> HashJoinExecutor2<K> {
-    async fn build(
-        &mut self,
-        mut build_table: BuildTable,
-        mut right_child_stream: BoxedDataChunkStream,
-    ) -> Result<()> {
+    async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
+        let mut right_child_stream = self.right_child.take().unwrap().execute();
         while let Some(chunk) = right_child_stream.next().await {
             let chunk = chunk?;
             build_table.append_build_chunk(chunk)?;
@@ -224,7 +222,7 @@ impl<K: HashKey> HashJoinExecutor2<K> {
         &mut self,
         first_probe: bool,
         mut probe_table: ProbeTable<K>,
-        mut left_child_stream: BoxedDataChunkStream,
+        left_child_stream: &mut BoxedDataChunkStream,
     ) -> Result<Option<DataChunk>> {
         if first_probe {
             match left_child_stream.next().await {
@@ -319,8 +317,8 @@ impl<K> HashJoinExecutor2<K> {
         identity: String,
     ) -> Self {
         HashJoinExecutor2 {
-            left_child,
-            right_child,
+            left_child: Some(left_child),
+            right_child: Some(right_child),
             state: HashJoinState::Build(BuildTable::with_params(params)),
             schema,
             identity,

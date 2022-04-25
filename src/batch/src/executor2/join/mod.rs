@@ -4,7 +4,6 @@ mod hash_join_state;
 
 pub use chunked_data::*;
 pub use hash_join::*;
-pub use hash_join_state::*;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 
 use crate::executor2::join::JoinType::Inner;
