@@ -21,8 +21,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::PlanNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 use sort_agg::*;
 
@@ -38,7 +38,7 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectionExecutor2, TopNExecutor2,
+    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2, TopNExecutor2,
     TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
@@ -187,7 +187,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor2,
+            NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
@@ -216,7 +216,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectionExecutor2,
+            NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
@@ -247,7 +247,7 @@ impl<'a> ExecutorBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::PlanNode;
+    use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
     use crate::task::{BatchEnvironment, TaskId};

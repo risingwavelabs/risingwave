@@ -19,8 +19,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
@@ -62,8 +61,8 @@ pub struct CreateMaterializedViewContext {
     pub hash_mapping: Vec<ParallelUnitId>,
     /// Distribution key of materialize node in current mview.
     pub distribution_keys: Vec<i32>,
-    /// Used for allocating internal table ids.
-    pub next_local_table_id: u32,
+    /// Table id offset get from meta id generator. Used to calculate global unique table id.
+    pub table_id_offset: u32,
     /// TODO: remove this when we deprecate Java frontend.
     pub is_legacy_frontend: bool,
 }
@@ -267,7 +266,7 @@ where
             affiliated_source,
             hash_mapping,
             distribution_keys: _,
-            next_local_table_id: _,
+            table_id_offset: _,
             is_legacy_frontend,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
@@ -279,7 +278,7 @@ where
             )
             .await;
         if nodes.is_empty() {
-            return Err(InternalError("no available node exist".to_string()).into());
+            return Err(internal_error("no available compute node in the cluster"));
         }
 
         let mut locations = ScheduledLocations::new();
@@ -626,7 +625,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
-    use risingwave_pb::plan::TableRefId;
+    use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,

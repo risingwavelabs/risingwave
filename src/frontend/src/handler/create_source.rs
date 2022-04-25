@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{
     CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema, SqlOption, Value,
@@ -164,7 +164,7 @@ pub mod tests {
 
         // Get all column descs
         for catalog in catalogs {
-            columns.append(&mut catalog.column_desc.get_column_descs());
+            columns.append(&mut catalog.column_desc.flatten());
         }
         let columns = columns
             .iter()

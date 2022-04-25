@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -85,7 +84,6 @@ impl PlanAggCall {
 pub struct LogicalAgg {
     pub base: PlanBase,
     agg_calls: Vec<PlanAggCall>,
-    agg_call_alias: Vec<Option<String>>,
     group_keys: Vec<usize>,
     input: PlanRef,
 }
@@ -251,12 +249,7 @@ impl ExprRewriter for ExprHandler {
 }
 
 impl LogicalAgg {
-    pub fn new(
-        agg_calls: Vec<PlanAggCall>,
-        agg_call_alias: Vec<Option<String>>,
-        group_keys: Vec<usize>,
-        input: PlanRef,
-    ) -> Self {
+    pub fn new(agg_calls: Vec<PlanAggCall>, group_keys: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(
             input.schema(),
@@ -265,7 +258,6 @@ impl LogicalAgg {
                 .iter()
                 .map(|agg_call| agg_call.return_type.clone())
                 .collect(),
-            &agg_call_alias,
         );
         let pk_indices = match group_keys.is_empty() {
             // simple agg
@@ -277,7 +269,6 @@ impl LogicalAgg {
         Self {
             base,
             agg_calls,
-            agg_call_alias,
             group_keys,
             input,
         }
@@ -305,7 +296,6 @@ impl LogicalAgg {
         input: &Schema,
         group_keys: &[usize],
         agg_call_data_types: Vec<DataType>,
-        agg_call_alias: &[Option<String>],
     ) -> Schema {
         let fields = group_keys
             .iter()
@@ -314,10 +304,9 @@ impl LogicalAgg {
             .chain(
                 agg_call_data_types
                     .into_iter()
-                    .zip_eq(agg_call_alias.iter())
                     .enumerate()
-                    .map(|(id, (data_type, alias))| {
-                        let name = alias.clone().unwrap_or(format!("agg#{}", id));
+                    .map(|(id, data_type)| {
+                        let name = format!("agg#{}", id);
                         Field::with_name(data_type, name)
                     }),
             )
@@ -355,13 +344,7 @@ impl LogicalAgg {
         let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        let agg_call_alias = vec![None; expr_handler.agg_calls.len()];
-        let logical_agg = LogicalAgg::new(
-            expr_handler.agg_calls,
-            agg_call_alias,
-            group_keys,
-            logical_project,
-        );
+        let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
 
         // This LogicalProject focus on transforming the aggregates and grouping columns to
         // InputRef.
@@ -370,11 +353,6 @@ impl LogicalAgg {
             rewritten_select_exprs,
             select_alias,
         ))
-    }
-
-    /// Get a reference to the logical agg's agg call alias.
-    pub fn agg_call_alias(&self) -> &[Option<String>] {
-        self.agg_call_alias.as_ref()
     }
 
     /// Get a reference to the logical agg's agg calls.
@@ -387,13 +365,8 @@ impl LogicalAgg {
         self.group_keys.as_ref()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<Option<String>>, Vec<usize>, PlanRef) {
-        (
-            self.agg_calls,
-            self.agg_call_alias,
-            self.group_keys,
-            self.input,
-        )
+    pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
+        (self.agg_calls, self.group_keys, self.input)
     }
 }
 
@@ -403,12 +376,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            self.agg_calls().to_vec(),
-            self.agg_call_alias().to_vec(),
-            self.group_keys().to_vec(),
-            input,
-        )
+        Self::new(self.agg_calls().to_vec(), self.group_keys().to_vec(), input)
     }
 
     #[must_use]
@@ -434,7 +402,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .cloned()
             .map(|key| input_col_change.map(key))
             .collect();
-        let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
+        let agg = Self::new(agg_calls, group_keys, input);
         // change the input columns index will not change the output column index
         let out_col_change = ColIndexMapping::identity(agg.schema().len());
         (agg, out_col_change)
@@ -462,16 +430,16 @@ impl ColPrunable for LogicalAgg {
 
         // Do not prune the group keys.
         let mut group_keys = self.group_keys.clone();
-        let (mut agg_calls, agg_call_alias): (Vec<_>, Vec<_>) = required_cols
+        let mut agg_calls: Vec<_> = required_cols
             .ones()
             .filter(|&index| index >= self.group_keys.len())
             .map(|index| {
                 let index = index - self.group_keys.len();
                 let agg_call = self.agg_calls[index].clone();
                 child_required_cols.extend(agg_call.inputs.iter().map(|x| x.index()));
-                (agg_call, self.agg_call_alias[index].clone())
+                agg_call
             })
-            .multiunzip();
+            .collect();
 
         let mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
         agg_calls.iter_mut().for_each(|agg_call| {
@@ -484,7 +452,6 @@ impl ColPrunable for LogicalAgg {
 
         let agg = LogicalAgg::new(
             agg_calls,
-            agg_call_alias,
             group_keys,
             self.input.prune_col(&child_required_cols),
         );
@@ -550,7 +517,7 @@ impl ToStream for LogicalAgg {
         // the insertion of RowCount, and it will be used to rewrite LogicalProject above this
         // LogicalAgg.
         // Please note that the index of group keys need not be changed.
-        let (mut agg_calls, mut agg_call_alias, group_keys, input) = agg.decompose();
+        let (mut agg_calls, group_keys, input) = agg.decompose();
         agg_calls.insert(
             0,
             PlanAggCall {
@@ -559,7 +526,6 @@ impl ToStream for LogicalAgg {
                 inputs: vec![],
             },
         );
-        agg_call_alias.insert(0, None);
 
         let (mut map, _) = out_col_change.into_parts();
         map.iter_mut().skip(group_keys.len()).for_each(|index| {
@@ -569,7 +535,7 @@ impl ToStream for LogicalAgg {
         });
 
         (
-            LogicalAgg::new(agg_calls, agg_call_alias, group_keys, input).into(),
+            LogicalAgg::new(agg_calls, group_keys, input).into(),
             ColIndexMapping::new(map),
         )
     }
@@ -736,12 +702,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
         };
-        let agg = LogicalAgg::new(
-            vec![agg_call],
-            vec![Some("min".to_string())],
-            vec![1],
-            values.into(),
-        );
+        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(2);
@@ -750,7 +711,6 @@ mod tests {
 
         // Check the result
         let agg_new = plan.as_logical_agg().unwrap();
-        assert_eq!(agg_new.agg_call_alias(), vec![Some("min".to_string())]);
         assert_eq!(agg_new.group_keys(), vec![0]);
 
         assert_eq!(agg_new.agg_calls.len(), 1);
@@ -795,12 +755,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
         };
-        let agg = LogicalAgg::new(
-            vec![agg_call],
-            vec![Some("min".to_string())],
-            vec![1],
-            values.into(),
-        );
+        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(2);
@@ -815,7 +770,6 @@ mod tests {
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
-        assert_eq!(agg_new.agg_call_alias(), vec![Some("min".to_string())]);
         assert_eq!(agg_new.group_keys(), vec![0]);
         assert_eq!(agg_new.id().0, 3);
 
@@ -869,12 +823,7 @@ mod tests {
                 inputs: vec![InputRef::new(1, ty.clone())],
             },
         ];
-        let agg = LogicalAgg::new(
-            agg_calls,
-            vec![Some("min".to_string()), Some("max".to_string())],
-            vec![1, 2],
-            values.into(),
-        );
+        let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(4);
@@ -889,7 +838,6 @@ mod tests {
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
-        assert_eq!(agg_new.agg_call_alias(), vec![Some("max".to_string())]);
         assert_eq!(agg_new.group_keys(), vec![0, 1]);
 
         assert_eq!(agg_new.agg_calls.len(), 1);

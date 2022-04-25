@@ -13,18 +13,19 @@
 // limitations under the License.
 
 use std::fmt;
+use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableDesc;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
 use crate::optimizer::property::Distribution;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
-// TODO: rename to `StreamChain`
 #[derive(Debug, Clone)]
 pub struct StreamTableScan {
     pub base: PlanBase,
@@ -59,6 +60,10 @@ impl StreamTableScan {
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
     }
+
+    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> StreamIndexScan {
+        StreamIndexScan::new(self.logical.to_index_scan(index_name, index))
+    }
 }
 
 impl_plan_tree_node_for_leaf! { StreamTableScan }
@@ -83,7 +88,7 @@ impl ToStreamProst for StreamTableScan {
 
 impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
-        use risingwave_pb::plan::*;
+        use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {

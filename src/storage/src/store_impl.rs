@@ -20,7 +20,6 @@ use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
@@ -98,8 +97,7 @@ impl StateStoreImpl {
                             .await,
                     ),
                     minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
-                        S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
-                            .await,
+                        S3ObjectStore::with_minio(minio.strip_prefix("hummock+").unwrap()).await,
                     ),
                     memory if memory.starts_with("hummock+memory") => {
                         tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
@@ -123,7 +121,6 @@ impl StateStoreImpl {
                 let inner = HummockStorage::new(
                     config.clone(),
                     sstable_store.clone(),
-                    Arc::new(LocalVersionManager::new()),
                     hummock_meta_client,
                     state_store_stats.clone(),
                 )

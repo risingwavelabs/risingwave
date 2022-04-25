@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use crate::binder::BoundSelect;
 use crate::expr::{
@@ -71,8 +71,7 @@ impl Planner {
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) - Agg(count(*)) - input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
-        let count_star =
-            LogicalAgg::new(vec![PlanAggCall::count_star()], vec![None], vec![], input);
+        let count_star = LogicalAgg::new(vec![PlanAggCall::count_star()], vec![], input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![

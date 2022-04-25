@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![allow(dead_code)]
-#![allow(unused)]
-use std::collections::{btree_map, BTreeMap};
+use std::collections::btree_map::{self, Entry};
+use std::collections::BTreeMap;
 
-use futures::Future;
 use risingwave_common::array::Row;
 
 use crate::error::StorageResult;
@@ -26,6 +25,8 @@ pub enum RowOp {
     Delete(Row),
     Update((Row, Row)),
 }
+/// `MemTable` is a buffer for modify operations without encoding
+#[derive(Clone)]
 pub struct MemTable {
     pub buffer: BTreeMap<Row, RowOp>,
 }
@@ -45,26 +46,71 @@ impl MemTable {
     }
 
     /// read methods
-    pub async fn get_row(&self, pk: &Row) -> StorageResult<Option<RowOp>> {
-        todo!()
+    pub fn get_row(&self, pk: &Row) -> StorageResult<Option<&RowOp>> {
+        Ok(self.buffer.get(pk))
     }
 
     /// write methods
-    pub async fn insert(&mut self, _pk: Row, _value: Row) -> StorageResult<()> {
+    pub fn insert(&mut self, pk: Row, value: Row) -> StorageResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Insert(value));
+            }
+            Entry::Occupied(mut e) => match e.get_mut() {
+                x @ RowOp::Delete(_) => {
+                    if let RowOp::Delete(ref mut old_value) = x {
+                        let old_val = std::mem::take(old_value);
+                        e.insert(RowOp::Update((old_val, value)));
+                    } else {
+                        unreachable!();
+                    }
+                }
+
+                _ => {
+                    panic!(
+                        "invalid flush status: double insert {:?} -> {:?}",
+                        e.key(),
+                        value
+                    );
+                }
+            },
+        }
         Ok(())
     }
 
-    pub async fn delete(&mut self, _pk: Row, _old_value: Row) -> StorageResult<()> {
+    pub fn delete(&mut self, pk: Row, old_value: Row) -> StorageResult<()> {
+        let entry = self.buffer.entry(pk);
+        match entry {
+            Entry::Vacant(e) => {
+                e.insert(RowOp::Delete(old_value));
+            }
+            Entry::Occupied(mut e) => match e.get_mut() {
+                RowOp::Insert(original_value) => {
+                    debug_assert_eq!(original_value, &old_value);
+                    e.remove();
+                }
+                RowOp::Delete(_) => {
+                    panic!(
+                        "invalid flush status: double delete {:?} -> {:?}",
+                        e.key(),
+                        old_value
+                    );
+                }
+                x @ RowOp::Update(_) => {
+                    if let RowOp::Update(ref mut value) = x {
+                        let (original_old_value, original_new_value) = std::mem::take(value);
+                        debug_assert_eq!(original_new_value, old_value);
+                        e.insert(RowOp::Delete(original_old_value));
+                    }
+                }
+            },
+        }
         Ok(())
     }
 
-    pub async fn update(
-        &mut self,
-        _pk: Row,
-        _old_value: Row,
-        _new_value: Row,
-    ) -> StorageResult<()> {
-        Ok(())
+    pub fn into_parts(self) -> BTreeMap<Row, RowOp> {
+        self.buffer
     }
 
     pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter<'_>> {

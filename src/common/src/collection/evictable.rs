@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Eq;
-use std::hash::Hash;
+use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
-use lru::LruCache;
+use lru::{DefaultHasher, LruCache};
 
 /// A wrapper for [`LruCache`] which provides manual eviction.
-pub struct EvictableHashMap<K, V> {
-    inner: LruCache<K, V>,
+pub struct EvictableHashMap<K, V, S = DefaultHasher> {
+    inner: LruCache<K, V, S>,
 
     /// Target capacity to keep when calling `evict_to_target_cap`.
     target_cap: usize,
@@ -28,9 +28,16 @@ pub struct EvictableHashMap<K, V> {
 
 impl<K: Hash + Eq, V> EvictableHashMap<K, V> {
     /// Create a [`EvictableHashMap`] with the given target capacity.
-    pub fn new(target_cap: usize) -> Self {
+    pub fn new(target_cap: usize) -> EvictableHashMap<K, V> {
+        EvictableHashMap::with_hasher(target_cap, DefaultHasher::new())
+    }
+}
+
+impl<K: Hash + Eq, V, S: BuildHasher> EvictableHashMap<K, V, S> {
+    /// Create a [`EvictableHashMap`] with the given target capacity and haser.
+    pub fn with_hasher(target_cap: usize, hasher: S) -> Self {
         Self {
-            inner: LruCache::unbounded(),
+            inner: LruCache::unbounded_with_hasher(hasher),
             target_cap,
         }
     }
@@ -72,15 +79,15 @@ impl<K: Hash + Eq, V> EvictableHashMap<K, V> {
     }
 }
 
-impl<K, V> Deref for EvictableHashMap<K, V> {
-    type Target = LruCache<K, V>;
+impl<K, V, S> Deref for EvictableHashMap<K, V, S> {
+    type Target = LruCache<K, V, S>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<K, V> DerefMut for EvictableHashMap<K, V> {
+impl<K, V, S> DerefMut for EvictableHashMap<K, V, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -28,23 +27,17 @@ use crate::session::OptimizerContext;
 pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
     let mut rows = vec![];
     for col in columns {
-        rows.append(
-            &mut col
-                .get_column_descs()
-                .into_iter()
-                .map(|c| {
-                    let type_name = {
-                        // If datatype is struct, use type name as struct name
-                        if let DataType::Struct { fields: _f } = c.data_type {
-                            c.type_name.clone()
-                        } else {
-                            format!("{:?}", &c.data_type)
-                        }
-                    };
-                    Row::new(vec![Some(c.name), Some(type_name)])
-                })
-                .collect_vec(),
-        );
+        rows.extend(col.flatten().into_iter().map(|c| {
+            let type_name = {
+                // If datatype is struct, use type name as struct name
+                if let DataType::Struct { fields: _f } = c.data_type {
+                    c.type_name.clone()
+                } else {
+                    format!("{:?}", &c.data_type)
+                }
+            };
+            Row::new(vec![Some(c.name), Some(type_name)])
+        }));
     }
     rows
 }

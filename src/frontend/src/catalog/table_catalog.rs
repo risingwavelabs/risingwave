@@ -19,7 +19,7 @@ use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
@@ -112,7 +112,7 @@ impl From<ProstTable> for TableCatalog {
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for catalog in columns.clone() {
-            for col_desc in catalog.column_desc.get_column_descs() {
+            for col_desc in catalog.column_desc.flatten() {
                 let col_name = col_desc.name.clone();
                 if !col_names.insert(col_name.clone()) {
                     panic!("duplicated column name {} in table {} ", col_name, tb.name)
@@ -164,7 +164,9 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+    use risingwave_pb::plan_common::{
+        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
+    };
 
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;

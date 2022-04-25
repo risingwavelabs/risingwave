@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
@@ -35,6 +36,11 @@ impl BoundQuery {
     /// The names returned by this [`BoundQuery`].
     pub fn names(&self) -> Vec<String> {
         self.body.names()
+    }
+
+    /// The fields returned by this [`BoundQuery`].
+    pub fn fields(&self) -> Vec<Field> {
+        self.body.fields()
     }
 
     /// The types returned by this [`BoundQuery`].

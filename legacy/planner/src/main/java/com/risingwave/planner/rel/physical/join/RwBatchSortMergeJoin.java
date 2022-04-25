@@ -9,9 +9,9 @@ import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
-import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SortMergeJoinNode;
+import com.risingwave.proto.plan_common.OrderType;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;

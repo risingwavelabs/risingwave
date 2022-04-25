@@ -2,13 +2,13 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "data.proto";
+import "expr.proto";
+import "plan_common.proto";
+
 option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
-
-import "data.proto";
-import "expr.proto";
-import "plan.proto";
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
@@ -28,7 +28,7 @@ message SourceNode {
     TABLE = 0;
     SOURCE = 1;
   }
-  plan.TableRefId table_ref_id = 1;
+  plan_common.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
   // split allocation information,
@@ -57,10 +57,10 @@ message FilterNode {
 // `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
 // arrange columns and pk columns, while distribution keys will be arrange columns.
 message MaterializeNode {
-  plan.TableRefId table_ref_id = 1;
-  plan.TableRefId associated_table_ref_id = 2;
+  plan_common.TableRefId table_ref_id = 1;
+  plan_common.TableRefId associated_table_ref_id = 2;
   // Column indexes and orders of primary key
-  repeated plan.ColumnOrder column_orders = 3;
+  repeated plan_common.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
   // Hash keys of the materialize node, which is a subset of pk.
@@ -80,7 +80,7 @@ message HashAggNode {
 }
 
 message TopNNode {
-  repeated plan.OrderType order_types = 1;
+  repeated plan_common.OrderType order_types = 1;
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
@@ -88,17 +88,32 @@ message TopNNode {
 }
 
 message HashJoinNode {
-  plan.JoinType join_type = 1;
+  plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated int32 distribution_keys = 5;
-  // Whether to use delta join for this hash join node.
+  // Whether to use delta join for this hash join node. When enabled, arrangement will be created
+  // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
   bool is_delta_join = 6;
-  // Used for internal table states.
-  plan.TableRefId left_table_ref_id = 7;
-  plan.TableRefId right_table_ref_id = 8;
+  // Used for internal table states. Id of the left table.
+  uint32 left_table_id = 7;
+  // Used for internal table states. Id of the right table.
+  uint32 right_table_id = 8;
+}
+
+// Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
+// service, it will be rewritten into lookup joins.
+message DeltaIndexJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  expr.ExprNode condition = 4;
+  // Table id of the left index.
+  uint32 left_table_id = 7;
+  // Table id of the right index.
+  uint32 right_table_id = 8;
 }
 
 message HopWindowNode {
@@ -110,7 +125,7 @@ message HopWindowNode {
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
   // The schema of input columns. TODO: remove this field.
-  repeated plan.Field fields = 2;
+  repeated plan_common.Field fields = 2;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -124,9 +139,9 @@ message ExchangeNode {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  plan.TableRefId table_ref_id = 1;
+  plan_common.TableRefId table_ref_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
-  repeated plan.Field upstream_fields = 2;
+  repeated plan_common.Field upstream_fields = 2;
   repeated int32 column_ids = 3;
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
@@ -136,11 +151,11 @@ message ChainNode {
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
-// BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan.
+// BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan_common.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
-  plan.TableRefId table_ref_id = 1;
-  repeated plan.ColumnDesc column_descs = 2;
+  plan_common.TableRefId table_ref_id = 1;
+  repeated plan_common.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
   // TODO: make hash_mapping more compact. (e.g. store ranges)
   ParallelUnitMapping hash_mapping = 4;
@@ -200,6 +215,7 @@ message StreamNode {
     LookupNode lookup_node = 20;
     ArrangeNode arrange_node = 21;
     UnionNode union_node = 22;
+    DeltaIndexJoinNode delta_index_join = 25;
   }
   // The id for the operator.
   uint64 operator_id = 1;
@@ -209,7 +225,7 @@ message StreamNode {
   bool append_only = 24;
   string identity = 18;
   // The schema of the plan node
-  repeated plan.Field fields = 19;
+  repeated plan_common.Field fields = 19;
 }
 
 enum DispatcherType {

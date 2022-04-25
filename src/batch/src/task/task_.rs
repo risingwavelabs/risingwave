@@ -18,7 +18,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
+use risingwave_pb::batch_plan::{
+    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
+};
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
 use tracing_futures::Instrument;

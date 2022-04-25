@@ -22,7 +22,7 @@ use crate::error::Result;
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Column {
     array: ArrayRef,
 }
@@ -184,7 +184,7 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(NaiveDateWrapper::new_with_days(i as i32).ok())
+                    .append(NaiveDateWrapper::with_days(i as i32).ok())
                     .unwrap();
             } else {
                 builder.append(None).unwrap();
@@ -197,7 +197,7 @@ mod tests {
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
-                    NaiveDateWrapper::new_with_days(i as i32).ok().unwrap(),
+                    NaiveDateWrapper::with_days(i as i32).ok().unwrap(),
                     x.unwrap()
                 );
             } else {
@@ -214,7 +214,7 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(NaiveTimeWrapper::new_with_secs_nano(i as u32, i as u32 * 1000).ok())
+                    .append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok())
                     .unwrap();
             } else {
                 builder.append(None).unwrap();
@@ -227,7 +227,7 @@ mod tests {
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
-                    NaiveTimeWrapper::new_with_secs_nano(i as u32, i as u32 * 1000)
+                    NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000)
                         .ok()
                         .unwrap(),
                     x.unwrap()
@@ -246,9 +246,7 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(
-                        NaiveDateTimeWrapper::new_with_secs_nsecs(i as i64, i as u32 * 1000).ok(),
-                    )
+                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok())
                     .unwrap();
             } else {
                 builder.append(None).unwrap();
@@ -261,7 +259,7 @@ mod tests {
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(
-                    NaiveDateTimeWrapper::new_with_secs_nsecs(i as i64, i as u32 * 1000)
+                    NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000)
                         .ok()
                         .unwrap(),
                     x.unwrap()

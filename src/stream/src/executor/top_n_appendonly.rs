@@ -15,7 +15,7 @@
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};

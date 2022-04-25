@@ -19,7 +19,7 @@ import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.planner.sql.SqlConverter;
 import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan_common.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;

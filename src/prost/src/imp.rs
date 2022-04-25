@@ -5,7 +5,7 @@ use std::net::{AddrParseError, SocketAddr};
 use crate::common::HostAddress;
 use crate::data::data_type::TypeName;
 use crate::data::DataType;
-use crate::plan::ColumnDesc;
+use crate::plan_common::ColumnDesc;
 
 impl crate::common::HostAddress {
     /// Convert `HostAddress` to `SocketAddr`.
@@ -82,7 +82,7 @@ impl crate::catalog::Source {
     }
 }
 
-impl crate::plan::ColumnDesc {
+impl crate::plan_common::ColumnDesc {
     // Used for test
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
         Self {

@@ -13,20 +13,18 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
-use super::Sstable;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::{BlockIterator, SstableStoreRef};
+use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 
 pub trait SSTableIteratorType {
     type SSTableIterator: HummockIterator;
 
-    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
+    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
 }
 
 /// Iterates on a table.
@@ -38,13 +36,13 @@ pub struct SSTableIterator {
     cur_idx: usize,
 
     /// Reference to the sst
-    pub sst: Arc<Sstable>,
+    pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
 }
 
 impl SSTableIterator {
-    pub fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
@@ -58,15 +56,19 @@ impl SSTableIterator {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: table_id = {}, block_id = {}",
-            self.sst.id,
+            self.sst.value().id,
             idx,
         );
-        if idx >= self.sst.block_count() {
+        if idx >= self.sst.value().block_count() {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
-                .get(&self.sst, idx as u64, crate::hummock::CachePolicy::Fill)
+                .get(
+                    self.sst.value(),
+                    idx as u64,
+                    crate::hummock::CachePolicy::Fill,
+                )
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
@@ -120,6 +122,7 @@ impl HummockIterator for SSTableIterator {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
             .sst
+            .value()
             .meta
             .block_metas
             .partition_point(|block_meta| {
@@ -144,7 +147,7 @@ impl HummockIterator for SSTableIterator {
 impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
 
-    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
+    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
         SSTableIterator::new(table, sstable_store)
     }
 }
@@ -159,9 +162,10 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
+        test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
+
     #[tokio::test]
     async fn test_table_iterator() {
         // Build remote table
@@ -173,7 +177,10 @@ mod tests {
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut sstable_iter = SSTableIterator::new(Arc::new(table), sstable_store);
+        let cache = create_small_table_cache();
+        let handle = cache.insert(0, 0, 1, Box::new(table));
+
+        let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -198,8 +205,10 @@ mod tests {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
-        let table = Arc::new(table);
-        let mut sstable_iter = SSTableIterator::new(table.clone(), sstable_store);
+        let cache = create_small_table_cache();
+        let handle = cache.insert(0, 0, 1, Box::new(table));
+
+        let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

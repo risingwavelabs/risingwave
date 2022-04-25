@@ -16,17 +16,18 @@ use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_pb::batch_plan::exchange_info::{Distribution, DistributionMode};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::values_node::ExprTuple;
+use risingwave_pb::batch_plan::{
+    exchange_info, CreateTableNode, ExchangeInfo, InsertNode, PlanFragment, PlanNode,
+    TaskId as ProstTaskId, TaskOutputId as ProstOutputId, ValuesNode,
+};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ConstantValue;
-use risingwave_pb::plan::exchange_info::{Distribution, DistributionMode};
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::values_node::ExprTuple;
-use risingwave_pb::plan::{
-    exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, TaskId as ProstTaskId, TaskOutputId as ProstOutputId, ValuesNode,
-};
+use risingwave_pb::plan_common::{ColumnDesc, Field as NodeField};
 use risingwave_pb::task_service::GetDataResponse;
 
 use super::*;

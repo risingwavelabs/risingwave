@@ -26,7 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
@@ -53,6 +53,11 @@ struct BuildFragmentGraphState {
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
     next_local_fragment_id: u32,
+
+    /// Next local table id to be allocated. It equals to total table ids cnt when finish stream
+    /// node traversing.
+    next_table_id: u32,
+
     /// rewrite will produce new operators, and we need to track next operator id
     #[derivative(Default(value = "u32::MAX - 1"))]
     next_operator_id: u32,
@@ -75,6 +80,13 @@ impl BuildFragmentGraphState {
     fn gen_operator_id(&mut self) -> u32 {
         self.next_operator_id -= 1;
         self.next_operator_id
+    }
+
+    /// Generate an table id
+    fn gen_table_id(&mut self) -> u32 {
+        let ret = self.next_table_id;
+        self.next_table_id += 1;
+        ret
     }
 }
 
@@ -142,6 +154,7 @@ impl StreamFragmenter {
                 next_operator_id: _,
                 distribution_keys,
                 dependent_table_ids,
+                next_table_id: next_local_table_id,
             } = {
                 let mut state = BuildFragmentGraphState::default();
                 self.generate_fragment_graph(&mut state, stream_node)?;
@@ -157,6 +170,15 @@ impl StreamFragmenter {
             let offset = id_gen_manager
                 .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
                 .await? as _;
+
+            // Compute how many table ids should be allocated for all actors.
+            // Allocate all needed table ids for current MV.
+            let table_ids_cnt = next_local_table_id;
+            let start_table_id = id_gen_manager
+                .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+                .await? as _;
+            ctx.table_id_offset = start_table_id;
+
             fragment_graph.seal(offset);
             fragment_graph
         };
@@ -164,7 +186,7 @@ impl StreamFragmenter {
         let stream_graph = {
             let BuildActorGraphState {
                 stream_graph_builder,
-                fragment_actors,
+                fragment_actors: _,
                 next_local_actor_id,
             } = {
                 let mut state = BuildActorGraphState::default();
@@ -182,36 +204,17 @@ impl StreamFragmenter {
             };
 
             // generates global ids
-            let (actor_len, start_actor_id, table_ids_cnt, start_table_id) = {
+            let (actor_len, start_actor_id) = {
                 let actor_len = stream_graph_builder.actor_len() as u32;
                 assert_eq!(actor_len, next_local_actor_id);
                 let start_actor_id = id_gen_manager
                     .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
                     .await? as _;
 
-                // Compute how many table ids should be allocated for all actors.
-                let mut table_ids_cnt = 0;
-                for (local_fragment_id, fragment) in fragment_graph.fragments() {
-                    let num_of_actors = fragment_actors
-                        .get(local_fragment_id)
-                        .expect("Fragment should have at least one actor")
-                        .len();
-                    // Total table ids number equals to table ids cnt in all actors.
-                    table_ids_cnt += num_of_actors * fragment.table_ids_cnt;
-                }
-                let start_table_id = id_gen_manager
-                    .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
-                    .await? as _;
-                (actor_len, start_actor_id, table_ids_cnt, start_table_id)
+                (actor_len, start_actor_id)
             };
 
-            stream_graph_builder.build(
-                ctx,
-                start_actor_id,
-                actor_len,
-                start_table_id,
-                table_ids_cnt as u32,
-            )?
+            stream_graph_builder.build(ctx, start_actor_id, actor_len)?
         };
 
         // Serialize the graph
@@ -362,8 +365,11 @@ impl StreamFragmenter {
 
         // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
         // with only equal conditions
-        if let Node::HashJoinNode(hash_join_node) = stream_node.get_node()? {
-            current_fragment.table_ids_cnt += 2;
+        if let Node::HashJoinNode(hash_join_node) = stream_node.node.as_mut().unwrap() {
+            // Allocate local table id. It will be rewrite to global table id after get table id
+            // offset from id generator.
+            hash_join_node.left_table_id = state.gen_table_id();
+            hash_join_node.right_table_id = state.gen_table_id();
             if hash_join_node.is_delta_join {
                 if hash_join_node.get_join_type()? == JoinType::Inner
                     && hash_join_node.condition.is_none()

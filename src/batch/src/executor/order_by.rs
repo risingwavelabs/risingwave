@@ -30,7 +30,7 @@ use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_enc
 use risingwave_common::util::sort_util::{
     compare_two_row, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};

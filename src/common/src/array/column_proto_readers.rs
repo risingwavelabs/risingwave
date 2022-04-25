@@ -173,7 +173,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let offset_buff = array.get_values()[0].get_body().as_slice();
     let data_buf = array.get_values()[1].get_body().as_slice();
 
-    let mut builder = B::new_with_meta(cardinality, ArrayMeta::Simple)?;
+    let mut builder = B::with_meta(cardinality, ArrayMeta::Simple)?;
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);
