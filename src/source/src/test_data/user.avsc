@@ -1,0 +1,212 @@
+{
+	"name": "user",
+	"type": "record",
+	"fields": [
+		{
+			"name": "uid",
+			"doc": "User ID. Can be one of anid, ifa, xfa, external_id, device_id type.",
+			"type": [
+				{
+					"name": "anid",
+					"type": "long",
+					"doc": "Appnexus user ID."
+				},
+				{
+					"name": "eid",
+					"type": "record",
+					"doc": "Single user identity",
+					"fields": [
+						{
+							"name": "source",
+							"type": "string",
+							"doc": "Identity code from Identity Settings Service"
+						},
+						{
+							"name": "id",
+							"type": "string",
+							"doc": "User identity"
+						}
+					]
+				},
+				{
+					"name": "ifa",
+					"type": "record",
+					"doc": "Identifier for Advertising record by iabtechlab.com",
+					"fields": [
+						{
+							"name": "id",
+							"type": "string",
+							"doc": "IFA in UUID format."
+						},
+						{
+							"name": "type",
+							"type": "string",
+							"doc": "IFA type."
+						}
+					]
+				},
+				{
+					"name": "xfa",
+					"type": "record",
+					"doc": "Xandr synthetic ID record.",
+					"fields": [
+						{
+							"name": "device_model_id",
+							"type": "int",
+							"doc": "Device atlas device model.",
+							"default": 0
+						},
+						{
+							"name": "device_make_id",
+							"type": "int",
+							"doc": "Device atlas device make.",
+							"default": 0
+						},
+						{
+							"name": "ip",
+							"type": "string",
+							"default": "",
+							"doc": "Residential IP address."
+						}
+					]
+				},
+				{
+					"name": "external_id",
+					"type": "record",
+					"doc": "External ID record.",
+					"fields": [
+						{
+							"name": "id",
+							"type": "string",
+							"doc": "External ID provided by member."
+						},
+						{
+							"name": "member_id",
+							"type": "int",
+							"doc": "Owner member ID.",
+							"default": 0
+						}
+					]
+				},
+				{
+					"name": "device_id",
+					"type": "record",
+					"doc": "Mobile device ID record.",
+					"fields": [
+						{
+							"name": "id",
+							"type": "string",
+							"doc": "Mobile device ID."
+						},
+						{
+							"name": "domain",
+							"type": {
+								"name": "domain",
+								"type": "enum",
+								"doc": "Mobile device domain.",
+								"symbols": [
+									"idfa",
+									"sha1udid",
+									"md5udid",
+									"openudid",
+									"aaid",
+									"windowsadid",
+									"rida"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "aes_encrypted",
+					"type": "record",
+					"doc": "Encrypted user ID",
+					"fields": [
+						{
+							"name": "ciphertext",
+							"type": "bytes",
+							"doc":  "ID encrypted by PKCS5(pad16)+AES-CBC."
+						},
+						{
+							"name": "iv",
+							"type": "bytes",
+							"doc": "Initialization vector."
+						},
+						{
+							"name": "key_id",
+							"type": "int",
+							"doc": "Encryption key ID."
+						},
+						{
+							"name": "set_name",
+							"default": null,
+							"type": [
+								{
+									"name": "anid_external",
+									"type": "null",
+									"doc": "null if ciphertext is either anid or external id."
+								},
+								{
+									"name": "device_id",
+									"doc": "ciphertext device id domain.",
+									"type": "domain"
+								}
+							],
+							"doc": "Type of id encrypted in ciphertext."
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "segments",
+			"doc": "Array of segments.",
+			"type": {
+				"type": "array",
+				"doc": "Element of the segments array.",
+				"items": {
+					"name": "segment",
+					"type": "record",
+					"fields": [
+						{
+							"name": "id",
+							"type": "int",
+							"doc": "Segment ID. Alternatively pair of code and member_id can be used.",
+							"default": 0
+						},
+						{
+							"name": "code",
+							"type": "string",
+							"doc": "Segment code. Requires segment.member_id.",
+							"default": ""
+						},
+						{
+							"name": "member_id",
+							"type": "int",
+							"doc": "Segment member ID. Requires segment.code.",
+							"default": 0
+						},
+						{
+							"name": "expiration",
+							"type": "int",
+							"doc": "Segment expiration in minutes. 0: max expiration (180 days); -2: default expiration; -1: segment removal.",
+							"default": 0
+						},
+						{
+							"name": "timestamp",
+							"type": "long",
+							"doc": "Defines when segment becomes 'live'. Timestamp in seconds from epoch. 0 enables segment immediately",
+							"default": 0
+						},
+						{
+							"name": "value",
+							"type": "int",
+							"doc": "User provided value associated with the segment.",
+							"default": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

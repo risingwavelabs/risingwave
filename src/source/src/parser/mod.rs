@@ -26,6 +26,7 @@ use risingwave_common::types::Datum;
 
 use crate::{SourceColumnDesc, SourceFormat};
 
+mod avro_parser;
 mod common;
 mod debezium;
 mod json_parser;
