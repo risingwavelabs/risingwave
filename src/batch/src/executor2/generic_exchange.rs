@@ -162,6 +162,7 @@ impl<CS: 'static + CreateSource> GenericExchangeExecutor2<CS> {
 mod tests {
     use std::sync::Arc;
 
+    use futures::StreamExt;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
@@ -207,7 +208,7 @@ mod tests {
             sources.push(ProstExchangeSource::default());
         }
 
-        let mut executor = GenericExchangeExecutor::<FakeCreateSource> {
+        let executor = Box::new(GenericExchangeExecutor2::<FakeCreateSource> {
             sources,
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_idx: 0,
@@ -218,17 +219,17 @@ mod tests {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
             task_id: TaskId::default(),
-            identity: "GenericExchangeExecutor".to_string(),
-        };
+            identity: "GenericExchangeExecutor2".to_string(),
+        });
 
         let mut chunks: usize = 0;
-        loop {
-            let res = executor.next().await.unwrap();
-            match res {
-                Some(_) => chunks += 1,
-                None => break,
-            }
+
+        let mut stream = executor.execute();
+        while let Some(chunk) = stream.next().await {
+            let _ = chunk.unwrap();
+            chunks += 1;
         }
+
         assert_eq!(chunks, 3);
     }
 }
