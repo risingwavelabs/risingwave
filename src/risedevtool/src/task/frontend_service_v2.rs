@@ -39,21 +39,13 @@ impl FrontendServiceV2 {
             Ok(Command::new(Path::new(&prefix_bin).join("frontend-v2")))
         }
     }
-}
 
-impl Task for FrontendServiceV2 {
-    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        ctx.service(self);
-        ctx.pb.set_message("starting...");
-
-        let mut cmd = self.frontend_v2()?;
-
-        cmd.env("RUST_BACKTRACE", "1");
-
+    /// Apply command args accroding to config
+    pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
         cmd.arg("--host")
-            .arg(format!("{}:{}", self.config.address, self.config.port));
+            .arg(format!("{}:{}", config.address, config.port));
 
-        let provide_meta_node = self.config.provide_meta_node.as_ref().unwrap();
+        let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.len() {
             0 => {
                 return Err(anyhow!(
@@ -72,6 +64,20 @@ impl Task for FrontendServiceV2 {
                 ));
             }
         };
+
+        Ok(())
+    }
+}
+
+impl Task for FrontendServiceV2 {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        ctx.service(self);
+        ctx.pb.set_message("starting...");
+
+        let mut cmd = self.frontend_v2()?;
+
+        cmd.env("RUST_BACKTRACE", "1");
+        Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

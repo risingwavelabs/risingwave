@@ -3319,8 +3319,10 @@ dependencies = [
 name = "risingwave_cmd_all"
 version = "0.1.5"
 dependencies = [
+ "anyhow",
  "clap 3.1.9",
  "log 0.4.16",
+ "risedev",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
