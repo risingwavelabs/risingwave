@@ -79,7 +79,7 @@ impl Rule for IndexDeltaJoinRule {
                 }
 
                 if remaining_to_match.is_empty() {
-                    return Some(table_scan.to_index_scan(&name, index).into());
+                    return Some(table_scan.to_index_scan(name, index).into());
                 }
             }
 
