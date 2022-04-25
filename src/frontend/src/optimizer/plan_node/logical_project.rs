@@ -36,7 +36,7 @@ use crate::utils::ColIndexMapping;
 pub struct LogicalProject {
     pub base: PlanBase,
     exprs: Vec<ExprImpl>,
-    expr_alias: Vec<Option<String>>,
+    ea_len: usize,
     input: PlanRef,
 }
 
@@ -54,7 +54,7 @@ impl LogicalProject {
         LogicalProject {
             base,
             exprs,
-            expr_alias,
+            ea_len: expr_alias.len(),
             input,
         }
     }
@@ -168,8 +168,8 @@ impl LogicalProject {
     }
 
     /// Get a reference to the logical project's expr alias.
-    pub fn expr_alias(&self) -> &[Option<String>] {
-        self.expr_alias.as_ref()
+    pub fn expr_alias(&self) -> Vec<Option<String>> {
+        vec![None; self.ea_len]
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
@@ -191,7 +191,7 @@ impl LogicalProject {
             && self
                 .exprs
                 .iter()
-                .zip_eq(self.expr_alias.iter())
+                .zip_eq(self.expr_alias().iter())
                 .zip_eq(self.input.schema().fields())
                 .enumerate()
                 .all(|(i, ((expr, alias), field))| {
@@ -201,7 +201,8 @@ impl LogicalProject {
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>, PlanRef) {
-        (self.exprs, self.expr_alias, self.input)
+        let ea = self.expr_alias();
+        (self.exprs, ea, self.input)
     }
 }
 
@@ -260,7 +261,7 @@ impl ColPrunable for LogicalProject {
             .map(|id| {
                 (
                     mapping.rewrite_expr(self.exprs[id].clone()),
-                    self.expr_alias[id].clone(),
+                    None,
                 )
             })
             .unzip();
