@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
+use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
 
 /// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
@@ -31,7 +31,7 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     cur_idx: usize,
 
     /// All non-overlapping tables.
-    tables: Vec<Arc<Sstable>>,
+    tables: Vec<SstableInfo>,
 
     sstable_store: SstableStoreRef,
 }
@@ -40,7 +40,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
-    pub fn new(tables: Vec<Arc<Sstable>>, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(tables: Vec<SstableInfo>, sstable_store: SstableStoreRef) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
@@ -54,7 +54,8 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
         if idx >= self.tables.len() {
             self.sstable_iter = None;
         } else {
-            let mut sstable_iter = TI::new(self.tables[idx].clone(), self.sstable_store.clone());
+            let table = self.sstable_store.sstable(self.tables[idx].id).await?;
+            let mut sstable_iter = TI::new(table, self.sstable_store.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {
@@ -105,11 +106,17 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
             .tables
             .partition_point(|table| match Self::Direction::direction() {
                 DirectionEnum::Forward => {
-                    let ord = VersionedComparator::compare_key(&table.meta.smallest_key, key);
+                    let ord = VersionedComparator::compare_key(
+                        &table.key_range.as_ref().unwrap().left,
+                        key,
+                    );
                     ord == Less || ord == Equal
                 }
                 DirectionEnum::Backward => {
-                    let ord = VersionedComparator::compare_key(&table.meta.largest_key, key);
+                    let ord = VersionedComparator::compare_key(
+                        &table.key_range.as_ref().unwrap().right,
+                        key,
+                    );
                     ord == Greater || ord == Equal
                 }
             })

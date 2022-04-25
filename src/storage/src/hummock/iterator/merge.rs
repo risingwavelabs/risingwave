@@ -33,7 +33,7 @@ mod test {
     };
     use crate::hummock::iterator::{BoxedForwardHummockIterator, HummockIterator};
     use crate::hummock::sstable::SSTableIterator;
-    use crate::hummock::test_utils::gen_test_sstable;
+    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
 
@@ -133,7 +133,7 @@ mod test {
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store();
-        let table0 = Arc::new(
+        let table0 = Box::new(
             gen_iterator_test_sstable_base(
                 0,
                 default_builder_opt_for_test(),
@@ -143,7 +143,7 @@ mod test {
             )
             .await,
         );
-        let table1 = Arc::new(
+        let table1 = Box::new(
             gen_iterator_test_sstable_base(
                 1,
                 default_builder_opt_for_test(),
@@ -154,21 +154,31 @@ mod test {
             .await,
         );
 
+        let cache = create_small_table_cache();
+
         let mut unordered_iter = MergeIterator::new(
             vec![
-                Box::new(SSTableIterator::new(table0.clone(), sstable_store.clone()))
-                    as BoxedForwardHummockIterator,
-                Box::new(SSTableIterator::new(table1.clone(), sstable_store.clone()))
-                    as BoxedForwardHummockIterator,
+                Box::new(SSTableIterator::new(
+                    cache.insert(table0.id, table0.id, 1, table0),
+                    sstable_store.clone(),
+                )) as BoxedForwardHummockIterator,
+                Box::new(SSTableIterator::new(
+                    cache.insert(table1.id, table1.id, 1, table1),
+                    sstable_store.clone(),
+                )) as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
         );
         let mut ordered_iter = OrderedAwareMergeIterator::new(
             vec![
-                Box::new(SSTableIterator::new(table0.clone(), sstable_store.clone()))
-                    as BoxedForwardHummockIterator,
-                Box::new(SSTableIterator::new(table1.clone(), sstable_store.clone()))
-                    as BoxedForwardHummockIterator,
+                Box::new(SSTableIterator::new(
+                    cache.lookup(0, &0).unwrap(),
+                    sstable_store.clone(),
+                )) as BoxedForwardHummockIterator,
+                Box::new(SSTableIterator::new(
+                    cache.lookup(1, &1).unwrap(),
+                    sstable_store.clone(),
+                )) as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
         );
@@ -200,7 +210,7 @@ mod test {
     async fn test_ordered_merge_iter() {
         let sstable_store = mock_sstable_store();
 
-        let non_overlapped_sstable = Arc::new(
+        let non_overlapped_sstable = Box::new(
             gen_test_sstable(
                 default_builder_opt_for_test(),
                 0,
@@ -215,7 +225,7 @@ mod test {
             .await,
         );
 
-        let overlapped_old_sstable = Arc::new(
+        let overlapped_old_sstable = Box::new(
             gen_test_sstable(
                 default_builder_opt_for_test(),
                 1,
@@ -230,7 +240,7 @@ mod test {
             .await,
         );
 
-        let overlapped_new_sstable = Arc::new(
+        let overlapped_new_sstable = Box::new(
             gen_test_sstable(
                 default_builder_opt_for_test(),
                 2,
@@ -244,19 +254,35 @@ mod test {
             )
             .await,
         );
+        let cache = create_small_table_cache();
 
         let mut iter = OrderedAwareMergeIterator::new(
             vec![
                 Box::new(SSTableIterator::new(
-                    non_overlapped_sstable,
+                    cache.insert(
+                        non_overlapped_sstable.id,
+                        non_overlapped_sstable.id,
+                        1,
+                        non_overlapped_sstable,
+                    ),
                     sstable_store.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
-                    overlapped_new_sstable,
+                    cache.insert(
+                        overlapped_new_sstable.id,
+                        overlapped_new_sstable.id,
+                        1,
+                        overlapped_new_sstable,
+                    ),
                     sstable_store.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
-                    overlapped_old_sstable,
+                    cache.insert(
+                        overlapped_old_sstable.id,
+                        overlapped_old_sstable.id,
+                        1,
+                        overlapped_old_sstable,
+                    ),
                     sstable_store.clone(),
                 )) as BoxedForwardHummockIterator,
             ],

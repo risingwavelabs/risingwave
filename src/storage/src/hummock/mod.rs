@@ -48,7 +48,7 @@ pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
-pub use cache::{CachableEntry, LruCache};
+pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
 use value::*;
 
@@ -146,11 +146,11 @@ impl HummockStorage {
 
     async fn get_from_table(
         &self,
-        table: Arc<Sstable>,
+        table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
     ) -> HummockResult<Option<Bytes>> {
-        if table.surely_not_have_user_key(key) {
+        if table.value().surely_not_have_user_key(key) {
             self.stats.bloom_filter_true_negative_counts.inc();
             return Ok(None);
         }

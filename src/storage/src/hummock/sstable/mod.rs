@@ -29,6 +29,8 @@ use bytes::{Buf, BufMut};
 pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
+
 mod utils;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -73,6 +75,17 @@ impl Sstable {
     #[inline]
     pub fn encoded_size(&self) -> usize {
         8 /* id */ + self.meta.encoded_size()
+    }
+
+    pub fn get_sstable_info(&self) -> SstableInfo {
+        SstableInfo {
+            id: self.id,
+            key_range: Some(KeyRange {
+                left: self.meta.smallest_key.clone(),
+                right: self.meta.largest_key.clone(),
+                inf: false,
+            }),
+        }
     }
 }
 
