@@ -65,7 +65,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 104s
         );
         let grpc_latency =
             register_histogram_vec_with_registry!(opts, &["path"], registry).unwrap();
@@ -73,7 +73,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency",
-            exponential_buckets(0.000005, 1.6, 36).unwrap() // max 115s
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 65s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
