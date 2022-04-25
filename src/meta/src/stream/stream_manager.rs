@@ -61,8 +61,8 @@ pub struct CreateMaterializedViewContext {
     pub hash_mapping: Vec<ParallelUnitId>,
     /// Distribution key of materialize node in current mview.
     pub distribution_keys: Vec<i32>,
-    /// Used for allocating internal table ids.
-    pub next_local_table_id: u32,
+    /// Table id offset get from meta id generator. Used to calculate global unique table id.
+    pub table_id_offset: u32,
     /// TODO: remove this when we deprecate Java frontend.
     pub is_legacy_frontend: bool,
 }
@@ -266,7 +266,7 @@ where
             affiliated_source,
             hash_mapping,
             distribution_keys: _,
-            next_local_table_id: _,
+            table_id_offset: _,
             is_legacy_frontend,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {

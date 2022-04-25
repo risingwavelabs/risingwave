@@ -394,8 +394,6 @@ impl StreamGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,
-        table_ids_map: &HashMap<u64, u32>,
-        start_table_id: u32,
     ) -> Result<HashMap<LocalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
 
@@ -412,14 +410,8 @@ impl StreamGraphBuilder {
                 .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
                 .collect();
 
-            actor.nodes = Some(self.build_inner(
-                ctx,
-                actor.get_nodes()?,
-                actor_id,
-                &mut upstream_actors,
-                table_id_offset,
-                table_id_len,
-            )?);
+            actor.nodes =
+                Some(self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?);
 
             graph
                 .entry(builder.get_fragment_id())
@@ -446,13 +438,8 @@ impl StreamGraphBuilder {
         stream_node: &StreamNode,
         actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
-        table_id_offset: u32,
-        table_id_len: u32,
-        fragment_id: LocalFragmentId,
-        parallel_degree: u32,
-        table_ids_map: &HashMap<u64, u32>,
-        start_table_id: u32,
     ) -> Result<StreamNode> {
+        let table_id_offset = ctx.table_id_offset;
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
@@ -468,7 +455,7 @@ impl StreamGraphBuilder {
                     // The operator id must be assigned with table ids. Otherwise it is a logic
                     // error.
                     let left_table_id =
-                        table_ids_map.get(&new_stream_node.operator_id).unwrap() + start_table_id;
+                        node.left_table_ref_id.as_ref().unwrap().table_id + table_id_offset as i32;
                     let right_table_id = left_table_id + 1;
                     node.left_table_ref_id = Some(TableRefId {
                         table_id: left_table_id as i32,
@@ -503,14 +490,8 @@ impl StreamGraphBuilder {
                                 self.resolve_chain_node(ctx, input, actor_id)?;
                         }
                         _ => {
-                            new_stream_node.input[idx] = self.build_inner(
-                                ctx,
-                                input,
-                                actor_id,
-                                upstream_actor_id,
-                                table_ids_map,
-                                start_table_id,
-                            )?;
+                            new_stream_node.input[idx] =
+                                self.build_inner(ctx, input, actor_id, upstream_actor_id)?;
                         }
                     }
                 }
