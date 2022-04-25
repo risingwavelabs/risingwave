@@ -24,7 +24,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
-use crate::object::{InMemObjectStore, ObjectStoreImpl, S3ObjectStore};
+use crate::object::parse_object_store;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
 use crate::StateStore;
@@ -92,26 +92,7 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
-                let object_store = Arc::new(match hummock {
-                    s3 if s3.starts_with("hummock+s3://") => ObjectStoreImpl::S3(
-                        S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string())
-                            .await,
-                    ),
-                    minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
-                        S3ObjectStore::with_minio(minio.strip_prefix("hummock+").unwrap()).await,
-                    ),
-                    memory if memory.starts_with("hummock+memory") => {
-                        tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
-                        ObjectStoreImpl::Mem(InMemObjectStore::new())
-                    }
-                    other => {
-                        unimplemented!(
-                            "{} Hummock only supports s3, minio and memory for now.",
-                            other
-                        )
-                    }
-                });
-
+                let object_store = Arc::new(parse_object_store(hummock).await);
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store,
                     config.data_directory.to_string(),
