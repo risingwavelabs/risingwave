@@ -43,7 +43,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
-pub use type_inference::{cast_ok, infer_type, least_restrictive, CastContext};
+pub use type_inference::{align_types, cast_ok, infer_type, least_restrictive, CastContext};
 pub use utils::*;
 
 /// the trait of bound exprssions

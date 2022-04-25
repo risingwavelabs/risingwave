@@ -68,7 +68,9 @@ impl Task for EtcdService {
             .arg("--listen-peer-urls")
             .arg(&peer_urls)
             .arg("--name")
-            .arg("risedev-meta");
+            .arg("risedev-meta")
+            .arg("--max-txn-ops")
+            .arg("999999");
 
         if self.config.unsafe_no_fsync {
             cmd.arg("--unsafe-no-fsync");
