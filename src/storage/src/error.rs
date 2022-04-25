@@ -33,6 +33,13 @@ pub enum StorageError {
         #[source]
         RwError,
     ),
+
+    #[error("State table error: {0}")]
+    StateTable(
+        #[backtrace]
+        #[source]
+        RwError,
+    ),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
