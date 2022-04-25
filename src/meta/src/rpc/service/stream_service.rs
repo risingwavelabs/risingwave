@@ -89,16 +89,16 @@ where
             ..Default::default()
         };
 
-        let fragmenter = StreamFragmenter::new(
+        let graph = StreamFragmenter::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
             true,
-        );
-        let graph = fragmenter
-            .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)
-            .await
-            .map_err(|e| e.to_grpc_status())?;
+            req.get_stream_node().map_err(tonic_err)?,
+            &mut ctx,
+        )
+        .await
+        .map_err(|e| e.to_grpc_status())?;
 
         let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph, vec![]);
         match self

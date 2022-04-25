@@ -76,21 +76,21 @@ impl StreamFragment {
         self.node = Some(Box::new(node));
     }
 
-    fn visit(node: &mut StreamNode, (offset, len): (u32, u32)) {
-        for input in &mut node.input {
-            Self::visit(input, (offset, len));
-        }
-        if let Some(Node::LookupNode(ref mut lookup)) = node.node {
-            assert!(lookup.arrange_local_fragment_id < len);
-            lookup.arrange_fragment_id = lookup.arrange_local_fragment_id + offset;
-        }
-    }
-
     /// Seal the fragment and rewrite local ids inside the node.
     /// TODO: when we add support of arrangement id in catalog, we won't need to rewrite stream node
     /// content any more.
     pub fn seal(&mut self, offset: u32, len: u32) {
-        Self::visit(self.node.as_mut().unwrap(), (offset, len));
+        fn visit(node: &mut StreamNode, (offset, len): (u32, u32)) {
+            for input in &mut node.input {
+                visit(input, (offset, len));
+            }
+            if let Some(Node::LookupNode(ref mut lookup)) = node.node {
+                assert!(lookup.arrange_local_fragment_id < len);
+                lookup.arrange_fragment_id = lookup.arrange_local_fragment_id + offset;
+            }
+        }
+
+        visit(self.node.as_mut().unwrap(), (offset, len));
         self.is_sealed = true;
     }
 
@@ -101,6 +101,7 @@ impl StreamFragment {
 }
 
 /// [`StreamFragmentGraph`] stores a fragment graph (DAG).
+#[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
     fragments: HashMap<LocalFragmentId, StreamFragment>,
@@ -116,15 +117,6 @@ pub struct StreamFragmentGraph {
 }
 
 impl StreamFragmentGraph {
-    pub fn new() -> Self {
-        Self {
-            fragments: HashMap::new(),
-            downstreams: HashMap::new(),
-            upstreams: HashMap::new(),
-            sealed: false,
-        }
-    }
-
     pub fn fragments(&self) -> &HashMap<LocalFragmentId, StreamFragment> {
         &self.fragments
     }
@@ -132,11 +124,9 @@ impl StreamFragmentGraph {
     /// Adds a fragment to the graph.
     pub fn add_fragment(&mut self, stream_fragment: StreamFragment) {
         assert!(!self.sealed);
-        assert!(stream_fragment.fragment_id.is_local());
         let id = stream_fragment.fragment_id;
-        let ret = self
-            .fragments
-            .insert(stream_fragment.fragment_id, stream_fragment);
+        assert!(id.is_local());
+        let ret = self.fragments.insert(id, stream_fragment);
         assert!(ret.is_none(), "fragment already exists: {:?}", id);
     }
 
@@ -154,7 +144,7 @@ impl StreamFragmentGraph {
         let ret = self
             .downstreams
             .entry(upstream_id)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(downstream_id, edge.clone());
         assert!(
             ret.is_none(),
@@ -165,7 +155,7 @@ impl StreamFragmentGraph {
         let ret = self
             .upstreams
             .entry(downstream_id)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(upstream_id, edge.clone());
         assert!(
             ret.is_none(),
@@ -202,7 +192,8 @@ impl StreamFragmentGraph {
     }
 
     /// Convert all local ids to global ids by `local_id + offset`
-    pub fn seal(&mut self, offset: u32, len: u32) {
+    pub fn seal(&mut self, offset: u32) {
+        let len = self.fragment_len() as u32;
         self.sealed = true;
         self.fragments = std::mem::take(&mut self.fragments)
             .into_iter()
@@ -219,35 +210,26 @@ impl StreamFragmentGraph {
             })
             .collect();
 
-        self.downstreams = std::mem::take(&mut self.downstreams)
-            .into_iter()
-            .map(|(upstream, links)| {
-                let upstream = upstream.to_global_id(offset, len);
-                let links = links
+        let convert_edges =
+            |edges: HashMap<LocalFragmentId, HashMap<LocalFragmentId, StreamFragmentEdge>>| {
+                edges
                     .into_iter()
-                    .map(|(downstream, dispatcher)| {
-                        let downstream = downstream.to_global_id(offset, len);
-                        (downstream, dispatcher)
+                    .map(|(id1, links)| {
+                        let id1 = id1.to_global_id(offset, len);
+                        let links = links
+                            .into_iter()
+                            .map(|(id2, dispatcher)| {
+                                let id2 = id2.to_global_id(offset, len);
+                                (id2, dispatcher)
+                            })
+                            .collect();
+                        (id1, links)
                     })
-                    .collect();
-                (upstream, links)
-            })
-            .collect();
+                    .collect()
+            };
 
-        self.upstreams = std::mem::take(&mut self.upstreams)
-            .into_iter()
-            .map(|(downstream, links)| {
-                let downstream = downstream.to_global_id(offset, len);
-                let links = links
-                    .into_iter()
-                    .map(|(upstream, dispatcher)| {
-                        let upstream = upstream.to_global_id(offset, len);
-                        (upstream, dispatcher)
-                    })
-                    .collect();
-                (downstream, links)
-            })
-            .collect();
+        self.downstreams = convert_edges(std::mem::take(&mut self.downstreams));
+        self.upstreams = convert_edges(std::mem::take(&mut self.upstreams));
     }
 
     /// Number of fragments

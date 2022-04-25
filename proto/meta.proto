@@ -2,44 +2,45 @@ syntax = "proto3";
 
 package meta;
 
+import "catalog.proto";
+import "common.proto";
+import "hummock.proto";
+import "plan_common.proto";
+import "stream_plan.proto";
+
 option java_multiple_files = true;
 option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
-import "catalog.proto";
-import "common.proto";
-import "hummock.proto";
-import "plan.proto";
-import "stream_plan.proto";
-
 // Hash mapping for meta. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-  repeated uint32 hash_mapping = 1;
+  uint32 table_id = 1;
+  repeated uint32 hash_mapping = 2;
 }
 
 // will be deprecated and replaced by catalog.Table and catalog.Source
 message Table {
-  plan.TableRefId table_ref_id = 1;
+  plan_common.TableRefId table_ref_id = 1;
   string table_name = 2;
-  repeated plan.ColumnDesc column_descs = 3;
+  repeated plan_common.ColumnDesc column_descs = 3;
   uint64 version = 4;
   oneof info {
-    plan.StreamSourceInfo stream_source = 5;
-    plan.TableSourceInfo table_source = 6;
-    plan.MaterializedViewInfo materialized_view = 7;
+    plan_common.StreamSourceInfo stream_source = 5;
+    plan_common.TableSourceInfo table_source = 6;
+    plan_common.MaterializedViewInfo materialized_view = 7;
   }
 }
 
 // will be deprecated and replaced by catalog.Database
 message Database {
-  plan.DatabaseRefId database_ref_id = 1;
+  plan_common.DatabaseRefId database_ref_id = 1;
   string database_name = 2;
   uint64 version = 3;
 }
 
 // will be deprecated and replaced by catalog.Schema
 message Schema {
-  plan.SchemaRefId schema_ref_id = 1;
+  plan_common.SchemaRefId schema_ref_id = 1;
   string schema_name = 2;
   uint64 version = 3;
 }
@@ -79,9 +80,9 @@ message CreateResponse {
 message DropRequest {
   uint32 node_id = 1;
   oneof catalog_id {
-    plan.DatabaseRefId database_id = 2;
-    plan.SchemaRefId schema_id = 3;
-    plan.TableRefId table_id = 4;
+    plan_common.DatabaseRefId database_id = 2;
+    plan_common.SchemaRefId schema_id = 3;
+    plan_common.TableRefId table_id = 4;
   }
 }
 
@@ -179,7 +180,7 @@ message ActorLocation {
 message CreateMaterializedViewRequest {
   uint32 node_id = 1;
   // TODO: remove this, do catalog init in Meta and return in response.
-  plan.TableRefId table_ref_id = 2;
+  plan_common.TableRefId table_ref_id = 2;
   stream_plan.StreamNode stream_node = 3;
 }
 
@@ -191,7 +192,7 @@ message CreateMaterializedViewResponse {
 // will be deprecated and replaced by DdlService
 message DropMaterializedViewRequest {
   uint32 node_id = 1;
-  plan.TableRefId table_ref_id = 2;
+  plan_common.TableRefId table_ref_id = 2;
 }
 
 // will be deprecated and replaced by DdlService

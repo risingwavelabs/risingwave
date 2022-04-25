@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package plan_common;
+
+import "data.proto";
+import "expr.proto";
+
+option java_multiple_files = true;
+option java_package = "com.risingwave.proto.plan_common";
+option optimize_for = SPEED;
+
+// Field is a column in the streaming or batch plan.
+message Field {
+  data.DataType data_type = 1;
+  string name = 2;
+}
+
+message DatabaseRefId {
+  int32 database_id = 1;
+}
+
+message SchemaRefId {
+  DatabaseRefId database_ref_id = 1;
+  int32 schema_id = 2;
+}
+
+message TableRefId {
+  SchemaRefId schema_ref_id = 1;
+  int32 table_id = 2;
+}
+
+message ColumnDesc {
+  data.DataType column_type = 1;
+  int32 column_id = 2;
+  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
+  string name = 3;
+  // For STRUCT type.
+  repeated ColumnDesc field_descs = 4;
+  // The user-defined type's name. Empty if the column type is a builtin type.
+  // For example, when the type is created from a protobuf schema file,
+  // this field will store the message name.
+  string type_name = 5;
+}
+
+message OrderedColumnDesc {
+  ColumnDesc column_desc = 1;
+  OrderType order = 2;
+}
+
+message ColumnCatalog {
+  ColumnDesc column_desc = 1;
+  bool is_hidden = 2;
+}
+
+message CellBasedTableDesc {
+  uint32 table_id = 1;
+  repeated OrderedColumnDesc pk = 2;
+}
+
+enum JoinType {
+  // Note that it comes from Calcite's JoinRelType.
+  // DO NOT HAVE direction for SEMI and ANTI now.
+  INNER = 0;
+  LEFT_OUTER = 1;
+  RIGHT_OUTER = 2;
+  FULL_OUTER = 3;
+  LEFT_SEMI = 4;
+  LEFT_ANTI = 5;
+  RIGHT_SEMI = 6;
+  RIGHT_ANTI = 7;
+}
+
+enum OrderType {
+  INVALID = 0;
+  ASCENDING = 1;
+  DESCENDING = 2;
+}
+
+message ColumnOrder {
+  // maybe other name
+  OrderType order_type = 1;
+  expr.InputRefExpr input_ref = 2;
+  data.DataType return_type = 3;
+}
+
+enum RowFormatType {
+  JSON = 0;
+  PROTOBUF = 1;
+  DEBEZIUM_JSON = 2;
+  AVRO = 3;
+}
+
+message StreamSourceInfo {
+  bool append_only = 1;
+  map<string, string> properties = 2;
+  RowFormatType row_format = 3;
+  string row_schema_location = 4;
+  int32 row_id_index = 5;
+}
+
+message TableSourceInfo {}
+
+message MaterializedViewInfo {
+  TableRefId associated_table_ref_id = 1;
+  repeated ColumnOrder column_orders = 2;
+  repeated int32 pk_indices = 3;
+  repeated TableRefId dependent_tables = 4;
+}

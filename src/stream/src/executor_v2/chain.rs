@@ -137,9 +137,9 @@ mod test {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
@@ -150,22 +150,14 @@ mod test {
 
     #[tokio::test]
     async fn test_basic() {
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let first = Box::new(
             MockSource::with_chunks(
                 schema.clone(),
                 PkIndices::new(),
                 vec![
-                    StreamChunk::new(
-                        vec![Op::Insert],
-                        vec![column_nonnull! { I32Array, [1] }],
-                        None,
-                    ),
-                    StreamChunk::new(
-                        vec![Op::Insert],
-                        vec![column_nonnull! { I32Array, [2] }],
-                        None,
-                    ),
+                    StreamChunk::from_pretty("I\n + 1"),
+                    StreamChunk::from_pretty("I\n + 2"),
                 ],
             )
             .stop_on_finish(false),
@@ -176,16 +168,8 @@ mod test {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(StreamChunk::new(
-                    vec![Op::Insert],
-                    vec![column_nonnull! { I32Array, [3] }],
-                    None,
-                )),
-                Message::Chunk(StreamChunk::new(
-                    vec![Op::Insert],
-                    vec![column_nonnull! { I32Array, [4] }],
-                    None,
-                )),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],
         ));
 
@@ -213,8 +197,7 @@ mod test {
         let mut count = 0;
         while let Some(Message::Chunk(ck)) = chain.next().await.transpose().unwrap() {
             count += 1;
-            let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
-            assert_eq!(target, count);
+            assert_eq!(ck, StreamChunk::from_pretty(&format!("I\n + {count}")));
         }
     }
 }

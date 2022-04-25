@@ -91,7 +91,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             // We compute vnode on arrange keys in materialized view since materialized views are
             // grouped by arrange keys.
             let vnode = arrange_keys.hash_row(&hash_builder).to_vnode();
-            let value_meta = ValueMeta::new_with_vnode(vnode);
+            let value_meta = ValueMeta::with_vnode(vnode);
 
             for (key, value) in bytes {
                 match value {

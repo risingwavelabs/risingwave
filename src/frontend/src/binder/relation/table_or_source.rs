@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{ObjectName, TableAlias};
@@ -26,16 +28,7 @@ pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
-}
-
-impl From<&TableCatalog> for BoundBaseTable {
-    fn from(t: &TableCatalog) -> Self {
-        Self {
-            name: t.name.clone(),
-            table_id: t.id,
-            table_catalog: t.clone(),
-        }
-    }
+    pub table_indexes: Vec<Arc<TableCatalog>>,
 }
 
 /// `BoundTableSource` is used by DML statement on table source like insert, updata
@@ -82,35 +75,49 @@ impl Binder {
 
         let (ret, columns) = {
             let catalog = &self.catalog;
+            if let Ok(table_catalog) =
+                catalog.get_table_by_name(&self.db_name, schema_name, table_name)
+            {
+                let table_id = table_catalog.id();
+                let table_catalog = table_catalog.clone();
+                let columns = table_catalog.columns.clone();
+                let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
 
-            catalog
-                .get_table_by_name(&self.db_name, schema_name, table_name)
-                .map(|t| (Relation::BaseTable(Box::new(t.into())), t.columns.clone()))
-                .or_else(|_| {
-                    catalog
-                        .get_source_by_name(&self.db_name, schema_name, table_name)
-                        .map(|s| {
-                            let source = s.clone().flatten();
-                            (Relation::Source(Box::new((&source).into())), source.columns)
-                        })
-                })
-                .map_err(|_| {
-                    RwError::from(CatalogError::NotFound(
-                        "table or source",
-                        table_name.to_string(),
-                    ))
-                })?
+                let table = BoundBaseTable {
+                    name: table_name.to_string(),
+                    table_id,
+                    table_catalog,
+                    table_indexes,
+                };
+
+                (Relation::BaseTable(Box::new(table)), columns)
+            } else if let Ok(s) = catalog.get_source_by_name(&self.db_name, schema_name, table_name)
+            {
+                (Relation::Source(Box::new(s.into())), s.columns.clone())
+            } else {
+                return Err(RwError::from(CatalogError::NotFound(
+                    "table or source",
+                    table_name.to_string(),
+                )));
+            }
         };
 
-        self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.to_string(),
-            alias,
-        )?;
+        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
         Ok(ret)
+    }
+
+    fn resolve_table_indexes(
+        &mut self,
+        schema_name: &str,
+        table_id: TableId,
+    ) -> Result<Vec<Arc<TableCatalog>>> {
+        Ok(self
+            .catalog
+            .get_schema_by_name(&self.db_name, schema_name)?
+            .iter_mv()
+            .filter(|x| x.is_index_on == Some(table_id))
+            .map(|table| table.clone().into())
+            .collect())
     }
 
     pub(crate) fn bind_table(
@@ -123,22 +130,19 @@ impl Binder {
             .catalog
             .get_table_by_name(&self.db_name, schema_name, table_name)?
             .clone();
-        let columns = table_catalog.columns.clone();
-
-        self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.to_string(),
-            alias,
-        )?;
 
         let table_id = table_catalog.id();
+        let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
+
+        let columns = table_catalog.columns.clone();
+
+        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
+
         Ok(BoundBaseTable {
             name: table_name.to_string(),
             table_id,
             table_catalog,
+            table_indexes,
         })
     }
 

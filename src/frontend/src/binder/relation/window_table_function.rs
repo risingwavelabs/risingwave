@@ -15,11 +15,13 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
 use super::{Binder, Relation, Result};
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]
@@ -109,22 +111,31 @@ impl Binder {
             .into());
         }
 
-        let columns = columns
-            .iter()
-            .map(|c| {
-                (
-                    c.column_desc.name.clone(),
-                    c.column_desc.data_type.clone(),
-                    c.is_hidden,
-                )
-            })
-            .chain(
-                [
-                    ("window_start".to_string(), DataType::Timestamp, false),
-                    ("window_end".to_string(), DataType::Timestamp, false),
-                ]
-                .into_iter(),
-            );
+        let columns = columns.iter().cloned().chain(
+            [
+                ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Timestamp,
+                        column_id: ColumnId::new(0),
+                        name: "window_start".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                    },
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Timestamp,
+                        column_id: ColumnId::new(0),
+                        name: "window_end".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                    },
+                    is_hidden: false,
+                },
+            ]
+            .into_iter(),
+        );
         // TODO: support alias.
         self.bind_context(columns, table_name.clone(), None)?;
 

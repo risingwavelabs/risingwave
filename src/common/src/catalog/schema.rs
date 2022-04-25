@@ -15,7 +15,7 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan::Field as ProstField;
+use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;

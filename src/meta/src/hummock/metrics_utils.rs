@@ -34,21 +34,28 @@ pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersi
     metrics.uncommitted_sst_num.set(uncommitted_sst_num as i64);
 }
 
-pub fn trigger_sst_stat(metrics: &MetaMetrics, compact_status: &CompactStatus) {
+pub fn trigger_sst_stat(
+    metrics: &MetaMetrics,
+    compact_status: &CompactStatus,
+    current_version: &HummockVersion,
+) {
     let reduce_compact_cnt =
         |compacting_key_ranges: &Vec<(risingwave_hummock_sdk::key_range::KeyRange, u64, u64)>| {
             compacting_key_ranges
                 .iter()
                 .fold(0, |accum, elem| accum + elem.2)
         };
+    let level_sst_cnt = |level_idx: usize| current_version.levels[level_idx].table_infos.len();
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let (sst_num, compact_cnt) = match level_handler {
-            LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-            }
-            LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-            }
+            LevelHandler::Nonoverlapping(_, compacting_key_ranges) => (
+                level_sst_cnt(idx),
+                reduce_compact_cnt(compacting_key_ranges),
+            ),
+            LevelHandler::Overlapping(_, compacting_key_ranges) => (
+                level_sst_cnt(idx),
+                reduce_compact_cnt(compacting_key_ranges),
+            ),
         };
         let level_label = String::from("L") + &idx.to_string();
         metrics
@@ -83,12 +90,14 @@ pub fn trigger_sst_stat(metrics: &MetaMetrics, compact_status: &CompactStatus) {
     {
         for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
             let (sst_num, compact_cnt) = match level_handler {
-                LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-                LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
+                LevelHandler::Nonoverlapping(_, compacting_key_ranges) => (
+                    level_sst_cnt(idx),
+                    reduce_compact_cnt(compacting_key_ranges),
+                ),
+                LevelHandler::Overlapping(_, compacting_key_ranges) => (
+                    level_sst_cnt(idx),
+                    reduce_compact_cnt(compacting_key_ranges),
+                ),
             };
             tracing::info!(
                 "Level {} has {} SSTs, {} of those are being compacted to bottom levels",

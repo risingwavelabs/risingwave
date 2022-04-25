@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::SetExpr;
@@ -32,6 +33,14 @@ impl BoundSetExpr {
         match self {
             BoundSetExpr::Select(s) => s.names(),
             BoundSetExpr::Values(v) => v.schema.fields().iter().map(|f| f.name.clone()).collect(),
+        }
+    }
+
+    /// The fields returned by this [`BoundSetExpr`].
+    pub fn fields(&self) -> Vec<Field> {
+        match self {
+            BoundSetExpr::Select(s) => s.schema.fields.clone(),
+            BoundSetExpr::Values(v) => v.schema.fields.clone(),
         }
     }
 

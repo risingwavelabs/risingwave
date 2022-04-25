@@ -116,7 +116,7 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),

@@ -22,7 +22,7 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::plan::TableRefId;
+use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
 use tonic::{Request, Response, Status};
@@ -419,13 +419,15 @@ where
             hash_mapping,
             ..Default::default()
         };
-        let fragmenter = StreamFragmenter::new(
+        let graph = StreamFragmenter::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
             false,
-        );
-        let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
+            &stream_node,
+            &mut ctx,
+        )
+        .await?;
         let table_fragments = TableFragments::new(mview_id, graph, ctx.distribution_keys.clone());
 
         // Create on compute node.

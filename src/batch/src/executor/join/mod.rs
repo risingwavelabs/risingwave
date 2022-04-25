@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan::JoinType as JoinTypeProst;
+use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 
 use crate::executor::join::JoinType::Inner;
 
