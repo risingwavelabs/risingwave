@@ -19,8 +19,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
@@ -279,7 +278,7 @@ where
             )
             .await;
         if nodes.is_empty() {
-            return Err(InternalError("no available node exist".to_string()).into());
+            return Err(internal_error("no available compute node in the cluster"));
         }
 
         let mut locations = ScheduledLocations::new();
