@@ -25,7 +25,6 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
@@ -61,7 +60,6 @@ pub async fn mock_hummock_storage() -> HummockStorage {
     HummockStorage::with_default_stats(
         Arc::new(StorageConfig::default()),
         sstable_store.clone(),
-        Arc::new(LocalVersionManager::new()),
         mock_hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
     )
