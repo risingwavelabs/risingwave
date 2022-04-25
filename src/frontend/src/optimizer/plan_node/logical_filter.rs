@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
@@ -102,24 +103,30 @@ impl fmt::Display for LogicalFilter {
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let required_col_bitset = FixedBitSet::with_capacity(self.input.schema().len());
-        let mut visitor = CollectInputRef::new(required_col_bitset);
-        self.predicate.visit_expr(&mut visitor);
-        let input_required_cols: FixedBitSet = visitor.into();
-        let input_required_cols: Vec<_> = input_required_cols.ones().collect();
-        let filter = LogicalFilter::new(
-            self.input.prune_col(&input_required_cols),
-            self.predicate.clone(),
-        );
+        let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
 
-        if required_cols == input_required_cols {
+        let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
+        self.predicate.visit_expr(&mut visitor);
+        let predicate_required_cols: FixedBitSet = visitor.into();
+
+        let mut predicate = self.predicate.clone();
+        let input_required_cols = predicate_required_cols
+            .union(&required_cols_bitset)
+            .collect_vec();
+        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        predicate = predicate.rewrite_expr(&mut mapping);
+
+        let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
+
+        if predicate_required_cols.is_subset(&required_cols_bitset) {
             filter.into()
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());
-            remaining_columns.extend(required_cols.iter().copied());
+            // Given that `LogicalFilter` always has same schema of its input, if predicate's
+            // `InputRef`s are not subset of the requirement of downstream operator, a
+            // `LogicalProject` node should be added.
             LogicalProject::with_mapping(
                 filter.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(required_cols),
             )
         }
     }

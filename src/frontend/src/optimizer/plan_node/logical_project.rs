@@ -247,9 +247,7 @@ impl ColPrunable for LogicalProject {
 
         // Record each InputRef's index.
         let mut input_ref_collector =
-            CollectInputRef::with_capacity(self.input.schema().fields().len());
-        required_cols.iter().for_each(|id| {});
-
+            CollectInputRef::with_capacity(input_col_num);
         required_cols.iter().for_each(|i| {
             if let ExprImpl::InputRef(ref input_ref) = self.exprs[*i] {
                 let input_idx = input_ref.index;
@@ -269,23 +267,18 @@ impl ColPrunable for LogicalProject {
         }
         let input_required_cols = input_required_cols
             .into_iter()
-            .filter_map(|i| i)
+            .flatten()
             .collect_vec();
 
         let new_input = self.input.prune_col(&input_required_cols);
-
-        let mut input_change = vec![None; input_col_num];
-        for (new, old) in input_required_cols.into_iter().enumerate() {
-            input_change[old] = Some(new);
-        }
-        let mut mapping = ColIndexMapping::new(input_change);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         // Rewrite each InputRef with new index.
         let (exprs, expr_alias) = required_cols
             .iter()
-            .map(|id| {
+            .map(|&id| {
                 (
-                    mapping.rewrite_expr(self.exprs[*id].clone()),
-                    self.expr_alias[*id].clone(),
+                    mapping.rewrite_expr(self.exprs[id].clone()),
+                    self.expr_alias[id].clone(),
                 )
             })
             .unzip();

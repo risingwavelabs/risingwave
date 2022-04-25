@@ -81,7 +81,6 @@ impl fmt::Display for LogicalSource {
 
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
         let mapping = ColIndexMapping::with_remaining_columns(&required_cols);
         LogicalProject::with_mapping(self.clone().into(), mapping)
     }

@@ -422,7 +422,6 @@ impl fmt::Display for LogicalAgg {
 
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let mut child_required_cols =
             FixedBitSet::with_capacity(self.input.schema().fields().len());
         child_required_cols.extend(self.group_keys.iter().cloned());
@@ -448,22 +447,22 @@ impl ColPrunable for LogicalAgg {
                 .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
         });
         group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
-        let child_required_cols_vec: Vec<_> = child_required_cols.ones().collect();
+
         let agg = LogicalAgg::new(
             agg_calls,
             group_keys,
-            self.input.prune_col(&child_required_cols_vec),
+            self.input.prune_col(&child_required_cols),
         );
 
-        if FixedBitSet::from_iter(0..self.group_keys.len()).is_subset(&required_cols_bitset) {
+        if FixedBitSet::from_iter(0..self.group_keys.len()).is_subset(required_cols) {
             agg.into()
         } else {
             // Some group key columns are not needed
             let mut required_cols_new = FixedBitSet::with_capacity(agg.schema().fields().len());
             required_cols
-                .iter()
-                .filter(|&&i| i < agg.group_keys.len())
-                .for_each(|&i| required_cols_new.insert(i));
+                .ones()
+                .filter(|&i| i < agg.group_keys.len())
+                .for_each(|i| required_cols_new.insert(i));
             required_cols_new.extend(agg.group_keys.len()..agg.schema().fields().len());
             LogicalProject::with_mapping(
                 agg.into(),

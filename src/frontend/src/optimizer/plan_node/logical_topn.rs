@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
@@ -111,12 +112,15 @@ impl fmt::Display for LogicalTopN {
 
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let mut input_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
+        let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
+        let order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
         self.order
             .field_order
             .iter()
-            .for_each(|fo| input_required_cols.insert(fo.index));
-
+            .for_each(|fo| order_required_cols.insert(fo.index));
+        let input_required_cols = order_required_cols
+            .union(&input_required_bitset)
+            .collect_vec();
         let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         let new_order = Order {
             field_order: self
@@ -129,18 +133,15 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
-        let new_input = self.input.prune_col(required_cols);
+        let new_input = self.input.prune_col(&input_required_cols);
         let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
-        let input_required_cols: Vec<_> = input_required_cols.ones().collect();
 
-        if required_cols == input_required_cols {
+        if order_required_cols.is_subset(&input_required_bitset) {
             top_n
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(top_n.schema().fields().len());
-            remaining_columns.extend(required_cols.iter().map(|i| mapping.map(*i)));
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(required_cols),
             )
         }
     }
