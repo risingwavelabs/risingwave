@@ -26,7 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::plan_common::{JoinType, TableRefId};
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
@@ -368,14 +368,8 @@ impl StreamFragmenter {
         if let Node::HashJoinNode(hash_join_node) = stream_node.node.as_mut().unwrap() {
             // Allocate local table id. It will be rewrite to global table id after get table id
             // offset from id generator.
-            hash_join_node.left_table_ref_id = Some(TableRefId {
-                table_id: state.gen_table_id() as i32,
-                ..Default::default()
-            });
-            hash_join_node.right_table_ref_id = Some(TableRefId {
-                table_id: state.gen_table_id() as i32,
-                ..Default::default()
-            });
+            hash_join_node.left_table_id = state.gen_table_id();
+            hash_join_node.right_table_id = state.gen_table_id();
             if hash_join_node.is_delta_join {
                 if hash_join_node.get_join_type()? == JoinType::Inner
                     && hash_join_node.condition.is_none()

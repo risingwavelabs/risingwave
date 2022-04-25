@@ -21,7 +21,6 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 use risingwave_pb::ProstFieldNotFound;
@@ -454,17 +453,10 @@ impl StreamGraphBuilder {
                 {
                     // The operator id must be assigned with table ids. Otherwise it is a logic
                     // error.
-                    let left_table_id =
-                        node.left_table_ref_id.as_ref().unwrap().table_id + table_id_offset as i32;
+                    let left_table_id = node.left_table_id + table_id_offset;
                     let right_table_id = left_table_id + 1;
-                    node.left_table_ref_id = Some(TableRefId {
-                        table_id: left_table_id as i32,
-                        ..Default::default()
-                    });
-                    node.right_table_ref_id = Some(TableRefId {
-                        table_id: right_table_id as i32,
-                        ..Default::default()
-                    });
+                    node.left_table_id = left_table_id;
+                    node.right_table_id = right_table_id;
                 }
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
