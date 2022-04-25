@@ -17,7 +17,6 @@ use std::str::FromStr;
 
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
@@ -31,6 +30,8 @@ pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
+
+use crate::catalog::column_catalog::ColumnCatalog;
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
@@ -63,7 +64,7 @@ impl Binder {
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (String, DataType, bool)>,
+        columns: impl IntoIterator<Item = ColumnCatalog>,
         table_name: String,
         alias: Option<TableAlias>,
     ) -> Result<()> {
@@ -79,17 +80,20 @@ impl Binder {
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type, is_hidden))| {
-                let name = match is_hidden {
-                    true => name,
-                    false => alias_iter.next().map(|t| t.value).unwrap_or(name),
+            .for_each(|(index, mut catalog)| {
+                let name = match catalog.is_hidden {
+                    true => catalog.name().to_string(),
+                    false => alias_iter
+                        .next()
+                        .map(|t| t.value)
+                        .unwrap_or_else(|| catalog.name().to_string()),
                 };
+                catalog.column_desc.name = name.clone();
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    name.clone(),
                     begin + index,
-                    data_type,
-                    is_hidden,
+                    catalog.is_hidden,
+                    catalog.column_desc,
                 ));
                 self.context
                     .indexs_of
