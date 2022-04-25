@@ -13,27 +13,26 @@
 // limitations under the License.
 
 use std::fmt;
-use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
 use crate::optimizer::property::Distribution;
 
-/// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
+/// `StreamIndexScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
-/// creation request.
+/// creation request. Compared with `StreamTableScan`, it will reorder columns, and the chain node
+/// doesn't allow rearrange.
 #[derive(Debug, Clone)]
-pub struct StreamTableScan {
+pub struct StreamIndexScan {
     pub base: PlanBase,
     logical: LogicalScan,
     batch_plan_id: PlanNodeId,
 }
 
-impl StreamTableScan {
+impl StreamIndexScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
 
@@ -60,19 +59,15 @@ impl StreamTableScan {
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
     }
-
-    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> StreamIndexScan {
-        StreamIndexScan::new(self.logical.to_index_scan(index_name, index))
-    }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { StreamIndexScan }
 
-impl fmt::Display for StreamTableScan {
+impl fmt::Display for StreamIndexScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamTableScan {{ table: {}, columns: [{}], pk_indices: {:?} }}",
+            "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?} }}",
             self.logical.table_name(),
             self.logical.column_names().join(", "),
             self.base.pk_indices
@@ -80,13 +75,13 @@ impl fmt::Display for StreamTableScan {
     }
 }
 
-impl ToStreamProst for StreamTableScan {
+impl ToStreamProst for StreamIndexScan {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!("stream index scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
-impl StreamTableScan {
+impl StreamIndexScan {
     pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
@@ -110,7 +105,7 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            /// StreamTableScan should follow the same distribution as upstream materialize node.
+            /// StreamIndexScan should follow the same distribution as upstream materialize node.
             /// So this will be filled in meta.
             distribution_keys: vec![],
             // Will fill when resolving chain node.
@@ -143,7 +138,7 @@ impl StreamTableScan {
                 },
             ],
             node: Some(ProstStreamNode::ChainNode(ChainNode {
-                disable_rearrange: false,
+                disable_rearrange: true,
                 table_ref_id: Some(TableRefId {
                     table_id: self.logical.table_desc().table_id.table_id as i32,
                     schema_ref_id: None, // TODO: fill schema ref id
