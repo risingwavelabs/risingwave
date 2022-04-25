@@ -14,10 +14,13 @@
 
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use futures::channel::oneshot::{channel, Receiver, Sender};
 use spin::Mutex;
 
 const IN_CACHE: u8 = 1;
@@ -28,8 +31,8 @@ const IN_LRU: u8 = 2;
 #[cfg(debug_assertions)]
 const REVERSE_IN_LRU: u8 = !IN_LRU;
 
-pub trait LruKey: PartialEq + Send + Sync {}
-impl<T: PartialEq + Send + Sync> LruKey for T {}
+pub trait LruKey: Eq + Send + Hash {}
+impl<T: Eq + Send + Hash> LruKey for T {}
 
 pub trait LruValue: Send + Sync {}
 impl<T: Send + Sync> LruValue for T {}
@@ -296,6 +299,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     }
 }
 
+type RequestQueue<K, T> = Vec<Sender<CachableEntry<K, T>>>;
 pub struct LruCacheShard<K: LruKey, T: LruValue> {
     /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
     /// cache handles that are not used externally.
@@ -303,6 +307,7 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
     table: LruHandleTable<K, T>,
     // TODO: may want to use an atomic object linked list shared by all shards.
     object_pool: Vec<Box<LruHandle<K, T>>>,
+    write_request: HashMap<K, RequestQueue<K, T>>,
     lru_usage: Arc<AtomicUsize>,
     usage: Arc<AtomicUsize>,
     capacity: usize,
@@ -327,6 +332,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
             object_pool,
             lru,
             table: LruHandleTable::new(),
+            write_request: HashMap::with_capacity(16),
         }
     }
 
@@ -520,7 +526,6 @@ impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
 }
 
 pub struct LruCache<K: LruKey, T: LruValue> {
-    num_shard_bits: usize,
     shards: Vec<Mutex<LruCacheShard<K, T>>>,
     shard_usages: Vec<Arc<AtomicUsize>>,
     shard_lru_usages: Vec<Arc<AtomicUsize>>,
@@ -541,7 +546,6 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shards.push(Mutex::new(shard));
         }
         Self {
-            num_shard_bits,
             shards,
             shard_usages,
             shard_lru_usages,
@@ -560,6 +564,26 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
                 handle: ptr,
             };
             Some(entry)
+        }
+    }
+
+    pub fn lookup_for_request(self: &Arc<Self>, hash: u64, key: K) -> LookupResult<K, T> {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        unsafe {
+            let ptr = shard.lookup(hash, &key);
+            if !ptr.is_null() {
+                return LookupResult::Cached(CachableEntry {
+                    cache: self.clone(),
+                    handle: ptr,
+                });
+            }
+            if let Some(que) = shard.write_request.get_mut(&key) {
+                let (tx, recv) = channel();
+                que.push(tx);
+                return LookupResult::WaitPendingRequest(recv);
+            }
+            shard.write_request.insert(key, vec![]);
+            LookupResult::Miss
         }
     }
 
@@ -583,15 +607,30 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         let mut to_delete = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
+            let pending_request = shard.write_request.remove(&key);
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
             debug_assert!(!ptr.is_null());
-            CachableEntry::<K, T> {
+            if let Some(que) = pending_request {
+                for sender in que {
+                    (*ptr).add_ref();
+                    let _ = sender.send(CachableEntry {
+                        cache: self.clone(),
+                        handle: ptr,
+                    });
+                }
+            }
+            CachableEntry {
                 cache: self.clone(),
                 handle: ptr,
             }
         };
         to_delete.clear();
         handle
+    }
+
+    pub fn clear_pending_request(&self, key: &K, hash: u64) {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        shard.write_request.remove(key);
     }
 
     pub fn erase(&self, hash: u64, key: &K) {
@@ -617,17 +656,19 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 
     fn shard(&self, hash: u64) -> usize {
-        if self.num_shard_bits > 0 {
-            (hash >> (64 - self.num_shard_bits)) as usize
-        } else {
-            0
-        }
+        hash as usize % self.shards.len()
     }
 }
 
 pub struct CachableEntry<K: LruKey, T: LruValue> {
     cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
+}
+
+pub enum LookupResult<K: LruKey, T: LruValue> {
+    Cached(CachableEntry<K, T>),
+    Miss,
+    WaitPendingRequest(Receiver<CachableEntry<K, T>>),
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for CachableEntry<K, T> {}
@@ -678,8 +719,8 @@ mod tests {
     fn test_cache_shard() {
         let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
         assert_eq!(cache.shard(0), 0);
-        assert_eq!(cache.shard(1), 0);
-        assert_eq!(cache.shard(10), 0);
+        assert_eq!(cache.shard(1), 1);
+        assert_eq!(cache.shard(10), 2);
     }
 
     #[test]
@@ -871,6 +912,36 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(old_entry);
+        }
+    }
+
+    #[test]
+    fn test_write_request_pending() {
+        let cache = Arc::new(LruCache::new(0, 5, 5));
+        {
+            let mut shard = cache.shards[0].lock();
+            insert(&mut *shard, "a", "v1");
+            assert!(lookup(&mut *shard, "a"));
+        }
+        let ret = cache.lookup_for_request(0, "a".to_string());
+        match ret {
+            LookupResult::Cached(_) => (),
+            _ => panic!(),
+        }
+        let ret1 = cache.lookup_for_request(0, "b".to_string());
+        match ret1 {
+            LookupResult::Miss => (),
+            _ => panic!(),
+        }
+        let ret2 = cache.lookup_for_request(0, "b".to_string());
+        match ret2 {
+            LookupResult::WaitPendingRequest(mut recv) => {
+                assert!(recv.try_recv().unwrap().is_none());
+                cache.insert("b".to_string(), 0, 1, "v2".to_string());
+                let v = recv.try_recv().unwrap().unwrap();
+                assert_eq!(v.value(), "v2");
+            }
+            _ => panic!(),
         }
     }
 }
