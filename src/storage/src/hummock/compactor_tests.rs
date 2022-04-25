@@ -142,10 +142,8 @@ mod tests {
             .id;
         let table = storage
             .sstable_store()
-            .sstables(&[output_table_id])
+            .sstable(output_table_id)
             .await
-            .unwrap()
-            .pop()
             .unwrap();
         let target_table_size = storage.options().sstable_size;
         assert!(

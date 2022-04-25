@@ -31,7 +31,7 @@ use super::utils::{validate_epoch, validate_table_key_range};
 use super::{HummockStorage, ReverseSSTableIterator, SSTableIterator};
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
-use crate::hummock::utils::{prune_ssts, range_overlap};
+use crate::hummock::utils::prune_ssts;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -79,9 +79,9 @@ impl HummockStorage {
 
         // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
         // `key_range`
-        let table_ids = prune_ssts(uncommitted_ssts.iter(), &key_range, reversed);
-        let tables = self.sstable_store.sstables(&table_ids).await?;
-        for table in tables.into_iter().rev() {
+        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, reversed);
+        for table_info in table_infos.into_iter().rev() {
+            let table = self.sstable_store.sstable(table_info.id).await?;
             if reversed {
                 overlapped_backward_iters.push(Box::new(ReverseSSTableIterator::new(
                     table,
@@ -96,26 +96,16 @@ impl HummockStorage {
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
-        for level in &levels {
-            let table_infos = level
-                .table_infos
-                .iter()
-                .filter(|info| {
-                    let table_range = info.key_range.as_ref().unwrap();
-                    let table_start = user_key(table_range.left.as_slice());
-                    let table_end = user_key(table_range.right.as_slice());
-                    range_overlap(&key_range, table_start, table_end, reversed)
-                })
-                .cloned()
-                .collect_vec();
+        for level in pinned_version.levels() {
+            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, reversed);
             if table_infos.is_empty() {
                 continue;
             }
 
             match level.level_type() {
                 LevelType::Overlapping => {
-                    for table in table_infos.into_iter().rev() {
-                        let table = self.sstable_store.sstable(table.id).await?;
+                    for table_info in table_infos.into_iter().rev() {
+                        let table = self.sstable_store.sstable(table_info.id).await?;
                         if reversed {
                             overlapped_backward_iters.push(Box::new(ReverseSSTableIterator::new(
                                 table,
@@ -133,15 +123,14 @@ impl HummockStorage {
                 }
                 LevelType::Nonoverlapping => {
                     if reversed {
-                        overlapped_backward_iters.push(
-                            Box::new(ReverseConcatIterator::new(
-                                table_infos.into_iter().rev().collect(),
-                                self.sstable_store(),
-                            )) as BoxedBackwardHummockIterator,
-                        );
+                        overlapped_backward_iters.push(Box::new(ReverseConcatIterator::new(
+                            table_infos.into_iter().rev().cloned().collect(),
+                            self.sstable_store(),
+                        ))
+                            as BoxedBackwardHummockIterator);
                     } else {
                         overlapped_forward_iters.push(Box::new(ConcatIterator::new(
-                            table_infos,
+                            table_infos.into_iter().cloned().collect(),
                             self.sstable_store(),
                         ))
                             as BoxedForwardHummockIterator);
@@ -229,9 +218,9 @@ impl StateStore for HummockStorage {
             let internal_key = key_with_epoch(key.to_vec(), epoch);
 
             // Query uploaded but uncommitted SSTs. Return the value if found.
-            let table_ids = prune_ssts(uncommitted_ssts.iter(), &(key..=key), false);
-            let tables = self.sstable_store.sstables(&table_ids).await?;
-            for table in tables.into_iter().rev() {
+            let table_infos = prune_ssts(uncommitted_ssts.iter(), &(key..=key), false);
+            for table_info in table_infos.into_iter().rev() {
+                let table = self.sstable_store.sstable(table_info.id).await?;
                 table_counts += 1;
                 if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
                     return Ok(Some(v));
@@ -244,9 +233,9 @@ impl StateStore for HummockStorage {
                 }
                 match level.level_type() {
                     LevelType::Overlapping => {
-                        let table_ids = prune_ssts(level.table_infos.iter(), &(key..=key), false);
-                        let tables = self.sstable_store.sstables(&table_ids).await?;
-                        for table in tables.into_iter().rev() {
+                        let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key), false);
+                        for table_info in table_infos.into_iter().rev() {
+                            let table = self.sstable_store.sstable(table_info.id).await?;
                             table_counts += 1;
                             if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
                                 return Ok(Some(v));

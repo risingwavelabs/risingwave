@@ -82,19 +82,18 @@ pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     key_range: &R,
     reversed: bool,
-) -> Vec<u64>
+) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B> + Send,
     B: AsRef<[u8]> + Send,
 {
-    let result_sst_ids: Vec<u64> = ssts
+    let result_sst_ids: Vec<&'a SstableInfo> = ssts
         .filter(|info| {
             let table_range = info.key_range.as_ref().unwrap();
             let table_start = user_key(table_range.left.as_slice());
             let table_end = user_key(table_range.right.as_slice());
             range_overlap(key_range, table_start, table_end, reversed)
         })
-        .map(|info| info.id)
         .collect();
     result_sst_ids
 }
