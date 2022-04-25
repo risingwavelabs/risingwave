@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
@@ -95,7 +96,7 @@ impl FunctionCall {
                     // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
                     // the end. So we align exprs at odd indices as well as the last one when length
                     // is odd.
-                    match (i & 1) == 1 || (len & 1) == 1 && i == len - 1 {
+                    match i.is_odd() || len.is_odd() && i == len - 1 {
                         true => Some(e),
                         false => None,
                     }
