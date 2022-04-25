@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -24,6 +25,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::next_key;
 
+use super::mem_table::RowOp;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
@@ -185,22 +187,86 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn batch_write_rows(
         &mut self,
-        rows: Vec<(Row, Option<Row>)>,
+        buffer: BTreeMap<Row, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        for (pk, cell_values) in rows {
-            let arrange_key_buf =
-                serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?;
-            let bytes = self
-                .cell_based_row_serializer
-                .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                .map_err(err)?;
-            for (key, value) in bytes {
-                match value {
-                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                    None => local.delete(key),
+        let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
+        for (pk, row_op) in buffer {
+            let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
+            match row_op {
+                RowOp::Insert(row) => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, row, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, value) in bytes {
+                        local.put(key, StorageValue::new_default_put(value))
+                    }
+                }
+                RowOp::Delete(old_row) => {
+                    // TODO(wcy-fdu): only serialize key on deletion
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, _) in bytes {
+                        local.delete(key);
+                    }
+                }
+                RowOp::Update((old_row, new_row)) => {
+                    let delete_bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .map_err(err)?;
+                    let insert_bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, new_row, &self.column_ids)
+                        .map_err(err)?;
+                    let mut insert_bytes_iter = insert_bytes.into_iter().fuse().peekable();
+                    let mut delete_bytes_iter = delete_bytes.into_iter().fuse().peekable();
+                    loop {
+                        match (insert_bytes_iter.peek(), delete_bytes_iter.peek()) {
+                            (None, None) => break,
+                            (None, Some((delete_pk, _))) => {
+                                local.delete(delete_pk);
+                                delete_bytes_iter.next();
+                            }
+                            (Some(_), None) => {
+                                let (insert_pk, insert_row) = insert_bytes_iter.next().unwrap();
+                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
+                            }
+                            (Some((insert_pk, _)), Some((delete_pk, _))) => {
+                                let delete_cell_id = gengrate_cell_id_from_pk(delete_pk)?;
+                                let insert_cell_id = gengrate_cell_id_from_pk(insert_pk)?;
+                                match delete_cell_id.cmp(insert_cell_id) {
+                                    std::cmp::Ordering::Less => {
+                                        local.delete(delete_pk);
+                                        delete_bytes_iter.next();
+                                    }
+                                    std::cmp::Ordering::Equal => {
+                                        let (insert_pk, insert_row) =
+                                            insert_bytes_iter.next().unwrap();
+                                        local.put(
+                                            insert_pk,
+                                            StorageValue::new_default_put(insert_row),
+                                        );
+
+                                        delete_bytes_iter.next();
+                                    }
+                                    std::cmp::Ordering::Greater => {
+                                        let (insert_pk, insert_row) =
+                                            insert_bytes_iter.next().unwrap();
+                                        local.put(
+                                            insert_pk,
+                                            StorageValue::new_default_put(insert_row),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -226,6 +292,16 @@ impl<S: StateStore> CellBasedTable<S> {
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
+}
+
+fn gengrate_cell_id_from_pk(pk: &[u8]) -> StorageResult<&[u8]> {
+    if pk.len() < 4 {
+        return Err(StorageError::CellBasedTable(
+            ErrorCode::InternalError("corrupted key".to_owned()).into(),
+        ));
+    }
+    let (_, cell_id) = pk.split_at(pk.len() - 4);
+    Ok(cell_id)
 }
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
