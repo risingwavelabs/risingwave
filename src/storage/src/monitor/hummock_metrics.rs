@@ -14,22 +14,9 @@
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
-    Histogram, Registry,
+    exponential_buckets, histogram_opts, register_histogram_with_registry,
+    register_int_counter_with_registry, Histogram, Registry,
 };
-
-pub const DEFAULT_BUCKETS: &[f64; 11] = &[
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-];
-
-pub const PIN_VERSION_LATENCY_SCALE: f64 = 0.1;
-pub const UNPIN_VERSION_LATENCY_SCALE: f64 = 0.1;
-pub const PIN_SNAPSHOT_LATENCY_SCALE: f64 = 0.1;
-pub const UNPIN_SNAPSHOT_LATENCY_SCALE: f64 = 0.1;
-pub const ADD_TABLE_LATENCT_SCALE: f64 = 0.1;
-pub const GET_NEW_TABLE_ID_LATENCY_SCALE: f64 = 0.1;
-pub const GET_COMPACTION_TASK_LATENCY_SCALE: f64 = 0.1;
-pub const REPORT_COMPACTION_TASK_LATENCY_SCALE: f64 = 0.1;
 
 /// Defines all metrics.
 #[macro_export]
@@ -116,89 +103,69 @@ impl HummockMetrics {
 
         // gRPC latency
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * PIN_VERSION_LATENCY_SCALE)
-            .to_vec();
         let pin_version_latency_opts = histogram_opts!(
             "state_store_pin_version_latency",
             "Total latency of pin version that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let pin_version_latency =
             register_histogram_with_registry!(pin_version_latency_opts, registry).unwrap();
 
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * UNPIN_VERSION_LATENCY_SCALE)
-            .to_vec();
         let unpin_version_latency_opts = histogram_opts!(
             "state_store_unpin_version_latency",
             "Total latency of unpin version that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let unpin_version_latency =
             register_histogram_with_registry!(unpin_version_latency_opts, registry).unwrap();
 
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * PIN_SNAPSHOT_LATENCY_SCALE)
-            .to_vec();
         let pin_snapshot_latency_opts = histogram_opts!(
             "state_store_pin_snapshot_latency",
             "Total latency of pin snapshot that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let pin_snapshot_latency =
             register_histogram_with_registry!(pin_snapshot_latency_opts, registry).unwrap();
 
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * UNPIN_SNAPSHOT_LATENCY_SCALE)
-            .to_vec();
         let unpin_snapshot_latency_opts = histogram_opts!(
             "state_store_unpin_snapshot_latency",
             "Total latency of unpin snapshot that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let unpin_snapshot_latency =
             register_histogram_with_registry!(unpin_snapshot_latency_opts, registry).unwrap();
 
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * ADD_TABLE_LATENCT_SCALE)
-            .to_vec();
         let add_tables_latency_opts = histogram_opts!(
             "state_store_add_tables_latency",
             "Total latency of add tables that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let add_tables_latency =
             register_histogram_with_registry!(add_tables_latency_opts, registry).unwrap();
 
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * GET_NEW_TABLE_ID_LATENCY_SCALE)
-            .to_vec();
         let get_new_table_id_latency_opts = histogram_opts!(
             "state_store_get_new_table_id_latency",
             "Total latency of get new table id that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let get_new_table_id_latency =
             register_histogram_with_registry!(get_new_table_id_latency_opts, registry).unwrap();
 
         // --
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * REPORT_COMPACTION_TASK_LATENCY_SCALE)
-            .to_vec();
         let report_compaction_task_latency_opts = histogram_opts!(
             "state_store_report_compaction_task_latency",
             "Total latency of report compaction task that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let report_compaction_task_latency =
             register_histogram_with_registry!(report_compaction_task_latency_opts, registry)
                 .unwrap();
+
         Self {
             pin_version_counts,
             unpin_version_counts,

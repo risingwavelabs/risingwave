@@ -14,32 +14,11 @@
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
-    Histogram, Registry,
+    exponential_buckets, histogram_opts, register_histogram_with_registry,
+    register_int_counter_with_registry, Histogram, Registry,
 };
 
 use super::monitor_process;
-
-pub const DEFAULT_BUCKETS: &[f64; 11] = &[
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-];
-
-pub const GET_KEY_SIZE_SCALE: f64 = 200.0;
-pub const GET_VALUE_SIZE_SCALE: f64 = 200.0;
-pub const GET_LATENCY_SCALE: f64 = 0.01;
-pub const GET_SNAPSHOT_LATENCY_SCALE: f64 = 0.0001;
-
-pub const BATCH_WRITE_SIZE_SCALE: f64 = 20000.0;
-pub const BATCH_WRITE_LATENCY_SCALE: f64 = 0.1;
-pub const BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE: f64 = 1.0;
-pub const BATCH_WRITE_ADD_L0_LATENCT_SCALE: f64 = 0.00001;
-
-pub const RANGE_SCAN_SIZE_SCALE: f64 = 10000.0;
-pub const RANGE_SCAN_LATENCY_SCALE: f64 = 0.1;
-
-pub const ITER_MERGE_SST_COUNTS: f64 = 200.0;
-pub const ITER_SEEK_LATENCY_SCALE: f64 = 0.0001;
-pub const ITER_NEXT_SIZE_SCALE: f64 = 400.0;
 
 /// Define all metrics.
 #[macro_export]
@@ -98,28 +77,24 @@ for_all_metrics! { define_state_store_metrics }
 impl StateStoreMetrics {
     pub fn new(registry: Registry) -> Self {
         // ----- get -----
-        let buckets = DEFAULT_BUCKETS.map(|x| x * GET_KEY_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_get_key_size",
             "Total key bytes of get that have been issued to state store",
-            buckets
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
         );
         let get_key_size = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * GET_VALUE_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_get_value_size",
             "Total value bytes that have been requested from remote storage",
-            buckets
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
         );
         let get_value_size = register_histogram_with_registry!(opts, registry).unwrap();
-
-        let buckets = DEFAULT_BUCKETS.map(|x| x * GET_LATENCY_SCALE).to_vec();
 
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
             "Total latency of get that have been issued to state store",
-            buckets
+            exponential_buckets(0.00001, 2.0, 21).unwrap() // max 10s
         );
         let get_duration = register_histogram_with_registry!(get_duration_opts, registry).unwrap();
 
@@ -132,52 +107,44 @@ impl StateStoreMetrics {
 
         let bloom_filter_true_negative_counts = register_int_counter_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
-            "Total number of sst tables that have been considered true negative by bloom filters.",
+            "Total number of sstables that have been considered true negative by bloom filters",
             registry
         )
         .unwrap();
 
         let bloom_filter_might_positive_counts = register_int_counter_with_registry!(
             "state_store_bloom_filter_might_positive_counts",
-            "Total number of sst tables that have been considered possibly positive by bloom filters.",
+            "Total number of sst tables that have been considered possibly positive by bloom filters",
             registry
         )
         .unwrap();
 
         // ----- range_scan -----
-        let buckets = DEFAULT_BUCKETS.map(|x| x * RANGE_SCAN_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_range_scan_size",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            buckets
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
         );
         let range_scan_size = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * RANGE_SCAN_LATENCY_SCALE)
-            .to_vec();
         let opts = histogram_opts!(
             "state_store_range_scan_duration",
             "Total time of scan that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let range_scan_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * RANGE_SCAN_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_range_reverse_scan_size",
             "Total bytes scanned reversely from HummockStorage",
-            buckets
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
         );
         let range_reverse_scan_size = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * RANGE_SCAN_LATENCY_SCALE)
-            .to_vec();
         let opts = histogram_opts!(
             "state_store_range_reverse_scan_duration",
             "Total time of reverse scan that have been issued to state store",
-            buckets
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let range_reverse_scan_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -190,69 +157,56 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * BATCH_WRITE_LATENCY_SCALE)
-            .to_vec();
         let opts = histogram_opts!(
             "state_store_write_batch_duration",
-            "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer.",
-            buckets
+            "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let write_batch_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * BATCH_WRITE_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_write_batch_size",
             "Total size of batched write that have been issued to state store",
-            buckets
+            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
         );
         let write_batch_size = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE)
-            .to_vec();
         let opts = histogram_opts!(
             "state_store_write_build_l0_sst_duration",
             "Total time of batch_write_build_table that have been issued to state store",
-            buckets
+            exponential_buckets(0.001, 2.0, 16).unwrap() // max 32s
         );
         let write_build_l0_sst_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS
-            .map(|x| x * BATCH_WRITE_ADD_L0_LATENCT_SCALE)
-            .to_vec();
         let opts = histogram_opts!(
             "state_store_shared_buffer_to_l0_duration",
-            "Histogram of time spent from compacting shared buffer to remote storage.",
-            buckets
+            "Histogram of time spent from compacting shared buffer to remote storage",
+            exponential_buckets(0.01, 2.0, 16).unwrap() // max 327s
         );
         let shared_buffer_to_l0_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.to_vec();
         let opts = histogram_opts!(
             "state_store_shared_buffer_to_sstable_size",
-            "Histogram of batch size compacted from shared buffer to remote storage.",
-            buckets
+            "Histogram of batch size compacted from shared buffer to remote storage",
+            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
         );
         let shared_buffer_to_sstable_size =
             register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- iter -----
-        let buckets = DEFAULT_BUCKETS.map(|x| x * ITER_MERGE_SST_COUNTS).to_vec();
         let opts = histogram_opts!(
             "state_store_iter_merge_sstable_counts",
-            "Number of child iterators merged into one MergeIterator.",
-            buckets
+            "Number of child iterators merged into one MergeIterator",
+            exponential_buckets(1.0, 2.0, 17).unwrap() // max 65536 times
         );
         let iter_merge_sstable_counts = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * ITER_NEXT_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_iter_merge_seek_duration",
-            "Seek() time conducted by MergeIterators.",
-            buckets
+            "Seek() time conducted by MergeIterators",
+            exponential_buckets(1.0, 2.0, 17).unwrap() // max 65536 times
         );
         let iter_merge_seek_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -264,20 +218,18 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * ITER_NEXT_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_sst_store_get_remote_duration",
-            "Time spent fetching blocks from remote object store.",
-            buckets
+            "Time spent fetching blocks from remote object store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let sst_store_get_remote_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * ITER_NEXT_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_sst_store_put_remote_duration",
-            "Time spent putting blocks to remote object store.",
-            buckets
+            "Time spent putting blocks to remote object store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let sst_store_put_remote_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -297,6 +249,7 @@ impl StateStoreMetrics {
             get_key_size,
             get_value_size,
             get_shared_buffer_hit_counts,
+
             bloom_filter_true_negative_counts,
             bloom_filter_might_positive_counts,
 
@@ -319,6 +272,7 @@ impl StateStoreMetrics {
 
             shared_buffer_to_l0_duration,
             shared_buffer_to_sstable_size,
+
             compaction_upload_sst_counts,
         }
     }
