@@ -384,7 +384,7 @@ template:
     address: "127.0.0.1"
 
     # Listen port of Kafka
-    port: 29092
+    port: 9092
 
     # ZooKeeper used by this Kafka instance
     provide-zookeeper: "zookeeper*"
