@@ -19,19 +19,22 @@ mod filter;
 mod hash_agg;
 mod insert;
 mod limit;
-mod projection;
+mod project;
+mod top_n;
 mod trace;
 mod values;
+
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use hash_agg::*;
 pub use insert::*;
 pub use limit::*;
-pub use projection::*;
+pub use project::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+pub use top_n::*;
 pub use trace::*;
 pub use values::*;
 

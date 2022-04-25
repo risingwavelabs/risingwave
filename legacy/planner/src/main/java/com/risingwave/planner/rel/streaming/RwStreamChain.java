@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.streaming;
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan_common.Field;
 import com.risingwave.proto.streaming.plan.*;
 import com.risingwave.rpc.Messages;
 import java.util.List;

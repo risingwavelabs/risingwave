@@ -478,6 +478,7 @@ mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -583,31 +584,18 @@ mod tests {
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
-        // Prepare test data chunks
-        let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
-        let col1_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
-        let col2_arr1: Arc<ArrayImpl> =
-            Arc::new(array_nonnull! { Utf8Array, ["foo", "bar", "baz"] }.into());
-        let rowid_arr2: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
-        let col1_arr2: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [4, 5, 6] }.into());
-        let col2_arr2: Arc<ArrayImpl> =
-            Arc::new(Utf8Array::from_slice(&[Some("hello"), None, Some("world")])?.into());
-
-        let chunk1 = {
-            let rowid = Column::new(rowid_arr1.clone());
-            let col1 = Column::new(col1_arr1.clone());
-            let col2 = Column::new(col2_arr1.clone());
-            let vis = vec![Op::Insert, Op::Insert, Op::Insert];
-            StreamChunk::new(vis, vec![rowid, col1, col2], None)
-        };
-
-        let chunk2 = {
-            let rowid = Column::new(rowid_arr2.clone());
-            let col1 = Column::new(col1_arr2.clone());
-            let col2 = Column::new(col2_arr2.clone());
-            let vis = vec![Op::Insert, Op::Insert, Op::Insert];
-            StreamChunk::new(vis, vec![rowid, col1, col2], None)
-        };
+        let chunk1 = StreamChunk::from_pretty(
+            " I i T
+            + 0 1 foo
+            + 0 2 bar
+            + 0 3 baz",
+        );
+        let chunk2 = StreamChunk::from_pretty(
+            " I i T
+            + 0 4 hello
+            + 0 5 .
+            + 0 6 world",
+        );
 
         let schema = Schema {
             fields: vec![
@@ -659,18 +647,15 @@ mod tests {
 
         for _ in 0..2 {
             match source_executor.next().await.unwrap() {
-                Message::Chunk(chunk) => {
-                    assert_eq!(3, chunk.columns().len());
-                    assert_eq!(
-                        col1_arr1.iter().collect_vec(),
-                        chunk.column_at(1).array_ref().iter().collect_vec(),
-                    );
-                    assert_eq!(
-                        col2_arr1.iter().collect_vec(),
-                        chunk.column_at(2).array_ref().iter().collect_vec()
-                    );
-                    assert_eq!(vec![Op::Insert; 3], chunk.ops());
-                }
+                Message::Chunk(chunk) => assert_eq!(
+                    chunk,
+                    StreamChunk::from_pretty(
+                        " I i T
+                            + 0 1 foo
+                            + 0 2 bar
+                            + 0 3 baz",
+                    )
+                ),
                 Message::Barrier(barrier) => {
                     assert_eq!(barrier.epoch, Epoch::new_test_epoch(1))
                 }
@@ -680,20 +665,16 @@ mod tests {
         // Write 2nd chunk
         write_chunk(chunk2);
 
-        if let Message::Chunk(chunk) = source_executor.next().await.unwrap() {
-            assert_eq!(3, chunk.columns().len());
-            assert_eq!(
-                col1_arr2.iter().collect_vec(),
-                chunk.column_at(1).array_ref().iter().collect_vec()
-            );
-            assert_eq!(
-                col2_arr2.iter().collect_vec(),
-                chunk.column_at(2).array_ref().iter().collect_vec()
-            );
-            assert_eq!(vec![Op::Insert; 3], chunk.ops());
-        } else {
-            unreachable!();
-        }
+        let msg = source_executor.next().await.unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I i T
+                + 0 4 hello
+                + 0 5 .
+                + 0 6 world",
+            )
+        );
 
         Ok(())
     }
@@ -735,18 +716,12 @@ mod tests {
         let source = source_desc.clone().source;
 
         // Prepare test data chunks
-        let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
-        let col1_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
-        let col2_arr1: Arc<ArrayImpl> =
-            Arc::new(array_nonnull! { Utf8Array, ["foo", "bar", "baz"] }.into());
-
-        let chunk = {
-            let rowid = Column::new(rowid_arr1.clone());
-            let col1 = Column::new(col1_arr1.clone());
-            let col2 = Column::new(col2_arr1.clone());
-            let vis = vec![Op::Insert, Op::Insert, Op::Insert];
-            StreamChunk::new(vis, vec![rowid, col1, col2], None)
-        };
+        let chunk = StreamChunk::from_pretty(
+            " I i T
+            + 0 1 foo
+            + 0 2 bar
+            + 0 3 baz",
+        );
 
         let schema = Schema {
             fields: vec![

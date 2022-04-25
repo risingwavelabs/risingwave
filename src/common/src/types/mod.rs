@@ -128,7 +128,7 @@ impl DataType {
             DataType::Struct { .. } => {
                 todo!()
             }
-            DataType::List { datatype } => ListArrayBuilder::new_with_meta(
+            DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
                     datatype: datatype.to_owned(),
@@ -651,16 +651,16 @@ impl ScalarImpl {
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
                 let (secs, nano) = de.deserialize_naivetime()?;
-                NaiveTimeWrapper::new_with_secs_nano(secs, nano)?
+                NaiveTimeWrapper::with_secs_nano(secs, nano)?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
                 let (secs, nsecs) = de.deserialize_naivedatetime()?;
-                NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs)?
+                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
             Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = de.deserialize_naivedate()?;
-                NaiveDateWrapper::new_with_days(days)?
+                NaiveDateWrapper::with_days(days)?
             }),
             _ => {
                 panic!("Type is unable to be deserialized.")

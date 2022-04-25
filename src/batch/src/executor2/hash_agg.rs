@@ -29,8 +29,8 @@ use risingwave_common::hash::{
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::HashAggNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::HashAggNode;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};

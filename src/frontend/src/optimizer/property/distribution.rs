@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan::exchange_info::{
+use risingwave_pb::batch_plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
-use risingwave_pb::plan::ExchangeInfo;
+use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
 use crate::optimizer::property::Order;

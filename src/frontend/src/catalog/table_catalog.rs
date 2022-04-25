@@ -19,7 +19,7 @@ use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
@@ -164,7 +164,9 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+    use risingwave_pb::plan_common::{
+        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
+    };
 
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
