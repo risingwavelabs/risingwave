@@ -560,9 +560,9 @@ mod tests {
                     chunk,
                     StreamChunk::from_pretty(
                         " I i T
-                            + 0 1 foo
-                            + 0 2 bar
-                            + 0 3 baz",
+                            + 4194304 1 foo
+                            + 4194305 2 bar
+                            + 4194306 3 baz",
                     )
                 ),
                 Message::Barrier(barrier) => {
@@ -579,9 +579,9 @@ mod tests {
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I i T
-                + 0 4 hello
-                + 0 5 .
-                + 0 6 world",
+                + 4194307 4 hello
+                + 4194308 5 .
+                + 4194309 6 world",
             )
         );
 

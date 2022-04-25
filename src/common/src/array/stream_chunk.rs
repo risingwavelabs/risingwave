@@ -290,8 +290,9 @@ impl StreamChunkTestExt for StreamChunk {
     ///
     /// # Example
     /// ```
+    /// use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     /// use risingwave_common::array::StreamChunk;
-    /// let chunk = StreamChunk::from_str(
+    /// let chunk = StreamChunk::from_pretty(
     ///     "  I I I I      // type chars
     ///     U- 2 5 . .      // '.' means NULL
     ///     U+ 2 5 2 6 D    // 'D' means deleted in visibility
