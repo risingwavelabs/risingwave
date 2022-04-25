@@ -241,15 +241,44 @@ impl fmt::Display for LogicalProject {
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let input_col_num = self.input().schema().len();
+        let mut input_required_cols = vec![None; input_col_num];
+        let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
+
         // Record each InputRef's index.
-        let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
-        required_cols.iter().for_each(|id| {
-            visitor.visit_expr(&self.exprs[*id]);
+        let mut input_ref_collector =
+            CollectInputRef::with_capacity(self.input.schema().fields().len());
+        required_cols.iter().for_each(|id| {});
+
+        required_cols.iter().for_each(|i| {
+            if let ExprImpl::InputRef(ref input_ref) = self.exprs[*i] {
+                let input_idx = input_ref.index;
+                input_required_cols[*i] = Some(input_idx);
+                input_required_appeared.put(input_idx);
+            } else {
+                input_ref_collector.visit_expr(&self.exprs[*i]);
+            }
         });
 
-        let child_required_cols: FixedBitSet = visitor.into();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
+        // the required input columns have not been added into input_required_cols
+        for (a, b) in FixedBitSet::from(input_ref_collector)
+            .difference(&input_required_appeared)
+            .zip(input_required_cols.iter_mut().filter(|x| x.is_none()))
+        {
+            *b = Some(a);
+        }
+        let input_required_cols = input_required_cols
+            .into_iter()
+            .filter_map(|i| i)
+            .collect_vec();
 
+        let new_input = self.input.prune_col(&input_required_cols);
+
+        let mut input_change = vec![None; input_col_num];
+        for (new, old) in input_required_cols.into_iter().enumerate() {
+            input_change[old] = Some(new);
+        }
+        let mut mapping = ColIndexMapping::new(input_change);
         // Rewrite each InputRef with new index.
         let (exprs, expr_alias) = required_cols
             .iter()
@@ -260,15 +289,7 @@ impl ColPrunable for LogicalProject {
                 )
             })
             .unzip();
-
-        // Reconstruct the LogicalProject.
-        let child_required_cols: Vec<_> = child_required_cols.ones().collect();
-        LogicalProject::new(
-            self.input.prune_col(&child_required_cols),
-            exprs,
-            expr_alias,
-        )
-        .into()
+        LogicalProject::new(new_input, exprs, expr_alias).into()
     }
 }
 
