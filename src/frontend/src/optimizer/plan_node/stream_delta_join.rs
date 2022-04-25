@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_pb::plan_common::{JoinType, TableRefId};
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::DeltaIndexJoinNode;
 
@@ -142,14 +142,8 @@ impl ToStreamProst for StreamDeltaJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table_ref_id: Some(TableRefId {
-                table_id: self.left_table_id.table_id() as i32,
-                schema_ref_id: None, // TODO: fill schema ref id
-            }),
-            right_table_ref_id: Some(TableRefId {
-                table_id: self.right_table_id.table_id() as i32,
-                schema_ref_id: None, // TODO: fill schema ref id
-            }),
+            left_table_id: self.left_table_id.table_id(),
+            right_table_id: self.right_table_id.table_id(),
         })
     }
 }
