@@ -315,4 +315,4 @@
         string address = 1;
         string zipcode = 3;
       }
-  binder_error: 'Bind error: The field "address" is not the nested column'
+  binder_error: 'Bind error: The field "address" is not a nested column'

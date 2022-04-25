@@ -15,14 +15,14 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Expr, Ident};
 
 use crate::binder::bind_context::ColumnBinding;
 use crate::binder::Binder;
 use crate::expr::{
-    Expr as _, ExprImpl, ExprType, ExprVisitor, FunctionCall, GetFieldDesc, InputRef, Literal,
+    AggCall, Expr as _, ExprImpl, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
 
 impl Binder {
@@ -88,7 +88,7 @@ impl Binder {
     }
 
     /// Bind wildcard field column, e.g. `(table.v1).*`.
-    /// Will return vector of Field type `FunctionCall` and alias.
+    /// Will return vector of expressions and aliases.
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
@@ -124,9 +124,7 @@ impl Binder {
         Ok(exprs[0].clone())
     }
 
-    /// Bind field in recursive way, each field in the binding path will store as `literal` in
-    /// exprs and return.
-    /// `col` describes what `expr` contains.
+    /// Bind field in recursive way.
     fn bind_field(
         expr: ExprImpl,
         idents: &[Ident],
@@ -185,45 +183,38 @@ impl Binder {
             ))
         } else {
             Err(ErrorCode::BindError(format!(
-                "The field \"{}\" is not the nested column",
+                "The field \"{}\" is not a nested column",
                 desc.name
             ))
             .into())
         }
     }
 
-    /// Only struct return type need to transfer to Field.
-    /// Now we accept `InputRef`, Field `FunctionCall` and Min and Max `AggCall` to return struct.
-    /// Use `GetFieldDesc Visitor` to find `field_desc`.
+    /// Return the schema of an expr, represented by a [`Field`].
+    /// `name` is the alias of the expr.
     pub fn expr_to_field(&self, item: &ExprImpl, name: String) -> Result<Field> {
-        let err = Err(ErrorCode::BindError(format!(
-            "Not support this expr {:?} type to return struct data_type",
-            item
-        ))
-        .into());
-        let is_field_select = {
-            if let DataType::Struct { .. } = item.return_type() {
-                match item {
-                    ExprImpl::InputRef(_) => true,
-                    ExprImpl::FunctionCall(function) => match function.get_expr_type() {
-                        ExprType::Field => true,
-                        _ => {
-                            return err;
-                        }
-                    },
-                    ExprImpl::AggCall(agg) => match agg.agg_kind() {
-                        AggKind::Max | AggKind::Min => true,
-                        _ => {
-                            return err;
-                        }
-                    },
-                    _ => false,
+        if let DataType::Struct { .. } = item.return_type() {
+            // Derive the schema of a struct including its fields name.
+            // NOTE: The implementation assumes that only Min/Max/Field/InputRef
+            // will return a STRUCT. Because we assumes the first argument (if in a function form)
+            // must be a STRUCT.
+            let is_struct_function = match item {
+                ExprImpl::InputRef(_) => true,
+                ExprImpl::FunctionCall(function) => {
+                    matches!(function.get_expr_type(), ExprType::Field)
                 }
-            } else {
-                false
+                ExprImpl::AggCall(agg) => {
+                    matches!(agg.agg_kind(), AggKind::Max | AggKind::Min)
+                }
+                _ => false,
+            };
+            if !is_struct_function {
+                return Err(ErrorCode::BindError(format!(
+                    "The expr must be Min/Max/Field/InputRef: {:?}",
+                    item
+                ))
+                .into());
             }
-        };
-        if is_field_select {
             let mut visitor = GetFieldDesc::new(self.context.columns.clone());
             visitor.visit_expr(item);
             let column = visitor.collect()?;
@@ -235,6 +226,112 @@ impl Binder {
             ))
         } else {
             Ok(Field::with_name(item.return_type(), name))
+        }
+    }
+}
+
+/// Collect `field_desc` from bindings and expression.
+struct GetFieldDesc {
+    field_desc: Option<ColumnDesc>,
+    err: Option<ErrorCode>,
+    column_bindings: Vec<ColumnBinding>,
+}
+
+impl ExprVisitor for GetFieldDesc {
+    /// Only check the first input because now we only accept nested column
+    /// as first index.
+    fn visit_agg_call(&mut self, agg_call: &AggCall) {
+        match agg_call.inputs().get(0) {
+            Some(input) => {
+                self.visit_expr(input);
+            }
+            None => {}
+        }
+    }
+
+    fn visit_input_ref(&mut self, expr: &InputRef) {
+        self.field_desc = Some(self.column_bindings[expr.index].desc.clone());
+    }
+
+    /// The `func_call` only have two kinds which are `Field{InputRef,Literal(i32)}` or
+    /// `Field{Field,Literal(i32)}`. So we only need to check the first input to get
+    /// `column_desc` from bindings. And then we get the `field_desc` by second input.
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        match func_call.inputs().get(0) {
+            Some(ExprImpl::FunctionCall(function)) => {
+                self.visit_function_call(function);
+            }
+            Some(ExprImpl::InputRef(input)) => {
+                self.visit_input_ref(input);
+            }
+            _ => {
+                self.err = Some(
+                    ErrorCode::BindError(format!(
+                        "The first input of Field function must be FunctionCall or InputRef, now is {:?}",
+                        func_call
+                    )
+                ));
+                return;
+            }
+        }
+        let column = match &self.field_desc {
+            None => {
+                return;
+            }
+            Some(column) => column,
+        };
+        let expr = &func_call.inputs()[1];
+        if let ExprImpl::Literal(literal) = expr {
+            match literal.get_data() {
+                Some(ScalarImpl::Int32(i)) => match column.field_descs.get(*i as usize) {
+                    Some(desc) => {
+                        self.field_desc = Some(desc.clone());
+                    }
+                    None => {
+                        self.err = Some(ErrorCode::BindError(format!(
+                            "Index {} out of field_desc bound {}",
+                            *i,
+                            column.field_descs.len()
+                        )));
+                    }
+                },
+                _ => {
+                    self.err = Some(ErrorCode::BindError(format!(
+                        "The Literal in Field Function only accept i32 type, now is {:?}",
+                        literal.return_type()
+                    )));
+                }
+            }
+        } else {
+            self.err = Some(ErrorCode::BindError(format!(
+                "The second input of Field function must be Literal, now is {:?}",
+                expr
+            )));
+        }
+    }
+}
+
+impl GetFieldDesc {
+    /// Creates a `GetFieldDesc` with columns.
+    fn new(columns: Vec<ColumnBinding>) -> Self {
+        GetFieldDesc {
+            field_desc: None,
+            err: None,
+            column_bindings: columns,
+        }
+    }
+
+    /// Returns the `field_desc` by the `GetFieldDesc`.
+    fn collect(self) -> Result<ColumnDesc> {
+        match self.err {
+            Some(err) => Err(err.into()),
+            None => match self.field_desc {
+                Some(desc) => Ok(desc),
+                None => Err(ErrorCode::BindError(
+                    "Not find field_desc for struct item".to_string(),
+                )
+                .into()),
+            },
         }
     }
 }
