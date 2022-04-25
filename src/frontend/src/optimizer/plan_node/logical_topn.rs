@@ -32,7 +32,7 @@ pub struct LogicalTopN {
 }
 
 impl LogicalTopN {
-    fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
+    pub fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();
