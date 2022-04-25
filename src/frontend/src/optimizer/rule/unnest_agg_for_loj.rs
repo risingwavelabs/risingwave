@@ -91,7 +91,7 @@ impl Rule for UnnestAggForLOJ {
                 input_ref.shift_with_offset(apply_left_len as isize);
             });
         });
-        let agg = LogicalAgg::new(agg_calls, vec![], group_keys, new_apply.into());
+        let agg = LogicalAgg::new(agg_calls, group_keys, new_apply.into());
 
         // Columns of old Apply's left child should be in the left.
         let mut exprs: Vec<ExprImpl> = apply

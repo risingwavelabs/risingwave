@@ -72,7 +72,7 @@ impl Planner {
     /// It is represented by `Project([$0 >= 1]) - Agg(count(*)) - input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
         let count_star =
-            LogicalAgg::new(vec![PlanAggCall::count_star()], vec![None], vec![], input);
+            LogicalAgg::new(vec![PlanAggCall::count_star()], vec![], input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![
