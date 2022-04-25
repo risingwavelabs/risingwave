@@ -37,7 +37,6 @@ use crate::storage::MetaStore;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
-#[allow(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,

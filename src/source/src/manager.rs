@@ -36,6 +36,7 @@ const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
 
+/// The local source manager on the compute node.
 pub trait SourceManager: Debug + Sync + Send {
     fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
