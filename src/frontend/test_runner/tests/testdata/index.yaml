@@ -6,10 +6,10 @@
     /* should generate delta join plan, and stream index scan (not supported for now) */
     select * from t1, t2 where t1.v1 = t2.v3;
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, v5, _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
-      StreamExchange { dist: HashShard([2, 6]) }
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, v5, _row_id#1(hidden)], pk_columns: [v1, _row_id#0, v3, _row_id#1] }
+      StreamExchange { dist: HashShard([0, 2, 3, 6]) }
         StreamDeltaJoin { type: Inner, predicate: $0 = $3 }
           StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+            StreamIndexScan { index: t1_v1, columns: [v1, v2, _row_id#0], pk_indices: [0, 2] }
           StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: t2, columns: [v3, v4, v5, _row_id#0], pk_indices: [3] }
+            StreamIndexScan { index: t2_v3, columns: [v3, v4, v5, _row_id#0], pk_indices: [0, 3] }
