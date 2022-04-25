@@ -88,7 +88,7 @@ impl Binder {
     }
 
     /// Bind wildcard field column, e.g. `(table.v1).*`.
-    /// Will return vector of expressions and aliases.
+    /// Will return a vector of `Field(expr, int)` expressions and aliases.
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
@@ -112,7 +112,8 @@ impl Binder {
     }
 
     /// Bind single field column, e.g. `(table.v1).v2`.
-    /// Will return Field type `FunctionCall` and alias.
+    /// Will return `Field(expr, int)` expression and the corresponding alias.
+    /// `int` in the signagure of `Field` represents the field index.
     pub fn bind_single_field_column(&mut self, expr: Expr, ids: &[Ident]) -> Result<ExprImpl> {
         let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
         let (exprs, _) = Self::bind_field(
