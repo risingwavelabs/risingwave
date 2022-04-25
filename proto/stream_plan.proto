@@ -97,8 +97,8 @@ message HashJoinNode {
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
   bool is_delta_join = 6;
   // Used for internal table states.
-  plan_common.TableRefId left_table_ref_id = 7;
-  plan_common.TableRefId right_table_ref_id = 8;
+  uint32 left_table_id = 7;
+  uint32 right_table_id = 8;
 }
 
 message HopWindowNode {
