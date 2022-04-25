@@ -58,7 +58,7 @@ impl CompactorService {
         match (provide_minio.as_slice(), provide_aws_s3.as_slice()) {
             ([], []) => {
                 return Err(anyhow!(
-                    "Compactor is not compatible with in_memory_kv_state_backend. Need to enable either minio or aws-s3.",
+                    "Compactor is not compatible with in-memory state backend. Need to enable either minio or aws-s3.",
                 ))
             }
             ([minio], []) => {

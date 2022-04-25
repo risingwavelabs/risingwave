@@ -3378,7 +3378,7 @@ dependencies = [
 name = "risingwave_compactor"
 version = "0.1.0"
 dependencies = [
- "clap 3.1.9",
+ "clap 3.1.10",
  "prometheus",
  "risingwave_common",
  "risingwave_pb",
