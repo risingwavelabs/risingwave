@@ -22,6 +22,10 @@ use risingwave_sqlparser::ast::{
 use crate::binder::Binder;
 use crate::expr::{least_restrictive, Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
+use risingwave_common::array::ListValue;
+use crate::expr::Literal;
+use risingwave_common::types::ScalarImpl;
+
 mod binary_op;
 mod column;
 mod function;
@@ -66,6 +70,7 @@ impl Binder {
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
+            Expr::Array(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_array(exprs)?))),
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_binary_op(*left, op, *right)?,
             ))),
@@ -281,6 +286,20 @@ impl Binder {
         self.bind_expr(expr)?
             .cast_explicit(bind_data_type(&data_type)?)
     }
+    
+    pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<Literal> {
+        // Take first item from vector to extract the datatype
+        let _extract_type = self.bind_expr(exprs[0].to_owned())?;
+        Ok(Literal::new(
+            Some(ScalarImpl::List(ListValue::new(
+                vec![None],
+            ))),
+            DataType::List {
+                // Currently hardcoded Int32 datatype
+                datatype: Box::new(DataType::Int32),
+            },
+        ))
+    }
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
@@ -298,9 +317,10 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestampz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List {
+        AstDataType::Array(datatype) => {
+            DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
-        },
+        }},
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
                 "CHAR is not supported, please use VARCHAR instead\n".to_string(),

@@ -1,0 +1,15 @@
+- sql: |
+    /* insert values on matching types */
+    create table t (a int);
+    insert into t values (22), (33);
+  batch_plan: |
+    BatchInsert { table: t }
+      BatchValues { rows: [[22:Int32], [33:Int32]] }
+
+- sql: |
+    /* insert values on matching types */
+    create table t (a int[]);
+    insert into t values (ARRAY[22, 33]), (ARRAY[44, 55]);
+  batch_plan: |
+    BatchInsert { table: t }
+      BatchValues { rows: [[:List { datatype: Int32 }], [:List { datatype: Int32 }]] }
