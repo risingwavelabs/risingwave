@@ -14,23 +14,24 @@
 
 use std::marker::PhantomData;
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
 
-use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::execution::local_exchange::LocalExchangeSource;
-use crate::executor::{Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
 use crate::task::{BatchEnvironment, TaskId};
 
-pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
+pub type ExchangeExecutor2 = GenericExchangeExecutor2<DefaultCreateSource>;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-pub struct GenericExchangeExecutor<C> {
+pub struct GenericExchangeExecutor2<C> {
     sources: Vec<ProstExchangeSource>,
     server_addr: HostAddr,
     env: BatchEnvironment,
@@ -84,43 +85,50 @@ impl CreateSource for DefaultCreateSource {
     }
 }
 
-impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecutor<CS> {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl<CS: 'static + CreateSource> BoxedExecutor2Builder for GenericExchangeExecutor2<CS> {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Exchange
         )?;
 
-        let server_addr = source.env.server_address().clone();
+        let server_addr = source.env().server_address().clone();
 
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
-        Ok(Box::new(
-            Self {
-                sources,
-                server_addr,
-                env: source.env.clone(),
-                source_creator: PhantomData,
-                source_idx: 0,
-                current_source: None,
-                schema: Schema { fields },
-                task_id: source.task_id.clone(),
-                identity: source.plan_node().get_identity().clone(),
-            }
-            .fuse(),
-        ))
+        Ok(Box::new(Self {
+            sources,
+            server_addr,
+            env: source.env().clone(),
+            source_creator: PhantomData,
+            source_idx: 0,
+            current_source: None,
+            schema: Schema { fields },
+            task_id: source.task_id.clone(),
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 
-#[async_trait::async_trait]
-impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
+impl<CS: 'static + CreateSource> Executor2 for GenericExchangeExecutor2<CS> {
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl<CS: 'static + CreateSource> GenericExchangeExecutor2<CS> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
         loop {
             if self.source_idx >= self.sources.len() {
                 break;
@@ -143,23 +151,10 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
                         assert_ne!(res.cardinality(), 0);
                     }
                     self.current_source = Some(source);
-                    return Ok(Some(res));
+                    yield res;
                 }
             }
         }
-        Ok(None)
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
     }
 }
 
