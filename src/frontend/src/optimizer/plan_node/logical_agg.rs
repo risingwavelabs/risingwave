@@ -249,11 +249,7 @@ impl ExprRewriter for ExprHandler {
 }
 
 impl LogicalAgg {
-    pub fn new(
-        agg_calls: Vec<PlanAggCall>,
-        group_keys: Vec<usize>,
-        input: PlanRef,
-    ) -> Self {
+    pub fn new(agg_calls: Vec<PlanAggCall>, group_keys: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(
             input.schema(),
@@ -348,11 +344,7 @@ impl LogicalAgg {
         let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        let logical_agg = LogicalAgg::new(
-            expr_handler.agg_calls,
-            group_keys,
-            logical_project,
-        );
+        let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
 
         // This LogicalProject focus on transforming the aggregates and grouping columns to
         // InputRef.
@@ -374,11 +366,7 @@ impl LogicalAgg {
     }
 
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
-        (
-            self.agg_calls,
-            self.group_keys,
-            self.input,
-        )
+        (self.agg_calls, self.group_keys, self.input)
     }
 }
 
@@ -388,11 +376,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            self.agg_calls().to_vec(),
-            self.group_keys().to_vec(),
-            input,
-        )
+        Self::new(self.agg_calls().to_vec(), self.group_keys().to_vec(), input)
     }
 
     #[must_use]
@@ -718,11 +702,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
         };
-        let agg = LogicalAgg::new(
-            vec![agg_call],
-            vec![1],
-            values.into(),
-        );
+        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(2);
@@ -775,11 +755,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
         };
-        let agg = LogicalAgg::new(
-            vec![agg_call],
-            vec![1],
-            values.into(),
-        );
+        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(2);
@@ -847,11 +823,7 @@ mod tests {
                 inputs: vec![InputRef::new(1, ty.clone())],
             },
         ];
-        let agg = LogicalAgg::new(
-            agg_calls,
-            vec![1, 2],
-            values.into(),
-        );
+        let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(4);
