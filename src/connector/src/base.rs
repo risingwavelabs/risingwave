@@ -134,6 +134,8 @@ pub enum SplitEnumeratorImpl {
     Kinesis(kinesis::enumerator::client::KinesisSplitEnumerator),
 }
 
+/// [`SplitImpl`] is the structure used to describe the allocation of splits when creating a reader,
+/// and the [`ConnectorStateV2`] is used in state management. These two can be related by id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(kafka::KafkaSplit),

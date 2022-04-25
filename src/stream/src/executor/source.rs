@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
@@ -405,7 +406,7 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
 
                     // If there's barrier, this branch will be deferred.
                     Some(Either::Right(chunk)) => {
-                        let (mut chunk, _split_offset_mapping) = chunk?;
+                        let (mut chunk, split_offset_mapping) = chunk?;
                         // Refill row id only if not a table source.
                         // Note(eric): Currently, rows from external sources are filled with row_ids
                         // here, but rows from tables (by insert statements)
@@ -421,13 +422,19 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                             _ => "".to_string(),
                         };
                         if !connector_type.is_empty() {
-                            // TODO how to get identifier for the state (with one or more split),
-                            // the identifier should be consistent with ConnectorStateV2::Split for
-                            // indexing & how to represent start offset for one or more splits
-                            //
-                            // self.state_cache = Some(ConnectorState {
-                            //     identifier
-                            // });
+                            let mut state_vec: Vec<ConnectorState> =
+                                Vec::with_capacity(split_offset_mapping.len());
+                            for (split_id, latest_offset) in &split_offset_mapping {
+                                // TODO [`SplitImpl`] should offer a unified interface for reading
+                                // start_offset and end_offset
+                                let end_offset = "".to_string();
+                                state_vec.push(ConnectorState {
+                                    identifier: Bytes::from(split_id.clone()),
+                                    start_offset: latest_offset.clone(),
+                                    end_offset,
+                                });
+                            }
+                            self.state_cache = Some(state_vec);
                         }
 
                         self.metrics
@@ -476,11 +483,8 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
-    use risingwave_common::array_nonnull;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_connector::kafka::split::KafkaSplit;
