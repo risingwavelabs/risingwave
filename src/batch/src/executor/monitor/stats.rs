@@ -25,7 +25,7 @@ impl BatchMetrics {
         let opts = histogram_opts!(
             "batch_row_seq_scan_next_duration",
             "Time spent deserializing into a row in cell based table.",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 17).unwrap() // max 6s
         );
         let row_seq_scan_next_duration = register_histogram_with_registry!(opts, registry).unwrap();
 

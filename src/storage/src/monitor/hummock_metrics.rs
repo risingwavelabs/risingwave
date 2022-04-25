@@ -106,7 +106,7 @@ impl HummockMetrics {
         let pin_version_latency_opts = histogram_opts!(
             "state_store_pin_version_latency",
             "Total latency of pin version that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let pin_version_latency =
             register_histogram_with_registry!(pin_version_latency_opts, registry).unwrap();
@@ -115,7 +115,7 @@ impl HummockMetrics {
         let unpin_version_latency_opts = histogram_opts!(
             "state_store_unpin_version_latency",
             "Total latency of unpin version that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let unpin_version_latency =
             register_histogram_with_registry!(unpin_version_latency_opts, registry).unwrap();
@@ -124,7 +124,7 @@ impl HummockMetrics {
         let pin_snapshot_latency_opts = histogram_opts!(
             "state_store_pin_snapshot_latency",
             "Total latency of pin snapshot that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let pin_snapshot_latency =
             register_histogram_with_registry!(pin_snapshot_latency_opts, registry).unwrap();
@@ -133,7 +133,7 @@ impl HummockMetrics {
         let unpin_snapshot_latency_opts = histogram_opts!(
             "state_store_unpin_snapshot_latency",
             "Total latency of unpin snapshot that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let unpin_snapshot_latency =
             register_histogram_with_registry!(unpin_snapshot_latency_opts, registry).unwrap();
@@ -142,7 +142,7 @@ impl HummockMetrics {
         let add_tables_latency_opts = histogram_opts!(
             "state_store_add_tables_latency",
             "Total latency of add tables that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let add_tables_latency =
             register_histogram_with_registry!(add_tables_latency_opts, registry).unwrap();
@@ -151,7 +151,7 @@ impl HummockMetrics {
         let get_new_table_id_latency_opts = histogram_opts!(
             "state_store_get_new_table_id_latency",
             "Total latency of get new table id that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let get_new_table_id_latency =
             register_histogram_with_registry!(get_new_table_id_latency_opts, registry).unwrap();
@@ -160,7 +160,7 @@ impl HummockMetrics {
         let report_compaction_task_latency_opts = histogram_opts!(
             "state_store_report_compaction_task_latency",
             "Total latency of report compaction task that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 16).unwrap() // max 6s
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let report_compaction_task_latency =
             register_histogram_with_registry!(report_compaction_task_latency_opts, registry)
