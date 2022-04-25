@@ -98,8 +98,7 @@ impl StateStoreImpl {
                             .await,
                     ),
                     minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
-                        S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
-                            .await,
+                        S3ObjectStore::with_minio(minio.strip_prefix("hummock+").unwrap()).await,
                     ),
                     memory if memory.starts_with("hummock+memory") => {
                         tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");

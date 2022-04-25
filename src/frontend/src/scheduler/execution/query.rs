@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
+use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;

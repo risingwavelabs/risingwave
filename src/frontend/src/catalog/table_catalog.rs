@@ -19,7 +19,7 @@ use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
@@ -32,6 +32,7 @@ pub struct TableCatalog {
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
     pub pk_desc: Vec<OrderedColumnDesc>,
+    pub is_index_on: Option<TableId>,
 }
 
 impl TableCatalog {
@@ -94,6 +95,8 @@ impl TableCatalog {
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+            is_index: self.is_index_on.is_some(),
+            index_on_id: self.is_index_on.unwrap_or_default().table_id(),
         }
     }
 }
@@ -109,7 +112,7 @@ impl From<ProstTable> for TableCatalog {
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for catalog in columns.clone() {
-            for col_desc in catalog.column_desc.get_column_descs() {
+            for col_desc in catalog.column_desc.flatten() {
                 let col_name = col_desc.name.clone();
                 if !col_names.insert(col_name.clone()) {
                     panic!("duplicated column name {} in table {} ", col_name, tb.name)
@@ -139,6 +142,11 @@ impl From<ProstTable> for TableCatalog {
             name,
             pk_desc,
             columns,
+            is_index_on: if tb.is_index {
+                Some(tb.index_on_id.into())
+            } else {
+                None
+            },
         }
     }
 }
@@ -156,7 +164,9 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+    use risingwave_pb::plan_common::{
+        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
+    };
 
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
@@ -165,6 +175,8 @@ mod tests {
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = ProstTable {
+            is_index: false,
+            index_on_id: 0,
             id: 0,
             schema_id: 0,
             database_id: 0,
@@ -206,6 +218,7 @@ mod tests {
         assert_eq!(
             table,
             TableCatalog {
+                is_index_on: None,
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),

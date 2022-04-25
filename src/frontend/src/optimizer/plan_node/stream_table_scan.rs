@@ -55,7 +55,12 @@ impl StreamTableScan {
     pub fn table_name(&self) -> &str {
         self.logical.table_name()
     }
+
+    pub fn logical(&self) -> &LogicalScan {
+        &self.logical
+    }
 }
+
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
@@ -78,7 +83,7 @@ impl ToStreamProst for StreamTableScan {
 
 impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
-        use risingwave_pb::plan::*;
+        use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {

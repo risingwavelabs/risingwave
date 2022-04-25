@@ -21,7 +21,6 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 use risingwave_pb::ProstFieldNotFound;
@@ -32,7 +31,7 @@ use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext};
 
 /// A list of actors with order.
 #[derive(Debug, Clone)]
-pub struct OrderedActorLink(pub Vec<LocalActorId>);
+struct OrderedActorLink(pub Vec<LocalActorId>);
 
 impl OrderedActorLink {
     pub fn to_global_ids(&self, actor_id_offset: u32, actor_id_len: u32) -> Self {
@@ -53,7 +52,7 @@ impl OrderedActorLink {
     }
 }
 
-pub struct StreamActorDownstream {
+struct StreamActorDownstream {
     /// Dispatcher
     /// TODO: refactor to `DispatchStrategy`.
     dispatcher: Dispatcher,
@@ -65,7 +64,7 @@ pub struct StreamActorDownstream {
     same_worker_node: bool,
 }
 
-pub struct StreamActorUpstream {
+struct StreamActorUpstream {
     /// Upstream actors
     actors: OrderedActorLink,
 
@@ -74,7 +73,7 @@ pub struct StreamActorUpstream {
 }
 
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
-pub struct StreamActorBuilder {
+struct StreamActorBuilder {
     /// actor id field
     actor_id: LocalActorId,
 
@@ -108,10 +107,6 @@ impl StreamActorBuilder {
             upstreams: HashMap::new(),
             sealed: false,
         }
-    }
-
-    pub fn get_id(&self) -> LocalActorId {
-        self.actor_id
     }
 
     pub fn get_fragment_id(&self) -> LocalFragmentId {
@@ -273,8 +268,16 @@ impl StreamGraphBuilder {
     }
 
     /// Insert new generated actor.
-    pub fn add_actor(&mut self, actor: StreamActorBuilder) {
-        self.actor_builders.insert(actor.get_id(), actor);
+    pub fn add_actor(
+        &mut self,
+        actor_id: LocalActorId,
+        fragment_id: LocalFragmentId,
+        node: Arc<StreamNode>,
+    ) {
+        self.actor_builders.insert(
+            actor_id,
+            StreamActorBuilder::new(actor_id, fragment_id, node),
+        );
     }
 
     /// Number of actors in the graph builder
@@ -386,12 +389,10 @@ impl StreamGraphBuilder {
 
     /// Build final stream DAG with dependencies with current actor builders.
     pub fn build(
-        &mut self,
+        mut self,
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,
-        table_id_offset: u32,
-        table_id_len: u32,
     ) -> Result<HashMap<LocalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
 
@@ -408,14 +409,8 @@ impl StreamGraphBuilder {
                 .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
                 .collect();
 
-            actor.nodes = Some(self.build_inner(
-                ctx,
-                actor.get_nodes()?,
-                actor_id,
-                &mut upstream_actors,
-                table_id_offset,
-                table_id_len,
-            )?);
+            actor.nodes =
+                Some(self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?);
 
             graph
                 .entry(builder.get_fragment_id())
@@ -436,15 +431,14 @@ impl StreamGraphBuilder {
     /// 2. ignore root node when it's `ExchangeNode`.
     /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
     /// ids if it is a `ChainNode`.
-    pub fn build_inner(
+    fn build_inner(
         &self,
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
         actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
-        table_id_offset: u32,
-        table_id_len: u32,
     ) -> Result<StreamNode> {
+        let table_id_offset = ctx.table_id_offset;
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
@@ -457,19 +451,13 @@ impl StreamGraphBuilder {
                     .as_mut()
                     .ok_or(ProstFieldNotFound("prost stream node field not found"))?
                 {
-                    let left_table_id = (ctx.next_local_table_id + table_id_offset) as u64;
+                    // The operator id must be assigned with table ids. Otherwise it is a logic
+                    // error.
+                    let left_table_id = node.left_table_id + table_id_offset;
                     let right_table_id = left_table_id + 1;
-                    node.left_table_ref_id = Some(TableRefId {
-                        table_id: left_table_id as i32,
-                        ..Default::default()
-                    });
-                    node.right_table_ref_id = Some(TableRefId {
-                        table_id: right_table_id as i32,
-                        ..Default::default()
-                    });
-                    ctx.next_local_table_id += 2;
+                    node.left_table_id = left_table_id;
+                    node.right_table_id = right_table_id;
                 }
-                assert!(ctx.next_local_table_id <= table_id_len);
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
                         Node::ExchangeNode(_) => {
@@ -494,14 +482,8 @@ impl StreamGraphBuilder {
                                 self.resolve_chain_node(ctx, input, actor_id)?;
                         }
                         _ => {
-                            new_stream_node.input[idx] = self.build_inner(
-                                ctx,
-                                input,
-                                actor_id,
-                                upstream_actor_id,
-                                table_id_offset,
-                                table_id_len,
-                            )?;
+                            new_stream_node.input[idx] =
+                                self.build_inner(ctx, input, actor_id, upstream_actor_id)?;
                         }
                     }
                 }

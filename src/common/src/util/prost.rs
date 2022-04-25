@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::{data, plan};
+use risingwave_pb::{batch_plan, data};
 
 pub trait TypeUrl {
     fn type_url() -> &'static str;
 }
 
-impl TypeUrl for plan::ExchangeNode {
+impl TypeUrl for batch_plan::ExchangeNode {
     fn type_url() -> &'static str {
         "type.googleapis.com/plan.ExchangeNode"
     }

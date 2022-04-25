@@ -59,11 +59,11 @@ impl ReverseUserIterator {
         iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_epoch(iterator, key_range, Epoch::MAX, None)
+        Self::with_epoch(iterator, key_range, Epoch::MAX, None)
     }
 
     /// Creates [`ReverseUserIterator`] with given `read_epoch`.
-    pub(crate) fn new_with_epoch(
+    pub(crate) fn with_epoch(
         iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,

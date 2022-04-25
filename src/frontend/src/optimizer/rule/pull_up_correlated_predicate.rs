@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::{Either, Itertools};
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};

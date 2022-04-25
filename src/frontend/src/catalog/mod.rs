@@ -25,7 +25,6 @@ pub(crate) mod schema_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod table_catalog;
 
-#[allow(dead_code)]
 pub(crate) type SourceId = u32;
 
 pub(crate) type DatabaseId = u32;

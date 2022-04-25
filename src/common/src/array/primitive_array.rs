@@ -177,7 +177,7 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),

@@ -14,8 +14,8 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::OrderByNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::OrderByNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::Order;

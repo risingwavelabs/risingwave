@@ -20,7 +20,7 @@ use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan_common::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
@@ -128,7 +128,7 @@ impl ProtobufParser {
         let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index))
+            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, &mut index))
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 
@@ -136,7 +136,6 @@ impl ProtobufParser {
     pub fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
-        lastname: String,
         index: &mut i32,
     ) -> Result<ColumnDesc> {
         let field_type = field_descriptor.field_type(descriptors);
@@ -145,19 +144,12 @@ impl ProtobufParser {
             let column_vec = m
                 .fields()
                 .iter()
-                .map(|f| {
-                    Self::pb_field_to_col_desc(
-                        f,
-                        descriptors,
-                        lastname.clone() + field_descriptor.name() + ".",
-                        index,
-                    )
-                })
+                .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
                 .collect::<Result<Vec<_>>>()?;
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
-                name: lastname + field_descriptor.name(),
+                name: field_descriptor.name().to_string(),
                 column_type: Some(data_type.to_protobuf()),
                 field_descs: column_vec,
                 type_name: m.name().to_string(),
@@ -166,7 +158,7 @@ impl ProtobufParser {
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
-                name: lastname + field_descriptor.name(),
+                name: field_descriptor.name().to_string(),
                 column_type: Some(data_type.to_protobuf()),
                 ..Default::default()
             })
@@ -294,7 +286,7 @@ mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_pb::plan_common::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -483,13 +475,13 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 3),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 4),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
-            ColumnDesc::new_struct("country.city", 5, ".test.City", city),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
+            ColumnDesc::new_struct("city", 5, ".test.City", city),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 6),
         ];
         assert_eq!(
             columns,

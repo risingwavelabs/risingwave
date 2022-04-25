@@ -16,7 +16,7 @@ use std::borrow::Cow;
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
+use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 
 use super::row_id_column_desc;
 

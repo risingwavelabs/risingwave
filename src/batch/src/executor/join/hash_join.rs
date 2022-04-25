@@ -22,7 +22,7 @@ use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;

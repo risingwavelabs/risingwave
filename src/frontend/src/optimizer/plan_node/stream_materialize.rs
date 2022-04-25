@@ -22,7 +22,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::ColumnOrder;
+use risingwave_pb::plan_common::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -100,19 +100,19 @@ impl StreamMaterialize {
 
     /// Create a materialize node.
     ///
-    /// When creating index, `distribute_only_order_by` should be true. We should distribute keys
+    /// When creating index, `is_index` should be true. Then, materialize will distribute keys
     /// using order by columns, instead of pk.
     pub fn create(
         input: PlanRef,
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
-        distribute_only_order_by: bool,
+        is_index_on: Option<TableId>,
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
         let input = match input.distribution() {
             Distribution::Single => input,
-            _ => Distribution::HashShard(if distribute_only_order_by {
+            _ => Distribution::HashShard(if is_index_on.is_some() {
                 user_order_by.field_order.iter().map(|x| x.index).collect()
             } else {
                 input.pk_indices().to_vec()
@@ -166,6 +166,7 @@ impl StreamMaterialize {
             name: mv_name,
             columns,
             pk_desc,
+            is_index_on,
         };
 
         Ok(Self { base, input, table })

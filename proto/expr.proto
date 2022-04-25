@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package expr;
 
+import "data.proto";
+
 option java_multiple_files = true;
 option java_package = "com.risingwave.proto.expr";
 option optimize_for = SPEED;
-
-import "data.proto";
 
 message ExprNode {
   enum Type {
@@ -64,6 +64,8 @@ message ExprNode {
     IS_NOT_NULL = 306;
     // Unary operators
     NEG = 401;
+    // Nested selection operators
+    FIELD = 501;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -23,7 +24,7 @@ use rand::thread_rng;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, LevelEntry, LevelType, SstableInfo,
     TableSetStatistics,
@@ -98,24 +99,44 @@ impl CompactStatus {
         };
 
         let num_levels = self.level_handlers.len();
+        let level_expect_size = (0..num_levels).map(|x| 16 << (2 * x)).collect_vec();
         let mut idle_levels = Vec::with_capacity(num_levels - 1);
-        for (level_handler_idx, level_handler) in
-            self.level_handlers[..num_levels - 1].iter().enumerate()
+        let mut last_level_idle = true;
+        for (level_handler_idx, level_handler) in self.level_handlers[..num_levels - 1]
+            .iter()
+            .enumerate()
+            .rev()
         {
             match level_handler {
                 LevelHandler::Overlapping(_, compacting_key_ranges)
                 | LevelHandler::Nonoverlapping(_, compacting_key_ranges) => {
-                    if compacting_key_ranges.is_empty() {
-                        idle_levels.push(level_handler_idx);
+                    last_level_idle = if compacting_key_ranges.is_empty() {
+                        if last_level_idle {
+                            idle_levels.push(level_handler_idx);
+                        }
+                        true
+                    } else {
+                        false
                     }
                 }
             }
         }
-        let select_level = if idle_levels.is_empty() {
-            0
+        let (select_level, must_l0_to_l0) = if idle_levels.is_empty() {
+            (0, true)
         } else {
-            *idle_levels.first().unwrap() as u32
+            (*idle_levels.last().unwrap() as u32, false)
         };
+
+        let l0_idle_sst_num = {
+            let l0 = match self.level_handlers.first().unwrap() {
+                LevelHandler::Overlapping(l_0, _) => l_0,
+                LevelHandler::Nonoverlapping(l_0, _) => l_0,
+            };
+            levels.first().unwrap().table_infos.len() - l0.len()
+        };
+        if must_l0_to_l0 && l0_idle_sst_num <= *level_expect_size.first().unwrap() {
+            return None;
+        }
 
         enum SearchResult {
             Found(Vec<SstableInfo>, Vec<SstableInfo>, Vec<KeyRange>),
@@ -129,6 +150,15 @@ impl CompactStatus {
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
+        let ord_table_id = |x: u64, y: u64| {
+            if x == y {
+                Ordering::Equal
+            } else if y.wrapping_sub(x) <= u64::MAX / 2 {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        };
         // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
             LevelHandler::Overlapping(compacting_ssts_l_n, compacting_key_ranges_l_n)
@@ -142,6 +172,7 @@ impl CompactStatus {
                         let mut next_sst_idx = sst_idx + 1;
                         let sst_key_range = l_n[sst_idx].key_range.clone();
                         let mut select_level_inputs = vec![l_n[sst_idx].clone().into()];
+                        let mut earliest_table_id = ln[sst_idx].table_id;
                         // Must ensure that there exists no SSTs in `select_level` which have
                         // overlapping user key with `select_level_inputs`
                         let key_range = if !is_select_level_leveling {
@@ -154,6 +185,11 @@ impl CompactStatus {
                                 {
                                     select_level_inputs.push(other.into());
                                     tier_key_range.full_key_extend(&other.key_range);
+                                    if ord_table_id(*other.table_id, earliest_table_id)
+                                        == Ordering::Less
+                                    {
+                                        earliest_table_id = *other_table_id;
+                                    }
                                 } else {
                                     next_sst_idx = sst_idx + 1 + delta_idx;
                                     break;
@@ -169,6 +205,7 @@ impl CompactStatus {
                         };
 
                         polysst_candidates.push((
+                            earliest_table_id,
                             (sst_idx, next_sst_idx),
                             select_level_inputs,
                             key_range.clone(),
@@ -178,10 +215,17 @@ impl CompactStatus {
                     }
                 }
 
-                let mut rng = thread_rng();
-                polysst_candidates.shuffle(&mut rng);
+                if select_level == 0 {
+                    polysst_candidates.sort_by(|(table_id_a, ..), (table_id_b, ..)| {
+                        ord_table_id(*table_id_a, *table_id_b)
+                    });
+                } else {
+                    let mut rng = thread_rng();
+                    polysst_candidates.shuffle(&mut rng);
+                }
 
-                for ((sst_idx, next_sst_idx), select_level_inputs, key_range) in polysst_candidates
+                for (_, (sst_idx, next_sst_idx), select_level_inputs, key_range) in
+                    polysst_candidates
                 {
                     let mut is_select_idle = true;
                     for SSTableInfo { table_id, .. } in &l_n[sst_idx..next_sst_idx] {
@@ -368,10 +412,8 @@ impl CompactStatus {
     pub fn apply_compact_result(
         compact_task: &CompactTask,
         based_hummock_version: HummockVersion,
-        new_version_id: HummockVersionId,
     ) -> HummockVersion {
         let mut new_version = based_hummock_version;
-        new_version.id = new_version_id;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
         for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
             new_version.levels[idx].table_infos.retain(|sst| {

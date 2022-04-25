@@ -2,7 +2,7 @@ package com.risingwave.planner.rel.physical.join;
 
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
-import com.risingwave.proto.plan.JoinType;
+import com.risingwave.proto.plan_common.JoinType;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;

@@ -18,7 +18,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
+use risingwave_pb::batch_plan::{
+    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
+};
 
 use crate::task::env::BatchEnvironment;
 use crate::task::{BatchTaskExecution, TaskId, TaskOutput};
@@ -106,9 +108,9 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::exchange_info::DistributionMode;
-    use risingwave_pb::plan::plan_node::NodeBody;
-    use risingwave_pb::plan::TaskOutputId as ProstTaskOutputId;
+    use risingwave_pb::batch_plan::exchange_info::DistributionMode;
+    use risingwave_pb::batch_plan::plan_node::NodeBody;
+    use risingwave_pb::batch_plan::TaskOutputId as ProstTaskOutputId;
     use tonic::Code;
 
     use crate::task::{BatchEnvironment, BatchManager, TaskId};
@@ -132,7 +134,7 @@ mod tests {
         );
 
         let output_id = ProstTaskOutputId {
-            task_id: Some(risingwave_pb::plan::TaskId {
+            task_id: Some(risingwave_pb::batch_plan::TaskId {
                 stage_id: 0,
                 task_id: 0,
                 query_id: "".to_owned(),
@@ -147,7 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        use risingwave_pb::plan::*;
+        use risingwave_pb::batch_plan::*;
 
         let manager = BatchManager::new();
         let plan = PlanFragment {
