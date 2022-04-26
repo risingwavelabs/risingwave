@@ -85,6 +85,7 @@ impl Sstable {
                 right: self.meta.largest_key.clone(),
                 inf: false,
             }),
+            file_size: self.meta.estimated_size as u64,
         }
     }
 }

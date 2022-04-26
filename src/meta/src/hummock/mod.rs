@@ -158,15 +158,7 @@ where
                     let input_ssts = compact_task
                         .input_ssts
                         .iter()
-                        .flat_map(|v| {
-                            v.level
-                                .as_ref()
-                                .unwrap()
-                                .table_infos
-                                .iter()
-                                .map(|sst| sst.id)
-                                .collect_vec()
-                        })
+                        .flat_map(|v| v.table_infos.iter().map(|sst| sst.id).collect_vec())
                         .collect_vec();
                     tracing::debug!(
                         "Try to compact SSTs {:?} in worker {}.",
