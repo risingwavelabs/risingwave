@@ -333,7 +333,8 @@ impl<S: StateStore> ExecutorV1 for SourceExecutor<S> {
                 // todo: use epoch from msg to restore state from state store
                 assert!(matches!(msg, Message::Barrier(_)));
 
-                // the executor is assigned no split, should check if the barrier contains assign_split mutation later
+                // the executor is assigned no split, should check if the barrier contains
+                // assign_split mutation later
                 if self.stream_source_splits.is_empty() {
                     return Ok(msg);
                 }
