@@ -91,6 +91,7 @@ pub(crate) fn gen_create_index_plan(
         })
         .try_collect::<_, Vec<_>, RwError>()?;
 
+    let distribution_keys = table.distribution_keys().to_vec();
     // Manually assemble the materialization plan for the index MV.
     let materialize = {
         let scan_node = StreamTableScan::new(LogicalScan::new(
@@ -99,6 +100,7 @@ pub(crate) fn gen_create_index_plan(
             table_desc,
             // indexes are only used by DeltaJoin rule, and we don't need to provide them here.
             vec![],
+            distribution_keys,
             context,
         ));
         let mut required_cols = FixedBitSet::with_capacity(scan_node.schema().len());

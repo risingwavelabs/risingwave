@@ -49,6 +49,7 @@ impl Planner {
                 .iter()
                 .map(|x| Rc::new(x.table_desc()))
                 .collect(),
+            base_table.table_catalog.distribution_keys().to_vec(),
             self.ctx(),
         )
     }

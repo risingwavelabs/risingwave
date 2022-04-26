@@ -33,6 +33,7 @@ pub struct TableCatalog {
     pub columns: Vec<ColumnCatalog>,
     pub pk_desc: Vec<OrderedColumnDesc>,
     pub is_index_on: Option<TableId>,
+    pub distribution_keys: Vec<usize>,
 }
 
 impl TableCatalog {
@@ -71,6 +72,10 @@ impl TableCatalog {
         self.name.as_ref()
     }
 
+    pub fn distribution_keys(&self) -> &[usize] {
+        self.distribution_keys.as_ref()
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         let (pk_column_ids, pk_orders) = self
             .pk_desc()
@@ -97,6 +102,7 @@ impl TableCatalog {
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
             is_index: self.is_index_on.is_some(),
             index_on_id: self.is_index_on.unwrap_or_default().table_id(),
+            distribution_keys: vec![],
         }
     }
 }
@@ -147,6 +153,11 @@ impl From<ProstTable> for TableCatalog {
             } else {
                 None
             },
+            distribution_keys: tb
+                .distribution_keys
+                .iter()
+                .map(|k| *k as usize)
+                .collect_vec(),
         }
     }
 }
@@ -210,6 +221,7 @@ mod tests {
             pk_column_ids: vec![0],
             pk_orders: vec![OrderType::Ascending.to_prost() as i32],
             dependent_relations: vec![],
+            distribution_keys: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
         }
@@ -255,7 +267,8 @@ mod tests {
                 pk_desc: vec![OrderedColumnDesc {
                     column_desc: row_id_column_desc(),
                     order: OrderType::Ascending
-                }]
+                }],
+                distribution_keys: vec![],
             }
         );
     }

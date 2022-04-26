@@ -42,8 +42,9 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::AnyShard, // Mark as `AnyShard` cause we don't know the distribution yet.
-            false,                  // TODO: determine the `append-only` field of table scan
+            // TODO: change to hash shard, with distribution_keys fetched from TableCatalog.
+            Distribution::HashShard(logical.distribution_keys().to_vec()),
+            false, // TODO: determine the `append-only` field of table scan
         );
         Self {
             base,
@@ -105,9 +106,13 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            /// StreamTableScan should follow the same distribution as upstream materialize node.
-            /// So this will be filled in meta.
-            distribution_keys: vec![],
+            // TODO: get distribution_keys from TableCatalog.
+            distribution_keys: self
+                .logical
+                .distribution_keys()
+                .iter()
+                .map(|k| *k as i32)
+                .collect_vec(),
             // Will fill when resolving chain node.
             hash_mapping: None,
             parallel_unit_id: 0,

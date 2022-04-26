@@ -183,8 +183,6 @@ where
                     }
                     let batch_stream_node = &mut stream_node.input[1];
                     if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
-                        // TODO: we can also insert distribution keys here, make fragmenter
-                        // even simpler.
                         let (original_indices, data) = compress_data(self.hash_mapping);
                         batch_query.hash_mapping = Some(ParallelUnitMapping {
                             original_indices,

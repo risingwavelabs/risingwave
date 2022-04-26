@@ -36,6 +36,8 @@ pub struct LogicalScan {
     table_desc: Rc<TableDesc>,
     // Descriptors of all indexes on this table
     indexes: Vec<Rc<TableDesc>>,
+    // Distribution keys of the table
+    distribution_keys: Vec<usize>,
 }
 
 impl LogicalScan {
@@ -45,6 +47,7 @@ impl LogicalScan {
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<TableDesc>>,
+        distribution_keys: Vec<usize>,
         ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
@@ -79,6 +82,7 @@ impl LogicalScan {
             required_col_idx,
             table_desc,
             indexes,
+            distribution_keys,
         }
     }
 
@@ -87,6 +91,7 @@ impl LogicalScan {
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<TableDesc>>,
+        distribution_keys: Vec<usize>,
         ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
@@ -94,6 +99,7 @@ impl LogicalScan {
             (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
             indexes,
+            distribution_keys,
             ctx,
         )
         .into())
@@ -131,6 +137,11 @@ impl LogicalScan {
     pub fn indexes(&self) -> &[Rc<TableDesc>] {
         &self.indexes
     }
+
+    /// Get the distribution keys of this table
+    pub fn distribution_keys(&self) -> &[usize] {
+        &self.distribution_keys
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
@@ -159,6 +170,7 @@ impl ColPrunable for LogicalScan {
             required_col_idx,
             self.table_desc.clone(),
             self.indexes.clone(),
+            self.distribution_keys.clone(),
             self.base.ctx.clone(),
         )
         .into()
@@ -204,6 +216,7 @@ impl ToStream for LogicalScan {
                         required_col_idx,
                         self.table_desc.clone(),
                         self.indexes.clone(),
+                        self.distribution_keys.clone(),
                         self.base.ctx.clone(),
                     )
                     .into(),
