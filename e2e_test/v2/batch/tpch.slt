@@ -13,10 +13,12 @@ include ../../tpch/insert_supplier.slt.part
 include ../../tpch/insert_region.slt.part
 
 include ../../batch/tpch/q1.slt.part
+include ../../batch/tpch/q3.slt.part
 include ../../batch/tpch/q4.slt.part
 include ../../batch/tpch/q5.slt.part
 include ../../batch/tpch/q6.slt.part
 include ../../batch/tpch/q7.slt.part
+include ../../batch/tpch/q10.slt.part
 include ../../batch/tpch/q13.slt.part
 
 include ../../tpch/drop_tables.slt.part
