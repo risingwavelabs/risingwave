@@ -26,6 +26,7 @@ use risingwave_common::array::Op;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_pb::common::ActorInfo;
 use tracing::event;
 
 use super::{Barrier, Message, Mutation, Result, StreamChunk, StreamConsumer};
@@ -185,10 +186,19 @@ impl DispatchExecutorInner {
 
         match mutation {
             Mutation::UpdateOutputs(updates) => {
+                let mut updates: HashMap<DispatcherId, Vec<ActorInfo>> = updates
+                    .iter()
+                    .filter_map(|(&(actor_id, dispatcher_id), outputs)| {
+                        if actor_id == self.actor_id {
+                            Some((dispatcher_id, outputs.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
                 for dispatcher in &mut self.dispatchers {
-                    if let Some((_, actor_infos)) =
-                        updates.get_key_value(&(self.actor_id, dispatcher.get_dispatcher_id()))
-                    {
+                    if let Some(actor_infos) = updates.remove(&(dispatcher.get_dispatcher_id())) {
                         let mut new_outputs = vec![];
 
                         let actor_id = self.actor_id;
@@ -198,7 +208,7 @@ impl DispatchExecutorInner {
                                 || actor_infos.iter().any(|info| info.actor_id == down_id)
                         });
 
-                        for actor_info in actor_infos.iter() {
+                        for actor_info in actor_infos {
                             let down_id = actor_info.get_actor_id();
                             let downstream_addr = actor_info.get_host()?.into();
                             new_outputs.push(new_output(
@@ -211,12 +221,38 @@ impl DispatchExecutorInner {
                         dispatcher.set_outputs(new_outputs)
                     }
                 }
+
+                for (dispatcher_id, actor_infos) in updates {
+                    assert_eq!(actor_infos.len(), 1);
+                    let actor_info = &actor_infos[0];
+                    let down_id = actor_info.get_actor_id();
+                    let downstream_addr = actor_info.get_host()?.into();
+                    let output =
+                        new_output(&self.context, downstream_addr, self.actor_id, down_id)?;
+
+                    self.dispatchers
+                        .push(DispatcherImpl::Simple(SimpleDispatcher::new(
+                            output,
+                            dispatcher_id,
+                        )));
+                }
             }
 
             Mutation::AddOutput(adds) => {
+                let mut adds: HashMap<DispatcherId, Vec<ActorInfo>> = adds
+                    .iter()
+                    .filter_map(|(&(actor_id, dispatcher_id), outputs)| {
+                        if actor_id == self.actor_id {
+                            Some((dispatcher_id, outputs.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
                 for dispatcher in &mut self.dispatchers {
                     if let Some(downstream_actor_infos) =
-                        adds.get(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                        adds.remove(&(dispatcher.get_dispatcher_id()))
                     {
                         let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                         for downstream_actor_info in downstream_actor_infos {
@@ -231,6 +267,21 @@ impl DispatchExecutorInner {
                         }
                         dispatcher.add_outputs(outputs_to_add);
                     }
+                }
+
+                for (dispatcher_id, actor_infos) in adds {
+                    assert_eq!(actor_infos.len(), 1);
+                    let actor_info = &actor_infos[0];
+                    let down_id = actor_info.get_actor_id();
+                    let downstream_addr = actor_info.get_host()?.into();
+                    let output =
+                        new_output(&self.context, downstream_addr, self.actor_id, down_id)?;
+
+                    self.dispatchers
+                        .push(DispatcherImpl::Simple(SimpleDispatcher::new(
+                            output,
+                            dispatcher_id,
+                        )));
                 }
             }
 

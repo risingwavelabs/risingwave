@@ -53,8 +53,6 @@ pub struct CreateMaterializedViewContext {
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
-    /// (upstream, downstream) => dispatcher id
-    pub dispatcher_ids: HashMap<(ActorId, ActorId), DispatcherId>,
     /// Dependent table ids
     pub dependent_table_ids: HashSet<TableId>,
     /// Temporary source info used during `create_materialized_source`
@@ -111,7 +109,6 @@ where
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn resolve_chain_node(
         &self,
         table_fragments: &mut TableFragments,
@@ -119,7 +116,6 @@ where
         hash_mapping: &Vec<ParallelUnitId>,
         dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
-        dispatcher_ids: &HashMap<(ActorId, ActorId), DispatcherId>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
         // The closure environment. Used to simulate recursive closure.
@@ -127,7 +123,6 @@ where
             hash_mapping: &'a Vec<ParallelUnitId>,
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
             tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-            dispatcher_ids: &'a HashMap<(ActorId, ActorId), DispatcherId>,
             locations: &'a ScheduledLocations,
 
             dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
@@ -200,13 +195,9 @@ where
                         unreachable!("chain's input[1] should always be batch query");
                     }
 
-                    let dispatcher_id = self
-                        .dispatcher_ids
-                        .get(&(actor_id, *upstream_actor_id))
-                        .unwrap();
                     // finally, we should also build dispatcher infos here.
                     self.dispatches
-                        .entry((*upstream_actor_id, *dispatcher_id))
+                        .entry((*upstream_actor_id, stream_node.operator_id))
                         .or_default()
                         .push(actor_id);
                 } else {
@@ -233,7 +224,6 @@ where
             hash_mapping,
             upstream_parallel_unit_info,
             tables_node_actors,
-            dispatcher_ids,
             locations,
 
             dispatches,
@@ -273,7 +263,6 @@ where
             mut dispatches,
             mut upstream_node_actors,
             table_sink_map,
-            dispatcher_ids,
             dependent_table_ids,
             affiliated_source,
             hash_mapping,
@@ -317,7 +306,6 @@ where
                 &hash_mapping,
                 &mut dispatches,
                 &mut upstream_node_actors,
-                &dispatcher_ids,
                 &locations,
             )
             .await?;

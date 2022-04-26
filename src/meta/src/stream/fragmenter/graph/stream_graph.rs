@@ -405,10 +405,6 @@ impl StreamGraphBuilder {
             let mut actor = builder.build();
             let mut upstream_actors = HashMap::new();
             for (&id, StreamActorUpstream { actors, .. }) in &builder.upstreams {
-                actors.0.iter().for_each(|up_id| {
-                    ctx.dispatcher_ids
-                        .insert((up_id.as_global_id(), actor_id.as_global_id()), id);
-                });
                 upstream_actors.insert(id, actors.clone());
             }
 
@@ -518,12 +514,8 @@ impl StreamGraphBuilder {
 
             if ctx.is_legacy_frontend {
                 for &up_id in &upstream_actor_ids {
-                    let dispatcher_id = ctx
-                        .dispatcher_ids
-                        .get(&(up_id, actor_id.as_global_id()))
-                        .unwrap();
                     ctx.dispatches
-                        .entry((up_id, *dispatcher_id))
+                        .entry((up_id, stream_node.operator_id))
                         .or_default()
                         .push(actor_id.as_global_id());
                 }
