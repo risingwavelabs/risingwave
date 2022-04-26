@@ -263,7 +263,7 @@ impl DataChunk {
     /// the last new chunk will be the remainder.
     /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending
     /// on the demand
-    pub fn rechunk(chunks: &[DataChunkRef], each_size_limit: usize) -> Result<Vec<DataChunk>> {
+    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> Result<Vec<DataChunk>> {
         assert!(each_size_limit > 0);
         // Corner case: one of the `chunks` may have 0 length
         // remove the chunks with zero physical length here,
@@ -451,8 +451,6 @@ impl TryFrom<Vec<Column>> for DataChunk {
     }
 }
 
-pub type DataChunkRef = Arc<DataChunk>;
-
 /// Test utilities for [`DataChunk`].
 pub trait DataChunkTestExt {
     fn from_pretty(s: &str) -> Self;
@@ -591,7 +589,7 @@ mod tests {
                         builder.finish().unwrap().into(),
                     ))])
                     .build();
-                chunks.push(Arc::new(chunk));
+                chunks.push(chunk);
             }
 
             let total_size = num_chunks * chunk_size;
