@@ -142,7 +142,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
         }
         let mut probe_table: ProbeTable<K> = build_table.try_into()?;
 
-        let mut state = HashJoinState2::Probe;
+        let mut state = HashJoinState::Probe;
         let mut left_child_stream = self.left_child.take().unwrap().execute();
 
         // first probe
@@ -152,11 +152,11 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
                 probe_table.set_probe_data(data_chunk)?;
             }
             None => {
-                state = HashJoinState2::Done;
+                state = HashJoinState::Done;
             }
         }
         // probe
-        while state == HashJoinState2::Probe {
+        while state == HashJoinState::Probe {
             if let Some(ret_data_chunk) = probe_table.join()? {
                 let data_chunk = if probe_table.has_non_equi_cond() {
                     probe_table.process_non_equi_condition(ret_data_chunk)?
@@ -195,9 +195,9 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
                         probe_table.reset_result_index();
 
                         if probe_table.join_type().need_join_remaining() {
-                            state = HashJoinState2::ProbeRemaining;
+                            state = HashJoinState::ProbeRemaining;
                         } else {
-                            state = HashJoinState2::Done;
+                            state = HashJoinState::Done;
                         }
                         if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
                             yield data_chunk;
@@ -207,7 +207,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
             }
         }
         // probe_remaining
-        while state == HashJoinState2::ProbeRemaining {
+        while state == HashJoinState::ProbeRemaining {
             let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
                 let output_data_chunk =
                     probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
@@ -219,7 +219,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
                 let output_data_chunk =
                     probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-                state = HashJoinState2::Done;
+                state = HashJoinState::Done;
                 output_data_chunk
             };
             yield output_data_chunk
@@ -228,7 +228,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
 }
 
 #[derive(PartialEq)]
-enum HashJoinState2 {
+enum HashJoinState {
     Probe,
     ProbeRemaining,
     Done,
