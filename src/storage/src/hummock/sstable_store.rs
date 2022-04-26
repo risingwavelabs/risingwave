@@ -196,6 +196,11 @@ impl SstableStore {
     pub fn store(&self) -> ObjectStoreRef {
         self.store.clone()
     }
+
+    #[cfg(test)]
+    pub fn clear_block_cache(&self) {
+        self.block_cache.clear();
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;

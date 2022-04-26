@@ -47,6 +47,10 @@ jobs:
         run: |
           cargo doc --document-private-items --no-deps
 
+      - name: Run rust failpoints test
+        run: |
+          cargo nextest run failpoints  --features failpoints --no-fail-fast
+      
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast

@@ -26,7 +26,7 @@ use crate::hummock::iterator::{
     BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
     HummockIterator, MergeIterator, UserIterator,
 };
-use crate::hummock::test_utils::default_builder_opt_for_test;
+use crate::hummock::test_utils::{create_small_table_cache, default_builder_opt_for_test};
 use crate::hummock::{BackwardSSTableIterator, SSTableIterator};
 use crate::monitor::StateStoreMetrics;
 
@@ -51,7 +51,10 @@ async fn test_failpoint_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let mut iter = ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1)], sstable_store);
+    let mut iter = ConcatIterator::new(
+        vec![table0.get_sstable_info(), table1.get_sstable_info()],
+        sstable_store,
+    );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
     let result = iter.seek(iterator_test_key_of(22).as_slice()).await;
@@ -104,8 +107,10 @@ async fn test_failpoint_backward_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let mut iter =
-        BackwardConcatIterator::new(vec![Arc::new(table1), Arc::new(table0)], sstable_store);
+    let mut iter = BackwardConcatIterator::new(
+        vec![table1.get_sstable_info(), table0.get_sstable_info()],
+        sstable_store.clone(),
+    );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
     let result = iter.seek(iterator_test_key_of(2).as_slice()).await;
@@ -154,12 +159,16 @@ async fn test_failpoint_merge_invalid_key() {
         200,
     )
     .await;
-    let tables = vec![Arc::new(table0), Arc::new(table1)];
+    let tables = vec![table0, table1];
+    let cache = create_small_table_cache();
     let mut mi = MergeIterator::new(
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Forward>> {
-                Box::new(SSTableIterator::new(table.clone(), sstable_store.clone()))
+                Box::new(SSTableIterator::new(
+                    cache.insert(table.id, table.id, 1, Box::new(table.clone())),
+                    sstable_store.clone(),
+                ))
             }),
         Arc::new(StateStoreMetrics::unused()),
     );
@@ -198,13 +207,14 @@ async fn test_failpoint_backward_merge_invalid_key() {
         200,
     )
     .await;
-    let tables = vec![Arc::new(table0), Arc::new(table1)];
+    let tables = vec![table0, table1];
+    let cache = create_small_table_cache();
     let mut mi = BackwardMergeIterator::new(
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Backward>> {
                 Box::new(BackwardSSTableIterator::new(
-                    table.clone(),
+                    cache.insert(table.id, table.id, 1, Box::new(table.clone())),
                     sstable_store.clone(),
                 ))
             }),
@@ -245,13 +255,14 @@ async fn test_failpoint_user_read_err() {
         200,
     )
     .await;
+    let cache = create_small_table_cache();
     let iters: Vec<BoxedForwardHummockIterator> = vec![
         Box::new(SSTableIterator::new(
-            Arc::new(table0),
+            cache.insert(table0.id, table0.id, 1, Box::new(table0.clone())),
             sstable_store.clone(),
         )),
         Box::new(SSTableIterator::new(
-            Arc::new(table1),
+            cache.insert(table1.id, table1.id, 1, Box::new(table1.clone())),
             sstable_store.clone(),
         )),
     ];
@@ -301,13 +312,14 @@ async fn test_failpoint_backward_user_read_err() {
         200,
     )
     .await;
+    let cache = create_small_table_cache();
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
         Box::new(BackwardSSTableIterator::new(
-            Arc::new(table0),
+            cache.insert(table0.id, table0.id, 1, Box::new(table0.clone())),
             sstable_store.clone(),
         )),
         Box::new(BackwardSSTableIterator::new(
-            Arc::new(table1),
+            cache.insert(table1.id, table1.id, 1, Box::new(table1.clone())),
             sstable_store.clone(),
         )),
     ];
