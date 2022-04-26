@@ -14,7 +14,6 @@
 
 use drop_stream::*;
 use drop_table::*;
-use generic_exchange::*;
 use merge_sort_exchange::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
@@ -36,9 +35,9 @@ use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, OrderByExecutor2, ProjectExecutor2,
-    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
+    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2, TopNExecutor2,
+    TraceExecutor2, ValuesExecutor2, OrderByExecutor2
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -49,7 +48,6 @@ mod drop_table;
 pub mod executor2_wrapper;
 mod fuse;
 mod generate_series;
-mod generic_exchange;
 mod join;
 mod merge_sort_exchange;
 pub mod monitor;
@@ -183,7 +181,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
-            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor,
@@ -212,7 +210,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
-            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor,

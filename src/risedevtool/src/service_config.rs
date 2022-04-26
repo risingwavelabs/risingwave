@@ -30,6 +30,7 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
+    pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
 }
@@ -62,6 +63,23 @@ pub struct FrontendConfig {
     pub id: String,
     pub address: String,
     pub port: u16,
+    pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub user_managed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct CompactorConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub exporter_address: String,
+    pub exporter_port: u16,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
 }
@@ -179,6 +197,7 @@ pub enum ServiceConfig {
     MetaNode(MetaNodeConfig),
     Frontend(FrontendConfig),
     FrontendV2(FrontendConfig),
+    Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
     Prometheus(PrometheusConfig),
@@ -196,6 +215,7 @@ impl ServiceConfig {
             Self::MetaNode(c) => &c.id,
             Self::Frontend(c) => &c.id,
             Self::FrontendV2(c) => &c.id,
+            Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
             Self::Prometheus(c) => &c.id,

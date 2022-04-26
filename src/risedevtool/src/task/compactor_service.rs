@@ -13,36 +13,36 @@
 // limitations under the License.
 
 use std::env;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
 
-use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::ComputeNodeConfig;
+use crate::{CompactorConfig, ExecuteContext, Task};
 
-pub struct ComputeNodeService {
-    config: ComputeNodeConfig,
+pub struct CompactorService {
+    config: CompactorConfig,
 }
 
-impl ComputeNodeService {
-    pub fn new(config: ComputeNodeConfig) -> Result<Self> {
+impl CompactorService {
+    pub fn new(config: CompactorConfig) -> Result<Self> {
         Ok(Self { config })
     }
 
-    fn compute_node(&self) -> Result<Command> {
+    fn compactor(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("compute-node")))
+            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("compactor")))
         } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
+            Ok(Command::new(Path::new(&prefix_bin).join("compactor")))
         }
     }
 
     /// Apply command args accroding to config
-    pub fn apply_command_args(cmd: &mut Command, config: &ComputeNodeConfig) -> Result<()> {
+    pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--prometheus-listener-addr")
@@ -53,43 +53,15 @@ impl ComputeNodeService {
             .arg("--metrics-level")
             .arg("1");
 
-        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
-        match provide_jaeger.len() {
-            0 => {}
-            1 => {
-                cmd.arg("--enable-jaeger-tracing");
-            }
-            other_size => {
-                return Err(anyhow!(
-                    "{} Jaeger instance found in config, but only 1 is needed",
-                    other_size
-                ))
-            }
-        }
-
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
-
-        let is_shared_backend = match (
-            config.enable_in_memory_kv_state_backend,
-            provide_minio.as_slice(),
-            provide_aws_s3.as_slice(),
-        ) {
-            (true, [], []) => {
-                cmd.arg("--state-store").arg("in-memory");
-                false
-            }
-            (true, _, _) => {
+        match (provide_minio.as_slice(), provide_aws_s3.as_slice()) {
+            ([], []) => {
                 return Err(anyhow!(
-                "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
-            ))
+                    "Compactor is not compatible with in-memory state backend. Need to enable either minio or aws-s3.",
+                ))
             }
-            (false, [], []) => {
-                cmd.arg("--state-store").arg("hummock+memory");
-                false
-            }
-            (false, [minio], []) => {
+            ([minio], []) => {
                 cmd.arg("--state-store").arg(format!(
                     "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
                     hummock_user = minio.hummock_user,
@@ -100,25 +72,19 @@ impl ComputeNodeService {
                 ));
                 true
             }
-            (false, [], [aws_s3]) => {
-                cmd.arg("--state-store").arg(format!(
-                    "hummock+s3://{}", aws_s3.bucket
-                ));
+            ([], [aws_s3]) => {
+                cmd.arg("--state-store")
+                    .arg(format!("hummock+s3://{}", aws_s3.bucket));
                 true
             }
-            (false, other_minio, other_s3) => {
+            (other_minio, other_s3) => {
                 return Err(anyhow!(
                     "{} minio and {} s3 instance found in config, but only 1 is needed",
-                    other_minio.len(), other_s3.len()
+                    other_minio.len(),
+                    other_s3.len()
                 ))
             }
         };
-
-        if provide_compute_node.len() > 1 && !is_shared_backend {
-            return Err(anyhow!(
-                "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
-            ));
-        }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.as_slice() {
@@ -139,25 +105,18 @@ impl ComputeNodeService {
             }
         };
 
-        let provide_compactor = config.provide_compactor.as_ref().unwrap();
-        if is_shared_backend && provide_compactor.is_empty() {
-            return Err(anyhow!(
-                "When minio or aws-s3 is enabled, at least one compactor is required. Consider adding `use: compactor` in risedev config."
-            ));
-        }
-
         Ok(())
     }
 }
 
-impl Task for ComputeNodeService {
-    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+impl Task for CompactorService {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl Write>) -> Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
-        let mut cmd = self.compute_node()?;
+        let mut cmd = self.compactor()?;
 
         cmd.env("RUST_BACKTRACE", "1");
         cmd.arg("--config-path")
@@ -171,7 +130,7 @@ impl Task for ComputeNodeService {
             ctx.pb.set_message("user managed");
             writeln!(
                 &mut ctx.log,
-                "Please use the following parameters to start the compute node:\n{}\n{} {}\n\n",
+                "Please use the following parameters to start the compactor:\n{}\n{} {}\n\n",
                 get_program_env_cmd(&cmd),
                 get_program_name(&cmd),
                 get_program_args(&cmd)

@@ -30,7 +30,6 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
@@ -86,7 +85,7 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
+    let sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
         vec![MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval as u64),
@@ -113,16 +112,6 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
-
-    // A hummock compactor is deployed along with compute node for now.
-    if let Some(hummock) = state_store.as_hummock_state_store() {
-        sub_tasks.push(Compactor::start_compactor(
-            hummock.inner().options().clone(),
-            hummock.inner().hummock_meta_client().clone(),
-            hummock.inner().sstable_store(),
-            state_store_metrics,
-        ));
-    }
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
