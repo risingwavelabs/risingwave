@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::convert::TryInto;
-use std::mem::take;
+use std::marker::PhantomData;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -63,48 +63,15 @@ pub(super) struct EquiJoinParams {
     pub cond: Option<BoxedExpression>,
 }
 
-/// Different states when executing a hash join.
-enum HashJoinState<K> {
-    /// Invalid state
-    Invalid,
-    /// Initial state of hash join.
-    ///
-    /// In this state, the executor [`crate::executor::Executor::open`] build side input, and calls
-    /// [`crate::executor::Executor::next`] of build side input till [`None`] is returned to create
-    /// `BuildTable`.
-    Build(BuildTable),
-    /// First state after finishing build state.
-    ///
-    /// It's different from [`HashJoinState::Probe`] in that we need to
-    /// [`crate::executor::Executor::open`] probe side input.
-    FirstProbe(ProbeTable<K>),
-    /// State for executing join.
-    ///
-    /// In this state, the executor calls [`crate::executor::Executor::open`]  method of probe side
-    /// input, and executes joining with the chunk against build table to create output.
-    Probe(ProbeTable<K>),
-    /// State for executing join remaining.
-    ///
-    /// See [`JoinType::need_join_remaining`]
-    ProbeRemaining(ProbeTable<K>),
-    /// Final state of hash join.
-    Done,
-}
-
-impl<K> Default for HashJoinState<K> {
-    fn default() -> Self {
-        HashJoinState::Invalid
-    }
-}
-
 pub(super) struct HashJoinExecutor2<K> {
     /// Probe side
     left_child: Option<BoxedExecutor2>,
     /// Build side
     right_child: Option<BoxedExecutor2>,
-    state: HashJoinState<K>,
+    params: EquiJoinParams,
     schema: Schema,
     identity: String,
+    _phantom: PhantomData<K>,
 }
 
 impl EquiJoinParams {
@@ -167,17 +134,14 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut right_child_stream = self.right_child.take().unwrap().execute();
-        let mut probe_table: ProbeTable<K>;
-        match take(&mut self.state) {
-            HashJoinState::Build(mut build_table) => {
-                while let Some(chunk) = right_child_stream.next().await {
-                    let chunk = chunk?;
-                    build_table.append_build_chunk(chunk)?;
-                }
-                probe_table = build_table.try_into()?;
-            }
-            _ => unreachable!(),
+        let mut build_table = BuildTable::with_params(self.params);
+
+        while let Some(chunk) = right_child_stream.next().await {
+            let chunk = chunk?;
+            build_table.append_build_chunk(chunk)?;
         }
+        let mut probe_table: ProbeTable<K> = build_table.try_into()?;
+
         let mut state = HashJoinState2::Probe;
         let mut left_child_stream = self.left_child.take().unwrap().execute();
 
@@ -242,7 +206,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
                 }
             }
         }
-        //probe_remaining
+        // probe_remaining
         while state == HashJoinState2::ProbeRemaining {
             let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
                 let output_data_chunk =
@@ -281,9 +245,10 @@ impl<K> HashJoinExecutor2<K> {
         HashJoinExecutor2 {
             left_child: Some(left_child),
             right_child: Some(right_child),
-            state: HashJoinState::Build(BuildTable::with_params(params)),
+            params,
             schema,
             identity,
+            _phantom: PhantomData,
         }
     }
 }
