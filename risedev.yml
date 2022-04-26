@@ -257,6 +257,9 @@ template:
     # Sanity check: should use shared storage if there're multiple compute nodes
     provide-compute-node: "compute-node*"
 
+    # Sanity check: should start at lease one compactor if using shared object store
+    provide-compactor: "compactor*"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 

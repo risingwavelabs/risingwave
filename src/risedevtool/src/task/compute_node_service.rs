@@ -139,6 +139,13 @@ impl ComputeNodeService {
             }
         };
 
+        let provide_compactor = config.provide_compactor.as_ref().unwrap();
+        if is_shared_backend && provide_compactor.is_empty() {
+            return Err(anyhow!(
+                "When minio or aws-s3 is enabled, at least one compactor is required. Consider adding `use: compactor` in risedev config."
+            ));
+        }
+
         Ok(())
     }
 }

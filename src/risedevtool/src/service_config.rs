@@ -30,6 +30,7 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
+    pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
 }
