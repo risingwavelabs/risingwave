@@ -313,10 +313,8 @@ impl BlockBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-    use crate::hummock::BlockIterator;
+    use crate::hummock::{BlockHolder, BlockIterator};
 
     #[test]
     fn test_block_enc_dec() {
@@ -327,8 +325,8 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
-        let mut bi = BlockIterator::new(block);
+        let block = Box::new(Block::decode(buf).unwrap());
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
         assert!(bi.is_valid());
@@ -366,8 +364,8 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(Block::decode(buf).unwrap());
-        let mut bi = BlockIterator::new(block);
+        let block = Box::new(Block::decode(buf).unwrap());
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
         assert!(bi.is_valid());

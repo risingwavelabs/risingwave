@@ -19,7 +19,6 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::*;
-use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::StorageValue;
@@ -57,8 +56,7 @@ macro_rules! assert_count_reverse_range_scan {
     }};
 }
 
-#[tokio::test]
-async fn test_snapshot() {
+async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     let remote_dir = "hummock_001";
     let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let sstable_store = Arc::new(SstableStore::new(
@@ -68,7 +66,7 @@ async fn test_snapshot() {
         64 << 20,
         64 << 20,
     ));
-    let vm = Arc::new(LocalVersionManager::new());
+    let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -76,16 +74,15 @@ async fn test_snapshot() {
         worker_node.id,
     ));
 
-    let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        vm.clone(),
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+    let vm = hummock_storage.local_version_manager().clone();
 
     let epoch1: u64 = 1;
     hummock_storage
@@ -98,9 +95,13 @@ async fn test_snapshot() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
-    mock_hummock_meta_client.commit_epoch(epoch1).await.unwrap();
-    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+    if enable_sync {
+        hummock_storage.sync(Some(epoch1)).await.unwrap();
+        if enable_commit {
+            mock_hummock_meta_client.commit_epoch(epoch1).await.unwrap();
+            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+        }
+    }
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
     let epoch2 = epoch1 + 1;
@@ -115,9 +116,13 @@ async fn test_snapshot() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch2)).await.unwrap();
-    mock_hummock_meta_client.commit_epoch(epoch2).await.unwrap();
-    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+    if enable_sync {
+        hummock_storage.sync(Some(epoch2)).await.unwrap();
+        if enable_commit {
+            mock_hummock_meta_client.commit_epoch(epoch2).await.unwrap();
+            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+        }
+    }
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
@@ -133,16 +138,19 @@ async fn test_snapshot() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch3)).await.unwrap();
-    mock_hummock_meta_client.commit_epoch(epoch3).await.unwrap();
-    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+    if enable_sync {
+        hummock_storage.sync(Some(epoch3)).await.unwrap();
+        if enable_commit {
+            mock_hummock_meta_client.commit_epoch(epoch3).await.unwrap();
+            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+        }
+    }
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 }
 
-#[tokio::test]
-async fn test_snapshot_range_scan() {
+async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let remote_dir = "hummock_001";
     let sstable_store = Arc::new(SstableStore::new(
@@ -152,23 +160,22 @@ async fn test_snapshot_range_scan() {
         64 << 20,
         64 << 20,
     ));
-    let vm = Arc::new(LocalVersionManager::new());
+    let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        vm.clone(),
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+    let vm = hummock_storage.local_version_manager();
 
     let epoch: u64 = 1;
 
@@ -184,9 +191,13 @@ async fn test_snapshot_range_scan() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch)).await.unwrap();
-    mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
-    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+    if enable_sync {
+        hummock_storage.sync(Some(epoch)).await.unwrap();
+        if enable_commit {
+            mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
+            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+        }
+    }
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx)).to_vec()
@@ -201,8 +212,7 @@ async fn test_snapshot_range_scan() {
     assert_count_range_scan!(hummock_storage, .., 4, epoch);
 }
 
-#[tokio::test]
-async fn test_snapshot_reverse_range_scan() {
+async fn test_snapshot_reverse_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let remote_dir = "/test";
     let sstable_store = Arc::new(SstableStore::new(
@@ -212,23 +222,22 @@ async fn test_snapshot_reverse_range_scan() {
         64 << 20,
         64 << 20,
     ));
-    let vm = Arc::new(LocalVersionManager::new());
+    let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options.clone(),
         sstable_store.clone(),
-        vm.clone(),
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+    let vm = hummock_storage.local_version_manager();
 
     let epoch = 1;
     hummock_storage
@@ -245,9 +254,13 @@ async fn test_snapshot_reverse_range_scan() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch)).await.unwrap();
-    mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
-    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+    if enable_sync {
+        hummock_storage.sync(Some(epoch)).await.unwrap();
+        if enable_commit {
+            mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
+            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+        }
+    }
     hummock_storage
         .ingest_batch(
             vec![
@@ -260,13 +273,16 @@ async fn test_snapshot_reverse_range_scan() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch + 1)).await.unwrap();
-    mock_hummock_meta_client
-        .commit_epoch(epoch + 1)
-        .await
-        .unwrap();
-    vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
-
+    if enable_sync {
+        hummock_storage.sync(Some(epoch + 1)).await.unwrap();
+        if enable_commit {
+            mock_hummock_meta_client
+                .commit_epoch(epoch + 1)
+                .await
+                .unwrap();
+            vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
+        }
+    }
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx)).to_vec()
@@ -281,4 +297,49 @@ async fn test_snapshot_reverse_range_scan() {
     assert_count_reverse_range_scan!(hummock_storage, .., 6, epoch);
     assert_count_reverse_range_scan!(hummock_storage, .., 8, epoch + 1);
     assert_count_reverse_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
+}
+
+#[tokio::test]
+async fn test_snapshot() {
+    test_snapshot_inner(false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_with_sync() {
+    test_snapshot_inner(true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_with_commit() {
+    test_snapshot_inner(true, true).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan() {
+    test_snapshot_range_scan_inner(false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_sync() {
+    test_snapshot_range_scan_inner(true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_commit() {
+    test_snapshot_range_scan_inner(true, true).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_reverse_range_scan() {
+    test_snapshot_reverse_range_scan_inner(false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_reverse_range_scan_with_sync() {
+    test_snapshot_reverse_range_scan_inner(true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_reverse_range_scan_with_commit() {
+    test_snapshot_reverse_range_scan_inner(true, true).await;
 }

@@ -15,7 +15,8 @@
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
-use risingwave_pb::hummock::Level;
+use risingwave_hummock_sdk::key::user_key;
+use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::{HummockError, HummockResult};
 
@@ -73,4 +74,26 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
         }
     }
     Ok(())
+}
+
+/// Prune SSTs that does not overlap with a specifc key range.
+/// Returns the sst ids after pruning
+pub fn prune_ssts<'a, R, B>(
+    ssts: impl Iterator<Item = &'a SstableInfo>,
+    key_range: &R,
+    reversed: bool,
+) -> Vec<&'a SstableInfo>
+where
+    R: RangeBounds<B> + Send,
+    B: AsRef<[u8]> + Send,
+{
+    let result_sst_ids: Vec<&'a SstableInfo> = ssts
+        .filter(|info| {
+            let table_range = info.key_range.as_ref().unwrap();
+            let table_start = user_key(table_range.left.as_slice());
+            let table_end = user_key(table_range.right.as_slice());
+            range_overlap(key_range, table_start, table_end, reversed)
+        })
+        .collect();
+    result_sst_ids
 }

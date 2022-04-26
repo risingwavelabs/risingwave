@@ -47,7 +47,7 @@ impl Planner {
             base_table
                 .table_indexes
                 .iter()
-                .map(|x| Rc::new(x.table_desc()))
+                .map(|x| (x.name.clone(), Rc::new(x.table_desc())))
                 .collect(),
             base_table.table_catalog.distribution_keys().to_vec(),
             self.ctx(),

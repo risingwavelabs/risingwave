@@ -14,12 +14,12 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::HashJoinNode;
+use risingwave_pb::stream_plan::DeltaIndexJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
+use crate::catalog::TableId;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 
@@ -33,10 +33,20 @@ pub struct StreamDeltaJoin {
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
+
+    /// Table id of the left side
+    left_table_id: TableId,
+    /// Table id of the right side
+    right_table_id: TableId,
 }
 
 impl StreamDeltaJoin {
-    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(
+        logical: LogicalJoin,
+        eq_join_predicate: EqJoinPredicate,
+        left_table_id: TableId,
+        right_table_id: TableId,
+    ) -> Self {
         let ctx = logical.base.ctx.clone();
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match logical.join_type() {
@@ -66,6 +76,8 @@ impl StreamDeltaJoin {
             base,
             logical,
             eq_join_predicate,
+            left_table_id,
+            right_table_id,
         }
     }
 
@@ -99,6 +111,8 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
         Self::new(
             self.logical.clone_with_left_right(left, right),
             self.eq_join_predicate.clone(),
+            self.left_table_id,
+            self.right_table_id,
         )
     }
 }
@@ -109,7 +123,7 @@ impl ToStreamProst for StreamDeltaJoin {
     fn to_stream_prost_body(&self) -> Node {
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
-        Node::HashJoinNode(HashJoinNode {
+        Node::DeltaIndexJoin(DeltaIndexJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: self
                 .eq_join_predicate
@@ -128,15 +142,8 @@ impl ToStreamProst for StreamDeltaJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            distribution_keys: self
-                .base
-                .dist
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as i32)
-                .collect_vec(),
-            is_delta_join: true,
-            ..Default::default()
+            left_table_id: self.left_table_id.table_id(),
+            right_table_id: self.right_table_id.table_id(),
         })
     }
 }

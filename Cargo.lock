@@ -568,9 +568,9 @@ dependencies = [
 
 [[package]]
 name = "axum"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47594e438a243791dba58124b6669561f5baa14cb12046641d8008bf035e5a25"
+checksum = "f523b4e98ba6897ae90994bc18423d9877c54f9047b06a00ddc8122a957b1c70"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -599,9 +599,9 @@ dependencies = [
 
 [[package]]
 name = "axum-core"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a671c9ae99531afdd5d3ee8340b8da547779430689947144c140fc74a740244"
+checksum = "d3ddbd16eabff8b45f21b98671fddcc93daaa7ac4c84f8473693437226040de5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -810,9 +810,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.9"
+version = "3.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aad2534fad53df1cc12519c5cda696dd3e20e6118a027e24054aea14a0bdcbe"
+checksum = "3124f3f75ce09e22d1410043e1e24f2ecc44fad3afe4f08408f1f7663d68da2b"
 dependencies = [
  "atty",
  "bitflags",
@@ -3205,7 +3205,7 @@ version = "0.1.5"
 dependencies = [
  "anyhow",
  "bytes",
- "clap 3.1.9",
+ "clap 3.1.10",
  "console",
  "dialoguer",
  "enum-iterator",
@@ -3278,7 +3278,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "bytesize",
- "clap 3.1.9",
+ "clap 3.1.10",
  "env_logger",
  "futures",
  "itertools",
@@ -3302,8 +3302,9 @@ dependencies = [
 name = "risingwave_cmd"
 version = "0.1.5"
 dependencies = [
- "clap 3.1.9",
+ "clap 3.1.10",
  "log 0.4.16",
+ "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
@@ -3320,9 +3321,10 @@ name = "risingwave_cmd_all"
 version = "0.1.5"
 dependencies = [
  "anyhow",
- "clap 3.1.9",
+ "clap 3.1.10",
  "log 0.4.16",
  "risedev",
+ "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
@@ -3373,6 +3375,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_compactor"
+version = "0.1.0"
+dependencies = [
+ "clap 3.1.10",
+ "prometheus",
+ "risingwave_common",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "serde",
+ "tokio",
+ "tokio-retry",
+ "tokio-stream",
+ "toml",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "risingwave_compute"
 version = "0.1.5"
 dependencies = [
@@ -3382,7 +3403,7 @@ dependencies = [
  "byteorder 1.4.3",
  "bytes",
  "chrono",
- "clap 3.1.9",
+ "clap 3.1.10",
  "crc32fast",
  "dyn-clone",
  "either",
@@ -3487,7 +3508,7 @@ version = "0.1.5"
 dependencies = [
  "anyhow",
  "bytes",
- "clap 3.1.9",
+ "clap 3.1.10",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -3539,7 +3560,7 @@ dependencies = [
  "async-trait",
  "byteorder 1.4.3",
  "bytes",
- "clap 3.1.9",
+ "clap 3.1.10",
  "downcast-rs",
  "dyn-clone",
  "enum-as-inner",
@@ -3635,7 +3656,7 @@ dependencies = [
  "byteorder 1.4.3",
  "bytes",
  "chrono",
- "clap 3.1.9",
+ "clap 3.1.10",
  "crc32fast",
  "derivative",
  "either",
@@ -3699,7 +3720,7 @@ name = "risingwave_regress_test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.9",
+ "clap 3.1.10",
  "env_logger",
  "log 0.4.16",
  "path-absolutize",
@@ -5133,9 +5154,9 @@ checksum = "d19538ccc21819d01deaf88d6a17eae6596a12e9aafdbb97916fb49896d89de9"
 
 [[package]]
 name = "wiremock"
-version = "0.5.12"
+version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08965ad3b91480b5bebbd4a7987eb8607ed8ad5afad9b39c70a9f931b8b19250"
+checksum = "1b12f508bdca434a55d43614d26f02e6b3e98ebeecfbc5a1614e0a0c8bf3e315"
 dependencies = [
  "assert-json-diff",
  "async-trait",

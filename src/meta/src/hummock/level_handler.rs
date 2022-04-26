@@ -35,6 +35,21 @@ impl From<&SstableInfo> for SSTableInfo {
     }
 }
 
+impl From<SSTableInfo> for SstableInfo {
+    fn from(info: SSTableInfo) -> Self {
+        SstableInfo {
+            key_range: Some(info.key_range.into()),
+            id: info.table_id,
+        }
+    }
+}
+
+impl From<&SSTableInfo> for SstableInfo {
+    fn from(info: &SSTableInfo) -> Self {
+        SstableInfo::from(info.clone())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LevelHandler {
     /// * `HashMap<HummockSSTableId, u64>` - compaction task id of a SST.
