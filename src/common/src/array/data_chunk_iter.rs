@@ -175,10 +175,11 @@ impl<'a> Iterator for RowRefIter<'a> {
     type Item = DatumRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: It's safe to use value_at_unchecked here.
-        self.columns
-            .next()
-            .map(|col| col.array_ref().value_at(self.row_idx))
+        unsafe {
+            self.columns
+                .next()
+                .map(|col| col.array_ref().value_at_unchecked(self.row_idx))
+        }
     }
 }
 

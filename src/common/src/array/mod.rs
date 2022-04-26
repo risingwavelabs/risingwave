@@ -180,7 +180,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     /// # Safety
     ///
-    /// The unchecked version of is_null, ignore index out of bound check. It is
+    /// The unchecked version of `is_null`, ignore index out of bound check. It is
     /// the caller's responsibility to ensure the index is valid.
     unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
         !self.null_bitmap().is_set_unchecked(idx)

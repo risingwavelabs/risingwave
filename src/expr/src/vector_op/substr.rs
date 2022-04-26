@@ -87,6 +87,8 @@ mod tests {
             let array = guard.into_inner().finish()?;
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
+            let v = unsafe { array.value_at_unchecked(0).unwrap() };
+            assert_eq!(v, expected);
         }
         Ok(())
     }

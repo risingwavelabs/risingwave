@@ -326,6 +326,7 @@ mod tests {
         let array = builder.finish()?;
         assert_eq!(array.len(), 1);
         assert_eq!(array.value_at(0), Some("ranran"));
+        assert_eq!(unsafe { array.value_at_unchecked(0) }, Some("ranran"));
 
         Ok(())
     }
