@@ -88,20 +88,6 @@ impl ColumnDesc {
         }
     }
 
-    pub fn with_name(
-        column_id: ColumnId,
-        data_type: DataType,
-        name: impl Into<String>,
-    ) -> ColumnDesc {
-        ColumnDesc {
-            data_type,
-            column_id,
-            name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
-        }
-    }
-
     /// Convert to proto
     pub fn to_protobuf(&self) -> ProstColumnDesc {
         ProstColumnDesc {
@@ -121,20 +107,14 @@ impl ColumnDesc {
     /// Flatten a nested column to a list of columns (including itself).
     /// If the type is atomic, it returns simply itself.
     /// If the type has multiple nesting levels, it traverses for the tree-like schema,
-    /// and returns every children node.
+    /// and returns every tree node.
     pub fn flatten(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
-        descs.append(
-            &mut self
-                .field_descs
-                .iter()
-                .flat_map(|d| {
-                    let mut desc = d.clone();
-                    desc.name = self.name.clone() + "." + &desc.name;
-                    desc.flatten()
-                })
-                .collect_vec(),
-        );
+        descs.extend(self.field_descs.iter().flat_map(|d| {
+            let mut desc = d.clone();
+            desc.name = self.name.clone() + "." + &desc.name;
+            desc.flatten()
+        }));
         descs
     }
 

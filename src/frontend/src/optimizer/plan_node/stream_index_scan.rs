@@ -116,7 +116,7 @@ impl StreamIndexScan {
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
-            fields: vec![], // TODO: fill this later
+            fields: self.schema().to_prost(),
             input: vec![
                 // The merge node should be empty
                 ProstStreamPlan {

@@ -18,13 +18,13 @@ use risingwave_sqlparser::ast::Statement;
 pub mod bind_context;
 mod delete;
 pub(crate) mod expr;
-mod field;
 mod insert;
 mod query;
 mod relation;
 mod select;
 mod set_expr;
 mod statement;
+mod struct_field;
 mod values;
 
 pub use bind_context::BindContext;

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
 mod ensure_stop_service;
@@ -44,6 +45,7 @@ use isahc::prelude::*;
 use isahc::Request;
 use tempfile::TempDir;
 
+pub use self::compactor_service::*;
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
 pub use self::ensure_stop_service::*;

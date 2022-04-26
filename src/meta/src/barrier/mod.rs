@@ -407,12 +407,7 @@ where
             .await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
-}
 
-impl<S> GlobalBarrierManager<S>
-where
-    S: MetaStore,
-{
     async fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
         self.scheduled_barriers
             .push((command, once(notifier).collect()))

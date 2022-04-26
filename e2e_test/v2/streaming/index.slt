@@ -35,6 +35,34 @@ select v4, v1, v3, v5 from iii_index;
 4 3 3 3
 5 2 2 2
 
+# create MV using index
+
+# statement ok
+# create index iii_index_1 on iii_t1(v1);
+
+# statement ok
+# create index iii_index_2 on iii_t2(v3);
+
+# statement ok
+# create materialized view iii_mv2 as select * from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
+
+# query IIII rowsort
+# select v1, v2, v3, v4 from iii_mv2;
+# ----
+# 2 0 2 5
+# 3 0 3 4
+# 0 0 0 3
+# 1 0 1 2
+
+# statement ok
+# drop materialized view iii_mv2
+
+# statement ok
+# drop materialized view iii_index_2
+
+# statement ok
+# drop materialized view iii_index_1
+
 # TODO: support drop index
 
 statement ok
