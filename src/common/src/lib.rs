@@ -49,3 +49,7 @@ pub mod hash;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;
+
+pub mod test_prelude {
+    pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
+}
