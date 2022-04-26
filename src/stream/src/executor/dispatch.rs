@@ -1038,7 +1038,7 @@ mod tests {
         let mut updates1: HashMap<(u32, u64), Vec<ActorInfo>> = HashMap::new();
 
         updates1.insert(
-            (actor_id, 0),
+            (actor_id, dispatcher_id),
             vec![
                 helper_make_local_actor(234),
                 helper_make_local_actor(235),
