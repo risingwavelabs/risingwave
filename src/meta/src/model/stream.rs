@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
-use super::{ActorId, DispatcherId, FragmentId};
+use super::{ActorId, FragmentId};
 use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::manager::SourceId;
 use crate::model::MetadataModel;
@@ -150,18 +150,6 @@ impl TableFragments {
     /// Returns sink actor ids.
     pub fn sink_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, FragmentType::Sink)
-    }
-
-    pub fn dispatcher_ids(&self) -> HashMap<ActorId, Vec<DispatcherId>> {
-        let mut m: HashMap<ActorId, Vec<DispatcherId>> = HashMap::new();
-        for fragment in self.fragments.values() {
-            for actor in &fragment.actors {
-                m.entry(actor.actor_id)
-                    .or_default()
-                    .extend(actor.dispatcher.iter().map(|d| d.dispatcher_id));
-            }
-        }
-        m
     }
 
     /// Returns distribution keys.
