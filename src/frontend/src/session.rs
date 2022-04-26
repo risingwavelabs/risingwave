@@ -392,38 +392,6 @@ impl Session for SessionImpl {
     }
 }
 
-// TODO: with a good MockMeta and then we can open the tests.
-// #[cfg(test)]
-// mod tests {
-
-//     #[tokio::test]
-//     async fn test_run_statement() {
-//         use std::ffi::OsString;
-
-//         use clap::StructOpt;
-//         use risingwave_meta::test_utils::LocalMeta;
-
-//         use super::*;
-
-//         let meta = LocalMeta::start(12008).await;
-//         let args: [OsString; 0] = []; // No argument.
-//         let mut opts = FrontendOpts::parse_from(args);
-//         opts.meta_addr = format!("http://{}", meta.meta_addr());
-//         let mgr = SessionManagerImpl::new(&opts).await.unwrap();
-//         // Check default database is created.
-//         assert!(mgr
-//             .env
-//             .catalog_manager
-//             .get_database(DEFAULT_DATABASE_NAME)
-//             .is_some());
-//         let session = mgr.connect();
-//         assert!(session.run_statement("select * from t").await.is_err());
-
-//         mgr.terminate();
-//         meta.stop().await;
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use assert_impl::assert_impl;

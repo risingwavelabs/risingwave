@@ -81,10 +81,8 @@ where
                     .await
                     .map_err(|e| e.to_grpc_status())?;
 
-                let nodes = self
-                    .cluster_manager
-                    .list_worker_node(WorkerType::ComputeNode, Some(Running))
-                    .await;
+                let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+                let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
                 // Send the snapshot on subscription. After that we will send only updates.
                 let meta_snapshot = MetaSnapshot {
