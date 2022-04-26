@@ -60,3 +60,6 @@ select * from t order by v2 desc, v1 limit 2
 ----
 1 4 2
 3 4 4
+
+statement ok
+drop table t;
