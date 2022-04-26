@@ -42,7 +42,7 @@ pub use chrono_array::{
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
-pub use data_chunk::{DataChunk, DataChunkRef};
+pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
@@ -51,7 +51,7 @@ pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
-pub use stream_chunk::{Op, StreamChunk};
+pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 

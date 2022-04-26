@@ -98,6 +98,25 @@ async fn main() {
         );
     }
 
+    // frontend node configuration
+    for fn_name in ["compactor", "compactor-node", "compactor_node"] {
+        fns.insert(
+            fn_name,
+            Box::new(|args: Vec<String>| {
+                Box::new(async move {
+                    eprintln!("launching compactor node");
+
+                    let opts = risingwave_compactor::CompactorOpts::parse_from(args);
+
+                    risingwave_logging::oneshot_common();
+                    risingwave_logging::init_risingwave_logger(false, false);
+
+                    risingwave_compactor::start(opts).await
+                })
+            }),
+        );
+    }
+
     // risectl
     fns.insert(
         "risectl",

@@ -270,7 +270,7 @@ impl StreamFragmenter {
             let input = match child_node.get_node()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                Node::HashAggNode(_) | Node::HashJoinNode(_) => {
+                Node::HashAggNode(_) | Node::HashJoinNode(_) | Node::DeltaIndexJoin(_) => {
                     // We didn't make `fields` available on Java frontend yet, so we check if schema
                     // is available (by `child_node.fields.is_empty()`) before deciding to do the
                     // rewrite.
@@ -387,6 +387,16 @@ impl StreamFragmenter {
                         "only inner join without non-equal condition is supported for delta joins"
                     );
                 }
+            }
+        }
+
+        if let Node::DeltaIndexJoin(delta_index_join) = stream_node.node.as_mut().unwrap() {
+            if delta_index_join.get_join_type()? == JoinType::Inner
+                && delta_index_join.condition.is_none()
+            {
+                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
+            } else {
+                panic!("only inner join without non-equal condition is supported for delta joins");
             }
         }
 

@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -45,14 +45,14 @@ impl TopNHeap {
         }
     }
 
-    pub fn fit(&mut self, chunk: DataChunkRef) {
+    pub fn fit(&mut self, chunk: DataChunk) {
         DataChunk::rechunk(&[chunk], 1)
             .unwrap()
             .into_iter()
             .for_each(|c| {
                 let elem = HeapElem {
                     order_pairs: self.order_pairs.clone(),
-                    chunk: Arc::new(c),
+                    chunk: c,
                     chunk_idx: 0usize, // useless
                     elem_idx: 0usize,
                     encoded_chunk: None,
@@ -154,12 +154,11 @@ impl TopNExecutor2 {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            self.top_n_heap.fit(Arc::new(data_chunk));
+            self.top_n_heap.fit(data_chunk);
         }
 
         if let Some(data_chunk) = self.top_n_heap.dump() {
-            let data_chunk = [Arc::new(data_chunk)];
-            let batch_chunks = DataChunk::rechunk(&data_chunk, DEFAULT_CHUNK_BUFFER_SIZE)?;
+            let batch_chunks = DataChunk::rechunk(&[data_chunk], DEFAULT_CHUNK_BUFFER_SIZE)?;
             for ret_chunk in batch_chunks {
                 yield ret_chunk
             }

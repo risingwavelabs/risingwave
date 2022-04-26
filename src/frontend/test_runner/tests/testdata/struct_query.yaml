@@ -299,7 +299,7 @@
 - sql: |
     create materialized view t as select * from s;
     select (country).address.* from t;
-  binder_error: 'Bind error: The field "address" is not the nested column'
+  binder_error: 'Bind error: The field "address" is not a nested column'
   create_source:
     row_format: protobuf
     name: s
