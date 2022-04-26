@@ -94,7 +94,6 @@ impl CompactorManager {
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         let mut guard = self.inner.write();
         if guard.compactors.is_empty() {
-            tracing::warn!("No compactor is available.");
             return None;
         }
         let compactor_index = guard.next_compactor % guard.compactors.len();
@@ -103,13 +102,13 @@ impl CompactorManager {
         Some(compactor)
     }
 
-    /// A new compactor is registered.
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
     ) -> Receiver<Result<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         let mut guard = self.inner.write();
+        // TODO: reject invalid context.
         guard.compactors.retain(|c| c.context_id != context_id);
         guard.compactors.push(Arc::new(Compactor {
             context_id,

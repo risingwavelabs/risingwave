@@ -27,10 +27,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource, Executor,
-    ExecutorBuilder,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor2::{CreateSource, DefaultCreateSource};
 use crate::task::{BatchEnvironment, TaskId};
 
 pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
