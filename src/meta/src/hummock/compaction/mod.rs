@@ -20,12 +20,12 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
 };
 
-use crate::hummock::compaction::tier_compaction_picker::TierCompactPicker;
+use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
@@ -134,7 +134,7 @@ impl CompactStatus {
 
     fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
         // only support compact L0 to L1 or L0 to L0
-        let mut picker = TierCompactPicker::new(self.next_compact_task_id);
+        let mut picker = TierCompactionPicker::new(self.next_compact_task_id);
         picker.pick_compaction(levels, &mut self.level_handlers)
     }
 
@@ -184,15 +184,9 @@ impl CompactStatus {
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
                 .sort_by(|sst1, sst2| {
-                    let a = sst1.key_range.as_ref().unwrap();
-                    let b = sst2.key_range.as_ref().unwrap();
-                    match (a.inf, b.inf) {
-                        (false, false) => VersionedComparator::compare_key(&a.left, &b.left)
-                            .then_with(|| VersionedComparator::compare_key(&a.right, &b.right)),
-                        (false, true) => std::cmp::Ordering::Less,
-                        (true, false) => std::cmp::Ordering::Greater,
-                        (true, true) => std::cmp::Ordering::Equal,
-                    }
+                    let a = KeyRange::from(sst1.key_range.as_ref().unwrap());
+                    let b = KeyRange::from(sst2.key_range.as_ref().unwrap());
+                    a.cmp(&b)
                 });
         }
         new_version

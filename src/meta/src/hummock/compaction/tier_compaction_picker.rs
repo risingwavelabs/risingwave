@@ -26,16 +26,16 @@ const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
 const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 
 #[derive(Debug)]
-pub struct TierCompactPicker {
+pub struct TierCompactionPicker {
     compact_task_id: u64,
     max_compaction_bytes: u64,
     level0_max_file_number: usize,
     level0_trigger_number: usize,
 }
 
-impl TierCompactPicker {
-    pub fn new(compact_task_id: u64) -> TierCompactPicker {
-        TierCompactPicker {
+impl TierCompactionPicker {
+    pub fn new(compact_task_id: u64) -> TierCompactionPicker {
+        TierCompactionPicker {
             compact_task_id,
             // TODO: set it by cluster configure or vertical group configure.
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
@@ -104,7 +104,7 @@ impl TierCompactPicker {
         let mut splits = Vec::with_capacity(overlap_end - overlap_begin);
         splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
         posterior.add_pending_task(next_task_id, &target_level_inputs);
-        let _ = target_level_inputs[1..].iter().map(|table| {
+        for table in &target_level_inputs[1..] {
             let key_before_last: Bytes = FullKey::from_user_key_slice(
                 user_key(&table.key_range.as_ref().unwrap().left),
                 HummockEpoch::MAX,
@@ -113,7 +113,7 @@ impl TierCompactPicker {
             .into();
             splits.last_mut().unwrap().right = key_before_last.clone();
             splits.push(KeyRange::new(key_before_last, Bytes::new()));
-        });
+        }
 
         Some(SearchResult {
             select_level: Level {
