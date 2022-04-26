@@ -16,7 +16,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -49,7 +49,7 @@ jobs:
 
       - name: Run rust test with coverage
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
+          cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast
 
       - uses: codecov/codecov-action@v2
         with:
