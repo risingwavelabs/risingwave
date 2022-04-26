@@ -99,8 +99,12 @@ impl<'a> RowRef<'a> {
 
     pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
-        // TODO: It's safe to use value_at_unchecked here.
-        self.chunk.columns()[pos].array_ref().value_at(self.idx)
+        // the above check ensures that the index is valid.
+        unsafe {
+            self.chunk.columns()[pos]
+                .array_ref()
+                .value_at_unchecked(self.idx)
+        }
     }
 
     pub fn size(&self) -> usize {
