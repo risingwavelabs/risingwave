@@ -97,7 +97,7 @@ impl LocalFrontend {
             Ok(Planner::new(OptimizerContext::new(session).into())
                 .plan(bound)
                 .unwrap()
-                .gen_dist_batch_query_plan())
+                .gen_batch_query_plan())
         } else {
             unreachable!()
         }
