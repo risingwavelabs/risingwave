@@ -13,6 +13,8 @@
 // limitations under the License.
 
 mod compaction;
+mod compaction_group;
+mod compaction_scheduler;
 mod compactor_manager;
 mod hummock_manager;
 #[cfg(test)]
@@ -25,12 +27,13 @@ mod model;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod vacuum;
+
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 pub use hummock_manager::*;
-use itertools::Itertools;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
@@ -38,22 +41,25 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
+use crate::hummock::compaction_group::CompactionGroupId;
+use crate::hummock::compaction_scheduler::CompactionSchedulerRef;
 use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
 
 /// Start hummock's asynchronous tasks.
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: CompactorManagerRef,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     notification_manager: NotificationManagerRef,
+    compaction_scheduler: CompactionSchedulerRef<S>,
 ) -> Vec<(JoinHandle<()>, UnboundedSender<()>)>
 where
     S: MetaStore,
 {
     vec![
-        start_compaction_trigger(hummock_manager.clone(), compactor_manager.clone()),
-        VacuumTrigger::start_vacuum_trigger(vacuum_trigger),
+        start_compaction_scheduler(compaction_scheduler),
+        start_vacuum_scheduler(vacuum_trigger),
         subscribe_cluster_membership_change(
             hummock_manager,
             compactor_manager,
@@ -63,7 +69,7 @@ where
     ]
 }
 
-/// Start a task to handle cluster membership change.
+/// Starts a task to handle cluster membership change.
 pub async fn subscribe_cluster_membership_change<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,
@@ -77,141 +83,98 @@ where
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         loop {
-            tokio::select! {
+            let worker_node = tokio::select! {
                 notification = rx.recv() => {
                     match notification {
                         None => {
                             return;
                         }
-                        Some(LocalNotification::WorkerDeletion(worker_node)) => {
-                            let retry_strategy = ExponentialBackoff::from_millis(10).max_delay(Duration::from_secs(60)).map(jitter);
-                            tokio_retry::Retry::spawn(retry_strategy, || async {
-                                if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
-                                    tracing::warn!("Failed to release_contexts {}. Will retry.", err);
-                                    return Err(err);
-                                }
-                                Ok(())
-                            }).await.expect("Should retry until release_contexts succeeds");
-                            compactor_manager.remove_compactor(worker_node.id);
-                        }
+                        Some(LocalNotification::WorkerDeletion(worker_node)) => worker_node
                     }
                 }
                 _ = shutdown_rx.recv() => {
                     return;
                 }
-            }
+            };
+            compactor_manager.remove_compactor(worker_node.id);
+            let retry_strategy = ExponentialBackoff::from_millis(10)
+                .max_delay(Duration::from_secs(60))
+                .map(jitter);
+            tokio_retry::Retry::spawn(retry_strategy, || async {
+                if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
+                    tracing::warn!("Failed to release_contexts {}. Will retry.", err);
+                    return Err(err);
+                }
+                Ok(())
+            })
+            .await
+            .expect("Should retry until release_contexts succeeds");
         }
     });
     (join_handle, shutdown_tx)
 }
 
-const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
-/// Starts a worker to conditionally trigger compaction.
-pub fn start_compaction_trigger<S>(
-    hummock_manager: HummockManagerRef<S>,
-    compactor_manager: Arc<CompactorManager>,
+/// Starts a task to accept compaction request.
+fn start_compaction_scheduler<S>(
+    compaction_scheduler: CompactionSchedulerRef<S>,
+) -> (JoinHandle<()>, UnboundedSender<()>)
+where
+    S: MetaStore,
+{
+    // TODO: remove this periodic trigger after #2121
+    let request_sender = compaction_scheduler.request_sender();
+    tokio::spawn(async move {
+        let mut min_interval = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            min_interval.tick().await;
+            if request_sender.send(CompactionGroupId::new(0)).is_err() {
+                tracing::info!("Stop periodic compaction trigger");
+                return;
+            }
+        }
+    });
+
+    // Start compaction scheduler
+    let shutdown_sender = compaction_scheduler.shutdown_sender();
+    let join_handle = tokio::spawn(async move {
+        compaction_scheduler.start().await;
+    });
+
+    (join_handle, shutdown_sender)
+}
+
+/// Vacuum is triggered at this rate.
+const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(30);
+/// Orphan SST will be deleted after this interval.
+const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
+/// Starts a task to periodically vacuum hummock.
+pub fn start_vacuum_scheduler<S>(
+    vacuum: Arc<VacuumTrigger<S>>,
 ) -> (JoinHandle<()>, UnboundedSender<()>)
 where
     S: MetaStore,
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
-        let mut min_interval = tokio::time::interval(COMPACT_TRIGGER_INTERVAL);
+        let mut min_trigger_interval = tokio::time::interval(VACUUM_TRIGGER_INTERVAL);
         loop {
             tokio::select! {
                 // Wait for interval
-                _ = min_interval.tick() => {},
-                // Shutdown compactor
+                _ = min_trigger_interval.tick() => {},
+                // Shutdown vacuum
                 _ = shutdown_rx.recv() => {
-                    tracing::info!("Compaction trigger is shutting down");
+                    tracing::info!("Vacuum is shutting down");
                     return;
                 }
             }
-
-            // 1. Pick a compactor.
-            let compactor = match compactor_manager.next_compactor() {
-                None => {
-                    tracing::warn!("No compactor is available.");
-                    continue;
-                }
-                Some(compactor) => compactor,
-            };
-
-            // 2. Get a compact task and assign to the compactor.
-            let compact_task = match hummock_manager
-                .get_compact_task(compactor.context_id())
-                .await
-            {
-                Ok(Some(compact_task)) => compact_task,
-                Ok(None) => {
-                    // No compact task available.
-                    continue;
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        "Failed to get compact task for compactor {}. {}",
-                        compactor.context_id(),
-                        err
-                    );
-                    // TODO: remove compactor if context is stale
-                    continue;
-                }
-            };
-
-            // 3. Send the compact task to the compactor.
-            match compactor.send_task(Some(compact_task.clone()), None).await {
-                Ok(_) => {
-                    let input_ssts = compact_task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|v| {
-                            v.level
-                                .as_ref()
-                                .unwrap()
-                                .table_infos
-                                .iter()
-                                .map(|sst| sst.id)
-                                .collect_vec()
-                        })
-                        .collect_vec();
-                    tracing::debug!(
-                        "Try to compact SSTs {:?} in worker {}.",
-                        input_ssts,
-                        compactor.context_id()
-                    );
-                }
-                Err(err) => {
-                    tracing::warn!("Failed to send compaction task. {}", err);
-                    compactor_manager.remove_compactor(compactor.context_id());
-                    // We don't need to explicitly cancel the compact task here.
-                    // Either the compactor will reestablish the stream and fetch this unfinished
-                    // compact task, or the compactor will lose connection and
-                    // its assigned compact task will be cancelled.
-                    // TODO: Currently the reestablished compactor won't retrieve the on-going
-                    // compact task until it is picked by next_compactor. This can leave the compact
-                    // task remain unfinished for some time.
-                }
+            if let Err(err) = vacuum.vacuum_version_metadata().await {
+                tracing::warn!("Vacuum tracked data error {}", err);
+            }
+            // vacuum_orphan_data can be invoked less frequently.
+            if let Err(err) = vacuum.vacuum_sst_data(ORPHAN_SST_RETENTION_INTERVAL).await {
+                tracing::warn!("Vacuum orphan data error {}", err);
             }
         }
     });
-
     (join_handle, shutdown_tx)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use crate::hummock::test_utils::setup_compute_env;
-    use crate::hummock::{start_compaction_trigger, CompactorManager};
-
-    #[tokio::test]
-    async fn test_shutdown_compaction_trigger() {
-        let (_, hummock_manager, _, _) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::new());
-        let (join_handle, shutdown_sender) =
-            start_compaction_trigger(hummock_manager, compactor_manager);
-        shutdown_sender.send(()).unwrap();
-        join_handle.await.unwrap();
-    }
 }

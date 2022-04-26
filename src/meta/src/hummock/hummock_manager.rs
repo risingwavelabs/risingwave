@@ -31,10 +31,12 @@ use risingwave_pb::hummock::{
     SstableInfo, UncommittedEpoch,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
@@ -60,6 +62,9 @@ pub struct HummockManager<S: MetaStore> {
     versioning: RwLock<Versioning>,
 
     metrics: Arc<MetaMetrics>,
+
+    /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
+    compaction_scheduler: parking_lot::RwLock<Option<UnboundedSender<CompactionGroupId>>>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -149,6 +154,7 @@ where
             }),
             metrics,
             cluster_manager,
+            compaction_scheduler: parking_lot::RwLock::new(None),
         };
 
         instance.load_meta_store_state().await?;
@@ -1119,12 +1125,7 @@ where
 
         let mut invalid_context_ids = vec![];
         for active_context_id in &active_context_ids {
-            if self
-                .cluster_manager
-                .get_worker_by_id(*active_context_id)
-                .await
-                .is_none()
-            {
+            if !self.check_context(*active_context_id).await {
                 invalid_context_ids.push(*active_context_id);
             }
         }
@@ -1132,6 +1133,14 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    /// Checks whether `context_id` is valid.
+    pub async fn check_context(&self, context_id: HummockContextId) -> bool {
+        self.cluster_manager
+            .get_worker_by_id(context_id)
+            .await
+            .is_some()
     }
 
     /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
@@ -1181,5 +1190,9 @@ where
             .get(&versioning_guard.current_version_id.id())
             .unwrap()
             .clone()
+    }
+
+    pub fn set_compaction_scheduler(&self, sender: UnboundedSender<CompactionGroupId>) {
+        *self.compaction_scheduler.write() = Some(sender);
     }
 }
