@@ -164,7 +164,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let source = request.into_inner().source.unwrap();
-        self.create_source_inner(&source).await.map_err(tonic_err)?;
+        self.create_source_inner(&source).map_err(tonic_err)?;
         tracing::debug!(id = %source.id, "create table source");
 
         Ok(Response::new(CreateSourceResponse { status: None }))
@@ -181,7 +181,7 @@ impl StreamService for StreamServiceImpl {
             .clear_sources()
             .map_err(tonic_err)?;
         for source in sources {
-            self.create_source_inner(&source).await.map_err(tonic_err)?;
+            self.create_source_inner(&source).map_err(tonic_err)?;
         }
 
         Ok(Response::new(SyncSourcesResponse { status: None }))
@@ -207,7 +207,7 @@ impl StreamService for StreamServiceImpl {
 }
 
 impl StreamServiceImpl {
-    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
+    fn create_source_inner(&self, source: &Source) -> RwResult<()> {
         use risingwave_pb::catalog::source::Info;
 
         let id = TableId::new(source.id); // TODO: use SourceId instead
@@ -216,8 +216,7 @@ impl StreamServiceImpl {
             Info::StreamSource(info) => {
                 self.env
                     .source_manager()
-                    .create_source(&id, info.to_owned())
-                    .await?;
+                    .create_source(&id, info.to_owned())?;
             }
             Info::TableSource(info) => {
                 let columns = info

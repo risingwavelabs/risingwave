@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -87,11 +88,29 @@ impl std::fmt::Debug for FunctionCall {
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
-    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<Self> {
-        let return_type = infer_type(
-            func_type,
-            inputs.iter().map(|expr| expr.return_type()).collect(),
-        )?; // should be derived from inputs
+    pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
+        let return_type = match func_type {
+            ExprType::Case => {
+                let len = inputs.len();
+                align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                    // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
+                    // the end. So we align exprs at odd indices as well as the last one when length
+                    // is odd.
+                    match i.is_odd() || len.is_odd() && i == len - 1 {
+                        true => Some(e),
+                        false => None,
+                    }
+                }))
+            }
+            ExprType::In => {
+                align_types(inputs.iter_mut())?;
+                Ok(DataType::Boolean)
+            }
+            _ => infer_type(
+                func_type,
+                inputs.iter().map(|expr| expr.return_type()).collect(),
+            ),
+        }?;
         Ok(Self {
             func_type,
             return_type,

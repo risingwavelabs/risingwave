@@ -38,7 +38,7 @@ impl SourceCatalog {
             catalogs.append(
                 &mut col
                     .column_desc
-                    .get_column_descs()
+                    .flatten()
                     .into_iter()
                     .map(|c| ColumnCatalog {
                         column_desc: c,
