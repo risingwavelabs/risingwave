@@ -139,6 +139,7 @@ impl LogicalScan {
     }
 
     /// Get the distribution keys of this table
+    #[must_use]
     pub fn distribution_keys(&self) -> &[usize] {
         &self.distribution_keys
     }
@@ -163,6 +164,7 @@ impl LogicalScan {
             new_required_col_idx,
             index.clone(),
             vec![],
+            self.distribution_keys.clone(),
             self.ctx(),
         )
     }

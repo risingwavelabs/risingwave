@@ -43,7 +43,7 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            // TODO: change to hash shard, with distribution_keys fetched from TableCatalog.
+            // follows upstream distribution from TableCatalog
             Distribution::HashShard(logical.distribution_keys().to_vec()),
             false, // TODO: determine the `append-only` field of table scan
         );
@@ -111,7 +111,6 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            // TODO: get distribution_keys from TableCatalog.
             distribution_keys: self
                 .logical
                 .distribution_keys()

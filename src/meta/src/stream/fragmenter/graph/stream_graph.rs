@@ -539,20 +539,8 @@ impl StreamGraphBuilder {
 
             let merge_node = &input[0];
             assert_matches!(merge_node.node, Some(Node::MergeNode(_)));
-
-            let batch_plan_node = input[1].clone();
+            let batch_plan_node = &input[1];
             assert_matches!(batch_plan_node.node, Some(Node::BatchPlanNode(_)));
-            // // Get distribution key from fragment_manager
-            // let distribution_keys = self
-            //     .upstream_distribution_keys
-            //     .get(&table_id)
-            //     .unwrap()
-            //     .clone();
-            // if let Some(Node::BatchPlanNode(ref mut node)) = batch_plan_node.node {
-            //     node.distribution_keys = distribution_keys;
-            // } else {
-            //     unreachable!("input[1].node should be a BatchPlanNode");
-            // }
 
             let chain_input = vec![
                 StreamNode {
@@ -571,7 +559,7 @@ impl StreamGraphBuilder {
                     identity: "MergeExecutor".to_string(),
                     append_only: stream_node.append_only,
                 },
-                batch_plan_node,
+                batch_plan_node.clone(),
             ];
 
             Ok(StreamNode {
