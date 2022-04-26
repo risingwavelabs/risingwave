@@ -17,12 +17,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hyper::{Body, Request, Response};
-use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -37,9 +36,6 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
-use tower::make::Shared;
-use tower::ServiceBuilder;
-use tower_http::add_extension::AddExtensionLayer;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
@@ -187,39 +183,4 @@ pub async fn compute_node_serve(
     meta_client.activate(&client_addr).await.unwrap();
 
     (join_handle, shutdown_send)
-}
-
-pub struct MetricsManager {}
-
-impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String, registry: Arc<Registry>) {
-        tokio::spawn(async move {
-            info!(
-                "Prometheus listener for Prometheus is set up on http://{}",
-                listen_addr
-            );
-            let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
-            let service = ServiceBuilder::new()
-                .layer(AddExtensionLayer::new(registry))
-                .service_fn(Self::metrics_service);
-            let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
-            if let Err(err) = serve_future.await {
-                eprintln!("server error: {}", err);
-            }
-        });
-    }
-
-    async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        let registry = req.extensions().get::<Arc<Registry>>().unwrap();
-        let encoder = TextEncoder::new();
-        let mut buffer = vec![];
-        let mf = registry.gather();
-        encoder.encode(&mf, &mut buffer).unwrap();
-        let response = Response::builder()
-            .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-            .body(Body::from(buffer))
-            .unwrap();
-
-        Ok(response)
-    }
 }

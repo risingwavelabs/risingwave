@@ -319,6 +319,9 @@ template:
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
 
+    # Compactors used by this Prometheus instance
+    provide-compactor: "compactor*"
+
   frontend-legacy:
     # Listen address of frontend-legacy
     address: "127.0.0.1"

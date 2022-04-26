@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
@@ -57,7 +58,6 @@ pub async fn compactor_serve(
     meta_client.activate(&client_addr).await.unwrap();
 
     // Boot compactor
-    // TODO: boot metric service
     let registry = prometheus::Registry::new();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
@@ -111,6 +111,14 @@ pub async fn compactor_serve(
             .await
             .unwrap();
     });
+
+    // Boot metrics service.
+    if opts.metrics_level > 0 {
+        MetricsManager::boot_metrics_service(
+            opts.prometheus_listener_addr.clone(),
+            Arc::new(registry.clone()),
+        );
+    }
 
     (join_handle, shutdown_send)
 }
