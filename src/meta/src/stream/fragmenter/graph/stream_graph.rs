@@ -513,12 +513,6 @@ impl StreamGraphBuilder {
             );
 
             if ctx.is_legacy_frontend {
-                for &up_id in &upstream_actor_ids {
-                    ctx.dispatches
-                        .entry((up_id, stream_node.operator_id))
-                        .or_default()
-                        .push(actor_id.as_global_id());
-                }
                 let chain_upstream_table_node_actors =
                     self.table_node_actors.get(&table_id).unwrap();
                 let chain_upstream_node_actors = chain_upstream_table_node_actors
@@ -534,6 +528,12 @@ impl StreamGraphBuilder {
                         .entry(node_id)
                         .or_default()
                         .extend(actor_ids.iter());
+                    for up_id in actor_ids {
+                        ctx.dispatches
+                            .entry((up_id, stream_node.operator_id))
+                            .or_default()
+                            .push(actor_id.as_global_id());
+                    }
                 }
             }
 
