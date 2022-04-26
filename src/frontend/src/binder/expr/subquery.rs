@@ -24,18 +24,12 @@ impl Binder {
         query: Query,
         kind: SubqueryKind,
     ) -> Result<ExprImpl> {
-        let r = self.bind_query(query);
-        if let Ok(query) = r {
-            // uncorrelated subquery
-            if kind == SubqueryKind::Scalar && query.data_types().len() != 1 {
-                return Err(ErrorCode::BindError(
-                    "subquery must return only one column".to_string(),
-                )
-                .into());
-            }
-            return Ok(Subquery::new(query, kind).into());
+        let query = self.bind_query(query)?;
+        if kind == SubqueryKind::Scalar && query.data_types().len() != 1 {
+            return Err(
+                ErrorCode::BindError("subquery must return only one column".to_string()).into(),
+            );
         }
-
-        Err(ErrorCode::NotImplemented("correlated subquery".to_string(), 1343.into()).into())
+        Ok(Subquery::new(query, kind).into())
     }
 }
