@@ -109,12 +109,8 @@ impl ArrayBuilder for StructArrayBuilder {
         let children = self
             .children_array
             .into_iter()
-            .map(|b| b.finish())
-            .collect::<Result<Vec<ArrayImpl>>>()?
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
-
+            .map(|b| Ok(Arc::new(b.finish()?)))
+            .collect::<Result<Vec<ArrayRef>>>()?;
         Ok(StructArray {
             bitmap: self.bitmap.finish(),
             children,
@@ -214,11 +210,8 @@ impl StructArray {
         let children = array_data
             .children_array
             .iter()
-            .map(|child| ArrayImpl::from_protobuf(child, cardinality))
-            .collect::<Result<Vec<ArrayImpl>>>()?
-            .into_iter()
-            .map(Arc::new)
-            .collect_vec();
+            .map(|child| Ok(Arc::new(ArrayImpl::from_protobuf(child, cardinality)?)))
+            .collect::<Result<Vec<ArrayRef>>>()?;
         let children_type: Arc<[DataType]> = array_data
             .children_type
             .iter()
