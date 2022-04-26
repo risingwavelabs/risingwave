@@ -172,7 +172,7 @@ impl ToBatch for LogicalTopN {
             }
         } else {
             let new_input = self.input().to_batch_with_order_required(self.topn_order());
-            let limit = LogicalLimit::new(new_input.into(), self.limit(), self.offset());
+            let limit = LogicalLimit::new(new_input, self.limit(), self.offset());
             BatchLimit::new(limit).into()
         };
 
