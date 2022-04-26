@@ -403,10 +403,11 @@ impl StreamGraphBuilder {
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
             let mut actor = builder.build();
-            let mut upstream_actors = HashMap::new();
-            for (&id, StreamActorUpstream { actors, .. }) in &builder.upstreams {
-                upstream_actors.insert(id, actors.clone());
-            }
+            let mut upstream_actors = builder
+                .upstreams
+                .iter()
+                .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
+                .collect();
 
             actor.nodes =
                 Some(self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?);
@@ -513,6 +514,12 @@ impl StreamGraphBuilder {
             );
 
             if ctx.is_legacy_frontend {
+                for &up_id in &upstream_actor_ids {
+                    ctx.dispatches
+                        .entry((up_id, stream_node.operator_id))
+                        .or_default()
+                        .push(actor_id.as_global_id());
+                }
                 let chain_upstream_table_node_actors =
                     self.table_node_actors.get(&table_id).unwrap();
                 let chain_upstream_node_actors = chain_upstream_table_node_actors
@@ -522,18 +529,11 @@ impl StreamGraphBuilder {
                     })
                     .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
                     .into_group_map();
-
                 for (node_id, actor_ids) in chain_upstream_node_actors {
                     ctx.upstream_node_actors
                         .entry(node_id)
                         .or_default()
                         .extend(actor_ids.iter());
-                    for up_id in actor_ids {
-                        ctx.dispatches
-                            .entry((up_id, stream_node.operator_id))
-                            .or_default()
-                            .push(actor_id.as_global_id());
-                    }
                 }
             }
 
