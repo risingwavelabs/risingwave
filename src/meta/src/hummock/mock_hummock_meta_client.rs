@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
@@ -45,7 +45,7 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task(1)
+            .get_compact_task(self.context_id)
             .await
             .unwrap_or(None)
     }
@@ -114,7 +114,11 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented(
+            "MockHummockMetaClient::subscribe_compact_tasks".to_owned(),
+            None.into(),
+        )
+        .into())
     }
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
