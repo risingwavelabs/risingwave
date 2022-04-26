@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::{Either, Itertools};
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
@@ -153,6 +154,20 @@ impl LogicalJoin {
         Self::o2r_col_mapping_inner(left_len, right_len, join_type).inverse()
     }
 
+    fn on2o_col_mapping_inner(
+        l2o_mapping: ColIndexMapping,
+        r2o_mapping: ColIndexMapping,
+        left_len: usize,
+    ) -> ColIndexMapping {
+        let (mut r2o_mapping_vec, _) = r2o_mapping.into_parts();
+        for target in &mut r2o_mapping_vec {
+            if let Some(target) = target {
+                *target += left_len;
+            }
+        }
+        l2o_mapping.union(&ColIndexMapping::new(r2o_mapping_vec))
+    }
+
     pub fn o2l_col_mapping(&self) -> ColIndexMapping {
         Self::o2l_col_mapping_inner(
             self.left().schema().len(),
@@ -183,6 +198,18 @@ impl LogicalJoin {
             self.right().schema().len(),
             self.join_type(),
         )
+    }
+
+    pub fn on2o_col_mapping(&self) -> ColIndexMapping {
+        Self::on2o_col_mapping_inner(
+            self.l2o_col_mapping(),
+            self.r2o_col_mapping(),
+            self.left().schema().len(),
+        )
+    }
+
+    pub fn o2on_col_mapping(&self) -> ColIndexMapping {
+        self.on2o_col_mapping().inverse()
     }
 
     pub(super) fn derive_schema(
@@ -260,17 +287,14 @@ impl PlanTreeNodeBinary for LogicalJoin {
         right: PlanRef,
         right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let new_on = {
-            let (mut left_map, _) = left_col_change.clone().into_parts();
-            let (mut right_map, _) = right_col_change.clone().into_parts();
-            for i in &mut right_map {
-                *i = Some(i.unwrap() + left.schema().len());
-            }
-            left_map.append(&mut right_map);
-            self.on()
-                .clone()
-                .rewrite_expr(&mut ColIndexMapping::new(left_map))
-        };
+        let new_on = self
+            .on()
+            .clone()
+            .rewrite_expr(&mut Self::on2o_col_mapping_inner(
+                left_col_change,
+                right_col_change,
+                left.schema().len(),
+            ));
         let join = Self::new(left, right, self.join_type, new_on);
 
         let old_o2l = self.o2l_col_mapping().composite(&left_col_change);
@@ -289,41 +313,62 @@ impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let left_len = self.left.schema().fields.len();
-        let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
-        let mut visitor = CollectInputRef::new(required_cols_bitset.clone());
-        self.on.visit_expr(&mut visitor);
-        let left_right_required_cols: FixedBitSet = visitor.into();
+        let left_len = self.left().schema().len();
+        let right_len = self.right().schema().len();
+        let output_column_cnt = Self::out_column_num(left_len, right_len, self.join_type());
 
-        let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
-        on = on.rewrite_expr(&mut mapping);
+        let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
 
-        let mut left_required_cols = Vec::new();
-        let mut right_required_cols = Vec::new();
-        left_right_required_cols.ones().for_each(|i| {
-            if i < left_len {
-                left_required_cols.push(i);
-            } else {
-                right_required_cols.push(i - left_len);
-            }
-        });
+        let join_condition_required_cols: FixedBitSet = {
+            let mut join_condition_visitor =
+                CollectInputRef::new(FixedBitSet::with_capacity(left_len + right_len));
+            self.on.visit_expr(&mut join_condition_visitor);
+            let condition: FixedBitSet = join_condition_visitor.into();
+            let on2o_col_mapping = self.on2o_col_mapping();
+            on2o_col_mapping.rewrite_bitset(&condition)
+        };
+
+        let total_required_cols = upstream_required_cols
+            .union(&join_condition_required_cols)
+            .collect_vec();
+
+        let (left_required_cols, right_required_cols): (Vec<_>, Vec<_>) = {
+            let o2l_mapping = self.o2l_col_mapping();
+            let o2r_mapping = self.o2l_col_mapping();
+            total_required_cols
+                .clone()
+                .into_iter()
+                .partition_map(|idx_in_output| {
+                    if let Some(idx_in_left) = o2l_mapping.try_map(idx_in_output) {
+                        Either::Left(idx_in_left)
+                    } else {
+                        Either::Right(o2r_mapping.map(idx_in_output))
+                    }
+                })
+        };
+
+        let new_on = self
+            .on
+            .clone()
+            .rewrite_expr(&mut Self::on2o_col_mapping_inner(
+                ColIndexMapping::with_remaining_columns(&left_required_cols),
+                ColIndexMapping::with_remaining_columns(&right_required_cols),
+                left_required_cols.len(),
+            ));
 
         let join = LogicalJoin::new(
             self.left.prune_col(&left_required_cols),
             self.right.prune_col(&right_required_cols),
             self.join_type,
-            on,
+            new_on,
         );
 
-        if required_cols_bitset == left_right_required_cols {
+        if join_condition_required_cols.is_subset(&upstream_required_cols) {
             join.into()
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
-            remaining_columns.extend(required_cols.iter().map(|&i| mapping.map(i)));
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(&required_cols),
             )
         }
     }

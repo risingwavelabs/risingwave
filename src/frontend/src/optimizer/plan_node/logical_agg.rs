@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -422,51 +423,53 @@ impl fmt::Display for LogicalAgg {
 
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let mut child_required_cols =
-            FixedBitSet::with_capacity(self.input.schema().fields().len());
-        child_required_cols.extend(self.group_keys.iter().cloned());
+        let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
+        let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
+        let mut agg_call_required_cols =
+            FixedBitSet::with_capacity(self.input().schema().fields().len());
         // Do not prune the group keys.
-        let mut group_keys = self.group_keys.clone();
+        let mut new_group_keys = self.group_keys.clone();
         let mut agg_calls: Vec<_> = required_cols
-            .ones()
-            .filter(|&index| index >= self.group_keys.len())
-            .map(|index| {
+            .iter()
+            .filter(|&&index| index >= self.group_keys.len())
+            .map(|&index| {
                 let index = index - self.group_keys.len();
                 let agg_call = self.agg_calls[index].clone();
-                child_required_cols.extend(agg_call.inputs.iter().map(|x| x.index()));
+                agg_call_required_cols.extend(agg_call.inputs.iter().map(|x| x.index()));
                 agg_call
             })
             .collect();
+        let input_required_cols = {
+            let mut tmp = FixedBitSet::new();
+            tmp.union_with(&upstream_required_cols);
+            tmp.union_with(&group_key_required_cols);
+            tmp.union_with(&agg_call_required_cols);
+            tmp.ones().collect_vec()
+        };
 
-        let mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
+        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         agg_calls.iter_mut().for_each(|agg_call| {
             agg_call
                 .inputs
                 .iter_mut()
                 .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
         });
-        group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
+        new_group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
 
         let agg = LogicalAgg::new(
             agg_calls,
-            group_keys,
-            self.input.prune_col(&child_required_cols),
+            new_group_keys,
+            self.input.prune_col(&input_required_cols),
         );
 
-        if FixedBitSet::from_iter(0..self.group_keys.len()).is_subset(required_cols) {
+        if group_key_required_cols.is_subset(&upstream_required_cols) {
             agg.into()
         } else {
             // Some group key columns are not needed
-            let mut required_cols_new = FixedBitSet::with_capacity(agg.schema().fields().len());
-            required_cols
-                .ones()
-                .filter(|&i| i < agg.group_keys.len())
-                .for_each(|i| required_cols_new.insert(i));
-            required_cols_new.extend(agg.group_keys.len()..agg.schema().fields().len());
             LogicalProject::with_mapping(
                 agg.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols_new),
+                ColIndexMapping::with_remaining_columns(&required_cols),
             )
         }
     }
