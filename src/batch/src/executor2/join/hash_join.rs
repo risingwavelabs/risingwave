@@ -39,7 +39,7 @@ use crate::task::TaskId;
 /// select a.a1, a.a2, b.b1, b.b2 from a inner join b where a.a3 = b.b3 and a.a1 = b.b1
 /// ```
 #[derive(Default)]
-pub struct EquiJoinParams {
+pub(super) struct EquiJoinParams {
     join_type: JoinType,
     /// Column indexes of left keys in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
     left_key_columns: Vec<usize>,
@@ -166,78 +166,33 @@ impl<K: HashKey + Send + Sync> Executor2 for HashJoinExecutor2<K> {
 impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let mut left_child_stream = self.left_child.take().unwrap().execute();
-
+        let mut right_child_stream = self.right_child.take().unwrap().execute();
+        let mut probe_table: ProbeTable<K>;
         match take(&mut self.state) {
-            HashJoinState::Build(build_table) => self.build(build_table).await?,
+            HashJoinState::Build(mut build_table) => {
+                while let Some(chunk) = right_child_stream.next().await {
+                    let chunk = chunk?;
+                    build_table.append_build_chunk(chunk)?;
+                }
+                probe_table = build_table.try_into()?;
+            }
             _ => unreachable!(),
         }
+        let mut state = HashJoinState2::Probe;
+        let mut left_child_stream = self.left_child.take().unwrap().execute();
 
-        loop {
-            match take(&mut self.state) {
-                HashJoinState::FirstProbe(probe_table) => {
-                    let ret = self
-                        .probe(true, probe_table, &mut left_child_stream)
-                        .await?;
-                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
-                        yield data_chunk;
-                    }
-                }
-                HashJoinState::Probe(probe_table) => {
-                    let ret = self
-                        .probe(false, probe_table, &mut left_child_stream)
-                        .await?;
-                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
-                        yield data_chunk;
-                    }
-                }
-                HashJoinState::ProbeRemaining(probe_table) => {
-                    let ret = self.probe_remaining(probe_table).await?;
-                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
-                        yield data_chunk;
-                    }
-                }
-                HashJoinState::Done => break,
-                _ => unreachable!(),
+        // first probe
+        match left_child_stream.next().await {
+            Some(data_chunk) => {
+                let data_chunk = data_chunk?;
+                probe_table.set_probe_data(data_chunk)?;
+            }
+            None => {
+                state = HashJoinState2::Done;
             }
         }
-    }
-}
-
-impl<K: HashKey> HashJoinExecutor2<K> {
-    async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
-        let mut right_child_stream = self.right_child.take().unwrap().execute();
-        while let Some(chunk) = right_child_stream.next().await {
-            let chunk = chunk?;
-            build_table.append_build_chunk(chunk)?;
-        }
-
-        let probe_table = build_table.try_into()?;
-
-        self.state = HashJoinState::FirstProbe(probe_table);
-        Ok(())
-    }
-
-    async fn probe(
-        &mut self,
-        first_probe: bool,
-        mut probe_table: ProbeTable<K>,
-        left_child_stream: &mut BoxedDataChunkStream,
-    ) -> Result<Option<DataChunk>> {
-        if first_probe {
-            match left_child_stream.next().await {
-                Some(data_chunk) => {
-                    let data_chunk = data_chunk?;
-                    probe_table.set_probe_data(data_chunk)?;
-                }
-                None => {
-                    self.state = HashJoinState::Done;
-                    return Ok(None);
-                }
-            }
-        }
-
-        loop {
+        // probe
+        while state == HashJoinState2::Probe {
             if let Some(ret_data_chunk) = probe_table.join()? {
                 let data_chunk = if probe_table.has_non_equi_cond() {
                     probe_table.process_non_equi_condition(ret_data_chunk)?
@@ -252,9 +207,9 @@ impl<K: HashKey> HashJoinExecutor2<K> {
 
                 probe_table.reset_result_index();
 
-                self.state = HashJoinState::Probe(probe_table);
-
-                return Ok(output_data_chunk);
+                if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
+                    yield data_chunk;
+                }
             } else {
                 match left_child_stream.next().await {
                     Some(data_chunk) => {
@@ -276,36 +231,43 @@ impl<K: HashKey> HashJoinExecutor2<K> {
                         probe_table.reset_result_index();
 
                         if probe_table.join_type().need_join_remaining() {
-                            self.state = HashJoinState::ProbeRemaining(probe_table);
+                            state = HashJoinState2::ProbeRemaining;
                         } else {
-                            self.state = HashJoinState::Done;
+                            state = HashJoinState2::Done;
                         }
-                        return Ok(output_data_chunk);
+                        if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
+                            yield data_chunk;
+                        }
                     }
                 }
             }
         }
+        //probe_remaining
+        while state == HashJoinState2::ProbeRemaining {
+            let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+                let output_data_chunk =
+                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+
+                probe_table.reset_result_index();
+                output_data_chunk
+            } else {
+                let ret_data_chunk = probe_table.consume_left()?;
+                let output_data_chunk =
+                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+
+                state = HashJoinState2::Done;
+                output_data_chunk
+            };
+            yield output_data_chunk
+        }
     }
+}
 
-    async fn probe_remaining(
-        &mut self,
-        mut probe_table: ProbeTable<K>,
-    ) -> Result<Option<DataChunk>> {
-        let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
-            let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
-
-            probe_table.reset_result_index();
-            self.state = HashJoinState::ProbeRemaining(probe_table);
-            output_data_chunk
-        } else {
-            let ret_data_chunk = probe_table.consume_left()?;
-            let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
-
-            self.state = HashJoinState::Done;
-            output_data_chunk
-        };
-        Ok(Some(output_data_chunk))
-    }
+#[derive(PartialEq)]
+enum HashJoinState2 {
+    Probe,
+    ProbeRemaining,
+    Done,
 }
 
 impl<K> HashJoinExecutor2<K> {
@@ -347,7 +309,7 @@ impl HashKeyDispatcher for HashJoinExecutor2BuilderDispatcher {
             input.right_child,
             input.params,
             input.schema,
-            format!("HashJoinExecutor2{:?}", input.task_id),
+            format!("HashJoinExecutor{:?}", input.task_id),
         ))
     }
 }
@@ -724,7 +686,7 @@ mod tests {
                 right_child,
                 params,
                 schema,
-                "HashJoinExecutor".to_string(),
+                "HashJoinExecutor2".to_string(),
             )) as BoxedExecutor2
         }
 
@@ -760,8 +722,10 @@ mod tests {
             } else {
                 unreachable!()
             }
-            let mut join_stream = join_executor.execute();
-            while let Some(data_chunk) = join_stream.next().await {
+
+            let mut stream = join_executor.execute();
+
+            while let Some(data_chunk) = stream.next().await {
                 let data_chunk = data_chunk.unwrap();
                 let data_chunk = data_chunk.compact().unwrap();
                 data_chunk_merger.append(&data_chunk).unwrap();
