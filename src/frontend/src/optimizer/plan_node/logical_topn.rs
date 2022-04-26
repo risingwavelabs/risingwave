@@ -16,7 +16,10 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    BatchLimit, ColPrunable, LogicalLimit, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
+};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
@@ -153,9 +156,25 @@ impl ToBatch for LogicalTopN {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
-        let new_input = self.input().to_batch();
-        let new_logical = self.clone_with_input(new_input);
-        let ret = BatchTopN::new(new_logical).into();
+        let offset_threshold = 512 * 1024;
+        let ret = if self.offset() < offset_threshold {
+            let new_input = self.input().to_batch();
+            // TODO: our current batch topN does not support offset so we add a limit here when
+            // offset != 0.
+            if self.offset() != 0 {
+                let top_n = Self::new(new_input, self.limit + self.offset, 0, self.order.clone());
+                let top_n = BatchTopN::new(top_n);
+                let limit = LogicalLimit::new(top_n.into(), self.limit(), self.offset());
+                BatchLimit::new(limit).into()
+            } else {
+                let top_n = self.clone_with_input(new_input);
+                BatchTopN::new(top_n).into()
+            }
+        } else {
+            let new_input = self.input().to_batch_with_order_required(self.topn_order());
+            let limit = LogicalLimit::new(new_input.into(), self.limit(), self.offset());
+            BatchLimit::new(limit).into()
+        };
 
         if self.topn_order().satisfies(required_order) {
             ret
