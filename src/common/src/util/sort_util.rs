@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
-use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::types::{ScalarPartialOrd, ScalarRef};
@@ -75,7 +75,7 @@ impl OrderPair {
 #[derive(Clone, Debug)]
 pub struct HeapElem {
     pub order_pairs: Arc<Vec<OrderPair>>,
-    pub chunk: DataChunkRef,
+    pub chunk: DataChunk,
     pub chunk_idx: usize,
     pub elem_idx: usize,
     /// DataChunk can be encoded to accelerate the comparison.
@@ -96,9 +96,9 @@ impl Ord for HeapElem {
         } else {
             compare_two_row(
                 self.order_pairs.as_ref(),
-                self.chunk.as_ref(),
+                &self.chunk,
                 self.elem_idx,
-                other.chunk.as_ref(),
+                &other.chunk,
                 other.elem_idx,
             )
             .unwrap()

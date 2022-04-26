@@ -22,9 +22,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -40,7 +38,7 @@ use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Build
 pub struct OrderByExecutor2 {
     child: Option<BoxedExecutor2>,
     sorted_indices: Vec<Vec<usize>>,
-    chunks: Vec<DataChunkRef>,
+    chunks: Vec<DataChunk>,
     vis_indices: Vec<usize>,
     min_heap: BinaryHeap<HeapElem>,
     order_pairs: Arc<Vec<OrderPair>>,
@@ -120,9 +118,9 @@ impl OrderByExecutor2 {
             if self.disable_encoding || !self.encodable {
                 compare_two_row(
                     self.order_pairs.as_ref(),
-                    self.chunks[idx].as_ref(),
+                    &self.chunks[idx],
                     *ia,
-                    self.chunks[idx].as_ref(),
+                    &self.chunks[idx],
                     *ib,
                 )
                 .unwrap_or(Ordering::Equal)
@@ -143,7 +141,7 @@ impl OrderByExecutor2 {
                 self.encoded_keys
                     .push(encode_chunk(&chunk, self.order_pairs.clone()));
             }
-            self.chunks.push(Arc::new(chunk));
+            self.chunks.push(chunk);
             self.sorted_indices
                 .push(self.get_order_index_from(self.chunks.len() - 1));
         }
