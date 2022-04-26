@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
@@ -25,7 +24,6 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
 use super::shared_buffer_batch::SharedBufferBatch;
-use super::shared_buffer_manager::SharedBufferManagerCore;
 use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -48,7 +46,6 @@ pub struct SharedBufferUploader {
     size: usize,
     threshold: usize,
 
-    core: Arc<RwLock<SharedBufferManagerCore>>,
     /// Serve as for not-uploaded batches.
     batches: BTreeMap<HummockEpoch, Vec<SharedBufferBatch>>,
 
@@ -72,7 +69,6 @@ impl SharedBufferUploader {
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        core: Arc<RwLock<SharedBufferManagerCore>>,
         uploader_rx: mpsc::UnboundedReceiver<UploadItem>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
@@ -83,7 +79,6 @@ impl SharedBufferUploader {
             } else {
                 None
             },
-            core,
             uploader_rx,
             batches: BTreeMap::default(),
             size: 0,
@@ -177,42 +172,27 @@ impl SharedBufferUploader {
         )
         .await?;
 
+        let uploaded_sst_info: Vec<SstableInfo> = tables
+            .iter()
+            .map(|sst| SstableInfo {
+                id: sst.id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: sst.meta.smallest_key.clone(),
+                    right: sst.meta.largest_key.clone(),
+                    inf: false,
+                }),
+            })
+            .collect();
+
         // Add all tables at once.
-        let version = self
-            .hummock_meta_client
-            .add_tables(
-                epoch,
-                tables
-                    .iter()
-                    .map(|sst| SstableInfo {
-                        id: sst.id,
-                        key_range: Some(risingwave_pb::hummock::KeyRange {
-                            left: sst.meta.smallest_key.clone(),
-                            right: sst.meta.largest_key.clone(),
-                            inf: false,
-                        }),
-                    })
-                    .collect(),
-            )
+        self.hummock_meta_client
+            .add_tables(epoch, uploaded_sst_info.clone())
             .await
             .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
-        self.local_version_manager.try_set_version(version);
-
-        // TODO: Uncomment the following lines after flushed sstable can be accessed.
-        // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
-        // Release shared buffer.
-        // let mut removed_size = 0;
-        // let mut guard = self.core.write();
-        // let epoch_buffer = guard.buffer.get_mut(&epoch).unwrap();
-        // for batch in batches {
-        //     if let Some(removed_batch) = epoch_buffer.remove(batch.end_user_key()) {
-        //         removed_size += removed_batch.size as usize;
-        //     }
-        // }
-        // guard.size -= removed_size;
-        // drop(guard);
+        self.local_version_manager
+            .update_uncommitted_ssts(epoch, uploaded_sst_info, batches);
 
         self.size -= flush_size;
 

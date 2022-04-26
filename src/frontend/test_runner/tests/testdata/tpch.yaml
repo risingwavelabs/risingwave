@@ -751,7 +751,7 @@
                     BatchScan { table: nation, columns: [n_nationkey, n_name] }
   stream_plan: |
     StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment] }
-      StreamTopN { order: [$2 DESC], limit: 20, offset: 0 }
+      StreamTopN { order: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], limit: 20, offset: 0 }
         StreamExchange { dist: Single }
           StreamProject { exprs: [$0, $1, $8, $2, $4, $5, $3, $6], expr_alias: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment] }
             StreamHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [count, sum($7)] }
