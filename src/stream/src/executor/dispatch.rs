@@ -223,16 +223,21 @@ impl DispatchExecutorInner {
                 }
 
                 for (dispatcher_id, actor_infos) in updates {
-                    assert_eq!(actor_infos.len(), 1);
-                    let actor_info = &actor_infos[0];
-                    let down_id = actor_info.get_actor_id();
-                    let downstream_addr = actor_info.get_host()?.into();
-                    let output =
-                        new_output(&self.context, downstream_addr, self.actor_id, down_id)?;
+                    let mut outputs = vec![];
 
+                    for actor_info in actor_infos {
+                        let down_id = actor_info.get_actor_id();
+                        let downstream_addr = actor_info.get_host()?.into();
+                        outputs.push(new_output(
+                            &self.context,
+                            downstream_addr,
+                            self.actor_id,
+                            down_id,
+                        )?);
+                    }
                     self.dispatchers
-                        .push(DispatcherImpl::Simple(SimpleDispatcher::new(
-                            output,
+                        .push(DispatcherImpl::Broadcast(BroadcastDispatcher::new(
+                            outputs,
                             dispatcher_id,
                         )));
                 }
@@ -270,16 +275,21 @@ impl DispatchExecutorInner {
                 }
 
                 for (dispatcher_id, actor_infos) in adds {
-                    assert_eq!(actor_infos.len(), 1);
-                    let actor_info = &actor_infos[0];
-                    let down_id = actor_info.get_actor_id();
-                    let downstream_addr = actor_info.get_host()?.into();
-                    let output =
-                        new_output(&self.context, downstream_addr, self.actor_id, down_id)?;
+                    let mut outputs = vec![];
 
+                    for actor_info in actor_infos {
+                        let down_id = actor_info.get_actor_id();
+                        let downstream_addr = actor_info.get_host()?.into();
+                        outputs.push(new_output(
+                            &self.context,
+                            downstream_addr,
+                            self.actor_id,
+                            down_id,
+                        )?);
+                    }
                     self.dispatchers
-                        .push(DispatcherImpl::Simple(SimpleDispatcher::new(
-                            output,
+                        .push(DispatcherImpl::Broadcast(BroadcastDispatcher::new(
+                            outputs,
                             dispatcher_id,
                         )));
                 }
