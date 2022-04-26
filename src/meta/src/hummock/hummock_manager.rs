@@ -733,7 +733,7 @@ where
 
             // Commit tables by moving them into level0
             let version_first_level = new_hummock_version.levels.first_mut().unwrap();
-            if version_first_level.level_idx > 0 {
+            if version_first_level.level_idx == 0 {
                 uncommitted_epoch
                     .tables
                     .iter()

@@ -58,7 +58,7 @@ pub struct LevelHandler {
     level: u32,
     total_bytes: u64,
     level_max_bytes: u64,
-    pub compacting_files: HashMap<HummockSSTableId, u64>,
+    compacting_files: HashMap<HummockSSTableId, u64>,
     pending_tasks: Vec<(u64, Vec<HummockSSTableId>)>,
 }
 
@@ -100,6 +100,10 @@ impl LevelHandler {
             table_ids.push(sst.id);
         }
         self.pending_tasks.push((task_id, table_ids));
+    }
+
+    pub fn get_pending_file_count(&self) -> usize {
+        self.compacting_files.len()
     }
 }
 

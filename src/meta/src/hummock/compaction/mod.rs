@@ -134,7 +134,7 @@ impl CompactStatus {
 
     fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
         // only support compact L0 to L1 or L0 to L0
-        let mut picker = TierCompactionPicker::new(self.next_compact_task_id);
+        let picker = TierCompactionPicker::new(self.next_compact_task_id);
         picker.pick_compaction(levels, &mut self.level_handlers)
     }
 

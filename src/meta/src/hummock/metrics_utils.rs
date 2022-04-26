@@ -41,7 +41,7 @@ pub fn trigger_sst_stat(
     let level_sst_cnt = |level_idx: usize| current_version.levels[level_idx].table_infos.len();
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let sst_num = level_sst_cnt(idx);
-        let compact_cnt = level_handler.compacting_files.len();
+        let compact_cnt = level_handler.get_pending_file_count();
         let level_label = String::from("L") + &idx.to_string();
         metrics
             .level_sst_num
@@ -75,7 +75,7 @@ pub fn trigger_sst_stat(
     {
         for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
             let sst_num = level_sst_cnt(idx);
-            let compact_cnt = level_handler.compacting_files.len();
+            let compact_cnt = level_handler.get_pending_file_count();
             tracing::info!(
                 "Level {} has {} SSTs, {} of those are being compacted to bottom levels",
                 idx,

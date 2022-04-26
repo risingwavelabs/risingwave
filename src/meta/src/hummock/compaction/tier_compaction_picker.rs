@@ -45,7 +45,7 @@ impl TierCompactionPicker {
     }
 
     pub fn pick_compaction(
-        &mut self,
+        &self,
         levels: Vec<Level>,
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
@@ -104,15 +104,17 @@ impl TierCompactionPicker {
         let mut splits = Vec::with_capacity(overlap_end - overlap_begin);
         splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
         posterior.add_pending_task(next_task_id, &target_level_inputs);
-        for table in &target_level_inputs[1..] {
-            let key_before_last: Bytes = FullKey::from_user_key_slice(
-                user_key(&table.key_range.as_ref().unwrap().left),
-                HummockEpoch::MAX,
-            )
-            .into_inner()
-            .into();
-            splits.last_mut().unwrap().right = key_before_last.clone();
-            splits.push(KeyRange::new(key_before_last, Bytes::new()));
+        if target_level_inputs.len() > 1 {
+            for table in &target_level_inputs[1..] {
+                let key_before_last: Bytes = FullKey::from_user_key_slice(
+                    user_key(&table.key_range.as_ref().unwrap().left),
+                    HummockEpoch::MAX,
+                )
+                .into_inner()
+                .into();
+                splits.last_mut().unwrap().right = key_before_last.clone();
+                splits.push(KeyRange::new(key_before_last, Bytes::new()));
+            }
         }
 
         Some(SearchResult {
@@ -131,7 +133,7 @@ impl TierCompactionPicker {
     }
 
     fn pick_intra_l0_compaction(
-        &mut self,
+        &self,
         level0: &Level,
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
@@ -230,5 +232,95 @@ impl TierCompactionPicker {
             }
         }
         Some(first_idle_idx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::KeyRange as RawKeyRange;
+
+    use super::*;
+    use crate::hummock::test_utils::iterator_test_key_of_epoch;
+
+    fn generate_table(
+        id: u64,
+        table_prefix: u64,
+        left: usize,
+        right: usize,
+        epoch: u64,
+    ) -> SstableInfo {
+        SstableInfo {
+            id,
+            key_range: Some(RawKeyRange {
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+                inf: false,
+            }),
+            file_size: 1,
+        }
+    }
+
+    #[test]
+    fn test_compact_l0_to_l1() {
+        let picker = TierCompactionPicker::new(0);
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                // table_5_[1_10],
+                // table_6_[2_20],
+                table_infos: vec![generate_table(4, 1, 101, 300, 2)],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(3, 1, 0, 100, 1),
+                    generate_table(2, 1, 111, 200, 1),
+                    generate_table(1, 1, 222, 300, 1),
+                    generate_table(0, 1, 301, 400, 1),
+                ],
+            },
+        ];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 2);
+        assert_eq!(ret.target_level.table_infos[0].id, 2);
+        assert_eq!(ret.target_level.table_infos[1].id, 1);
+
+        // no conflict with the last job
+        levels[0]
+            .table_infos
+            .push(generate_table(5, 1, 301, 333, 4));
+        let ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 3);
+        assert_eq!(ret.target_level.table_infos[0].id, 0);
+
+        // confict with the last job
+        let mut picker = TierCompactionPicker::new(1);
+        levels[0]
+            .table_infos
+            .push(generate_table(6, 1, 222, 233, 3));
+        let ret = picker.pick_compaction(levels.clone(), &mut levels_handler);
+        assert!(ret.is_none());
+
+        // compact L0 to L0
+        picker.level0_trigger_number = 2;
+        picker.level0_max_file_number = 2;
+        levels[0]
+            .table_infos
+            .push(generate_table(7, 2, 100, 200, 3));
+        let ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.table_infos[0].id, 6);
+        assert_eq!(ret.select_level.table_infos[1].id, 7);
+        assert!(ret.target_level.table_infos.is_empty());
     }
 }
