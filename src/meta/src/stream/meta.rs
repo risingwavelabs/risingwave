@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::RwLock;
 
 use crate::cluster::{ParallelUnitId, WorkerId};
-use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
+use crate::model::{ActorId, DispatcherId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
 struct FragmentManagerCore {
@@ -53,6 +53,7 @@ pub struct BuildGraphInfo {
     pub table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
     pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
     pub upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
+    pub dispatcher_ids: HashMap<ActorId, Vec<DispatcherId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -347,6 +348,7 @@ where
                         .insert(*table_id, table_fragment.sink_actor_ids());
                     info.upstream_distribution_keys
                         .insert(*table_id, table_fragment.distribution_keys().clone());
+                    info.dispatcher_ids.extend(table_fragment.dispatcher_ids());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

@@ -32,7 +32,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
 };
 
-use super::{CreateMaterializedViewContext, FragmentManagerRef};
+use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{FragmentId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
@@ -91,7 +91,6 @@ impl BuildFragmentGraphState {
 }
 
 /// The mutable state when building actor graph.
-#[derive(Default)]
 struct BuildActorGraphState {
     /// stream graph builder, to build streaming DAG.
     stream_graph_builder: StreamGraphBuilder,
@@ -103,6 +102,14 @@ struct BuildActorGraphState {
 }
 
 impl BuildActorGraphState {
+    pub fn new(info: BuildGraphInfo) -> Self {
+        Self {
+            stream_graph_builder: StreamGraphBuilder::new(info),
+            fragment_actors: HashMap::new(),
+            next_local_actor_id: 0,
+        }
+    }
+
     fn gen_actor_ids(&mut self, parallel_degree: u32) -> Range<u32> {
         let start_actor_id = self.next_local_actor_id;
         self.next_local_actor_id += parallel_degree;
@@ -189,14 +196,14 @@ impl StreamFragmenter {
                 fragment_actors: _,
                 next_local_actor_id,
             } = {
-                let mut state = BuildActorGraphState::default();
                 // resolve upstream table infos first
                 // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
                 // stream manager and remove dependency on fragment manager.
                 let info = fragment_manager
                     .get_build_graph_info(&ctx.dependent_table_ids)
                     .await?;
-                state.stream_graph_builder.fill_info(info);
+                ctx.dispatcher_ids = info.dispatcher_ids.clone();
+                let mut state = BuildActorGraphState::new(info);
 
                 // Generate actors of the streaming plan
                 self.build_actor_graph(&mut state, &fragment_graph)?;

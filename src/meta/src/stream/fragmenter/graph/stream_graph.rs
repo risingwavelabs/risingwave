@@ -248,7 +248,6 @@ impl StreamActorBuilder {
 
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
-#[derive(Default)]
 pub struct StreamGraphBuilder {
     actor_builders: BTreeMap<LocalActorId, StreamActorBuilder>,
 
@@ -261,10 +260,13 @@ pub struct StreamGraphBuilder {
 
 impl StreamGraphBuilder {
     /// Resolve infos at first to avoid blocking call inside.
-    pub fn fill_info(&mut self, info: BuildGraphInfo) {
-        self.table_node_actors = info.table_node_actors;
-        self.table_sink_actor_ids = info.table_sink_actor_ids;
-        self.upstream_distribution_keys = info.upstream_distribution_keys;
+    pub fn new(info: BuildGraphInfo) -> Self {
+        Self {
+            actor_builders: BTreeMap::new(),
+            table_node_actors: info.table_node_actors,
+            table_sink_actor_ids: info.table_sink_actor_ids,
+            upstream_distribution_keys: info.upstream_distribution_keys,
+        }
     }
 
     /// Insert new generated actor.
@@ -515,8 +517,9 @@ impl StreamGraphBuilder {
 
             if ctx.is_legacy_frontend {
                 for &up_id in &upstream_actor_ids {
+                    let dispatcher_ids = ctx.dispatcher_ids.get(&up_id).unwrap();
                     ctx.dispatches
-                        .entry((up_id, todo!()))
+                        .entry((up_id, dispatcher_ids[0]))
                         .or_default()
                         .push(actor_id.as_global_id());
                 }
