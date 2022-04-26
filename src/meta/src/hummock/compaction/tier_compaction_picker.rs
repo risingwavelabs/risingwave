@@ -66,42 +66,19 @@ impl TierCompactionPicker {
 
         let (tier_key_range, select_level_inputs) =
             self.pickup_l0_files(&levels[select_level], prior, select_sst_id);
-
-        let target_level_tables = &levels[target_level as usize].table_infos;
-        let mut overlap_all_idle = true;
-        let overlap_begin = target_level_tables.partition_point(|table_status| {
-            user_key(&table_status.key_range.as_ref().unwrap().right)
-                < user_key(&tier_key_range.left)
-        });
-        let mut overlap_end = overlap_begin;
-        let taget_table_len = target_level_tables.len();
         let mut target_level_inputs = vec![];
-
-        // pick up files in L1 which are overlap with L0 to target level input.
-        while overlap_end < taget_table_len
-            && user_key(
-                &target_level_tables[overlap_end]
-                    .key_range
-                    .as_ref()
-                    .unwrap()
-                    .left,
-            ) <= user_key(&tier_key_range.right)
-        {
-            if posterior.is_pending_compact(&target_level_tables[overlap_end].id) {
-                overlap_all_idle = false;
-                break;
-            }
-            target_level_inputs.push(target_level_tables[overlap_end].clone());
-            overlap_end += 1;
-        }
-
-        if !overlap_all_idle {
+        if !self.pick_target_level_overlap_files(
+            &tier_key_range,
+            &levels[target_level as usize],
+            posterior,
+            &mut target_level_inputs,
+        ) {
             return self.pick_intra_l0_compaction(&levels[0], level_handlers);
         }
 
         prior.add_pending_task(next_task_id, &select_level_inputs);
         // Here, we have known that `select_level_input` is valid
-        let mut splits = Vec::with_capacity(overlap_end - overlap_begin);
+        let mut splits = Vec::with_capacity(target_level_inputs.len());
         splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
         posterior.add_pending_task(next_task_id, &target_level_inputs);
         if target_level_inputs.len() > 1 {
@@ -130,6 +107,31 @@ impl TierCompactionPicker {
             },
             split_ranges: splits,
         })
+    }
+
+    fn pick_target_level_overlap_files(
+        &self,
+        tier_key_range: &KeyRange,
+        level: &Level,
+        level_handlers: &LevelHandler,
+        input_ssts: &mut Vec<SstableInfo>,
+    ) -> bool {
+        let overlap_begin = level.table_infos.partition_point(|table_status| {
+            user_key(&table_status.key_range.as_ref().unwrap().right)
+                < user_key(&tier_key_range.left)
+        });
+        // pick up files in L1 which are overlap with L0 to target level input.
+        for table in &level.table_infos[overlap_begin..] {
+            let end_range = KeyRange::from(table.key_range.as_ref().unwrap());
+            if user_key(&end_range.left) > user_key(&tier_key_range.right) {
+                break;
+            }
+            if level_handlers.is_pending_compact(&table.id) {
+                return false;
+            }
+            input_ssts.push(table.clone());
+        }
+        true
     }
 
     fn pick_intra_l0_compaction(
