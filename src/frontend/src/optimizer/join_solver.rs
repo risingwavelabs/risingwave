@@ -198,7 +198,7 @@ impl SolverEnv {
         let mut join_edge = HashMap::new();
 
         for table in &solver.join_order {
-            join_edge.insert(table.clone(), vec![]);
+            join_edge.insert(*table, vec![]);
         }
         for edge in &solver.edges {
             join_edge.get_mut(&edge.left).unwrap().push(edge.clone());
@@ -261,7 +261,7 @@ impl JoinSolver {
 
         'next_table: loop {
             assert!(
-                path.len() <= self.join_order.len() - 1,
+                path.len() < self.join_order.len(),
                 "internal error: infinite loop"
             );
 
@@ -271,10 +271,8 @@ impl JoinSolver {
 
             for current_table in &current_table_set {
                 for edge in &solver_env.join_edge[current_table] {
-                    if !current_table_set.contains(&edge.right) {
-                        if satisfies_distribution(&current_distribution, &edge) {
-                            reachable_tables.insert(edge.right, edge.clone());
-                        }
+                    if !current_table_set.contains(&edge.right) && satisfies_distribution(&current_distribution, edge) {
+                        reachable_tables.insert(edge.right, edge.clone());
                     }
                 }
             }
