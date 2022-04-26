@@ -3555,6 +3555,7 @@ dependencies = [
 name = "risingwave_frontend"
 version = "0.1.5"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "assert-impl",
  "async-trait",
