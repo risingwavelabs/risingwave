@@ -15,9 +15,9 @@
 use std::convert::TryFrom;
 
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
-use risingwave_common::ensure;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::{ensure, ensure_eq, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -41,9 +41,7 @@ impl Expression for FieldExpression {
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
             Ok(struct_array.get_children_by_index(self.index))
         } else {
-            Err(RwError::from(ErrorCode::InternalError(
-                "expects a struct array ref".to_string(),
-            )))
+            Err(internal_error("expects a struct array ref"))
         }
     }
 }
@@ -65,27 +63,18 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
         ensure!(prost.get_expr_type()? == Type::Field);
 
         let ret_type = DataType::from(prost.get_return_type()?);
-        if let RexNode::FuncCall(func_call_node) = prost.get_rex_node()? {
-            let children = func_call_node.children.to_vec();
-            // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
-            // `InputRef`, the second is i32 `Literal`.
-            ensure!(children.len() == 2);
-            let input = expr_build_from_prost(&children[0])?;
-            if let RexNode::Constant(value) = &children[1].get_rex_node()? {
-                let index = i32::from_be_bytes(value.body.clone().try_into().map_err(|e| {
-                    ErrorCode::InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-                })?);
-                Ok(FieldExpression::new(ret_type, input, index as usize))
-            } else {
-                Err(RwError::from(ErrorCode::InternalError(
-                    "expects a constant node".to_string(),
-                )))
-            }
-        } else {
-            Err(RwError::from(ErrorCode::InternalError(
-                "expects a function call node".to_string(),
-            )))
-        }
+        let func_call_node = try_match_expand!(prost.get_rex_node().unwrap(), RexNode::FuncCall)?;
+
+        let children = func_call_node.children.to_vec();
+        // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
+        // `InputRef`, the second is i32 `Literal`.
+        ensure_eq!(children.len(), 2);
+        let input = expr_build_from_prost(&children[0])?;
+        let value = try_match_expand!(children[1].get_rex_node().unwrap(), RexNode::Constant)?;
+        let index = i32::from_be_bytes(value.body.clone().try_into().map_err(|e| {
+            ErrorCode::InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
+        })?);
+        Ok(FieldExpression::new(ret_type, input, index as usize))
     }
 }
 
