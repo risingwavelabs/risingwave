@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The solver for delta join. Determines lookup order of a join plan.
+//! All collections types in this module should use `BTree` to ensure determinism between runs.
+
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
 pub struct JoinTable(pub usize);
 
 /// Represents whether `left` and `right` can be joined using a condition.
@@ -183,8 +186,8 @@ pub struct JoinSolver {
 pub struct LookupPath(JoinTable, pub Vec<JoinTable>);
 
 struct SolverEnv {
-    /// Stores all join edges in hash map. [`JoinEdge`]'s left side is always the key in hash map.
-    join_edge: HashMap<JoinTable, Vec<JoinEdge>>,
+    /// Stores all join edges in map. [`JoinEdge`]'s left side is always the key in map.
+    join_edge: BTreeMap<JoinTable, Vec<JoinEdge>>,
 
     /// Placement order of arrangements
     arrange_placement_order: Vec<JoinTable>,
@@ -195,7 +198,7 @@ struct SolverEnv {
 
 impl SolverEnv {
     fn build_from(solver: &JoinSolver) -> Self {
-        let mut join_edge = HashMap::new();
+        let mut join_edge = BTreeMap::new();
 
         for table in &solver.join_order {
             join_edge.insert(*table, vec![]);
@@ -231,7 +234,7 @@ impl JoinSolver {
         input_stream: JoinTable,
     ) -> Result<LookupPath> {
         // The table available to query
-        let mut current_table_set = HashSet::new();
+        let mut current_table_set = BTreeSet::new();
         current_table_set.insert(input_stream);
 
         // The distribution of the current lookup.
@@ -244,7 +247,7 @@ impl JoinSolver {
             current_distribution: &[(JoinTable, Vec<usize>)],
             edge: &JoinEdge,
         ) -> bool {
-            // TODO: if `current_distribution` is a `HashSet`, we can know if the distribution in
+            // TODO: if `current_distribution` is a `BTreeSet`, we can know if the distribution in
             // O(1). But as we generally have few tables, so we do a linear scan on tables.
             if current_distribution.is_empty() {
                 return true;
@@ -267,11 +270,13 @@ impl JoinSolver {
 
             // step 1: find tables that can be joined with `current_table_set` and satisfies the
             // current distribution.
-            let mut reachable_tables = HashMap::new();
+            let mut reachable_tables = BTreeMap::new();
 
             for current_table in &current_table_set {
                 for edge in &solver_env.join_edge[current_table] {
-                    if !current_table_set.contains(&edge.right) && satisfies_distribution(&current_distribution, edge) {
+                    if !current_table_set.contains(&edge.right)
+                        && satisfies_distribution(&current_distribution, edge)
+                    {
                         reachable_tables.insert(edge.right, edge.clone());
                     }
                 }
@@ -292,7 +297,7 @@ impl JoinSolver {
 
             // step 3: find all tables that can be joined with `current_table_set`, regardless of
             // distribution.
-            let mut reachable_tables = HashMap::new();
+            let mut reachable_tables = BTreeMap::new();
 
             for current_table in &current_table_set {
                 for edge in &solver_env.join_edge[current_table] {
