@@ -14,6 +14,37 @@
 
 //! The solver for delta join. Determines lookup order of a join plan.
 //! All collections types in this module should use `BTree` to ensure determinism between runs.
+//!
+//! In this module, `a*` means lookup executor that looks-up arrangement a of the current epoch.
+//! `a` means looks-up arranegment a of the previous epoch.
+//!
+//! Delta joins only supports inner equal join. The solver is based on the following formula (take
+//! 3-way join as an example):
+//!
+//! ```plain
+//! d((A join1 B) join2 C)
+//! = ((A + dA) join1 (B + dB)) join2 (C + dC) - A join1 B join2 C
+//! = (A join1 B + A join1 dB + dA join1 (B + dB)) join2 (C + dC) - A join1 B join2 C
+//! = A join1 B join2 (C + dC) + A join1 dB join2 (C + dC) + dA join1 (B + dB) join2 (C + dC) - A join1 B join2 C
+//! = A join1 B join2 dC + A join1 dB join2 (C + dC) + dA join1 (B + dB) join2 (C + dC)
+//! = dA join1 (B + dB) join2 (C + dC) + dB join1 A join2 (C + dC) + dC join2 B join1 A
+//!
+//! join1 means A join B using condition #1,
+//! join2 means B join C using condition #2.
+//! ```
+//!
+//! Inner joins satisfy commutative law and associative laws, so we can switch them back and forth
+//! between joins.
+//!
+//! ... which generates the following look up graph:
+//!
+//! ```plain
+//! a -> b* -> c* -> output3
+//! b -> a  -> c* -> output2
+//! c -> b  -> a  -> output1
+//! ```
+//!
+//! And the final output is `output1 <concat> output2 <concat> output3`.
 
 #![allow(dead_code)]
 
@@ -227,7 +258,19 @@ impl SolverEnv {
 }
 
 impl JoinSolver {
-    /// Generate a lookup path using the user provided strategy.
+    /// Generate a lookup path using the user provided strategy. The lookup path is generated in the
+    /// following way:
+    ///
+    /// * Firstly, we find all tables that can be joined with the current join table set. The tables
+    ///   should have the same join key as the current join set.
+    /// * If there are multiple tables that satisfy this condition, we will pick table according to
+    ///   [`ArrangeStrategy`].
+    /// * If not, then we have to do a shuffle. We pick all tables that have join condition with the
+    ///   current table set.
+    /// * And then pick a table using [`ArrangeStrategy`].
+    ///
+    /// Basically, this algorithm will greedy pick all tables with the same join key first (so that
+    /// there won't be shuffle). Then, switch a distribution, and do this process again.
     fn find_lookup_path(
         &self,
         solver_env: &SolverEnv,
