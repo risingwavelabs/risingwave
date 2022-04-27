@@ -16,8 +16,8 @@ pub mod plan_node;
 pub use plan_node::PlanRef;
 pub mod property;
 
+mod delta_join_solver;
 mod heuristic;
-mod join_solver;
 mod plan_rewriter;
 mod plan_visitor;
 mod rule;

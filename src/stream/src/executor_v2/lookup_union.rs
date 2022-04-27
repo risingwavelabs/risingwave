@@ -32,8 +32,10 @@ use crate::executor::{ExecutorBuilder, PkIndices};
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-/// `LookupUnionExecutor` merges data from multiple inputs. Currently this is done by using
-/// [`BarrierAligner`]. In the future we could have more efficient implementation.
+/// Merges data from multiple inputs with order. If `order = [2, 1, 0]`, then
+/// it will first pipe data from the third input; after the third input gets a barrier, it will then
+/// pipe the second, and finally the first. In the future we could have more efficient
+/// implementation.
 pub struct LookupUnionExecutor {
     inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
