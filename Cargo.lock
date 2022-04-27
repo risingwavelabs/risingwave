@@ -3559,6 +3559,7 @@ dependencies = [
 name = "risingwave_frontend"
 version = "0.1.5"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "assert-impl",
  "async-trait",
@@ -3762,7 +3763,6 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
- "either",
  "enum-as-inner",
  "farmhash",
  "futures",

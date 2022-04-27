@@ -30,13 +30,12 @@ pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
 pub use project::*;
-pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
     BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
-    LookupExecutorBuilder, UnionExecutorBuilder,
+    LookupExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
 };
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
@@ -54,7 +53,6 @@ mod merge;
 pub mod monitor;
 mod mview;
 mod project;
-mod source;
 mod top_n;
 mod top_n_appendonly;
 

@@ -18,7 +18,6 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::expr::InputRefDisplay;
 
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone)]
@@ -46,11 +45,7 @@ impl StreamHopWindow {
 
 impl fmt::Display for StreamHopWindow {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("StreamHopWindow")
-            .field("time_col", &InputRefDisplay(self.logical.time_col.index()))
-            .field("slide", &self.logical.window_slide)
-            .field("size", &self.logical.window_size)
-            .finish_non_exhaustive()
+        self.logical.fmt_with_name(f, "StreamHopWindow")
     }
 }
 

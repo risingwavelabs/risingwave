@@ -173,10 +173,13 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make interval configurable.
-        // TODO: when tracing is on, warn the developer on this short interval.
-        let interval = Duration::from_millis(100);
         let enable_recovery = env.opts.enable_recovery;
+        let interval = env.opts.checkpoint_interval;
+        tracing::info!(
+            "Starting barrier manager with: interval={:?}, enable_recovery={}",
+            interval,
+            enable_recovery
+        );
 
         Self {
             interval,

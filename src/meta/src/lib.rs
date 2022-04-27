@@ -76,12 +76,16 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value_t = String::from(""))]
     etcd_endpoints: String,
 
-    /// Maximum allowed heartbeat interval in ms
+    /// Maximum allowed heartbeat interval in ms.
     #[clap(long, default_value = "60000")]
     max_heartbeat_interval: u32,
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
+
+    /// Checkpoint interval in ms.
+    #[clap(long, default_value = "100")]
+    checkpoint_interval: u32,
 
     /// Whether to enable fail-on-recovery. If not set, default to enable. Should only be used in
     /// e2e tests.
@@ -105,6 +109,7 @@ pub async fn start(opts: MetaNodeOpts) {
         Backend::Mem => MetaStoreBackend::Mem,
     };
     let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
+    let checkpoint_interval = Duration::from_millis(opts.checkpoint_interval as u64);
 
     tracing::info!("Meta server listening at {}", addr);
     let (join_handle, _shutdown_send) = rpc_serve(
@@ -116,6 +121,7 @@ pub async fn start(opts: MetaNodeOpts) {
         opts.dashboard_ui_path,
         MetaOpts {
             enable_recovery: !opts.disable_recovery,
+            checkpoint_interval,
         },
     )
     .await

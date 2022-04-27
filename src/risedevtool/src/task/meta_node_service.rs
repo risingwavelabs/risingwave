@@ -40,7 +40,7 @@ impl MetaNodeService {
         }
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.address, config.port))
@@ -80,6 +80,11 @@ impl MetaNodeService {
         if config.unsafe_disable_recovery {
             cmd.arg("--disable-recovery");
         }
+
+        if let Some(interval) = config.checkpoint_interval {
+            cmd.arg("--checkpoint-interval").arg(interval.to_string());
+        }
+
         Ok(())
     }
 }
