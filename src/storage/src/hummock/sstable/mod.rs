@@ -126,10 +126,39 @@ impl BlockMeta {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
+pub struct VNodeBitmap {
+    pub bitmap: Vec<u8>,
+    pub table_id: u32,
+}
+
+impl VNodeBitmap {
+    /// Format:
+    ///
+    /// ```plain
+    /// | table_id (4B) | bitmap len (4B) | bitmap |
+    /// ```
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        buf.put_u32_le(self.table_id);
+        put_length_prefixed_slice(buf, &self.bitmap);
+    }
+
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        let table_id = buf.get_u32_le();
+        let bitmap = get_length_prefixed_slice(buf);
+        Self { bitmap, table_id }
+    }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        8 /* table_id + bitmap len */ + self.bitmap.len()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
+    pub vnode_bitmaps: Vec<VNodeBitmap>,
     pub bloom_filter: Vec<u8>,
-    pub bitmap: Vec<u8>,
     pub estimated_size: u32,
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
@@ -144,8 +173,9 @@ impl SstableMeta {
     /// ```plain
     /// | N (4B) |
     /// | block meta 0 | ... | block meta N-1 |
+    /// | M (4B) |
+    /// | vnode bitmap 0 | ... | vnode bitmap M-1 |
     /// | bloom filter len (4B) | bloom filter |
-    /// | bitmap len (4B) | bitmap |
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
@@ -157,8 +187,11 @@ impl SstableMeta {
         for block_meta in &self.block_metas {
             block_meta.encode(&mut buf);
         }
+        buf.put_u32_le(self.vnode_bitmaps.len() as u32);
+        for bitmap in &self.vnode_bitmaps {
+            bitmap.encode(&mut buf);
+        }
         put_length_prefixed_slice(&mut buf, &self.bloom_filter);
-        put_length_prefixed_slice(&mut buf, &self.bitmap);
         buf.put_u32_le(self.estimated_size as u32);
         buf.put_u32_le(self.key_count as u32);
         put_length_prefixed_slice(&mut buf, &self.smallest_key);
@@ -195,8 +228,12 @@ impl SstableMeta {
         for _ in 0..block_meta_count {
             block_metas.push(BlockMeta::decode(buf));
         }
+        let vnode_bitmap_count = buf.get_u32_le() as usize;
+        let mut vnode_bitmaps = Vec::with_capacity(vnode_bitmap_count);
+        for _ in 0..vnode_bitmap_count {
+            vnode_bitmaps.push(VNodeBitmap::decode(buf));
+        }
         let bloom_filter = get_length_prefixed_slice(buf);
-        let bitmap = get_length_prefixed_slice(buf);
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -204,8 +241,8 @@ impl SstableMeta {
 
         Ok(Self {
             block_metas,
+            vnode_bitmaps,
             bloom_filter,
-            bitmap,
             estimated_size,
             key_count,
             smallest_key,
@@ -222,10 +259,10 @@ impl SstableMeta {
             .iter()
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
+            + 4 // bitmap count
+            + self.vnode_bitmaps.iter().map(|vnode_bitmap| vnode_bitmap.encoded_size()).sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
-            + 4 // bitmap len
-            + self.bitmap.len()
             + 4 // estimated size
             + 4 // key count
             + 4 // key len
@@ -258,7 +295,10 @@ mod tests {
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),
-            bitmap: b"".to_vec(),
+            vnode_bitmaps: vec![VNodeBitmap {
+                table_id: 13,
+                bitmap: b"1101".to_vec(),
+            }],
             estimated_size: 123,
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),

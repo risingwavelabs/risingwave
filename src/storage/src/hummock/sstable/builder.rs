@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::key::{get_table_id, user_key};
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, DEFAULT_BLOCK_SIZE,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, VNodeBitmap, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
@@ -65,8 +67,8 @@ pub struct SSTableBuilder {
     block_metas: Vec<BlockMeta>,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
-    /// Bitmap of value meta.
-    bitmap: [u8; VNODE_BITMAP_LEN],
+    /// `table_id` -> Bitmaps of value meta.
+    vnode_bitmaps: BTreeMap<u32, [u8; VNODE_BITMAP_LEN]>,
     /// Last added full key.
     last_full_key: Bytes,
     key_count: usize,
@@ -80,7 +82,7 @@ impl SSTableBuilder {
             block_builder: None,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            bitmap: [0; VNODE_BITMAP_LEN],
+            vnode_bitmaps: BTreeMap::new(),
             last_full_key: Bytes::default(),
             key_count: 0,
         }
@@ -115,7 +117,11 @@ impl SSTableBuilder {
         let user_key = user_key(full_key);
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));
 
-        self.bitmap[(value_meta >> 3) as usize] |= 1 << (value_meta & 0b111);
+        let table_id = get_table_id(full_key);
+        self.vnode_bitmaps
+            .entry(table_id)
+            .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
+            1 << (value_meta & 0b111);
 
         if self.last_full_key.is_empty() {
             self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
@@ -148,6 +154,14 @@ impl SSTableBuilder {
 
         let meta = SstableMeta {
             block_metas: self.block_metas,
+            vnode_bitmaps: self
+                .vnode_bitmaps
+                .iter()
+                .map(|(table_id, vnode_bitmap)| VNodeBitmap {
+                    table_id: *table_id,
+                    bitmap: vnode_bitmap.to_vec(),
+                })
+                .collect(),
             bloom_filter: if self.options.bloom_false_positive > 0.0 {
                 let bits_per_key = Bloom::bloom_bits_per_key(
                     self.user_key_hashes.len(),
@@ -157,7 +171,6 @@ impl SSTableBuilder {
             } else {
                 vec![]
             },
-            bitmap: self.bitmap.to_vec(),
             estimated_size: self.buf.len() as u32,
             key_count: self.key_count as u32,
             smallest_key,
