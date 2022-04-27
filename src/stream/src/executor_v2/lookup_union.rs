@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-use std::collections::HashMap;
-
 use async_trait::async_trait;
-use futures::channel::mpsc::{unbounded, UnboundedReceiver};
-use futures::stream::select_all;
-use futures::StreamExt;
+use futures::channel::mpsc;
+use futures::future::{join_all, select, Either};
+use futures::{FutureExt, SinkExt, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
@@ -27,7 +25,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedExecutor, Executor, Message, PkIndicesRef};
+use super::{BoxedExecutor, Executor, Message, PkIndicesRef};
 use crate::executor::{ExecutorBuilder, PkIndices};
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -84,114 +82,52 @@ impl Executor for LookupUnionExecutor {
     }
 }
 
-#[try_stream(ok = (usize, Message), error = StreamExecutorError)]
-async fn poll_until_barrier(
-    mut stream: BoxedMessageStream,
-    id: usize,
-    mut barrier_notifier: UnboundedReceiver<()>,
-) {
-    'outer: loop {
-        'inner: loop {
-            match stream.next().await {
-                Some(Ok(Message::Barrier(barrier))) => {
-                    yield (id, Message::Barrier(barrier.clone()));
-                    break 'inner;
-                }
-                Some(Ok(x @ Message::Chunk(_))) => yield (id, x),
-                Some(Err(e)) => return Err(e),
-                None => break 'outer,
-            }
-        }
-        barrier_notifier.next().await;
-    }
-}
-
 impl LookupUnionExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let total_inputs = self.inputs.len();
-        let mut txs = vec![];
-        let mut inputs = self
-            .inputs
-            .into_iter()
-            .enumerate()
-            .collect::<HashMap<_, _>>();
-        let mut streams = vec![];
-        for (position, input_id) in self.order.iter().enumerate() {
-            let (tx, rx) = unbounded();
-            let stream = poll_until_barrier(
-                inputs
-                    .remove(input_id)
-                    .expect("duplicated inputs in order")
-                    .execute(),
-                position,
-                rx,
+        let mut inputs = self.inputs.into_iter().map(Some).collect_vec();
+        let mut futures = vec![];
+        let mut rxs = vec![];
+        for idx in self.order {
+            let mut stream = inputs[idx].take().unwrap().execute();
+            let (mut tx, rx) = mpsc::channel(1); // set buffer size to control back pressure
+            rxs.push(rx);
+            futures.push(
+                // construct a future that drives input stream until it is exhausted.
+                // the input elements are sent over bounded channel.
+                async move {
+                    while let Some(ret) = stream.next().await {
+                        tx.send(ret).await.unwrap();
+                    }
+                }
+                .boxed(),
             );
-            streams.push(Box::pin(stream));
-            txs.push(tx);
         }
-        let mut stream = select_all(streams);
-        let mut this_barrier: Option<Barrier> = None;
-        let mut buffer = (0..total_inputs)
-            .map(|_| Vec::new())
-            .collect::<Vec<Vec<Message>>>();
-        // As we are piping data one input by one input, we record which input we are piping in
-        // `pipe_order`.
-        let mut pipe_order = 0;
-
-        while let Some(res) = stream.next().await {
-            let (id, msg) = res?;
-            match id.cmp(&pipe_order) {
-                Ordering::Equal => {
-                    // We can directly forward msg of the current pipe
+        // This future is used to drive all inputs.
+        let mut drive_inputs = join_all(futures).fuse();
+        let mut end = false;
+        while !end {
+            end = true; // no message on this turn?
+            let mut this_barrier = None;
+            for rx in &mut rxs {
+                loop {
+                    let msg = match select(rx.next(), &mut drive_inputs).await {
+                        Either::Left((Some(msg), _)) => msg?,
+                        Either::Left((None, _)) => break, // input end
+                        Either::Right(_) => continue,
+                    };
+                    end = false;
                     match msg {
-                        Message::Chunk(chunk) => {
-                            yield Message::Chunk(chunk);
-                        }
+                        msg @ Message::Chunk(_) => yield msg,
                         Message::Barrier(barrier) => {
-                            if this_barrier.is_none() {
-                                this_barrier = Some(barrier);
-                            }
-                            pipe_order += 1;
-                            // process other buffers
-                            'outer: while pipe_order < total_inputs {
-                                for item in buffer[pipe_order].drain(..) {
-                                    if let Message::Barrier(ref barrier) = item {
-                                        let this_barrier = this_barrier.as_ref().unwrap();
-                                        if barrier != this_barrier {
-                                            return Err(StreamExecutorError::align_barrier(
-                                                this_barrier.clone(),
-                                                barrier.clone(),
-                                            ));
-                                        }
-                                        pipe_order += 1;
-                                        continue 'outer; // process the next buffer
-                                    } else {
-                                        yield item;
-                                    }
-                                }
-                                break; // still need to process this pipe
-                            }
-                            if pipe_order == total_inputs {
-                                for buffer in &buffer {
-                                    assert!(buffer.is_empty());
-                                }
-                                yield Message::Barrier(this_barrier.take().unwrap());
-                                pipe_order = 0;
-                                for tx in &mut txs {
-                                    tx.unbounded_send(()).unwrap();
-                                }
-                            }
+                            this_barrier.get_or_insert(barrier);
+                            break; // move to the next input
                         }
                     }
                 }
-                Ordering::Less => {
-                    unreachable!()
-                }
-                Ordering::Greater => {
-                    // We need to buffer the msg
-                    buffer[id].push(msg);
-                }
+            }
+            if let Some(barrier) = this_barrier {
+                yield Message::Barrier(barrier);
             }
         }
     }
@@ -211,5 +147,84 @@ impl ExecutorBuilder for LookupUnionExecutorBuilder {
             LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())
                 .boxed(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::TryStreamExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::executor::Barrier;
+    use crate::executor_v2::test_utils::MockSource;
+
+    #[tokio::test]
+    async fn lookup_union() {
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int64)],
+        };
+        let source0 = MockSource::with_messages(
+            schema.clone(),
+            vec![0],
+            vec![
+                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        )
+        .stop_on_finish(false);
+        let source1 = MockSource::with_messages(
+            schema.clone(),
+            vec![0],
+            vec![
+                Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+            ],
+        )
+        .stop_on_finish(false);
+        let source2 = MockSource::with_messages(
+            schema,
+            vec![0],
+            vec![
+                Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+            ],
+        )
+        .stop_on_finish(false);
+
+        let executor = Box::new(LookupUnionExecutor::new(
+            vec![0],
+            vec![Box::new(source0), Box::new(source1), Box::new(source2)],
+            vec![2, 1, 0],
+        ))
+        .execute();
+
+        let outputs: Vec<_> = executor.try_collect().await.unwrap();
+        assert_eq!(
+            outputs,
+            vec![
+                Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ]
+        );
     }
 }
