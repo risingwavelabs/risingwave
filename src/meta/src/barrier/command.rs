@@ -197,25 +197,31 @@ where
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
-                    let downstream_actors = dispatches
-                        .iter()
-                        .filter(|((upstream_actor_id, _), _)| actors.contains(upstream_actor_id))
-                        .map(|((upstream_actor_id, _), downstream_actor_infos)| {
-                            (
-                                *upstream_actor_id,
-                                downstream_actor_infos
-                                    .iter()
-                                    .map(|info| info.actor_id)
-                                    .collect(),
-                            )
-                        })
-                        .collect::<HashMap<ActorId, Vec<ActorId>>>();
+                    let mut downstream_actors: HashMap<
+                        ActorId,
+                        HashMap<DispatcherId, Vec<ActorId>>,
+                    > = HashMap::new();
+                    for ((upstream_actor_id, dispatcher_id), downstream_actor_infos) in dispatches {
+                        if actors.contains(upstream_actor_id) {
+                            let res = downstream_actors
+                                .entry(*upstream_actor_id)
+                                .or_default()
+                                .insert(
+                                    *dispatcher_id,
+                                    downstream_actor_infos
+                                        .iter()
+                                        .map(|info| info.actor_id)
+                                        .collect(),
+                                );
+                            assert!(res.is_none());
+                        }
+                    }
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }
                 self.fragment_manager
                     .finish_create_table_fragments(
                         &table_fragments.table_id(),
-                        &dependent_table_actors,
+                        dependent_table_actors,
                     )
                     .await?;
             }

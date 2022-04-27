@@ -202,7 +202,7 @@ impl StreamActorBuilder {
     pub fn build(&self) -> StreamActor {
         assert!(self.sealed);
 
-        let mut dispatcher = self
+        let dispatcher = self
             .downstreams
             .iter()
             .map(
@@ -214,14 +214,6 @@ impl StreamActorBuilder {
                 },
             )
             .collect_vec();
-
-        // If there's no dispatcher, add an empty broadcast. TODO: Can be removed later.
-        if dispatcher.is_empty() {
-            dispatcher = vec![Dispatcher {
-                r#type: DispatcherType::Broadcast.into(),
-                ..Default::default()
-            }]
-        }
 
         StreamActor {
             actor_id: self.actor_id.as_global_id(),

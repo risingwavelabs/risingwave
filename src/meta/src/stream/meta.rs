@@ -22,11 +22,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::stream_plan::StreamActor;
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ParallelUnitId, WorkerId};
-use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
+use crate::model::{ActorId, DispatcherId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
 struct FragmentManagerCore {
@@ -122,10 +122,14 @@ where
 
     /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,
     /// besides also update all dependent tables' downstream actors info.
+    #[allow(clippy::type_complexity)]
     pub async fn finish_create_table_fragments(
         &self,
         table_id: &TableId,
-        dependent_table_actors: &[(TableId, HashMap<ActorId, Vec<ActorId>>)],
+        dependent_table_actors: Vec<(
+            TableId,
+            HashMap<ActorId, HashMap<DispatcherId, Vec<ActorId>>>,
+        )>,
     ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -137,9 +141,9 @@ where
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
             let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
-            for (dependent_table_id, extra_downstream_actors) in dependent_table_actors {
+            for (dependent_table_id, mut extra_downstream_actors) in dependent_table_actors {
                 let mut dependent_table = map
-                    .get(dependent_table_id)
+                    .get(&dependent_table_id)
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(
                             "table_fragment not exist: id={}",
@@ -149,12 +153,28 @@ where
                     .clone();
                 for fragment in dependent_table.fragments.values_mut() {
                     for actor in &mut fragment.actors {
-                        if let Some(downstream_actors) =
-                            extra_downstream_actors.get(&actor.actor_id)
+                        if let Some(mut downstream_actors) =
+                            extra_downstream_actors.remove(&actor.actor_id)
                         {
-                            actor.dispatcher[0]
-                                .downstream_actor_id
-                                .extend(downstream_actors.iter().cloned());
+                            for dispatcher in &mut actor.dispatcher {
+                                if let Some(downstream_actors) =
+                                    downstream_actors.remove(&dispatcher.dispatcher_id)
+                                {
+                                    dispatcher
+                                        .downstream_actor_id
+                                        .extend(downstream_actors.iter().cloned());
+                                }
+                            }
+                            // Add new dispatchers
+                            for (dispatcher_id, downstream_actor_id) in downstream_actors {
+                                actor.dispatcher.push(Dispatcher {
+                                    r#type: DispatcherType::NoShuffle as i32,
+                                    column_indices: vec![],
+                                    hash_mapping: None,
+                                    dispatcher_id,
+                                    downstream_actor_id,
+                                })
+                            }
                         }
                     }
                 }

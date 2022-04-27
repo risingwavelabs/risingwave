@@ -271,7 +271,6 @@ where
             is_legacy_frontend,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
-
         tracing::debug!(?dispatches, "create_materialized_view");
 
         let nodes = self

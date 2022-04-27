@@ -287,7 +287,6 @@ async fn test_fragmenter() -> Result<()> {
     assert_eq!(sink_actor_ids, vec![1]);
 
     let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);
     expected_downstream.insert(3, vec![1]);
     expected_downstream.insert(4, vec![1]);
@@ -309,10 +308,15 @@ async fn test_fragmenter() -> Result<()> {
     expected_upstream.insert(9, vec![]);
 
     for actor in actors {
-        assert_eq!(
-            expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor.dispatcher[0].get_downstream_actor_id(),
-        );
+        match expected_downstream.get(&actor.get_actor_id()) {
+            None => {
+                assert!(actor.dispatcher.is_empty());
+            }
+            Some(downstream_actor_ids) => assert_eq!(
+                actor.dispatcher[0].get_downstream_actor_id(),
+                downstream_actor_ids
+            ),
+        }
         let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
