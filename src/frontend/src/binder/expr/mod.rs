@@ -43,18 +43,16 @@ impl Binder {
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
-                Ok(self.bind_single_field_column(*field_expr, &idents)?)
+                self.bind_single_field_column(*field_expr, &idents)
             }
             // operators & functions
-            Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
-            Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_binary_op(*left, op, *right)?,
-            ))),
+            Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
+            Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Function(f) => Ok(self.bind_function(f)?),
+            Expr::Function(f) => self.bind_function(f),
             // subquery
-            Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
-            Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
+            Expr::Exists(q) => self.bind_subquery_expr(*q, SubqueryKind::Existential),
             Expr::InSubquery {
                 expr,
                 subquery,
