@@ -52,6 +52,7 @@ pub struct MetaNodeConfig {
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub enable_dashboard_v2: bool,
     pub unsafe_disable_recovery: bool,
+    pub checkpoint_interval: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
