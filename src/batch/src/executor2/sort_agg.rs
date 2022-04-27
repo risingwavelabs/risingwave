@@ -17,7 +17,7 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -118,22 +118,14 @@ impl SortAggExecutor2 {
         let chunk_size_limit = self.output_size_limit() + 1;
 
         let mut processed_group_cnt: usize = 0;
-        let cardinality = 1; // init to 1 because we don't know the number of groups
-        let mut group_builders = self
-            .group_keys
-            .iter()
-            .map(|e| e.return_type().create_array_builder(cardinality))
-            .collect::<Result<Vec<_>>>()?;
-        let mut agg_builders = self
-            .agg_states
-            .iter()
-            .map(|e| e.return_type().create_array_builder(cardinality))
-            .collect::<Result<Vec<_>>>()?;
+
+        let (mut group_builders, mut agg_builders) =
+            SortAggExecutor2::create_builders(&self.group_keys, &self.agg_states);
 
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?;
-            let group_keys = self
+            let group_columns = self
                 .group_keys
                 .iter_mut()
                 .map(|expr| expr.eval(&child_chunk))
@@ -142,7 +134,7 @@ impl SortAggExecutor2 {
             let groups = self
                 .sorted_groupers
                 .iter()
-                .zip_eq(&group_keys)
+                .zip_eq(&group_columns)
                 .map(|(grouper, array)| grouper.detect_groups(array))
                 .collect::<Result<Vec<EqGroups>>>()?;
 
@@ -159,34 +151,28 @@ impl SortAggExecutor2 {
             };
 
             groups.set_limit(limit);
+            SortAggExecutor2::build_sorted_groups(
+                &mut self.sorted_groupers,
+                &group_columns,
+                &mut group_builders,
+                &groups,
+                0,
+            )?;
 
-            self.sorted_groupers
-                .iter_mut()
-                .zip_eq(&group_keys)
-                .zip_eq(&mut group_builders)
-                .map(|((grouper, column), builder)| {
-                    grouper.update_and_output_with_sorted_groups(column, 0, builder, &mut groups)
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let agg_row_indices = self
-                .agg_states
-                .iter_mut()
-                .zip_eq(&mut agg_builders)
-                .map(|(state, builder)| {
-                    state.update_and_output_with_sorted_groups(&child_chunk, 0, builder, &groups)
-                })
-                .collect::<Result<Vec<_>>>()?;
+            let row_offset = SortAggExecutor2::build_agg_states(
+                &mut self.agg_states,
+                &child_chunk,
+                &mut agg_builders,
+                &groups,
+                0,
+            )?;
 
             if groups.len() == 0 {
-                break;
+                continue;
             }
-
-            let mut row_offset = 0;
             if groups.limit() != 0 {
                 processed_group_cnt += groups.limit();
                 groups.set_offset(groups.limit());
-                row_offset = *agg_row_indices.first().unwrap();
             } else {
                 processed_group_cnt += groups.len()
             }
@@ -202,52 +188,32 @@ impl SortAggExecutor2 {
                 let output = DataChunk::builder().columns(columns).build();
                 yield output;
 
-                // reset builders to build next chunk
-                group_builders = self
-                    .group_keys
-                    .iter()
-                    .map(|e| e.return_type().create_array_builder(cardinality))
-                    .collect::<Result<Vec<_>>>()?;
-                agg_builders = self
-                    .agg_states
-                    .iter()
-                    .map(|e| e.return_type().create_array_builder(cardinality))
-                    .collect::<Result<Vec<_>>>()?;
-
+                // reset builders to build next output chunk
+                (group_builders, agg_builders) =
+                    SortAggExecutor2::create_builders(&self.group_keys, &self.agg_states);
                 if groups.limit() == 0 {
                     continue;
                 }
 
+                // reset counters
                 processed_group_cnt = 0;
                 groups.reset_limit();
+
                 // process remaining groups
-                self.sorted_groupers
-                    .iter_mut()
-                    .zip_eq(&group_keys)
-                    .zip_eq(&mut group_builders)
-                    .map(|((grouper, array), builder)| {
-                        grouper.update_and_output_with_sorted_groups(
-                            array,
-                            row_offset,
-                            builder,
-                            &mut groups,
-                        )
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
-                self.agg_states
-                    .iter_mut()
-                    .zip_eq(&mut agg_builders)
-                    .map(|(state, builder)| -> Result<_> {
-                        state.update_and_output_with_sorted_groups(
-                            &child_chunk,
-                            row_offset,
-                            builder,
-                            &groups,
-                        )
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
+                SortAggExecutor2::build_sorted_groups(
+                    &mut self.sorted_groupers,
+                    &group_columns,
+                    &mut group_builders,
+                    &groups,
+                    row_offset,
+                )?;
+                SortAggExecutor2::build_agg_states(
+                    &mut self.agg_states,
+                    &child_chunk,
+                    &mut agg_builders,
+                    &groups,
+                    row_offset,
+                )?;
                 processed_group_cnt += groups.len();
             }
         }
@@ -274,6 +240,57 @@ impl SortAggExecutor2 {
 
     pub fn output_size_limit(&self) -> usize {
         self.output_size_limit
+    }
+
+    fn build_sorted_groups(
+        sorted_groupers: &mut Vec<BoxedSortedGrouper>,
+        group_columns: &[ArrayRef],
+        group_builders: &mut Vec<ArrayBuilderImpl>,
+        groups: &EqGroups,
+        row_offset: usize,
+    ) -> Result<()> {
+        sorted_groupers
+            .iter_mut()
+            .zip_eq(group_columns)
+            .zip_eq(group_builders)
+            .try_for_each(|((grouper, column), builder)| {
+                grouper.update_and_output_with_sorted_groups(column, row_offset, builder, groups)
+            })
+    }
+
+    fn build_agg_states(
+        agg_states: &mut Vec<BoxedAggState>,
+        child_chunk: &DataChunk,
+        agg_builders: &mut Vec<ArrayBuilderImpl>,
+        groups: &EqGroups,
+        row_offset: usize,
+    ) -> Result<usize> {
+        let next_row_indices = agg_states
+            .iter_mut()
+            .zip_eq(agg_builders)
+            .map(|(state, builder)| {
+                state.update_and_output_with_sorted_groups(child_chunk, row_offset, builder, groups)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(*next_row_indices.first().unwrap_or(&0))
+    }
+
+    fn create_builders(
+        group_keys: &Vec<BoxedExpression>,
+        agg_states: &Vec<BoxedAggState>,
+    ) -> (Vec<ArrayBuilderImpl>, Vec<ArrayBuilderImpl>) {
+        let group_builders = group_keys
+            .iter()
+            .map(|e| e.return_type().create_array_builder(1))
+            .collect::<Result<Vec<_>>>();
+
+        let agg_builders = agg_states
+            .iter()
+            .map(|e| e.return_type().create_array_builder(1))
+            .collect::<Result<Vec<_>>>();
+
+        (group_builders.unwrap(), agg_builders.unwrap())
     }
 }
 

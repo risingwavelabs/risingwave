@@ -133,8 +133,8 @@ pub trait SortedGrouper: Send + 'static {
         input: &ArrayImpl,
         offset: usize,
         builder: &mut ArrayBuilderImpl,
-        groups: &mut EqGroups,
-    ) -> Result<usize>;
+        groups: &EqGroups,
+    ) -> Result<()>;
 
     /// `output` the state to the `builder`. Expected to be called once to obtain
     /// the last group, when there are no more upstream data.
@@ -204,13 +204,11 @@ where
         input: &T,
         offset: usize,
         builder: &mut T::Builder,
-        groups: &mut EqGroups,
-    ) -> Result<usize> {
-        // let mut groups_iter = groups.0.iter().peekable();
+        groups: &EqGroups,
+    ) -> Result<()> {
         let mut group_cnt = 0;
         let mut groups_iter = groups.get_starting_indices().iter().peekable();
         let mut cur = self.group_value.as_ref().map(|x| x.as_scalar_ref());
-        let mut row_idx = input.len();
         for (i, v) in input.iter().skip(offset).enumerate() {
             if groups_iter.peek() == Some(&&(i + offset)) {
                 groups_iter.next();
@@ -223,14 +221,11 @@ where
 
             // save current states and exit when we reach limit
             if groups.limit() != 0 && group_cnt == groups.limit() {
-                // TODO: cannot set offset here, since the groups is shared by all group_columns
-                // groups.set_offset(group_cnt);
-                row_idx = offset + i;
                 break;
             }
         }
         self.group_value = cur.map(|x| x.to_owned_scalar());
-        Ok(row_idx)
+        Ok(())
     }
 
     pub fn output_concrete(&self, builder: &mut T::Builder) -> Result<()> {
@@ -270,8 +265,8 @@ macro_rules! impl_sorted_grouper {
                 input: &ArrayImpl,
                 offset: usize,
                 builder: &mut ArrayBuilderImpl,
-                groups: &mut EqGroups,
-            ) -> Result<usize> {
+                groups: &EqGroups,
+            ) -> Result<()> {
                 if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$input_variant(b)) =
                     (input, builder)
                 {
