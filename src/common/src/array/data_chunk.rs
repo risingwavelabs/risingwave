@@ -468,8 +468,7 @@ impl DataChunkTestExt for DataChunk {
     ///
     /// # Example
     /// ```
-    /// use risingwave_common::array::stream_chunk::DataChunkTestExt as _;
-    /// use risingwave_common::array::DataChunk;
+    /// use risingwave_common::array::{DataChunk, DataChunkTestExt};
     /// let chunk = DataChunk::from_pretty(
     ///     "I I I I      // type chars
     ///      2 5 . .      // '.' means NULL
