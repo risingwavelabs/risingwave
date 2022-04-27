@@ -68,13 +68,12 @@ impl Eq for Subquery {}
 impl Expr for Subquery {
     fn return_type(&self) -> DataType {
         match self.kind {
-            SubqueryKind::Scalar => {
+            SubqueryKind::Scalar | SubqueryKind::SetComparison => {
                 let types = self.query.data_types();
-                assert_eq!(types.len(), 1, "Scalar subquery with more than one column");
+                assert_eq!(types.len(), 1, "Subquery with more than one column");
                 types[0].clone()
             }
             SubqueryKind::Existential => DataType::Boolean,
-            SubqueryKind::SetComparison => DataType::Boolean,
         }
     }
 

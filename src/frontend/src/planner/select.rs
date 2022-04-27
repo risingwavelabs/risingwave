@@ -69,7 +69,7 @@ impl Planner {
     }
 
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
-    /// It is represented by `Project([$0 >= 1]) - Agg(count(*)) - input`
+    /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
         let count_star = LogicalAgg::new(vec![PlanAggCall::count_star()], vec![], input);
         let ge = FunctionCall::new(
@@ -101,56 +101,39 @@ impl Planner {
             Condition::with_expr(where_clause)
                 .group_by::<_, 3>(|expr| match expr {
                     ExprImpl::Subquery(_) => 0,
-                    ExprImpl::FunctionCall(func_call)
-                        if func_call.get_expr_type() == ExprType::Not
-                            && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
-                    {
-                        1
-                    }
+                    ExprImpl::FunctionCall(func_call) => match func_call.get_expr_type() {
+                        ExprType::In if matches!(func_call.inputs()[1], ExprImpl::Subquery(_)) => 0,
+                        ExprType::Not => {
+                            let expr = &func_call.inputs()[0];
+                            match expr {
+                                ExprImpl::Subquery(_) => 1,
+                                ExprImpl::FunctionCall(func)
+                                    if func.get_expr_type() == ExprType::In
+                                        && matches!(func.inputs()[1], ExprImpl::Subquery(_)) =>
+                                {
+                                    1
+                                }
+                                _ => 2,
+                            }
+                        }
+                        _ => 2,
+                    },
                     _ => 2,
                 })
                 .into_iter()
                 .next_tuple()
                 .unwrap();
 
+        // EXISTS and IN in WHERE.
         for expr in subquery_conjunctions {
-            let subquery = expr.into_subquery().unwrap();
-            let is_correlated = subquery.is_correlated();
-
-            let join_type = match subquery.kind {
-                SubqueryKind::Existential => JoinType::LeftSemi,
-                SubqueryKind::Scalar | SubqueryKind::SetComparison => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("{:?}", subquery.kind),
-                        1343.into(),
-                    )
-                    .into())
-                }
-            };
-            let right = self.plan_query(subquery.query)?.as_subplan();
-
-            input = Self::create_apply_or_join(is_correlated, input, right, join_type);
+            self.handle_exists_and_in(expr, false, &mut input)?;
         }
 
+        // NOT EXISTS and NOT IN in WHERE.
         for expr in not_subquery_conjunctions {
             let not = expr.into_function_call().unwrap();
-            let (_, subquery) = not.decompose_as_unary();
-            let subquery = subquery.into_subquery().unwrap();
-            let is_correlated = subquery.is_correlated();
-
-            let join_type = match subquery.kind {
-                SubqueryKind::Existential => JoinType::LeftAnti,
-                SubqueryKind::Scalar | SubqueryKind::SetComparison => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("{:?}", subquery.kind),
-                        1343.into(),
-                    )
-                    .into())
-                }
-            };
-            let right = self.plan_query(subquery.query)?.as_subplan();
-
-            input = Self::create_apply_or_join(is_correlated, input, right, join_type);
+            let (_, expr) = not.decompose_as_unary();
+            self.handle_exists_and_in(expr, true, &mut input)?;
         }
 
         if others.always_true() {
@@ -164,6 +147,65 @@ impl Planner {
                 },
             ))
         }
+    }
+
+    /// Handle (NOT) EXISTS and (NOT) IN in WHERE clause.
+    ///
+    /// We will use a = b to replace a in (select b from ....) for (NOT) IN thus avoiding adding a
+    /// `LogicalFilter` on `LogicalApply`.
+    fn handle_exists_and_in(
+        &mut self,
+        expr: ExprImpl,
+        negated: bool,
+        input: &mut PlanRef,
+    ) -> Result<()> {
+        let join_type = if negated {
+            JoinType::LeftAnti
+        } else {
+            JoinType::LeftSemi
+        };
+        match expr {
+            ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::In => {
+                let (_, mut inputs, _) = func_call.decompose();
+                assert_eq!(inputs.len(), 2);
+
+                let subquery = inputs.pop().unwrap().into_subquery().unwrap();
+                let is_correlated = subquery.is_correlated();
+
+                let left = inputs.pop().unwrap();
+                let right = InputRef::new(input.schema().fields().len(), subquery.return_type());
+                let eq_cond = FunctionCall::new(ExprType::Equal, vec![left, right.into()])?;
+
+                let right_child = self.plan_query(subquery.query)?.as_subplan();
+
+                *input = Self::create_apply_or_join(
+                    is_correlated,
+                    input.clone(),
+                    right_child,
+                    eq_cond.into(),
+                    join_type,
+                );
+            }
+            ExprImpl::Subquery(subquery) if subquery.kind == SubqueryKind::Existential => {
+                let is_correlated = subquery.is_correlated();
+                let right = self.plan_query(subquery.query)?.as_subplan();
+                *input = Self::create_apply_or_join(
+                    is_correlated,
+                    input.clone(),
+                    right,
+                    ExprImpl::literal_bool(true),
+                    join_type,
+                );
+            }
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("Not supported subquery: {:?}", expr),
+                    1343.into(),
+                )
+                .into())
+            }
+        }
+        Ok(())
     }
 
     /// Substitutes all [`Subquery`] in `exprs`.
@@ -220,7 +262,13 @@ impl Planner {
                 }
             }
 
-            root = Self::create_apply_or_join(is_correlated, root, right, JoinType::LeftOuter);
+            root = Self::create_apply_or_join(
+                is_correlated,
+                root,
+                right,
+                ExprImpl::literal_bool(true),
+                JoinType::LeftOuter,
+            );
         }
         Ok((root, exprs))
     }
@@ -229,12 +277,13 @@ impl Planner {
         is_correlated: bool,
         left: PlanRef,
         right: PlanRef,
+        on: ExprImpl,
         join_type: JoinType,
     ) -> PlanRef {
         if is_correlated {
-            LogicalApply::create(left, right, join_type)
+            LogicalApply::create(left, right, join_type, on)
         } else {
-            LogicalJoin::create(left, right, join_type, ExprImpl::literal_bool(true))
+            LogicalJoin::create(left, right, join_type, on)
         }
     }
 }
