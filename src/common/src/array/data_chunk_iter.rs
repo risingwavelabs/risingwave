@@ -99,7 +99,7 @@ impl<'a> RowRef<'a> {
 
     pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
-        // the above check ensures that the index is valid.
+        // for `RowRef`, the index is always in bound.
         unsafe {
             self.chunk.columns()[pos]
                 .array_ref()
@@ -175,6 +175,7 @@ impl<'a> Iterator for RowRefIter<'a> {
     type Item = DatumRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // for `RowRef`, the index is always in bound.
         unsafe {
             self.columns
                 .next()

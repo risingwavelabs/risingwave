@@ -187,5 +187,9 @@ mod tests {
         assert_eq!(v.get_days(), 0);
         let v = ret_arr.value_at(1);
         assert_eq!(v, None);
+        let v = unsafe { ret_arr.value_at_unchecked(0).unwrap() };
+        assert_eq!(v.get_years(), 1);
+        assert_eq!(v.get_months(), 12);
+        assert_eq!(v.get_days(), 0);
     }
 }
