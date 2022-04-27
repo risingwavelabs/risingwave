@@ -197,7 +197,7 @@ where
 
                     // finally, we should also build dispatcher infos here.
                     self.dispatches
-                        .entry((*upstream_actor_id, todo!()))
+                        .entry((*upstream_actor_id, 0))
                         .or_default()
                         .push(actor_id);
                 } else {

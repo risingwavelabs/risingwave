@@ -516,7 +516,7 @@ impl StreamGraphBuilder {
             if ctx.is_legacy_frontend {
                 for &up_id in &upstream_actor_ids {
                     ctx.dispatches
-                        .entry((up_id, todo!()))
+                        .entry((up_id, 0))
                         .or_default()
                         .push(actor_id.as_global_id());
                 }
