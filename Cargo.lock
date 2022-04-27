@@ -3304,6 +3304,7 @@ version = "0.1.5"
 dependencies = [
  "clap 3.1.10",
  "log 0.4.16",
+ "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
@@ -3323,6 +3324,7 @@ dependencies = [
  "clap 3.1.10",
  "log 0.4.16",
  "risedev",
+ "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
@@ -3348,6 +3350,7 @@ dependencies = [
  "comfy-table",
  "crc32fast",
  "either",
+ "hyper",
  "itertools",
  "lazy_static",
  "log 0.4.16",
@@ -3356,6 +3359,7 @@ dependencies = [
  "more-asserts",
  "num-traits",
  "paste",
+ "prometheus",
  "prost 0.10.1",
  "rand 0.8.5",
  "risingwave_pb",
@@ -3367,9 +3371,30 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tonic",
+ "tower",
+ "tower-http",
  "twox-hash",
  "value-encoding",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_compactor"
+version = "0.1.0"
+dependencies = [
+ "clap 3.1.10",
+ "prometheus",
+ "risingwave_common",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "serde",
+ "tokio",
+ "tokio-retry",
+ "tokio-stream",
+ "toml",
+ "tonic",
+ "tracing",
 ]
 
 [[package]]
@@ -3534,6 +3559,7 @@ dependencies = [
 name = "risingwave_frontend"
 version = "0.1.5"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "assert-impl",
  "async-trait",
@@ -3737,7 +3763,6 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
- "either",
  "enum-as-inner",
  "farmhash",
  "futures",
@@ -5184,6 +5209,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "parking_lot_core 0.9.2",
  "petgraph",
+ "prometheus",
  "prost 0.9.0",
  "rand 0.8.5",
  "regex",

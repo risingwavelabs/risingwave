@@ -316,7 +316,7 @@ impl StreamChunkTestExt for StreamChunk {
     fn from_pretty(s: &str) -> Self {
         use crate::types::ScalarImpl;
 
-        let mut lines = s.split('\n');
+        let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
         let mut ops = vec![];
         // initialize array builders from the first line
         let header = lines.next().unwrap().trim();

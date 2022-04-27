@@ -19,6 +19,7 @@ mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
 mod expr_case;
+mod expr_field;
 mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
@@ -42,6 +43,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::build_expr_from_prost::*;
+use crate::expr::expr_field::FieldExpression;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
@@ -90,6 +92,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Case => build_case_expr(prost),
         Translate => build_translate_expr(prost),
         In => build_in_expr(prost),
+        Field => FieldExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

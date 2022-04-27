@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
@@ -121,7 +120,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor2, expect: BoxedExecutor2
         assert_matches!(chunk, Ok(_));
         let chunk = chunk.unwrap().compact().unwrap();
         expect_cardinality += chunk.cardinality();
-        expects.push(Arc::new(chunk));
+        expects.push(chunk);
     }
 
     #[for_await]
@@ -129,7 +128,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor2, expect: BoxedExecutor2
         assert_matches!(chunk, Ok(_));
         let chunk = chunk.unwrap().compact().unwrap();
         actual_cardinality += chunk.cardinality();
-        actuals.push(Arc::new(chunk));
+        actuals.push(chunk);
     }
 
     assert_eq!(actual_cardinality, expect_cardinality);

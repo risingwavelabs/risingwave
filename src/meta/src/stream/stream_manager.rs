@@ -135,77 +135,78 @@ where
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
             ) -> Result<()> {
-                // if node is chain node, we insert upstream ids into chain's input(merge)
-                if let Some(Node::ChainNode(ref mut chain)) = stream_node.node {
-                    // get upstream table id
-                    let table_id = TableId::from(&chain.table_ref_id);
+                let Some(Node::ChainNode(ref mut chain)) = stream_node.node else {
+                        // If node is not chain node, recursively deal with input nodes
+                        for input in &mut stream_node.input {
+                            self.resolve_chain_node_inner(input, actor_id)?;
+                        }
+                        return Ok(());
+                };
+                // If node is chain node, we insert upstream ids into chain's input(merge)
 
-                    let (upstream_actor_id, parallel_unit_id) = {
-                        // 1. use table id to get upstream parallel_unit->actor_id mapping
-                        let upstream_parallel_actor_mapping =
-                            self.upstream_parallel_unit_info.get(&table_id).unwrap();
-                        // 2. use our actor id to get our parallel unit id
-                        let parallel_unit_id =
-                            self.locations.actor_locations.get(&actor_id).unwrap().id;
-                        // 3. and use our parallel unit id to get upstream actor id
-                        (
-                            upstream_parallel_actor_mapping
-                                .get(&parallel_unit_id)
-                                .unwrap(),
-                            parallel_unit_id,
-                        )
-                    };
+                // get upstream table id
+                let table_id = TableId::from(&chain.table_ref_id);
 
-                    // fill upstream node-actor info for later use
-                    let upstream_table_node_actors =
-                        self.tables_node_actors.get(&table_id).unwrap();
+                let (upstream_actor_id, parallel_unit_id) = {
+                    // 1. use table id to get upstream parallel_unit->actor_id mapping
+                    let upstream_parallel_actor_mapping =
+                        self.upstream_parallel_unit_info.get(&table_id).unwrap();
+                    // 2. use our actor id to get our parallel unit id
+                    let parallel_unit_id =
+                        self.locations.actor_locations.get(&actor_id).unwrap().id;
+                    // 3. and use our parallel unit id to get upstream actor id
+                    (
+                        upstream_parallel_actor_mapping
+                            .get(&parallel_unit_id)
+                            .unwrap(),
+                        parallel_unit_id,
+                    )
+                };
 
-                    let chain_upstream_node_actors = upstream_table_node_actors
-                        .iter()
-                        .flat_map(|(node_id, actor_ids)| {
-                            actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
-                        })
-                        .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
-                        .into_group_map();
-                    for (node_id, actor_ids) in chain_upstream_node_actors {
-                        self.upstream_node_actors
-                            .entry(node_id)
-                            .or_default()
-                            .extend(actor_ids.iter());
-                    }
+                // fill upstream node-actor info for later use
+                let upstream_table_node_actors = self.tables_node_actors.get(&table_id).unwrap();
 
-                    // deal with merge and batch query node, setting upstream infos.
-                    let merge_stream_node = &mut stream_node.input[0];
-                    if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
-                        merge.upstream_actor_id.push(*upstream_actor_id);
-                    } else {
-                        unreachable!("chain's input[0] should always be merge");
-                    }
-                    let batch_stream_node = &mut stream_node.input[1];
-                    if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
-                        // TODO: we can also insert distribution keys here, make fragmenter
-                        // even simpler.
-                        let (original_indices, data) = compress_data(self.hash_mapping);
-                        batch_query.hash_mapping = Some(ParallelUnitMapping {
-                            original_indices,
-                            data,
-                        });
-                        batch_query.parallel_unit_id = parallel_unit_id;
-                    } else {
-                        unreachable!("chain's input[1] should always be batch query");
-                    }
-
-                    // finally, we should also build dispatcher infos here.
-                    self.dispatches
-                        .entry((*upstream_actor_id, 0))
+                let chain_upstream_node_actors = upstream_table_node_actors
+                    .iter()
+                    .flat_map(|(node_id, actor_ids)| {
+                        actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                    })
+                    .filter(|(_, actor_id)| *upstream_actor_id == *actor_id)
+                    .into_group_map();
+                for (node_id, actor_ids) in chain_upstream_node_actors {
+                    self.upstream_node_actors
+                        .entry(node_id)
                         .or_default()
-                        .push(actor_id);
-                } else {
-                    // otherwise, recursively deal with input nodes
-                    for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id)?;
-                    }
+                        .extend(actor_ids.iter());
                 }
+
+                // deal with merge and batch query node, setting upstream infos.
+                let merge_stream_node = &mut stream_node.input[0];
+                if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
+                    merge.upstream_actor_id.push(*upstream_actor_id);
+                } else {
+                    unreachable!("chain's input[0] should always be merge");
+                }
+                let batch_stream_node = &mut stream_node.input[1];
+                if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
+                    // TODO: we can also insert distribution keys here, make fragmenter
+                    // even simpler.
+                    let (original_indices, data) = compress_data(self.hash_mapping);
+                    batch_query.hash_mapping = Some(ParallelUnitMapping {
+                        original_indices,
+                        data,
+                    });
+                    batch_query.parallel_unit_id = parallel_unit_id;
+                } else {
+                    unreachable!("chain's input[1] should always be batch query");
+                }
+
+                // finally, we should also build dispatcher infos here.
+                self.dispatches
+                    .entry(*upstream_actor_id)
+                    .or_default()
+                    .push(actor_id);
+
                 Ok(())
             }
         }
@@ -844,7 +845,6 @@ mod tests {
         async fn stop(self) {
             for shutdown_tx in self.shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-                tokio::time::sleep(Duration::from_millis(150)).await;
             }
             for join_handle in self.join_handles {
                 join_handle.await.unwrap();

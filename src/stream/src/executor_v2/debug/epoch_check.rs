@@ -70,12 +70,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_epoch_ok() {
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_barrier(100, false);
-        source.push_chunks([StreamChunk::default()].into_iter());
-        source.push_barrier(114, false);
-        source.push_barrier(114, false);
-        source.push_barrier(514, false);
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_barrier(100, false);
+        tx.push_chunk(StreamChunk::default());
+        tx.push_barrier(114, false);
+        tx.push_barrier(114, false);
+        tx.push_barrier(514, false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -90,12 +90,12 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_bad() {
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_barrier(100, false);
-        source.push_chunks([StreamChunk::default()].into_iter());
-        source.push_barrier(514, false);
-        source.push_barrier(514, false);
-        source.push_barrier(114, false);
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_barrier(100, false);
+        tx.push_chunk(StreamChunk::default());
+        tx.push_barrier(514, false);
+        tx.push_barrier(514, false);
+        tx.push_barrier(114, false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -111,9 +111,9 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_first_not_barrier() {
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_chunks([StreamChunk::default()].into_iter());
-        source.push_barrier(114, false);
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_chunk(StreamChunk::default());
+        tx.push_barrier(114, false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -123,7 +123,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty() {
-        let source = MockSource::new(Default::default(), vec![]).stop_on_finish(false);
+        let (_, mut source) = MockSource::channel(Default::default(), vec![]);
+        source = source.stop_on_finish(false);
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 

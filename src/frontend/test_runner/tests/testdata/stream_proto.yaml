@@ -27,6 +27,15 @@
                           name: "_row_id#0"
                 pkIndices:
                   - 1
+                fields:
+                  - dataType:
+                      typeName: INT32
+                      isNullable: true
+                    name: v1
+                  - dataType:
+                      typeName: INT64
+                      isNullable: true
+                    name: "_row_id#0"
                 chainNode:
                   tableRefId:
                     tableId: 1
@@ -160,6 +169,15 @@
                       name: "_row_id#0"
             pkIndices:
               - 1
+            fields:
+              - dataType:
+                  typeName: INT32
+                  isNullable: true
+                name: v1
+              - dataType:
+                  typeName: INT64
+                  isNullable: true
+                name: "_row_id#0"
             chainNode:
               tableRefId:
                 tableId: 1
@@ -263,6 +281,15 @@
                       name: "_row_id#0"
             pkIndices:
               - 1
+            fields:
+              - dataType:
+                  typeName: INT32
+                  isNullable: true
+                name: v1
+              - dataType:
+                  typeName: INT64
+                  isNullable: true
+                name: "_row_id#0"
             chainNode:
               tableRefId:
                 tableId: 1
@@ -371,6 +398,15 @@
                           name: "_row_id#0"
                 pkIndices:
                   - 1
+                fields:
+                  - dataType:
+                      typeName: INT32
+                      isNullable: true
+                    name: v1
+                  - dataType:
+                      typeName: INT64
+                      isNullable: true
+                    name: "_row_id#0"
                 chainNode:
                   tableRefId:
                     tableId: 1
@@ -513,6 +549,19 @@
                                   name: "_row_id#0"
                         pkIndices:
                           - 2
+                        fields:
+                          - dataType:
+                              typeName: INT32
+                              isNullable: true
+                            name: v1
+                          - dataType:
+                              typeName: INT32
+                              isNullable: true
+                            name: v2
+                          - dataType:
+                              typeName: INT64
+                              isNullable: true
+                            name: "_row_id#0"
                         chainNode:
                           tableRefId:
                             tableId: 1
