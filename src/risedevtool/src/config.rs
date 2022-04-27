@@ -21,13 +21,12 @@ use yaml_rust::{yaml, Yaml, YamlEmitter, YamlLoader};
 use self::dollar_expander::DollarExpander;
 use self::id_expander::IdExpander;
 use self::use_expander::UseExpander;
+use crate::ServiceConfig;
 
 mod dollar_expander;
 mod id_expander;
-pub mod service_config;
-mod use_expander;
-pub use service_config::*;
 mod provide_expander;
+mod use_expander;
 pub use provide_expander::*;
 
 pub struct ConfigExpander;
@@ -107,6 +106,7 @@ impl ConfigExpander {
                     "etcd" => ServiceConfig::Etcd(serde_yaml::from_str(&out_str)?),
                     "frontend-legacy" => ServiceConfig::Frontend(serde_yaml::from_str(&out_str)?),
                     "frontend" => ServiceConfig::FrontendV2(serde_yaml::from_str(&out_str)?),
+                    "compactor" => ServiceConfig::Compactor(serde_yaml::from_str(&out_str)?),
                     "compute-node" => ServiceConfig::ComputeNode(serde_yaml::from_str(&out_str)?),
                     "meta-node" => ServiceConfig::MetaNode(serde_yaml::from_str(&out_str)?),
                     "prometheus" => ServiceConfig::Prometheus(serde_yaml::from_str(&out_str)?),

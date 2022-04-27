@@ -20,7 +20,6 @@ pub type ConcatIterator = ConcatIteratorInner<SSTableIterator>;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -57,7 +56,11 @@ mod tests {
         )
         .await;
         let mut iter = ConcatIterator::new(
-            vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)],
+            vec![
+                table0.get_sstable_info(),
+                table1.get_sstable_info(),
+                table2.get_sstable_info(),
+            ],
             sstable_store,
         );
         let mut i = 0;
@@ -117,7 +120,11 @@ mod tests {
         )
         .await;
         let mut iter = ConcatIterator::new(
-            vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)],
+            vec![
+                table0.get_sstable_info(),
+                table1.get_sstable_info(),
+                table2.get_sstable_info(),
+            ],
             sstable_store,
         );
 
@@ -194,7 +201,11 @@ mod tests {
         )
         .await;
         let mut iter = ConcatIterator::new(
-            vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)],
+            vec![
+                table0.get_sstable_info(),
+                table1.get_sstable_info(),
+                table2.get_sstable_info(),
+            ],
             sstable_store,
         );
 

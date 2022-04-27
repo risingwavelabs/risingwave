@@ -35,7 +35,7 @@ pub struct LogicalScan {
     // Descriptor of the table
     table_desc: Rc<TableDesc>,
     // Descriptors of all indexes on this table
-    indexes: Vec<Rc<TableDesc>>,
+    indexes: Vec<(String, Rc<TableDesc>)>,
 }
 
 impl LogicalScan {
@@ -44,7 +44,7 @@ impl LogicalScan {
         table_name: String,           // explain-only
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<TableDesc>>,
+        indexes: Vec<(String, Rc<TableDesc>)>,
         ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
@@ -86,7 +86,7 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<TableDesc>>,
+        indexes: Vec<(String, Rc<TableDesc>)>,
         ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
@@ -128,8 +128,32 @@ impl LogicalScan {
 
     /// Get all indexes on this table
     #[must_use]
-    pub fn indexes(&self) -> &[Rc<TableDesc>] {
+    pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
         &self.indexes
+    }
+
+    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> LogicalScan {
+        let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
+        let all_columns = index
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(idx, desc)| (desc.column_id, idx))
+            .collect::<HashMap<_, _>>();
+
+        // create index scan plan to match the output order of the current table scan
+        for &col_idx in &self.required_col_idx {
+            let column_idx_in_index = all_columns[&self.table_desc.columns[col_idx].column_id];
+            new_required_col_idx.push(column_idx_in_index);
+        }
+
+        Self::new(
+            index_name.to_string(),
+            new_required_col_idx,
+            index.clone(),
+            vec![],
+            self.ctx(),
+        )
     }
 }
 

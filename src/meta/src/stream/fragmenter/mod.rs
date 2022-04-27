@@ -26,7 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::plan_common::{JoinType, TableRefId};
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
@@ -263,7 +263,7 @@ impl StreamFragmenter {
             let input = match child_node.get_node()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                Node::HashAggNode(_) | Node::HashJoinNode(_) => {
+                Node::HashAggNode(_) | Node::HashJoinNode(_) | Node::DeltaIndexJoin(_) => {
                     // We didn't make `fields` available on Java frontend yet, so we check if schema
                     // is available (by `child_node.fields.is_empty()`) before deciding to do the
                     // rewrite.
@@ -368,14 +368,8 @@ impl StreamFragmenter {
         if let Node::HashJoinNode(hash_join_node) = stream_node.node.as_mut().unwrap() {
             // Allocate local table id. It will be rewrite to global table id after get table id
             // offset from id generator.
-            hash_join_node.left_table_ref_id = Some(TableRefId {
-                table_id: state.gen_table_id() as i32,
-                ..Default::default()
-            });
-            hash_join_node.right_table_ref_id = Some(TableRefId {
-                table_id: state.gen_table_id() as i32,
-                ..Default::default()
-            });
+            hash_join_node.left_table_id = state.gen_table_id();
+            hash_join_node.right_table_id = state.gen_table_id();
             if hash_join_node.is_delta_join {
                 if hash_join_node.get_join_type()? == JoinType::Inner
                     && hash_join_node.condition.is_none()
@@ -386,6 +380,16 @@ impl StreamFragmenter {
                         "only inner join without non-equal condition is supported for delta joins"
                     );
                 }
+            }
+        }
+
+        if let Node::DeltaIndexJoin(delta_index_join) = stream_node.node.as_mut().unwrap() {
+            if delta_index_join.get_join_type()? == JoinType::Inner
+                && delta_index_join.condition.is_none()
+            {
+                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
+            } else {
+                panic!("only inner join without non-equal condition is supported for delta joins");
             }
         }
 

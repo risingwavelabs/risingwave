@@ -56,7 +56,7 @@
         BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [v1, _row_id#0] }
-      StreamTopN { order: [$0 DESC], limit: 5, offset: 0 }
+      StreamTopN { order: [$0 DESC, $2 ASC], limit: 5, offset: 0 }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
@@ -68,6 +68,6 @@
         BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [v1, _row_id#0] }
-      StreamTopN { order: [$0 DESC], limit: 5, offset: 7 }
+      StreamTopN { order: [$0 DESC, $2 ASC], limit: 5, offset: 7 }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }

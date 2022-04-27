@@ -14,17 +14,17 @@
 
 use std::cmp::Ordering;
 use std::ops::Range;
-use std::sync::Arc;
 
 use bytes::BytesMut;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use super::{Block, KeyPrefix};
+use super::KeyPrefix;
+use crate::hummock::BlockHolder;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
     /// Block that iterates on.
-    block: Arc<Block>,
+    block: BlockHolder,
     /// Current restart point index.
     restart_point_index: usize,
     /// Current offset.
@@ -38,7 +38,7 @@ pub struct BlockIterator {
 }
 
 impl BlockIterator {
-    pub fn new(block: Arc<Block>) -> Self {
+    pub fn new(block: BlockHolder) -> Self {
         Self {
             block,
             offset: usize::MAX,
@@ -215,7 +215,7 @@ mod tests {
     use bytes::{BufMut, Bytes};
 
     use super::*;
-    use crate::hummock::{BlockBuilder, BlockBuilderOptions};
+    use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
@@ -225,7 +225,9 @@ mod tests {
         builder.add(&full_key(b"k04", 4), b"v04");
         builder.add(&full_key(b"k05", 5), b"v05");
         let buf = builder.build();
-        BlockIterator::new(Arc::new(Block::decode(buf).unwrap()))
+        BlockIterator::new(BlockHolder::from_owned_block(Box::new(
+            Block::decode(buf).unwrap(),
+        )))
     }
 
     #[test]

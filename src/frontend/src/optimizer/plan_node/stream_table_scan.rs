@@ -13,18 +13,19 @@
 // limitations under the License.
 
 use std::fmt;
+use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableDesc;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
 use crate::optimizer::property::Distribution;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
-// TODO: rename to `StreamChain`
 #[derive(Debug, Clone)]
 pub struct StreamTableScan {
     pub base: PlanBase,
@@ -58,6 +59,10 @@ impl StreamTableScan {
 
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
+    }
+
+    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> StreamIndexScan {
+        StreamIndexScan::new(self.logical.to_index_scan(index_name, index))
     }
 }
 
@@ -116,7 +121,7 @@ impl StreamTableScan {
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
-            fields: vec![], // TODO: fill this later
+            fields: self.schema().to_prost(),
             input: vec![
                 // The merge node should be empty
                 ProstStreamPlan {
