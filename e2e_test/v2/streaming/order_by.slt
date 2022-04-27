@@ -27,6 +27,7 @@ select v1, v2, v3 from mv1;
 1 9 1
 5 1 4
 9 8 1
+
 query III rowsort
 select v1, v2, v3 from mv2;
 ----
