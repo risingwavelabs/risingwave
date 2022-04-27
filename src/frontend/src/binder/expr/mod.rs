@@ -32,6 +32,36 @@ mod value;
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
+            // literal
+            Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
+            Expr::TypedString { data_type, value } => {
+                let s: ExprImpl = self.bind_string(value)?.into();
+                s.cast_explicit(bind_data_type(&data_type)?)
+            }
+            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
+            // input ref
+            Expr::Identifier(ident) => self.bind_column(&[ident]),
+            Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
+            Expr::FieldIdentifier(field_expr, idents) => {
+                Ok(self.bind_single_field_column(*field_expr, &idents)?)
+            }
+            // operators & functions
+            Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
+            Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_binary_op(*left, op, *right)?,
+            ))),
+            Expr::Nested(expr) => self.bind_expr(*expr),
+            Expr::Function(f) => Ok(self.bind_function(f)?),
+            // subquery
+            Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
+            Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => self.bind_in_subquery(*expr, *subquery, negated),
+            // special syntax
+            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
             Expr::IsNull(expr) => self.bind_is_operator(ExprType::IsNull, *expr),
             Expr::IsNotNull(expr) => self.bind_is_operator(ExprType::IsNotNull, *expr),
             Expr::IsTrue(expr) => self.bind_is_operator(ExprType::IsTrue, *expr),
@@ -44,49 +74,24 @@ impl Binder {
                 results,
                 else_result,
             } => self.bind_case(operand, conditions, results, else_result),
-            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
-            Expr::Substring {
-                expr,
-                substring_from,
-                substring_for,
-            } => self.bind_substring(*expr, substring_from, substring_for),
-            Expr::Identifier(ident) => self.bind_column(&[ident]),
-            Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
-            Expr::FieldIdentifier(field_expr, idents) => {
-                Ok(self.bind_single_field_column(*field_expr, &idents)?)
-            }
-            Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
-            Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_binary_op(*left, op, *right)?,
-            ))),
-            Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
-            Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
-            Expr::Function(f) => Ok(self.bind_function(f)?),
-            Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
-            Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
-            Expr::InSubquery {
-                expr,
-                subquery,
-                negated,
-            } => self.bind_in_subquery(*expr, *subquery, negated),
-            Expr::TypedString { data_type, value } => {
-                let s: ExprImpl = self.bind_string(value)?.into();
-                s.cast_explicit(bind_data_type(&data_type)?)
-            }
             Expr::Between {
                 expr,
                 negated,
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
-            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
             Expr::InList {
                 expr,
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
-            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
+            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
+            Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+            } => self.bind_substring(*expr, substring_from, substring_for),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
