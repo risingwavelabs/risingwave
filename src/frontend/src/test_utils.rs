@@ -114,7 +114,8 @@ impl LocalFrontend {
 pub struct MockCatalogWriter {
     catalog: Arc<RwLock<Catalog>>,
     id: AtomicU32,
-    id_to_schema_id: RwLock<HashMap<u32, (DatabaseId, SchemaId)>>,
+    table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
+    schema_id_to_database_id: RwLock<HashMap<u32, DatabaseId>>,
 }
 
 #[async_trait::async_trait]
@@ -143,7 +144,7 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
-        self.add_id(table.id, table.database_id, table.schema_id);
+        self.add_table_id(table.id, table.database_id, table.schema_id);
         Ok(())
     }
 
@@ -165,8 +166,8 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_id(source_id);
-        self.drop_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_id(source_id);
+        self.drop_table_id(table_id.table_id);
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -177,16 +178,27 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_source(&self, source_id: u32) -> Result<()> {
-        let (database_id, schema_id) = self.drop_id(source_id);
+        let (database_id, schema_id) = self.drop_table_id(source_id);
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
         Ok(())
     }
 
+    async fn drop_database(&self, database_id: u32) -> Result<()> {
+        self.catalog.write().drop_database(database_id);
+        Ok(())
+    }
+
+    async fn drop_schema(&self, schema_id: u32) -> Result<()> {
+        let database_id = self.drop_schema_id(schema_id);
+        self.catalog.write().drop_schema(database_id, schema_id);
+        Ok(())
+    }
+
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_id(table_id.table_id);
-        self.drop_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_id(table_id.table_id);
+        self.drop_table_id(table_id.table_id);
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -208,7 +220,8 @@ impl MockCatalogWriter {
         Self {
             catalog,
             id: AtomicU32::new(0),
-            id_to_schema_id: Default::default(),
+            table_id_to_schema_id: Default::default(),
+            schema_id_to_database_id: Default::default(),
         }
     }
 
@@ -216,21 +229,48 @@ impl MockCatalogWriter {
         self.id.fetch_add(1, Ordering::SeqCst)
     }
 
-    fn add_id(&self, id: u32, database_id: DatabaseId, schema_id: SchemaId) {
-        self.id_to_schema_id
+    fn add_table_id(&self, table_id: u32, schema_id: SchemaId, database_id: DatabaseId) {
+        self.table_id_to_schema_id
             .write()
-            .insert(id, (database_id, schema_id));
+            .insert(table_id, schema_id);
+        self.add_schema_id(schema_id, database_id);
     }
 
-    fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
-        self.id_to_schema_id.write().remove(&id).unwrap()
+    fn drop_table_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
+    fn add_schema_id(&self, schema_id: u32, database_id: DatabaseId) {
+        self.schema_id_to_database_id
+            .write()
+            .insert(schema_id, database_id);
+    }
+
+    fn drop_schema_id(&self, schema_id: u32) -> DatabaseId {
+        self.schema_id_to_database_id
+            .write()
+            .remove(&schema_id)
+            .unwrap()
     }
 
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
         self.catalog.write().create_source(source.clone());
-        self.add_id(source.id, source.database_id, source.schema_id);
+        self.add_table_id(source.id, source.database_id, source.schema_id);
         Ok(source.id)
+    }
+
+    fn get_database_id_by_schema(&self, schema_id: u32) -> DatabaseId {
+        *self
+            .schema_id_to_database_id
+            .read()
+            .get(&schema_id)
+            .unwrap()
     }
 }
 

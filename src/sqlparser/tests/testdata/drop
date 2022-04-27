@@ -15,3 +15,15 @@ DROP MATERIALIZED VIEW t
 DROP MATERIALIZED VIEW t
 =>
 Drop(DropStatement { object_type: MaterializedView, if_exists: false, name: Ident { value: "t", quote_style: None }, drop_mode: None })
+
+DROP DATABASE t
+---
+DROP DATABASE t
+=>
+Drop(DropStatement { object_type: Database, if_exists: false, name: Ident { value: "t", quote_style: None }, drop_mode: None })
+
+DROP SCHEMA t
+---
+DROP SCHEMA t
+=>
+Drop(DropStatement { object_type: Schema, if_exists: false, name: Ident { value: "t", quote_style: None }, drop_mode: None })

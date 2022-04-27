@@ -20,13 +20,17 @@ use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement
 
 use crate::session::{OptimizerContext, SessionImpl};
 
+mod create_database;
 pub mod create_index;
 pub mod create_mv;
+mod create_schema;
 pub mod create_source;
 pub mod create_table;
 mod describe;
 pub mod dml;
+mod drop_database;
 pub mod drop_mv;
+mod drop_schema;
 pub mod drop_source;
 pub mod drop_table;
 mod explain;
@@ -50,6 +54,16 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
+        Statement::CreateDatabase {
+            db_name,
+            if_not_exists,
+            ..
+        } => create_database::handle_create_database(context, db_name, if_not_exists).await,
+        Statement::CreateSchema {
+            schema_name,
+            if_not_exists,
+            ..
+        } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::Describe { name } => describe::handle_describe(context, name).await,
         // TODO: support complex sql for `show columns from <table>`
         Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
@@ -57,11 +71,13 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::Drop(DropStatement {
             object_type, name, ..
         }) => {
-            let name = ObjectName(vec![name]);
+            let object_name = ObjectName(vec![name.clone()]);
             match object_type {
-                ObjectType::Table => drop_table::handle_drop_table(context, name).await,
-                ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, name).await,
-                ObjectType::Source => drop_source::handle_drop_source(context, name).await,
+                ObjectType::Table => drop_table::handle_drop_table(context, object_name).await,
+                ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
+                ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
+                ObjectType::Database => drop_database::handle_drop_database(context, name).await,
+                ObjectType::Schema => drop_schema::handle_drop_schema(context, name).await,
                 _ => Err(ErrorCode::InvalidInputSyntax(format!(
                     "DROP {} is unsupported",
                     object_type
