@@ -32,38 +32,19 @@ mod value;
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
-            Expr::IsNull(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNull, *expr)?,
-            ))),
-            Expr::IsNotNull(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotNull, *expr)?,
-            ))),
-            Expr::IsTrue(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsTrue, *expr)?,
-            ))),
-            Expr::IsNotTrue(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotTrue, *expr)?,
-            ))),
-            Expr::IsFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsFalse, *expr)?,
-            ))),
-            Expr::IsNotFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotFalse, *expr)?,
-            ))),
+            Expr::IsNull(expr) => self.bind_is_operator(ExprType::IsNull, *expr),
+            Expr::IsNotNull(expr) => self.bind_is_operator(ExprType::IsNotNull, *expr),
+            Expr::IsTrue(expr) => self.bind_is_operator(ExprType::IsTrue, *expr),
+            Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
+            Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
+            Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
             Expr::Case {
                 operand,
                 conditions,
                 results,
                 else_result,
-            } => Ok(ExprImpl::FunctionCall(Box::new(self.bind_case(
-                operand,
-                conditions,
-                results,
-                else_result,
-            )?))),
-            Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_trim(*expr, trim_where)?,
-            ))),
+            } => self.bind_case(operand, conditions, results, else_result),
+            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
             Expr::Substring {
                 expr,
                 substring_from,
@@ -98,9 +79,7 @@ impl Binder {
                 negated,
                 low,
                 high,
-            } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_between(*expr, negated, *low, *high)?,
-            ))),
+            } => self.bind_between(*expr, negated, *low, *high),
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
             Expr::InList {
                 expr,
@@ -208,7 +187,7 @@ impl Binder {
         expr: Expr,
         // ([BOTH | LEADING | TRAILING], <expr>)
         trim_where: Option<(TrimWhereField, Box<Expr>)>,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let mut inputs = vec![self.bind_expr(expr)?];
         let func_type = match trim_where {
             Some(t) => {
@@ -221,7 +200,7 @@ impl Binder {
             }
             None => ExprType::Trim,
         };
-        FunctionCall::new(func_type, inputs)
+        Ok(FunctionCall::new(func_type, inputs)?.into())
     }
 
     fn bind_substring(
@@ -250,7 +229,7 @@ impl Binder {
         negated: bool,
         low: Expr,
         high: Expr,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
         let low = self.bind_expr(low)?;
         let high = self.bind_expr(high)?;
@@ -278,7 +257,7 @@ impl Binder {
             )
         };
 
-        Ok(func_call)
+        Ok(func_call.into())
     }
 
     pub(super) fn bind_case(
@@ -287,7 +266,7 @@ impl Binder {
         conditions: Vec<Expr>,
         results: Vec<Expr>,
         else_result: Option<Box<Expr>>,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let mut inputs = Vec::new();
         let results_expr: Vec<ExprImpl> = results
             .into_iter()
@@ -310,16 +289,12 @@ impl Binder {
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
-        FunctionCall::new(ExprType::Case, inputs)
+        Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
-    pub(super) fn bind_is_operator(
-        &mut self,
-        func_type: ExprType,
-        expr: Expr,
-    ) -> Result<FunctionCall> {
+    pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
-        FunctionCall::new(func_type, vec![expr])
+        Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
