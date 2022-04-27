@@ -174,11 +174,9 @@ impl TopNExecutor2 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::stream::StreamExt;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
+    use itertools::Itertools;
+    use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -186,15 +184,10 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
     #[tokio::test]
     async fn test_simple_top_n_executor() {
-        let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
-        let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
+        let col0 = column_nonnull! { I32Array, [1, 2, 3, 4, 5] };
+        let col1 = column_nonnull! { I32Array, [5, 4, 3, 2, 1] };
         let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
         let schema = Schema {
             fields: vec![
@@ -217,8 +210,8 @@ mod tests {
         let top_n_executor = Box::new(TopNExecutor2::new(
             Box::new(mock_executor),
             order_pairs,
-            2,
-            0,
+            3,
+            1,
             "TopNExecutor2".to_string(),
             DEFAULT_CHUNK_BUFFER_SIZE,
         ));
@@ -232,10 +225,11 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let res = res.unwrap();
-            assert_eq!(res.cardinality(), 2);
-            let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_int32().value_at(0), Some(3));
-            assert_eq!(col0.array().as_int32().value_at(1), Some(2));
+            assert_eq!(res.cardinality(), 3);
+            assert_eq!(
+                res.column_at(0).array().as_int32().iter().collect_vec(),
+                vec![Some(4), Some(3), Some(2)]
+            );
         }
 
         let res = stream.next().await;
