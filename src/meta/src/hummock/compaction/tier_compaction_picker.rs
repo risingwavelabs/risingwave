@@ -39,7 +39,7 @@ pub struct ConflictKeyRange {
 }
 
 impl ConflictKeyRange {
-    fn check_table_conflict(&mut self, level_handler: &LevelHandler, table: &SstableInfo) -> bool {
+    fn check_pending_compact(&mut self, level_handler: &LevelHandler, table: &SstableInfo) -> bool {
         let key_range = KeyRange::from(table.key_range.as_ref().unwrap());
         if level_handler.is_pending_compact(&table.id) {
             if let Some(range) = self.key_range.as_mut() {
@@ -49,6 +49,11 @@ impl ConflictKeyRange {
             }
             return true;
         }
+        false
+    }
+
+    fn check_overlap(&self, table: &SstableInfo) -> bool {
+        let key_range = KeyRange::from(table.key_range.as_ref().unwrap());
         if let Some(range) = self.key_range.as_ref() {
             // This file is conflict with previous files in L0.
             if key_range.full_key_overlap(range) {
@@ -173,6 +178,7 @@ impl TierCompactionPicker {
             }
             sst_idx += 1;
         }
+
         if level0.table_infos.len() - sst_idx < self.level0_trigger_number {
             return None;
         }
@@ -218,9 +224,13 @@ impl TierCompactionPicker {
         let mut conflict_range = ConflictKeyRange::default();
         for idx in 0..select_level.table_infos.len() {
             if conflict_range
-                .check_table_conflict(select_level_handler, &select_level.table_infos[idx])
+                .check_pending_compact(select_level_handler, &select_level.table_infos[idx])
             {
                 continue;
+            }
+
+            if conflict_range.check_overlap(&select_level.table_infos[idx]) {
+                break;
             }
 
             let mut tiered_key_range =
@@ -232,7 +242,7 @@ impl TierCompactionPicker {
                 target_level_handler,
                 &mut target_level_ssts,
             ) {
-                continue;
+                break;
             }
             let mut select_level_ssts = vec![select_level.table_infos[idx].clone()];
             let mut compaction_bytes = target_level_ssts
@@ -242,11 +252,13 @@ impl TierCompactionPicker {
                 + select_level_ssts[0].file_size;
             // try expand more L0 files if the currenct compaction job is too small.
             for other in &select_level.table_infos[idx + 1..] {
-                if compaction_bytes >= self.max_compaction_bytes {
+                if compaction_bytes >= self.max_compaction_bytes
+                    || select_level_handler.is_pending_compact(&other.id)
+                {
                     break;
                 }
-                if conflict_range.check_table_conflict(select_level_handler, other) {
-                    continue;
+                if conflict_range.check_overlap(other) {
+                    break;
                 }
                 // expand select range in L0.
                 tiered_key_range
