@@ -17,6 +17,7 @@ pub use plan_node::PlanRef;
 pub mod property;
 
 mod heuristic;
+mod join_solver;
 mod plan_rewriter;
 mod plan_visitor;
 mod rule;

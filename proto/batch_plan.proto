@@ -76,6 +76,7 @@ message OrderByNode {
 message TopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
   uint32 limit = 2;
+  uint32 offset = 3;
 }
 
 message LimitNode {

@@ -25,18 +25,17 @@ pub use dispatch::*;
 pub use filter::*;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
-pub use hash_join::*;
 pub use local_simple_agg::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
 pub use project::*;
-pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
-    BoxedExecutor, Executor, HopWindowExecutorBuilder, LookupExecutorBuilder, UnionExecutorBuilder,
+    BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
+    LookupExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
 };
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
@@ -48,14 +47,12 @@ mod dispatch;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
-mod hash_join;
 mod local_simple_agg;
 pub(crate) mod managed_state;
 mod merge;
 pub mod monitor;
 mod mview;
 mod project;
-mod source;
 mod top_n;
 mod top_n_appendonly;
 
@@ -166,6 +163,11 @@ impl Barrier {
             mutation: Some(Arc::new(mutation)),
             ..self
         }
+    }
+
+    #[must_use]
+    pub fn with_stop(self) -> Self {
+        self.with_mutation(Mutation::Stop(HashSet::default()))
     }
 
     // TODO: The barrier should always contain trace info after we migrated barrier generation to

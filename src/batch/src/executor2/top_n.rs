@@ -32,12 +32,12 @@ use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Build
 struct TopNHeap {
     order_pairs: Arc<Vec<OrderPair>>,
     min_heap: BinaryHeap<Reverse<HeapElem>>,
-    limit: usize,
+    size: usize,
 }
 
 impl TopNHeap {
     fn insert(&mut self, elem: HeapElem) {
-        if self.min_heap.len() < self.limit {
+        if self.min_heap.len() < self.size {
             self.min_heap.push(Reverse(elem));
         } else if elem > self.min_heap.peek().unwrap().0 {
             self.min_heap.push(Reverse(elem));
@@ -61,7 +61,7 @@ impl TopNHeap {
             });
     }
 
-    pub fn dump(&mut self) -> Option<DataChunk> {
+    pub fn dump(&mut self, offset: usize) -> Option<DataChunk> {
         if self.min_heap.is_empty() {
             return None;
         }
@@ -71,7 +71,9 @@ impl TopNHeap {
             .map(|e| e.0.chunk)
             .collect::<Vec<_>>();
         chunks.reverse();
-        if let Ok(mut res) = DataChunk::rechunk(&chunks, self.limit) {
+
+        // Skip the first `offset` elements
+        if let Ok(mut res) = DataChunk::rechunk(&chunks[offset..], self.size - offset) {
             assert_eq!(res.len(), 1);
             Some(res.remove(0))
         } else {
@@ -85,6 +87,7 @@ pub struct TopNExecutor2 {
     top_n_heap: TopNHeap,
     identity: String,
     chunk_size: usize,
+    offset: usize,
 }
 
 impl BoxedExecutor2Builder for TopNExecutor2 {
@@ -105,6 +108,7 @@ impl BoxedExecutor2Builder for TopNExecutor2 {
                 child,
                 order_pairs,
                 top_n_node.get_limit() as usize,
+                top_n_node.get_offset() as usize,
                 source.plan_node().get_identity().clone(),
                 DEFAULT_CHUNK_BUFFER_SIZE,
             )));
@@ -118,18 +122,20 @@ impl TopNExecutor2 {
         child: BoxedExecutor2,
         order_pairs: Vec<OrderPair>,
         limit: usize,
+        offset: usize,
         identity: String,
         chunk_size: usize,
     ) -> Self {
         Self {
             top_n_heap: TopNHeap {
                 min_heap: BinaryHeap::new(),
-                limit,
+                size: limit + offset,
                 order_pairs: Arc::new(order_pairs),
             },
             child,
             identity,
             chunk_size,
+            offset,
         }
     }
 }
@@ -157,7 +163,7 @@ impl TopNExecutor2 {
             self.top_n_heap.fit(data_chunk);
         }
 
-        if let Some(data_chunk) = self.top_n_heap.dump() {
+        if let Some(data_chunk) = self.top_n_heap.dump(self.offset) {
             let batch_chunks = DataChunk::rechunk(&[data_chunk], DEFAULT_CHUNK_BUFFER_SIZE)?;
             for ret_chunk in batch_chunks {
                 yield ret_chunk
@@ -168,11 +174,9 @@ impl TopNExecutor2 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::stream::StreamExt;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
+    use itertools::Itertools;
+    use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -180,15 +184,10 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        Ok(Column::new(array))
-    }
-
     #[tokio::test]
     async fn test_simple_top_n_executor() {
-        let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
-        let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
+        let col0 = column_nonnull! { I32Array, [1, 2, 3, 4, 5] };
+        let col1 = column_nonnull! { I32Array, [5, 4, 3, 2, 1] };
         let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
         let schema = Schema {
             fields: vec![
@@ -211,7 +210,8 @@ mod tests {
         let top_n_executor = Box::new(TopNExecutor2::new(
             Box::new(mock_executor),
             order_pairs,
-            2usize,
+            3,
+            1,
             "TopNExecutor2".to_string(),
             DEFAULT_CHUNK_BUFFER_SIZE,
         ));
@@ -225,10 +225,11 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let res = res.unwrap();
-            assert_eq!(res.cardinality(), 2);
-            let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_int32().value_at(0), Some(3));
-            assert_eq!(col0.array().as_int32().value_at(1), Some(2));
+            assert_eq!(res.cardinality(), 3);
+            assert_eq!(
+                res.column_at(0).array().as_int32().iter().collect_vec(),
+                vec![Some(4), Some(3), Some(2)]
+            );
         }
 
         let res = stream.next().await;
