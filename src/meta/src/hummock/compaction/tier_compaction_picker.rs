@@ -314,8 +314,6 @@ mod tests {
             Level {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
-                // table_5_[1_10],
-                // table_6_[2_20],
                 table_infos: vec![generate_table(4, 1, 101, 300, 2)],
             },
             Level {
@@ -342,18 +340,25 @@ mod tests {
         levels[0]
             .table_infos
             .push(generate_table(5, 1, 301, 333, 4));
+        levels[0]
+            .table_infos
+            .push(generate_table(6, 1, 100, 200, 2));
+        // pick table 5 and 0. but skip table 6 because [0_key_test_000100, 1_key_test_000333] will
+        // be conflict with the previous job.
         let ret = picker
             .pick_compaction(levels.clone(), &mut levels_handler)
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 3);
         assert_eq!(ret.target_level.table_infos[0].id, 0);
+        assert_eq!(ret.select_level.table_infos[0].id, 5);
 
-        // confict with the last job
+        // the first idle table in L0 is table 6 and its confict with the last job so we can not
+        // pick table 7.
         let mut picker = TierCompactionPicker::new(1);
         levels[0]
             .table_infos
-            .push(generate_table(6, 1, 222, 233, 3));
+            .push(generate_table(7, 1, 222, 233, 3));
         let ret = picker.pick_compaction(levels.clone(), &mut levels_handler);
         assert!(ret.is_none());
 
@@ -362,12 +367,13 @@ mod tests {
         picker.level0_max_file_number = 2;
         levels[0]
             .table_infos
-            .push(generate_table(7, 1, 100, 200, 3));
+            .push(generate_table(8, 1, 100, 200, 3));
         let ret = picker
             .pick_compaction(levels.clone(), &mut levels_handler)
             .unwrap();
         assert_eq!(ret.select_level.table_infos[0].id, 6);
         assert_eq!(ret.select_level.table_infos[1].id, 7);
+        assert_eq!(ret.select_level.table_infos[2].id, 8);
         assert!(ret.target_level.table_infos.is_empty());
     }
 }
