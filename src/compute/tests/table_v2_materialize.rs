@@ -38,10 +38,8 @@ use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
-use risingwave_stream::executor::{
-    Barrier, ExecutorV1, Message, PkIndices, SourceExecutor, StreamingMetrics,
-};
-use risingwave_stream::executor_v2::{Executor, MaterializeExecutor};
+use risingwave_stream::executor::{Barrier, ExecutorV1, Message, PkIndices, StreamingMetrics};
+use risingwave_stream::executor_v2::{Executor, MaterializeExecutor, SourceExecutor};
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
@@ -167,9 +165,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
     let mut materialize = MaterializeExecutor::new_from_v1(
-        (Box::new(stream_source) as Box<dyn ExecutorV1>)
-            .v2()
-            .boxed(),
+        Box::new(stream_source),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),
@@ -236,7 +232,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Send a barrier to start materialized view
     let curr_epoch = 1919;
     barrier_tx
-        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch)))
+        .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
 
     assert!(matches!(
@@ -266,7 +262,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Send a barrier and poll again, should write changes to storage
     let curr_epoch = 1919;
     barrier_tx
-        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch)))
+        .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
 
     assert!(matches!(
@@ -333,7 +329,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch + 1)))
+        .send(Barrier::new_test_barrier(curr_epoch + 1))
         .unwrap();
 
     assert!(matches!(

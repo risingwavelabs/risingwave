@@ -3763,7 +3763,6 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
- "either",
  "enum-as-inner",
  "farmhash",
  "futures",
