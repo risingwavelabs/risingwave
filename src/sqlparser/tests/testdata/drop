@@ -27,3 +27,15 @@ DROP SCHEMA t
 DROP SCHEMA t
 =>
 Drop(DropStatement { object_type: Schema, if_exists: false, name: Ident { value: "t", quote_style: None }, drop_mode: None })
+
+DROP DATABASE IF EXISTS t
+---
+DROP DATABASE IF EXISTS t
+=>
+Drop(DropStatement { object_type: Database, if_exists: true, name: Ident { value: "t", quote_style: None }, drop_mode: None })
+
+DROP SCHEMA IF EXISTS t
+---
+DROP SCHEMA IF EXISTS t
+=>
+Drop(DropStatement { object_type: Schema, if_exists: true, name: Ident { value: "t", quote_style: None }, drop_mode: None })

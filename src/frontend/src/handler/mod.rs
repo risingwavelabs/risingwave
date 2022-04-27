@@ -69,15 +69,22 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
         Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
         Statement::Drop(DropStatement {
-            object_type, name, ..
+            object_type,
+            name,
+            if_exists,
+            drop_mode,
         }) => {
             let object_name = ObjectName(vec![name.clone()]);
             match object_type {
                 ObjectType::Table => drop_table::handle_drop_table(context, object_name).await,
                 ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
                 ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
-                ObjectType::Database => drop_database::handle_drop_database(context, name).await,
-                ObjectType::Schema => drop_schema::handle_drop_schema(context, name).await,
+                ObjectType::Database => {
+                    drop_database::handle_drop_database(context, name, if_exists, drop_mode).await
+                }
+                ObjectType::Schema => {
+                    drop_schema::handle_drop_schema(context, name, if_exists, drop_mode).await
+                }
                 _ => Err(ErrorCode::InvalidInputSyntax(format!(
                     "DROP {} is unsupported",
                     object_type

@@ -15,8 +15,9 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_sqlparser::ast::{Ident, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
+use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
 pub async fn handle_create_database(
@@ -25,13 +26,12 @@ pub async fn handle_create_database(
     is_not_exist: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let catalog_reader = session.env().catalog_reader();
-    let database_name: Vec<Ident> = database_name.0;
-    let database_name = &database_name[0].value;
+    let database_name = Binder::resolve_single_name(database_name)?;
 
     {
+        let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(database_name).is_ok() && !is_not_exist {
+        if reader.get_database_by_name(&database_name).is_ok() && !is_not_exist {
             return Err(RwError::from(InternalError(format!(
                 "database {:?} already exists",
                 database_name,
@@ -40,6 +40,6 @@ pub async fn handle_create_database(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_database(database_name).await?;
+    catalog_writer.create_database(&database_name).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
 }

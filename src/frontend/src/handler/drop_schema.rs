@@ -13,23 +13,47 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::Ident;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_sqlparser::ast::{AstOption, DropMode, Ident};
 
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_schema(
     context: OptimizerContext,
     schema_name: Ident,
+    if_exist: bool,
+    mode: AstOption<DropMode>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
-    let schema_id = {
+
+    let schema = {
         let reader = catalog_reader.read_guard();
-        reader
-            .get_schema_by_name(session.database(), &schema_name.value)?
-            .id()
+        match reader.get_schema_by_name(session.database(), &schema_name.value) {
+            Ok(schema) => schema.clone(),
+            Err(err) => {
+                if if_exist {
+                    return Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA));
+                } else {
+                    return Err(err);
+                }
+            }
+        }
     };
+    let schema_id = {
+        if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
+            if !schema.is_empty() {
+                return Err(ErrorCode::InternalError(
+                    "Please drop tables and sources in this schema before drop it".to_string(),
+                )
+                .into());
+            }
+            schema.id()
+        } else {
+            todo!();
+        }
+    };
+
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_schema(schema_id).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA))

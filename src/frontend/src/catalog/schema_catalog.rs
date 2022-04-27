@@ -114,6 +114,10 @@ impl SchemaCatalog {
     pub fn id(&self) -> SchemaId {
         self.id
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.table_by_name.is_empty() || self.source_by_name.is_empty()
+    }
 }
 
 impl From<&ProstSchema> for SchemaCatalog {

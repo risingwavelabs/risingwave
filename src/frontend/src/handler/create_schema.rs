@@ -15,8 +15,9 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_sqlparser::ast::{Ident, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
+use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
 pub async fn handle_create_schema(
@@ -25,15 +26,13 @@ pub async fn handle_create_schema(
     is_not_exist: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let catalog_reader = session.env().catalog_reader();
-    let schema_name: Vec<Ident> = schema_name.0;
-    let schema_name = &schema_name[0].value;
+    let schema_name = Binder::resolve_single_name(schema_name)?;
 
     let db_id = {
+        let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
-        let db_id = reader.get_database_by_name(session.database())?.id();
         if reader
-            .get_schema_by_name(session.database(), schema_name)
+            .get_schema_by_name(session.database(), &schema_name)
             .is_ok()
             && !is_not_exist
         {
@@ -42,10 +41,10 @@ pub async fn handle_create_schema(
                 schema_name,
             ))));
         }
-        db_id
+        reader.get_database_by_name(session.database())?.id()
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_schema(db_id, schema_name).await?;
+    catalog_writer.create_schema(db_id, &schema_name).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
 }

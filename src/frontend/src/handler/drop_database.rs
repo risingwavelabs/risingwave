@@ -13,21 +13,47 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::Ident;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_sqlparser::ast::{AstOption, DropMode, Ident};
 
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_database(
     context: OptimizerContext,
     database_name: Ident,
+    if_exist: bool,
+    mode: AstOption<DropMode>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
-    let database_id = {
+
+    let database = {
         let reader = catalog_reader.read_guard();
-        reader.get_database_by_name(&database_name.value)?.id()
+        match reader.get_database_by_name(&database_name.value) {
+            Ok(db) => db.clone(),
+            Err(err) => {
+                return if if_exist {
+                    Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
+                } else {
+                    Err(err)
+                }
+            }
+        }
     };
+    let database_id = {
+        if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
+            if !database.is_empty() {
+                return Err(ErrorCode::InternalError(
+                    "Please drop schemas in this database before drop it".to_string(),
+                )
+                .into());
+            }
+            database.id()
+        } else {
+            todo!();
+        }
+    };
+
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_database(database_id).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))

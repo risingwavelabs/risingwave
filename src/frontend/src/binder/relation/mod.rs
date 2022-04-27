@@ -61,6 +61,17 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
+    /// return the single `name`
+    pub fn resolve_single_name(name: ObjectName) -> Result<String> {
+        let mut identifiers = name.0;
+        let single_name = identifiers
+            .pop()
+            .ok_or_else(|| ErrorCode::InternalError("empty name".into()))?
+            .value;
+
+        Ok(single_name)
+    }
+
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
