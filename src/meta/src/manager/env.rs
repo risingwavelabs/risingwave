@@ -14,6 +14,7 @@
 
 use std::ops::Deref;
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::{StreamClients, StreamClientsRef};
 use crate::manager::{
@@ -47,9 +48,18 @@ where
 }
 
 /// Options shared by all meta service instances
-#[derive(Default)]
 pub struct MetaOpts {
     pub enable_recovery: bool,
+    pub checkpoint_interval: Duration,
+}
+
+impl Default for MetaOpts {
+    fn default() -> Self {
+        Self {
+            enable_recovery: false,
+            checkpoint_interval: Duration::from_millis(100),
+        }
+    }
 }
 
 impl<S> MetaSrvEnv<S>

@@ -17,12 +17,12 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::mview::ManagedMViewState;
 use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
 };
@@ -31,7 +31,7 @@ use crate::executor_v2::{
 pub struct MaterializeExecutor<S: StateStore> {
     input: BoxedExecutor,
 
-    local_state: ManagedMViewState<S>,
+    state_table: StateTable<S>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -50,9 +50,20 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
+        let column_descs = column_ids
+            .into_iter()
+            .zip_eq(schema.fields.iter().cloned())
+            .map(|(column_id, field)| ColumnDesc {
+                data_type: field.data_type,
+                column_id,
+                name: field.name,
+                field_descs: vec![],
+                type_name: "".to_string(),
+            })
+            .collect_vec();
         Self {
             input,
-            local_state: ManagedMViewState::new(keyspace, column_ids, arrange_order_types),
+            state_table: StateTable::new(keyspace, column_descs, arrange_order_types),
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
                 schema,
@@ -97,10 +108,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.local_state.put(arrange_row, row);
+                                self.state_table.insert(arrange_row, row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.local_state.delete(arrange_row);
+                                self.state_table.delete(arrange_row, row)?;
                             }
                         }
                     }
@@ -109,8 +120,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
-                    self.local_state
-                        .flush(b.epoch.prev)
+                    self.state_table
+                        .commit(b.epoch.prev)
                         .await
                         .map_err(StreamExecutorError::executor_v1)?;
                     Message::Barrier(b)

@@ -14,7 +14,8 @@
 
 use std::marker::PhantomData;
 
-use async_trait::async_trait;
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
@@ -28,10 +29,11 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::barrier_align::{AlignedMessage, BarrierAligner};
-use super::managed_state::join::*;
-use super::{ExecutorV1, ExecutorV1State, Message, PkIndices, PkIndicesRef, StatefulExecutorV1};
+use super::barrier_align::*;
+use super::error::StreamExecutorError;
+use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
+use crate::executor::managed_state::join::*;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -112,6 +114,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         self.ht.values().any(|state| state.is_dirty())
     }
 
+    #[allow(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -126,8 +129,8 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
-    source_l: Box<dyn ExecutorV1>,
-    source_r: Box<dyn ExecutorV1>,
+    source_l: Box<dyn Executor>,
+    source_r: Box<dyn Executor>,
     params_l: JoinParams,
     params_r: JoinParams,
     pk_indices: PkIndices,
@@ -143,7 +146,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
     for HashJoinExecutorDispatcher<S, T>
 {
     type Input = HashJoinExecutorDispatcherArgs<S>;
-    type Output = Result<Box<dyn ExecutorV1>>;
+    type Output = Result<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
@@ -165,16 +168,16 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
 pub struct HashJoinExecutorBuilder {}
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor_v1(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn ExecutorV1>> {
+    ) -> Result<BoxedExecutor> {
         // Get table id and used as keyspace prefix.
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
-        let source_r = Box::new(params.input.remove(1).v1());
-        let source_l = Box::new(params.input.remove(0).v1());
+        let source_r = params.input.remove(1);
+        let source_l = params.input.remove(0);
         let params_l = JoinParams::new(
             node.get_left_key()
                 .iter()
@@ -205,7 +208,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 fn create_hash_join_executor<S: StateStore>(
                     typ: JoinTypeProto, kind: HashKeyKind,
                     args: HashJoinExecutorDispatcherArgs<S>,
-                ) -> Result<Box<dyn ExecutorV1>> {
+                ) -> Result<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
                         _ => todo!("Join type {:?} not implemented", typ),
@@ -259,8 +262,10 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
-    /// Barrier aligner that combines two input streams and aligns their barriers
-    aligner: BarrierAligner,
+    /// Left input executor.
+    input_l: Option<BoxedExecutor>,
+    /// Right input executor.
+    input_r: Option<BoxedExecutor>,
     /// the data types of the formed new columns
     output_data_types: Vec<DataType>,
     /// The schema of the hash join executor
@@ -273,18 +278,14 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
     cond: Option<RowExpression>,
-    /// Debug info for the left executor
-    debug_l: String,
-    /// Debug info for the right executor
-    debug_r: String,
     /// Identity string
     identity: String,
+    /// Epoch
+    epoch: u64,
 
+    #[allow(dead_code)]
     /// Logical Operator Info
     op_info: String,
-
-    /// Executor state
-    executor_state: ExecutorV1State,
 
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -297,8 +298,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashJoinExecutor")
             .field("join_type", &T)
-            .field("input_left", &format_args!("{}", &self.debug_l))
-            .field("input_right", &format_args!("{}", &self.debug_r))
+            .field("input_left", &self.input_l.as_ref().unwrap().identity())
+            .field("input_right", &self.input_r.as_ref().unwrap().identity())
             .field("side_l", &self.side_l)
             .field("side_r", &self.side_r)
             .field("pk_indices", &self.pk_indices)
@@ -308,35 +309,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
     }
 }
 
-#[async_trait]
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> ExecutorV1
-    for HashJoinExecutor<K, S, T>
-{
-    async fn next(&mut self) -> Result<Message> {
-        let msg = self.aligner.next().await;
-        if let Some(barrier) = self.try_init_executor(&msg) {
-            self.side_l.ht.update_epoch(barrier.epoch.curr);
-            self.side_r.ht.update_epoch(barrier.epoch.curr);
-            return Ok(Message::Barrier(barrier));
-        }
-        match msg {
-            AlignedMessage::Left(message) => match message {
-                Ok(chunk) => self.consume_chunk_left(chunk).await,
-                Err(e) => Err(e),
-            },
-            AlignedMessage::Right(message) => match message {
-                Ok(chunk) => self.consume_chunk_right(chunk).await,
-                Err(e) => Err(e),
-            },
-            AlignedMessage::Barrier(barrier) => {
-                self.flush_data().await?;
-                let epoch = barrier.epoch.curr;
-                self.side_l.ht.update_epoch(epoch);
-                self.side_r.ht.update_epoch(epoch);
-                self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
-                Ok(Message::Barrier(barrier))
-            }
-        }
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<K, S, T> {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.into_stream().boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -350,24 +325,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> ExecutorV1
     fn identity(&self) -> &str {
         self.identity.as_str()
     }
-
-    fn logical_operator_info(&self) -> &str {
-        &self.op_info
-    }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.side_l.clear_cache();
-        self.side_r.clear_cache();
-
-        Ok(())
-    }
 }
 
-#[allow(clippy::too_many_arguments)]
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input_l: Box<dyn ExecutorV1>,
-        input_r: Box<dyn ExecutorV1>,
+        input_l: BoxedExecutor,
+        input_r: BoxedExecutor,
         params_l: JoinParams,
         params_r: JoinParams,
         pk_indices: PkIndices,
@@ -378,9 +342,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         ks_l: Keyspace<S>,
         ks_r: Keyspace<S>,
     ) -> Self {
-        let debug_l = format!("{:#?}", &input_l);
-        let debug_r = format!("{:#?}", &input_r);
-
         let new_column_n = input_l.schema().len() + input_r.schema().len();
         let side_l_column_n = input_l.schema().len();
 
@@ -412,7 +373,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
         Self {
-            aligner: BarrierAligner::new(input_l, input_r),
+            input_l: Some(input_l),
+            input_r: Some(input_r),
             output_data_types,
             schema: Schema {
                 fields: schema_fields,
@@ -447,17 +409,49 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             pk_indices,
             cond,
-            debug_l,
-            debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorV1State::Init,
             key_indices,
+            epoch: 0,
+        }
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn into_stream(mut self) {
+        let input_l = self.input_l.take().unwrap();
+        let input_r = self.input_r.take().unwrap();
+        let aligned_stream = barrier_align(input_l.execute(), input_r.execute());
+        #[for_await]
+        for msg in aligned_stream {
+            match msg? {
+                AlignedMessage::Left(chunk) => {
+                    yield self
+                        .eq_join_oneside::<{ SideType::Left }>(chunk)
+                        .await
+                        .map_err(StreamExecutorError::hash_join_error)?;
+                }
+                AlignedMessage::Right(chunk) => {
+                    yield self
+                        .eq_join_oneside::<{ SideType::Right }>(chunk)
+                        .await
+                        .map_err(StreamExecutorError::hash_join_error)?;
+                }
+                AlignedMessage::Barrier(barrier) => {
+                    self.flush_data()
+                        .await
+                        .map_err(StreamExecutorError::hash_join_error)?;
+                    let epoch = barrier.epoch.curr;
+                    self.side_l.ht.update_epoch(epoch);
+                    self.side_r.ht.update_epoch(epoch);
+                    self.epoch = epoch;
+                    yield Message::Barrier(barrier);
+                }
+            }
         }
     }
 
     async fn flush_data(&mut self) -> Result<()> {
-        let epoch = self.executor_state().epoch();
+        let epoch = self.epoch;
         for side in [&mut self.side_l, &mut self.side_r] {
             let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
@@ -513,21 +507,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         })
     }
 
-    async fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
-        let result = self.eq_join_oneside::<{ SideType::Left }>(chunk).await?;
-        Ok(result)
-    }
-
-    async fn consume_chunk_right(&mut self, chunk: StreamChunk) -> Result<Message> {
-        let result = self.eq_join_oneside::<{ SideType::Right }>(chunk).await?;
-        Ok(result)
-    }
-
     async fn eq_join_oneside<const SIDE: SideTypePrimitive>(
         &mut self,
         chunk: StreamChunk,
     ) -> Result<Message> {
-        let epoch = self.executor_state().epoch();
+        let epoch = self.epoch;
         let chunk = chunk.compact()?;
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -698,18 +682,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> StatefulExecutorV1
-    for HashJoinExecutor<K, S, T>
-{
-    fn executor_state(&self) -> &ExecutorV1State {
-        &self.executor_state
-    }
-
-    fn update_executor_state(&mut self, new_state: ExecutorV1State) {
-        self.executor_state = new_state;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -720,11 +692,10 @@ mod tests {
     use risingwave_expr::expr::{InputRefExpression, RowExpression};
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
-    use crate::executor::test_utils::MockAsyncSource;
-    use crate::executor::{Barrier, Epoch, ExecutorV1, Message};
+    use crate::executor::{Barrier, Epoch, Message};
+    use crate::executor_v2::test_utils::{MessageSender, MockSource};
 
     fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
@@ -748,32 +719,22 @@ mod tests {
 
     fn create_executor<const T: JoinTypePrimitive>(
         with_condition: bool,
-    ) -> (
-        UnboundedSender<Message>, // left input
-        UnboundedSender<Message>, // right input
-        HashJoinExecutor<Key64, MemoryStateStore, T>,
-    ) {
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
             ],
         };
-
-        let (tx_l, rx_l) = unbounded_channel();
-        let (tx_r, rx_r) = unbounded_channel();
-
-        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
-        let source_r = MockAsyncSource::with_pk_indices(schema, rx_r, vec![0, 1]);
-
-        let cond = with_condition.then(create_cond);
-
+        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0, 1]);
+        let (tx_r, source_r) = MockSource::channel(schema, vec![0, 1]);
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
+        let cond = with_condition.then(create_cond);
 
         let (ks_l, ks_r) = create_in_memory_keyspace();
 
-        let executor = HashJoinExecutor::new(
+        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
@@ -786,7 +747,7 @@ mod tests {
             ks_l,
             ks_r,
         );
-        (tx_l, tx_r, executor)
+        (tx_l, tx_r, Box::new(executor).execute())
     }
 
     #[tokio::test]
@@ -816,36 +777,36 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(false);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the 1st right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 2 5 2 7"
@@ -853,10 +814,10 @@ mod tests {
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 6 3 10"
@@ -891,31 +852,31 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(false);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push a barrier to left side
-        MockAsyncSource::push_barrier(&mut tx_l, 2, false);
+        tx_l.push_barrier(2, false);
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+        tx_l.push_chunk(chunk_l2);
 
         // join the first right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        tx_r.push_chunk(chunk_r1);
 
         // Consume stream chunk
-        let chunk = hash_join.next().await.unwrap();
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 2 5 2 7"
@@ -923,12 +884,12 @@ mod tests {
         );
 
         // push a barrier to right side
-        MockAsyncSource::push_barrier(&mut tx_r, 2, false);
+        tx_r.push_barrier(2, false);
 
         // get the aligned barrier here
         let expected_epoch = Epoch::new_test_epoch(2);
         assert!(matches!(
-            hash_join.next().await.unwrap(),
+            hash_join.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
                 epoch,
                 mutation: None,
@@ -937,9 +898,9 @@ mod tests {
         ));
 
         // join the 2nd left chunk
-        let chunk = hash_join.next().await.unwrap();
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 6 8 6 9"
@@ -947,10 +908,10 @@ mod tests {
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 6 3 10
@@ -987,15 +948,15 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::LeftOuter }>(false);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 4 . .
@@ -1005,10 +966,10 @@ mod tests {
         );
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
@@ -1017,10 +978,10 @@ mod tests {
         );
 
         // push the 1st right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
                 U- 2 5 . .
@@ -1029,10 +990,10 @@ mod tests {
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
                 U- 3 6 . .
@@ -1069,31 +1030,31 @@ mod tests {
             create_executor::<{ JoinType::RightOuter }>(false);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the 1st right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 2 5 2 7
@@ -1103,10 +1064,10 @@ mod tests {
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
@@ -1142,15 +1103,15 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::FullOuter }>(false);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 4 . .
@@ -1160,10 +1121,10 @@ mod tests {
         );
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
@@ -1172,10 +1133,10 @@ mod tests {
         );
 
         // push the 1st right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
                 U- 2 5 . .
@@ -1186,10 +1147,10 @@ mod tests {
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
@@ -1225,15 +1186,15 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::FullOuter }>(true);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 4 . .
@@ -1243,10 +1204,10 @@ mod tests {
         );
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
@@ -1255,10 +1216,10 @@ mod tests {
         );
 
         // push the 1st right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
                 U- 2 5 . .
@@ -1269,10 +1230,10 @@ mod tests {
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
@@ -1308,39 +1269,39 @@ mod tests {
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::Inner }>(true);
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
-        hash_join.next().await.unwrap();
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
 
         // push the 1st left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the 2nd left chunk
-        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the 1st right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty("I I I I")
         );
 
         // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        let chunk = hash_join.next().await.unwrap();
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
-            *chunk.as_chunk().unwrap(),
+            chunk.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 6 3 10"

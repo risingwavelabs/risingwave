@@ -12,24 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
+use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, Executor, Message, Mutation, PkIndices, StreamChunk};
+use super::{Barrier, Executor, Message, PkIndices, StreamChunk};
 
 pub struct MockSource {
     schema: Schema,
     pk_indices: PkIndices,
-    msgs: VecDeque<Message>,
+    rx: mpsc::UnboundedReceiver<Message>,
 
     /// Whether to send a `Stop` barrier on stream finish.
     stop_on_finish: bool,
+}
+
+/// A wrapper around `Sender<Message>`.
+pub struct MessageSender(mpsc::UnboundedSender<Message>);
+
+impl MessageSender {
+    #[allow(dead_code)]
+    pub fn push_chunk(&mut self, chunk: StreamChunk) {
+        self.0.send(Message::Chunk(chunk)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
+        let mut barrier = Barrier::new_test_barrier(epoch);
+        if stop {
+            barrier = barrier.with_stop();
+        }
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
 }
 
 impl std::fmt::Debug for MockSource {
@@ -43,32 +61,32 @@ impl std::fmt::Debug for MockSource {
 
 impl MockSource {
     #[allow(dead_code)]
-    pub fn new(schema: Schema, pk_indices: PkIndices) -> Self {
-        Self {
+    pub fn channel(schema: Schema, pk_indices: PkIndices) -> (MessageSender, Self) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let source = Self {
             schema,
             pk_indices,
-            msgs: VecDeque::default(),
+            rx,
             stop_on_finish: true,
-        }
+        };
+        (MessageSender(tx), source)
     }
 
     #[allow(dead_code)]
     pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            msgs: msgs.into(),
-            stop_on_finish: true,
+        let (tx, source) = Self::channel(schema, pk_indices);
+        for msg in msgs {
+            tx.0.send(msg).unwrap();
         }
+        source
     }
 
     pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            msgs: chunks.into_iter().map(Message::Chunk).collect(),
-            stop_on_finish: true,
+        let (tx, source) = Self::channel(schema, pk_indices);
+        for chunk in chunks {
+            tx.0.send(Message::Chunk(chunk)).unwrap();
         }
+        source
     }
 
     #[allow(dead_code)]
@@ -80,35 +98,17 @@ impl MockSource {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn push_chunks(&mut self, chunks: impl Iterator<Item = StreamChunk>) {
-        self.msgs.extend(chunks.map(Message::Chunk));
-    }
-
-    #[allow(dead_code)]
-    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new_test_barrier(epoch);
-        if stop {
-            barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()));
-        }
-        self.msgs.push_back(Message::Barrier(barrier));
-    }
-}
-
-impl MockSource {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self: Box<Self>) {
+    async fn execute_inner(mut self: Box<Self>) {
         let mut epoch = 0;
 
-        for msg in self.msgs {
+        while let Some(msg) = self.rx.recv().await {
             epoch += 1;
-            yield msg
+            yield msg;
         }
 
         if self.stop_on_finish {
-            yield Message::Barrier(
-                Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(HashSet::default())),
-            );
+            yield Message::Barrier(Barrier::new_test_barrier(epoch).with_stop());
         }
     }
 }
