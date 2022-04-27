@@ -33,7 +33,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::{Executor, StreamExecutorResult};
 use crate::executor::{pk_input_arrays, PkDataTypes, PkIndicesRef};
 use crate::executor_v2::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_hash_agg_state, AggCall, AggState,
 };
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -73,7 +73,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     input_schema: Schema,
 
     /// The executor operates on this keyspace.
-    keyspace: Keyspace<S>,
+    keyspace: Vec<Keyspace<S>>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
@@ -105,7 +105,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        keyspace: Keyspace<S>,
+        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -246,7 +246,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     match states {
                         Some(s) => s.unwrap(),
                         None => Box::new(
-                            generate_agg_state(
+                            generate_hash_agg_state(
                                 Some(
                                     &key.clone()
                                         .deserialize(key_data_types.iter())
@@ -304,83 +304,87 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         epoch: u64,
     ) {
-        // --- Flush states to the state store ---
-        // Some state will have the correct output only after their internal states have been fully
-        // flushed.
-        let (write_batch, dirty_cnt) = {
-            let mut write_batch = keyspace.state_store().start_write_batch();
-            let mut dirty_cnt = 0;
+        for k in keyspace {
+            // --- Flush states to the state store ---
+            // Some state will have the correct output only after their internal states have been
+            // fully flushed.
+            let (write_batch, dirty_cnt) = {
+                let mut write_batch = k.state_store().start_write_batch();
+                let mut dirty_cnt = 0;
 
-            for states in state_map.values_mut() {
-                if states.as_ref().unwrap().is_dirty() {
-                    dirty_cnt += 1;
-                    for state in &mut states.as_mut().unwrap().managed_states {
-                        state
-                            .flush(&mut write_batch)
+                for states in state_map.values_mut() {
+                    if states.as_ref().unwrap().is_dirty() {
+                        dirty_cnt += 1;
+                        for state in &mut states.as_mut().unwrap().managed_states {
+                            state
+                                .flush(&mut write_batch)
+                                .map_err(StreamExecutorError::agg_state_error)?;
+                        }
+                    }
+                }
+                (write_batch, dirty_cnt)
+            };
+
+            if dirty_cnt == 0 {
+                // Nothing to flush.
+                assert!(write_batch.is_empty());
+                return Ok(());
+            } else {
+                write_batch
+                    .ingest(epoch)
+                    .await
+                    .map_err(StreamExecutorError::agg_state_error)?;
+
+                // --- Produce the stream chunk ---
+                let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
+                while let Some(batch) = batches.next() {
+                    // --- Create array builders ---
+                    // As the datatype is retrieved from schema, it contains both group key and
+                    // aggregation state outputs.
+                    let mut builders = schema
+                        .create_array_builders(dirty_cnt * 2)
+                        .map_err(StreamExecutorError::eval_error)?;
+                    let mut new_ops = Vec::with_capacity(dirty_cnt);
+
+                    // --- Retrieve modified states and put the changes into the builders ---
+                    for (key, states) in batch {
+                        let appended = states
+                            .as_mut()
+                            .unwrap()
+                            .build_changes(&mut builders[key_indices.len()..], &mut new_ops, epoch)
+                            .await
                             .map_err(StreamExecutorError::agg_state_error)?;
+
+                        for _ in 0..appended {
+                            key.clone()
+                                .deserialize_to_builders(&mut builders[..key_indices.len()])
+                                .map_err(StreamExecutorError::eval_error)?;
+                        }
                     }
-                }
-            }
-            (write_batch, dirty_cnt)
-        };
 
-        if dirty_cnt == 0 {
-            // Nothing to flush.
-            assert!(write_batch.is_empty());
-            return Ok(());
-        } else {
-            write_batch
-                .ingest(epoch)
-                .await
-                .map_err(StreamExecutorError::agg_state_error)?;
+                    let columns: Vec<Column> = builders
+                        .into_iter()
+                        .map(|builder| -> Result<_> {
+                            Ok(Column::new(Arc::new(builder.finish()?)))
+                        })
+                        .try_collect()
+                        .map_err(StreamExecutorError::eval_error)?;
 
-            // --- Produce the stream chunk ---
-            let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
-            while let Some(batch) = batches.next() {
-                // --- Create array builders ---
-                // As the datatype is retrieved from schema, it contains both group key and
-                // aggregation state outputs.
-                let mut builders = schema
-                    .create_array_builders(dirty_cnt * 2)
-                    .map_err(StreamExecutorError::eval_error)?;
-                let mut new_ops = Vec::with_capacity(dirty_cnt);
+                    let chunk = StreamChunk::new(new_ops, columns, None);
 
-                // --- Retrieve modified states and put the changes into the builders ---
-                for (key, states) in batch {
-                    let appended = states
-                        .as_mut()
-                        .unwrap()
-                        .build_changes(&mut builders[key_indices.len()..], &mut new_ops, epoch)
-                        .await
-                        .map_err(StreamExecutorError::agg_state_error)?;
-
-                    for _ in 0..appended {
-                        key.clone()
-                            .deserialize_to_builders(&mut builders[..key_indices.len()])
-                            .map_err(StreamExecutorError::eval_error)?;
-                    }
+                    trace!("output_chunk: {:?}", &chunk);
+                    yield chunk;
                 }
 
-                let columns: Vec<Column> = builders
-                    .into_iter()
-                    .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-                    .try_collect()
-                    .map_err(StreamExecutorError::eval_error)?;
-
-                let chunk = StreamChunk::new(new_ops, columns, None);
-
-                trace!("output_chunk: {:?}", &chunk);
-                yield chunk;
+                // evict cache to target capacity
+                // In current implementation, we need to fetch the RowCount from the state store
+                // once a key is deleted and added again. We should find a way to
+                // eliminate this extra fetch.
+                assert!(!state_map
+                    .values()
+                    .any(|state| state.as_ref().unwrap().is_dirty()));
+                state_map.evict_to_target_cap();
             }
-
-            // evict cache to target capacity
-            // In current implementation, we need to fetch the RowCount from the state store
-            // once a key is deleted and added again. We should find a way to
-            // eliminate this extra fetch.
-            assert!(!state_map
-                .values()
-                .any(|state| state.as_ref().unwrap().is_dirty()));
-            state_map.evict_to_target_cap();
         }
     }
 
@@ -433,11 +437,12 @@ mod tests {
     use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
+    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
     use crate::executor_v2::aggregation::{AggArgs, AggCall};
@@ -450,7 +455,7 @@ mod tests {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        keyspace: Keyspace<S>,
+        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
     }
@@ -475,7 +480,7 @@ mod tests {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        keyspace: Keyspace<impl StateStore>,
+        keyspace: Vec<Keyspace<impl StateStore>>,
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
@@ -499,20 +504,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_hash_aggregation_count_in_memory() {
-        test_local_hash_aggregation_count(create_in_memory_keyspace()).await
+        test_local_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
     #[tokio::test]
     async fn test_global_hash_aggregation_count_in_memory() {
-        test_global_hash_aggregation_count(create_in_memory_keyspace()).await
+        test_global_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
     #[tokio::test]
     async fn test_local_hash_aggregation_max_in_memory() {
-        test_local_hash_aggregation_max(create_in_memory_keyspace()).await
+        test_local_hash_aggregation_max(create_in_memory_keyspace_agg(2)).await
     }
 
-    async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
+    /// Create a vector of memory keyspace with len `num_ks`.
+    fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateStore>> {
+        let mut returned_vec = vec![];
+        let mem_state = MemoryStateStore::new();
+        for idx in 0..num_ks {
+            returned_vec.push(Keyspace::table_root(
+                mem_state.clone(),
+                &TableId::new(idx as u32),
+            ));
+        }
+        returned_vec
+    }
+
+    async fn test_local_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -589,7 +607,7 @@ mod tests {
         );
     }
 
-    async fn test_global_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
+    async fn test_global_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -680,7 +698,7 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_max(keyspace: Keyspace<impl StateStore>) {
+    async fn test_local_hash_aggregation_max(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![
                 // group key column

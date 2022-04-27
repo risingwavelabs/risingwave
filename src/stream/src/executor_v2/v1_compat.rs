@@ -304,7 +304,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        keyspace: Keyspace<S>,
+        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         _op_info: String,

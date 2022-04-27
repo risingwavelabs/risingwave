@@ -393,6 +393,13 @@ impl StreamFragmenter {
             }
         }
 
+        // Rewrite hash agg. One agg call -> one table id.
+        if let Node::HashAggNode(hash_agg_node) = stream_node.node.as_mut().unwrap() {
+            for _ in &hash_agg_node.agg_calls {
+                hash_agg_node.table_ids.push(state.gen_table_id());
+            }
+        }
+
         let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
         let inputs = inputs
