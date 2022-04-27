@@ -192,8 +192,10 @@ message LookupNode {
   uint64 arrange_operator_id = 7;
 }
 
-// Special node for shared state. Merge and align barrier from upstreams.
-message UnionNode {}
+// Special node for shared state. Merge and align barrier from upstreams. Pipe inputs in order.
+message LookupUnionNode {
+  repeated uint32 order = 1;
+}
 
 message StreamNode {
   oneof node {
@@ -214,7 +216,7 @@ message StreamNode {
     BatchPlanNode batch_plan_node = 17;
     LookupNode lookup_node = 20;
     ArrangeNode arrange_node = 21;
-    UnionNode union_node = 22;
+    LookupUnionNode lookup_union_node = 22;
     DeltaIndexJoinNode delta_index_join = 25;
   }
   // The id for the operator.

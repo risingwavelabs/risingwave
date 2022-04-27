@@ -35,7 +35,7 @@ pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
     BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
-    LookupExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
+    LookupExecutorBuilder, LookupUnionExecutorBuilder, SourceExecutorBuilder,
 };
 use crate::task::{
     ActorId, DispatcherId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION,
@@ -535,7 +535,7 @@ pub fn create_executor(
         Node::FilterNode => FilterExecutorBuilder,
         Node::ArrangeNode => ArrangeExecutorBuilder,
         Node::LookupNode => LookupExecutorBuilder,
-        Node::UnionNode => UnionExecutorBuilder,
+        Node::LookupUnionNode => LookupUnionExecutorBuilder,
     }
 }
 
