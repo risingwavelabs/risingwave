@@ -24,6 +24,8 @@ use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
 
+const TOPN_SIZE_THRESHOLD: usize = 1024 * 1024;
+
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
@@ -156,8 +158,7 @@ impl ToBatch for LogicalTopN {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
-        let offset_threshold = 512 * 1024;
-        let ret = if self.offset() < offset_threshold {
+        let ret = if self.limit() + self.offset() < TOPN_SIZE_THRESHOLD {
             let new_input = self.input().to_batch();
             // TODO: our current batch topN does not support offset so we add a limit here when
             // offset != 0.
@@ -176,11 +177,7 @@ impl ToBatch for LogicalTopN {
             BatchLimit::new(limit).into()
         };
 
-        if self.topn_order().satisfies(required_order) {
-            ret
-        } else {
-            required_order.enforce(ret)
-        }
+        required_order.enforce_if_not_satisfies(ret)
     }
 }
 
