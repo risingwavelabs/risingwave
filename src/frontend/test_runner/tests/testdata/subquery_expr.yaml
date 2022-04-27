@@ -129,3 +129,6 @@
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [count] }
               LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
+- sql: |
+    select 1 + (select 2 from t);
+  binder_error: 'Catalog error: table or source not found: t'

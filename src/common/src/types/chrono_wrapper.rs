@@ -29,6 +29,7 @@ macro_rules! impl_chrono_wrapper {
     ($({ $variant_name:ident, $chrono:ty, $array:ident, $builder:ident }),*) => {
         $(
             #[derive(Clone, Copy, Debug, Eq, PartialOrd, Ord)]
+            #[repr(transparent)]
             pub struct $variant_name(pub $chrono);
 
             impl $variant_name {

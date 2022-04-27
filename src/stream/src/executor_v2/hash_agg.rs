@@ -513,27 +513,25 @@ mod tests {
     }
 
     async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_pretty(
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int64)],
+        };
+        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
             " I
             + 1
             + 2
             + 2",
-        );
-        let chunk2 = StreamChunk::from_pretty(
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
             " I
             - 1
             - 2 D
             - 2",
-        );
-        let schema = Schema {
-            fields: vec![Field::unnamed(DataType::Int64)],
-        };
-        let mut source = MockSource::new(schema, PkIndices::new());
-        source.push_barrier(1, false);
-        source.push_chunks([chunk1].into_iter());
-        source.push_barrier(2, false);
-        source.push_chunks([chunk2].into_iter());
-        source.push_barrier(3, false);
+        ));
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -564,7 +562,7 @@ mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sorted_rows(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 1 1 1
@@ -580,7 +578,7 @@ mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sorted_rows(),
             StreamChunk::from_pretty(
                 "  I I I I
                 -  1 1 1 1
@@ -592,19 +590,6 @@ mod tests {
     }
 
     async fn test_global_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_pretty(
-            " I I I
-            + 1 1 1
-            + 2 2 2
-            + 2 2 2",
-        );
-        let chunk2 = StreamChunk::from_pretty(
-            " I I I
-            - 1 1 1
-            - 2 2 2 D
-            - 2 2 2
-            + 3 3 3",
-        );
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -613,12 +598,23 @@ mod tests {
             ],
         };
 
-        let mut source = MockSource::new(schema, PkIndices::new());
-        source.push_barrier(1, false);
-        source.push_chunks([chunk1].into_iter());
-        source.push_barrier(2, false);
-        source.push_chunks([chunk2].into_iter());
-        source.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            + 1 1 1
+            + 2 2 2
+            + 2 2 2",
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            - 1 1 1
+            - 2 2 2 D
+            - 2 2 2
+            + 3 3 3",
+        ));
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
@@ -656,7 +652,7 @@ mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sorted_rows(),
             StreamChunk::from_pretty(
                 " I I I I
                 + 1 1 1 1
@@ -672,7 +668,7 @@ mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sorted_rows(),
             StreamChunk::from_pretty(
                 "  I I I I
                 -  1 1 1 1
@@ -685,18 +681,6 @@ mod tests {
     }
 
     async fn test_local_hash_aggregation_max(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_pretty(
-            " I     I    I
-            + 1   233 1001
-            + 1 23333 1002
-            + 2  2333 1003",
-        );
-        let chunk2 = StreamChunk::from_pretty(
-            " I     I    I
-            - 1   233 1001
-            - 1 23333 1002 D
-            - 2  2333 1003",
-        );
         let schema = Schema {
             fields: vec![
                 // group key column
@@ -707,12 +691,22 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_barrier(1, false);
-        source.push_chunks([chunk1].into_iter());
-        source.push_barrier(2, false);
-        source.push_chunks([chunk2].into_iter());
-        source.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I     I    I
+            + 1   233 1001
+            + 1 23333 1002
+            + 2  2333 1003",
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I     I    I
+            - 1   233 1001
+            - 1 23333 1002 D
+            - 2  2333 1003",
+        ));
+        tx.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -738,7 +732,7 @@ mod tests {
         // Consume stream chunk
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sorted_rows(),
             StreamChunk::from_pretty(
                 " I I    I
                 + 1 2  233
@@ -754,7 +748,7 @@ mod tests {
 
         let msg = hash_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.into_chunk().unwrap().sorted_rows(),
+            msg.into_chunk().unwrap().sorted_rows(),
             StreamChunk::from_pretty(
                 "  I I     I
                 -  2 1  2333
