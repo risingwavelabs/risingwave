@@ -12,7 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -27,36 +32,85 @@ use crate::storage_value::VALUE_META_SIZE;
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
+pub(crate) struct SharedBufferBatchInner {
+    data: Vec<SharedBufferItem>,
+    size: usize,
+    buffer_size_tracker: Arc<AtomicUsize>,
+}
+
+impl Deref for SharedBufferBatchInner {
+    type Target = [SharedBufferItem];
+
+    fn deref(&self) -> &Self::Target {
+        self.data.as_slice()
+    }
+}
+
+impl Drop for SharedBufferBatchInner {
+    fn drop(&mut self) {
+        self.buffer_size_tracker.fetch_sub(self.size, Relaxed);
+    }
+}
+
+impl Debug for SharedBufferBatchInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SharedBufferBatchInner {{ data: {:?}, size: {} }}",
+            self.data, self.size
+        )
+    }
+}
+
+impl PartialEq for SharedBufferBatchInner {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
 // TODO: Remove `pub(super)`.
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedBufferBatch {
-    pub(super) inner: Arc<[SharedBufferItem]>,
-    pub(super) epoch: HummockEpoch,
-    pub(super) size: u64,
+    inner: Arc<SharedBufferBatchInner>,
+    epoch: HummockEpoch,
 }
 
+pub(crate) type IndexedSharedBufferBatches = BTreeMap<Vec<u8>, SharedBufferBatch>;
+
 impl SharedBufferBatch {
-    pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: HummockEpoch) -> Self {
+    pub fn new(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        buffer_size_tracker: Arc<AtomicUsize>,
+    ) -> Self {
         // size = Sum(length of full key + length of user value)
-        let size: u64 = sorted_items
+        let size: usize = Self::measure_batch_size(&sorted_items);
+
+        buffer_size_tracker.fetch_add(size, Relaxed);
+
+        Self {
+            inner: Arc::new(SharedBufferBatchInner {
+                data: sorted_items,
+                size,
+                buffer_size_tracker,
+            }),
+            epoch,
+        }
+    }
+
+    pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {
+        batches
             .iter()
             .map(|(k, v)| {
-                let vsize = {
+                k.len() + {
                     match v {
                         HummockValue::Put(_, val) => VALUE_META_SIZE + val.len(),
                         HummockValue::Delete(_) => VALUE_META_SIZE,
                     }
-                };
-                (k.len() + vsize) as u64
+                }
             })
-            .sum();
-
-        Self {
-            inner: sorted_items.into(),
-            epoch,
-            size,
-        }
+            .sum()
     }
 
     pub fn get(&self, user_key: &[u8]) -> Option<HummockValue<Vec<u8>>> {
@@ -77,6 +131,10 @@ impl SharedBufferBatch {
 
     pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
         SharedBufferBatchIterator::<Backward>::new(self.inner)
+    }
+
+    pub fn get_data(&self) -> &[SharedBufferItem] {
+        &self.inner
     }
 
     #[allow(dead_code)]
@@ -101,19 +159,19 @@ impl SharedBufferBatch {
         self.epoch
     }
 
-    pub fn size(&self) -> u64 {
-        self.size
+    pub fn size(&self) -> usize {
+        self.inner.size
     }
 }
 
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
-    inner: Arc<[SharedBufferItem]>,
+    inner: Arc<SharedBufferBatchInner>,
     current_idx: usize,
     _phantom: PhantomData<D>,
 }
 
 impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
-    pub fn new(inner: Arc<[SharedBufferItem]>) -> Self {
+    pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
         Self {
             inner,
             current_idx: 0,
@@ -240,8 +298,12 @@ mod tests {
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch =
-            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
+        let buffer_size_tracker = Arc::new(AtomicUsize::new(0));
+        let shared_buffer_batch = SharedBufferBatch::new(
+            transform_shared_buffer(shared_buffer_items.clone()),
+            epoch,
+            buffer_size_tracker,
+        );
 
         // Sketch
         assert_eq!(shared_buffer_batch.start_key(), shared_buffer_items[0].0);
@@ -313,8 +375,12 @@ mod tests {
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch =
-            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
+        let buffer_size_tracker = Arc::new(AtomicUsize::new(0));
+        let shared_buffer_batch = SharedBufferBatch::new(
+            transform_shared_buffer(shared_buffer_items.clone()),
+            epoch,
+            buffer_size_tracker,
+        );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();

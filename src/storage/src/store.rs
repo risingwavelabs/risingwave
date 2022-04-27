@@ -25,7 +25,7 @@ use crate::write_batch::WriteBatch;
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<u64>> + Send;
+pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]
 macro_rules! define_state_store_associated_type {
