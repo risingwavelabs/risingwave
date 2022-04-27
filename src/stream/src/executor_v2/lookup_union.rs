@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -118,7 +119,7 @@ impl LookupUnionExecutor {
             let (tx, rx) = unbounded();
             let stream = poll_until_barrier(
                 inputs
-                    .remove(&input_id)
+                    .remove(input_id)
                     .expect("duplicated inputs in order")
                     .execute(),
                 position,
@@ -138,53 +139,57 @@ impl LookupUnionExecutor {
 
         while let Some(res) = stream.next().await {
             let (id, msg) = res?;
-            if id == pipe_order {
-                // We can directly forward msg of the current pipe
-                match msg {
-                    Message::Chunk(chunk) => {
-                        yield Message::Chunk(chunk);
-                    }
-                    Message::Barrier(barrier) => {
-                        if this_barrier.is_none() {
-                            this_barrier = Some(barrier);
+            match id.cmp(&pipe_order) {
+                Ordering::Equal => {
+                    // We can directly forward msg of the current pipe
+                    match msg {
+                        Message::Chunk(chunk) => {
+                            yield Message::Chunk(chunk);
                         }
-                        pipe_order += 1;
-                        // process other buffers
-                        'outer: while pipe_order < total_inputs {
-                            for item in buffer[pipe_order].drain(..) {
-                                if let Message::Barrier(ref barrier) = item {
-                                    let this_barrier = this_barrier.as_ref().unwrap();
-                                    if barrier != this_barrier {
-                                        return Err(StreamExecutorError::align_barrier(
-                                            this_barrier.clone(),
-                                            barrier.clone(),
-                                        ));
+                        Message::Barrier(barrier) => {
+                            if this_barrier.is_none() {
+                                this_barrier = Some(barrier);
+                            }
+                            pipe_order += 1;
+                            // process other buffers
+                            'outer: while pipe_order < total_inputs {
+                                for item in buffer[pipe_order].drain(..) {
+                                    if let Message::Barrier(ref barrier) = item {
+                                        let this_barrier = this_barrier.as_ref().unwrap();
+                                        if barrier != this_barrier {
+                                            return Err(StreamExecutorError::align_barrier(
+                                                this_barrier.clone(),
+                                                barrier.clone(),
+                                            ));
+                                        }
+                                        pipe_order += 1;
+                                        continue 'outer; // process the next buffer
+                                    } else {
+                                        yield item;
                                     }
-                                    pipe_order += 1;
-                                    continue 'outer; // process the next buffer
-                                } else {
-                                    yield item;
                                 }
+                                break; // still need to process this pipe
                             }
-                            break; // still need to process this pipe
-                        }
-                        if pipe_order == total_inputs {
-                            for buffer in &buffer {
-                                assert!(buffer.is_empty());
-                            }
-                            yield Message::Barrier(this_barrier.take().unwrap());
-                            pipe_order = 0;
-                            for tx in &mut txs {
-                                tx.unbounded_send(()).unwrap();
+                            if pipe_order == total_inputs {
+                                for buffer in &buffer {
+                                    assert!(buffer.is_empty());
+                                }
+                                yield Message::Barrier(this_barrier.take().unwrap());
+                                pipe_order = 0;
+                                for tx in &mut txs {
+                                    tx.unbounded_send(()).unwrap();
+                                }
                             }
                         }
                     }
                 }
-            } else if id < pipe_order {
-                unreachable!()
-            } else {
-                // We need to buffer the msg
-                buffer[id].push(msg);
+                Ordering::Less => {
+                    unreachable!()
+                }
+                Ordering::Greater => {
+                    // We need to buffer the msg
+                    buffer[id].push(msg);
+                }
             }
         }
     }
