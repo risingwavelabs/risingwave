@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The solver for delta join. Determines lookup order of a join plan.
-//! All collections types in this module should use `BTree` to ensure determinism between runs.
+//! The solver for delta join, whic determines lookup order of a join plan.
+//! All collection types in this module should be `BTree` to ensure determinism between runs.
 //!
-//! In this module, `a*` means lookup executor that looks-up arrangement a of the current epoch.
-//! `a` means looks-up arranegment a of the previous epoch.
+//! # Representation of Multi-Way Join
 //!
-//! Delta joins only supports inner equal join. The solver is based on the following formula (take
+//! In this module, `a*` means lookup executor that looks-up the arrangement `a` of the current
+//! epoch. `a` means looks-up arrangement `a` of the previous epoch.
+//!
+//! Delta joins only support inner equal join. The solver is based on the following formula (take
 //! 3-way join as an example):
 //!
 //! ```plain
@@ -36,7 +38,7 @@
 //! Inner joins satisfy commutative law and associative laws, so we can switch them back and forth
 //! between joins.
 //!
-//! ... which generates the following look up graph:
+//! ... which generates the following look-up graph:
 //!
 //! ```plain
 //! a -> b* -> c* -> output3
@@ -44,7 +46,25 @@
 //! c -> b  -> a  -> output1
 //! ```
 //!
-//! And the final output is `output1 <concat> output2 <concat> output3`.
+//! And the final output is `output1 <concat> output2 <concat> output3`. The concatenation is
+//! ordered: all items from output 1 must appear before output 2.
+//!
+//! TODO: support dynamic filter and filter condition in lookups.
+//!
+//! # What need the caller do?
+//!
+//! After solving the delta join plan, caller will need to do a lot of things.
+//!
+//! * Use the correct index for every stream input. By looking at the first lookup fragment in each
+//!   row, we can decide whether to use `a.x` or `a.y` as index for stream input.
+//! * Insert exchanges between lookups of different distribution. Generally, if the whole row is
+//!   operating on the same join key, we only need to do 1v1 exchanges between lookups. However, it
+//!   would be possible that a row of lookup first join `a.x == b.x`, then `a.y == c.y`. In this
+//!   case, we will need to insert hash exchange between these two lookups.
+//! * Ensure the order of union. Always union from the last row to the first row.
+//! * Insert exchange before union. Still the case for `a.x == b.x`, then `a.y == c.y`, it is
+//!   possible that every lookup path produces different distribution. We need to shuffle them
+//!   before feeding data to union.
 
 #![allow(dead_code)]
 
@@ -147,7 +167,7 @@ pub enum ArrangeStrategy {
 /// ... where `c`, the right-most table in multi-way join, passes through most number of
 /// lookup-this-epoch.
 ///
-/// More lookup-this-epochs in a lookup row means more latency when a barrier is flushed. If lookup
+/// More lookup-this-epochs in a lookup row mean more latency when a barrier is flushed. If lookup
 /// executor is set to lookup this epoch, it will wait until a barrier from the arrangement side
 /// before actually starting lookups and joins.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,18 +192,18 @@ pub enum StreamStrategy {
 /// The `solve` function will return a vector of [`LookupPath`]. See [`LookupPath`] for more.
 pub struct JoinSolver {
     /// Strategy of arrangement placement, see docs of [`ArrangeStrategy`] for more details.
-    pub arrange_strategy: ArrangeStrategy,
+    arrange_strategy: ArrangeStrategy,
 
     /// Strategy of stream placement, see docs of [`StreamStrategy`] for more details.
-    pub stream_strategy: StreamStrategy,
+    stream_strategy: StreamStrategy,
 
     /// Possible combination of joins. If `(a, b)` is in `edges`, then `a` and `b` can be joined.
     /// The edge is bi-directional, so only one pair (either `a, b` or `b, a`) needs to be present
     /// in this vector.
-    pub edges: Vec<JoinEdge>,
+    edges: Vec<JoinEdge>,
 
     /// The recommended join order from optimizer in a multi-way join plan node.
-    pub join_order: Vec<JoinTable>,
+    join_order: Vec<JoinTable>,
 }
 
 /// A row in the lookup plan, which includes the stream side arrangement, and all arrangements to be
@@ -263,14 +283,14 @@ impl JoinSolver {
     ///
     /// * Firstly, we find all tables that can be joined with the current join table set. The tables
     ///   should have the same join key as the current join set.
-    /// * If there are multiple tables that satisfy this condition, we will pick table according to
+    /// * If there are multiple tables that satisfy this condition, we will pick tables according to
     ///   [`ArrangeStrategy`].
     /// * If not, then we have to do a shuffle. We pick all tables that have join condition with the
     ///   current table set.
     /// * And then pick a table using [`ArrangeStrategy`].
     ///
-    /// Basically, this algorithm will greedy pick all tables with the same join key first (so that
-    /// there won't be shuffle). Then, switch a distribution, and do this process again.
+    /// Basically, this algorithm will greedily pick all tables with the same join key first (so
+    /// that there won't be shuffle). Then, switch a distribution, and do this process again.
     fn find_lookup_path(
         &self,
         solver_env: &SolverEnv,
@@ -311,7 +331,7 @@ impl JoinSolver {
                 "internal error: infinite loop"
             );
 
-            // step 1: find tables that can be joined with `current_table_set` and satisfies the
+            // step 1: find tables that can be joined with `current_table_set` and satisfy the
             // current distribution.
             let mut reachable_tables = BTreeMap::new();
 
@@ -336,10 +356,10 @@ impl JoinSolver {
                 }
             }
 
-            // not table can be joined using the same distribution at this point.
+            // no table can be joined using the same distribution at this point.
 
             // step 3: find all tables that can be joined with `current_table_set`, regardless of
-            // distribution.
+            // their distribution.
             let mut reachable_tables = BTreeMap::new();
 
             for current_table in &current_table_set {
@@ -384,6 +404,19 @@ impl JoinSolver {
             .iter()
             .map(|x| self.find_lookup_path(&solver_env, *x))
             .collect()
+    }
+
+    pub fn new(
+        stream_strategy: StreamStrategy,
+        edges: Vec<JoinEdge>,
+        join_order: Vec<JoinTable>,
+    ) -> Self {
+        Self {
+            stream_strategy,
+            edges,
+            join_order,
+            arrange_strategy: ArrangeStrategy::LeftFirst,
+        }
     }
 }
 
