@@ -1,5 +1,5 @@
 statement ok
-create materialized source s1 (v1 int not null, v2 varchar not null) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.brokers' = '127.0.0.1:29092' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest' ) row format json
 
 query IT rowsort
 select * from s1
@@ -13,7 +13,7 @@ statement ok
 drop source s1
 
 statement ok
-create materialized source s1 (v1 int not null, v2 varchar not null) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.brokers' = '127.0.0.1:29092' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
 
 query IT rowsort
 select * from s1
@@ -27,7 +27,7 @@ statement ok
 drop source s1
 
 statement ok
-create materialized source s1 (v1 int not null, v2 varchar not null) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.brokers' = '127.0.0.1:29092' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
 
 query IT rowsort
 select * from s1
@@ -41,7 +41,7 @@ statement ok
 drop source s1
 
 statement ok
-create materialized source s1 (v1 int not null, v2 varchar not null) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.brokers' = '127.0.0.1:29092' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
 
 query IT rowsort
 select * from s1
@@ -55,7 +55,7 @@ statement ok
 drop source s1
 
 statement ok
-create materialized source s1 (v1 int not null, v2 varchar not null) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.brokers' = '127.0.0.1:29092' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
 
 query I
 select count(*) from s1
@@ -66,7 +66,7 @@ statement ok
 drop source s1
 
 statement ok
-create materialized source s1 (v1 int not null, v2 varchar not null) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_mv_topic', 'kafka.brokers' = '127.0.0.1:29092' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_mv_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
 
 query I
 select count(*) from s1
