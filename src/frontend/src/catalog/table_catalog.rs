@@ -64,6 +64,7 @@ impl TableCatalog {
             table_id: self.id,
             pk: self.pk_desc.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
+            distribution_keys: self.distribution_keys.clone(),
         }
     }
 
@@ -102,7 +103,11 @@ impl TableCatalog {
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
             is_index: self.is_index_on.is_some(),
             index_on_id: self.is_index_on.unwrap_or_default().table_id(),
-            distribution_keys: vec![],
+            distribution_keys: self
+                .distribution_keys
+                .iter()
+                .map(|k| *k as i32)
+                .collect_vec(),
         }
     }
 }

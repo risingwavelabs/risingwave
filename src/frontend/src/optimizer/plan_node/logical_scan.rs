@@ -36,8 +36,6 @@ pub struct LogicalScan {
     table_desc: Rc<TableDesc>,
     // Descriptors of all indexes on this table
     indexes: Vec<(String, Rc<TableDesc>)>,
-    // Distribution keys of the table
-    distribution_keys: Vec<usize>,
 }
 
 impl LogicalScan {
@@ -47,7 +45,6 @@ impl LogicalScan {
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         indexes: Vec<(String, Rc<TableDesc>)>,
-        distribution_keys: Vec<usize>,
         ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
@@ -82,7 +79,6 @@ impl LogicalScan {
             required_col_idx,
             table_desc,
             indexes,
-            distribution_keys,
         }
     }
 
@@ -91,7 +87,6 @@ impl LogicalScan {
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
         indexes: Vec<(String, Rc<TableDesc>)>,
-        distribution_keys: Vec<usize>,
         ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
@@ -99,7 +94,6 @@ impl LogicalScan {
             (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
             indexes,
-            distribution_keys,
             ctx,
         )
         .into())
@@ -138,12 +132,6 @@ impl LogicalScan {
         &self.indexes
     }
 
-    /// Get the distribution keys of this table
-    #[must_use]
-    pub fn distribution_keys(&self) -> &[usize] {
-        &self.distribution_keys
-    }
-
     pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> LogicalScan {
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
         let all_columns = index
@@ -164,7 +152,6 @@ impl LogicalScan {
             new_required_col_idx,
             index.clone(),
             vec![],
-            self.distribution_keys.clone(),
             self.ctx(),
         )
     }
@@ -196,7 +183,6 @@ impl ColPrunable for LogicalScan {
             required_col_idx,
             self.table_desc.clone(),
             self.indexes.clone(),
-            self.distribution_keys.clone(),
             self.base.ctx.clone(),
         )
         .into()
@@ -242,7 +228,6 @@ impl ToStream for LogicalScan {
                         required_col_idx,
                         self.table_desc.clone(),
                         self.indexes.clone(),
-                        self.distribution_keys.clone(),
                         self.base.ctx.clone(),
                     )
                     .into(),

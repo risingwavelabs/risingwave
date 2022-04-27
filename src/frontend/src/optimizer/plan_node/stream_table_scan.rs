@@ -44,7 +44,7 @@ impl StreamTableScan {
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
             // follows upstream distribution from TableCatalog
-            Distribution::HashShard(logical.distribution_keys().to_vec()),
+            Distribution::HashShard(logical.table_desc().distribution_keys.clone()),
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
@@ -113,7 +113,8 @@ impl StreamTableScan {
                 .collect(),
             distribution_keys: self
                 .logical
-                .distribution_keys()
+                .table_desc()
+                .distribution_keys
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),

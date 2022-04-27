@@ -24,4 +24,6 @@ pub struct TableDesc {
     pub pk: Vec<OrderedColumnDesc>,
     /// all columns in the table, noticed it is NOT sorted by columnId in the vec
     pub columns: Vec<ColumnDesc>,
+    /// distribution keys of this table
+    pub distribution_keys: Vec<usize>,
 }
