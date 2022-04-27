@@ -49,9 +49,10 @@ pub trait Aggregator: Send + 'static {
     fn update_and_output_with_sorted_groups(
         &mut self,
         input: &DataChunk,
+        offset: usize,
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
-    ) -> Result<()>;
+    ) -> Result<usize>;
 }
 
 pub type BoxedAggState = Box<dyn Aggregator>;
