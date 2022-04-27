@@ -15,11 +15,12 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::{array::Op::*, catalog::ColumnDesc};
+use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::{Keyspace, StateStore, table::state_table::StateTable};
+use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{
@@ -50,16 +51,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let column_descs = column_ids
-        .into_iter()
-        .zip_eq(schema.fields.iter().cloned())
-        .map(|(column_id, field)| ColumnDesc {
-            data_type: field.data_type,
-            column_id,
-            name: field.name,
-            field_descs: vec![],
-            type_name: "".to_string(),
-        })
-        .collect_vec();
+            .into_iter()
+            .zip_eq(schema.fields.iter().cloned())
+            .map(|(column_id, field)| ColumnDesc {
+                data_type: field.data_type,
+                column_id,
+                name: field.name,
+                field_descs: vec![],
+                type_name: "".to_string(),
+            })
+            .collect_vec();
         Self {
             input,
             state_table: StateTable::new(keyspace, column_descs, arrange_order_types),
