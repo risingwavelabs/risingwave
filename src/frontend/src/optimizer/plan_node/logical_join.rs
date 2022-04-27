@@ -313,7 +313,7 @@ impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let left_len = self.left().schema().len();
         let right_len = self.right().schema().len();
-        let output_column_cnt = Self::out_column_num(left_len, right_len, self.join_type());
+        let _output_column_cnt = Self::out_column_num(left_len, right_len, self.join_type());
 
         let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
 
@@ -334,7 +334,7 @@ impl ColPrunable for LogicalJoin {
             let o2l_mapping = self.o2l_col_mapping();
             let o2r_mapping = self.o2l_col_mapping();
             total_required_cols
-                .clone()
+                
                 .into_iter()
                 .partition_map(|idx_in_output| {
                     if let Some(idx_in_left) = o2l_mapping.try_map(idx_in_output) {
@@ -366,7 +366,7 @@ impl ColPrunable for LogicalJoin {
         } else {
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols),
+                ColIndexMapping::with_remaining_columns(required_cols),
             )
         }
     }

@@ -469,7 +469,7 @@ impl ColPrunable for LogicalAgg {
             // Some group key columns are not needed
             LogicalProject::with_mapping(
                 agg.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols),
+                ColIndexMapping::with_remaining_columns(required_cols),
             )
         }
     }
