@@ -217,7 +217,8 @@ mod tests {
         let top_n_executor = Box::new(TopNExecutor2::new(
             Box::new(mock_executor),
             order_pairs,
-            2usize,
+            2,
+            0,
             "TopNExecutor2".to_string(),
             DEFAULT_CHUNK_BUFFER_SIZE,
         ));
