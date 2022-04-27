@@ -48,13 +48,12 @@ select v1, v2, v3 from mv2;
 1 1 4
 1 9 1
 
-# FIXME: #2128
-# query III rowsort
-# select * from t1 order by v1 limit 3 offset 1;
-# ----
-# 1 1 4
-# 1 9 1
-# 5 1 4
+query III rowsort
+select * from t1 order by v1 limit 3 offset 1;
+----
+1 1 4
+1 9 1
+5 1 4
 
 query III rowsort
 select v1, v2, v3 from mv3;
