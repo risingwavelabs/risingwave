@@ -246,8 +246,7 @@ impl ColPrunable for LogicalProject {
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
         // Record each InputRef's index.
-        let mut input_ref_collector =
-            CollectInputRef::with_capacity(input_col_num);
+        let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
         required_cols.iter().for_each(|i| {
             if let ExprImpl::InputRef(ref input_ref) = self.exprs[*i] {
                 let input_idx = input_ref.index;
@@ -265,10 +264,7 @@ impl ColPrunable for LogicalProject {
         {
             *b = Some(a);
         }
-        let input_required_cols = input_required_cols
-            .into_iter()
-            .flatten()
-            .collect_vec();
+        let input_required_cols = input_required_cols.into_iter().flatten().collect_vec();
 
         let new_input = self.input.prune_col(&input_required_cols);
         let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);

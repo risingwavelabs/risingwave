@@ -113,11 +113,15 @@ impl fmt::Display for LogicalTopN {
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
-        let order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
-        self.order
-            .field_order
-            .iter()
-            .for_each(|fo| order_required_cols.insert(fo.index));
+        let order_required_cols = {
+            let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
+            self.order
+                .field_order
+                .iter()
+                .for_each(|fo| order_required_cols.insert(fo.index));
+            order_required_cols
+        };
+
         let input_required_cols = order_required_cols
             .union(&input_required_bitset)
             .collect_vec();

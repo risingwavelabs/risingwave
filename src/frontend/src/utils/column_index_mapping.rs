@@ -167,7 +167,10 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
     pub fn with_removed_columns(cols: &[usize]) -> Self {
-        let mut cols = (0..cols.iter().max().unwrap() + 1).into_iter().filter(|x| !cols.contains(x)).collect_vec();
+        let mut cols = (0..cols.iter().max().unwrap() + 1)
+            .into_iter()
+            .filter(|x| !cols.contains(x))
+            .collect_vec();
         Self::with_remaining_columns(&cols)
     }
 

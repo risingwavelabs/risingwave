@@ -160,10 +160,8 @@ impl LogicalJoin {
         left_len: usize,
     ) -> ColIndexMapping {
         let (mut r2o_mapping_vec, _) = r2o_mapping.into_parts();
-        for target in &mut r2o_mapping_vec {
-            if let Some(target) = target {
-                *target += left_len;
-            }
+        for target in r2o_mapping_vec.iter_mut().flatten() {
+            *target += left_len;
         }
         l2o_mapping.union(&ColIndexMapping::new(r2o_mapping_vec))
     }
@@ -291,8 +289,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
             .on()
             .clone()
             .rewrite_expr(&mut Self::on2o_col_mapping_inner(
-                left_col_change,
-                right_col_change,
+                left_col_change.clone(),
+                right_col_change.clone(),
                 left.schema().len(),
             ));
         let join = Self::new(left, right, self.join_type, new_on);
