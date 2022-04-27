@@ -77,10 +77,10 @@ impl ToDistributedBatch for BatchHopWindow {
         required_dist: &Distribution,
     ) -> PlanRef {
         let input_required = self
-              .logical
-              .o2i_col_mapping()
-              .rewrite_required_distribution(required_dist)
-              .unwrap_or(Distribution::Any);
+            .logical
+            .o2i_col_mapping()
+            .rewrite_required_distribution(required_dist)
+            .unwrap_or(Distribution::Any);
         let new_input = self
             .input()
             .to_distributed_with_required(required_order, &input_required);
