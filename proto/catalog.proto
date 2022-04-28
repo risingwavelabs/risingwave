@@ -53,6 +53,7 @@ message Table {
   }
   bool is_index = 10;
   uint32 index_on_id = 11;
+  repeated int32 distribution_keys = 12;
 }
 
 message Schema {

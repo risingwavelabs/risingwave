@@ -167,6 +167,7 @@ impl StreamMaterialize {
             columns,
             pk_desc,
             is_index_on,
+            distribution_keys: base.dist.dist_column_indices().to_vec(),
         };
 
         Ok(Self { base, input, table })

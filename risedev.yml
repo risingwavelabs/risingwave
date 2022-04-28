@@ -19,6 +19,7 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
+      checkpoint-interval: 100
     - use: compute-node
     - use: frontend
 
@@ -318,6 +319,9 @@ template:
 
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
+
+    # Compactors used by this Prometheus instance
+    provide-compactor: "compactor*"
 
   frontend-legacy:
     # Listen address of frontend-legacy
