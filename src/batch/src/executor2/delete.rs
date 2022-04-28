@@ -153,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::new());
+        let source_manager = Arc::new(MemSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
