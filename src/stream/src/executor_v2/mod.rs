@@ -48,7 +48,6 @@ mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
 mod union;
-mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;

@@ -44,7 +44,7 @@ async fn test_merger_sum_aggr() {
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = LocalSimpleAggExecutor::new_from_v1(
+        let aggregator = LocalSimpleAggExecutor::new(
             input.boxed(),
             vec![
                 AggCall {
@@ -60,7 +60,6 @@ async fn test_merger_sum_aggr() {
             ],
             vec![],
             1,
-            "LocalSimpleAggExecutor".to_string(),
         )
         .unwrap();
         let (tx, rx) = channel(16);
@@ -113,7 +112,7 @@ async fn test_merger_sum_aggr() {
     let merger = MergeExecutor::new(schema, vec![], 0, outputs);
 
     // for global aggregator, we need to sum data and sum row count
-    let aggregator = SimpleAggExecutor::new_from_v1(
+    let aggregator = SimpleAggExecutor::new(
         merger.boxed(),
         vec![
             AggCall {
@@ -130,20 +129,17 @@ async fn test_merger_sum_aggr() {
         create_in_memory_keyspace(),
         vec![],
         2,
-        "SimpleAggExecutor".to_string(),
         vec![],
     )
     .unwrap();
 
-    let projection = ProjectExecutor::new_from_v1(
+    let projection = ProjectExecutor::new(
         aggregator.boxed(),
-        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
-        "ProjectExecutor".to_string(),
     );
 
     let items = Arc::new(Mutex::new(vec![]));

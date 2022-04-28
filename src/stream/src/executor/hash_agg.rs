@@ -39,7 +39,6 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
-    op_info: String,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -47,14 +46,13 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
     type Output = Result<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(HashAggExecutor::<K, S>::new_from_v1(
+        Ok(HashAggExecutor::<K, S>::new(
             args.input,
             args.agg_calls,
-            args.key_indices,
             args.keyspace,
             args.pk_indices,
             args.executor_id,
-            args.op_info,
+            args.key_indices,
         )?
         .boxed())
     }
@@ -100,7 +98,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             keyspace,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
-            op_info: params.op_info,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }
