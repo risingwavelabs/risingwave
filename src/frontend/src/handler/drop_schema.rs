@@ -58,3 +58,26 @@ pub async fn handle_drop_schema(
     catalog_writer.drop_schema(schema_id).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_drop_schema() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        frontend.run_sql("CREATE SCHEMA s1").await.unwrap();
+
+        frontend.run_sql("DROP SCHEMA s1").await.unwrap();
+
+        let schema = catalog_reader
+            .read_guard()
+            .get_database_by_name("s1")
+            .ok()
+            .cloned();
+        assert!(schema.is_none());
+    }
+}

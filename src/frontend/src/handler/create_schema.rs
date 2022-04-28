@@ -49,3 +49,26 @@ pub async fn handle_create_schema(
     catalog_writer.create_schema(db_id, &schema_name).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_create_schema() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        frontend.run_sql("CREATE SCHEMA s1").await.unwrap();
+
+        let schema = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, "s1")
+            .ok()
+            .cloned();
+        assert!(schema.is_some());
+    }
+}

@@ -66,13 +66,18 @@ mod tests {
     #[tokio::test]
     async fn test_drop_database() {
         let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
 
         frontend.run_sql("CREATE DATABASE t1").await.unwrap();
 
-        frontend.run_sql("CREATE SCHEMA t1.s1").await.unwrap();
-
         frontend.run_sql("DROP DATABASE t1").await.unwrap();
 
-        assert_eq!(1, 2);
+        let database = catalog_reader
+            .read_guard()
+            .get_database_by_name("t1")
+            .ok()
+            .cloned();
+        assert!(database.is_none());
     }
 }

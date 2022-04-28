@@ -43,3 +43,24 @@ pub async fn handle_create_database(
     catalog_writer.create_database(&database_name).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_create_database() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        frontend.run_sql("CREATE DATABASE t1").await.unwrap();
+
+        let database = catalog_reader
+            .read_guard()
+            .get_database_by_name("t1")
+            .ok()
+            .cloned();
+        assert!(database.is_some());
+    }
+}
