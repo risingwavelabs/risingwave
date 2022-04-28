@@ -248,7 +248,7 @@
                       BatchFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
                         BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
-    StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [revenue, o_orderdate, l_orderkey, o_shippriority] }
+    StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [l_orderkey, o_orderdate, o_shippriority], order_descs: [revenue, o_orderdate, l_orderkey, o_shippriority] }
       StreamProject { exprs: [$0, $4, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
         StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
           StreamProject { exprs: [$5, $1, $2, ($6 * (1:Int32 - $7)), $3, $4, $8], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
@@ -389,7 +389,7 @@
                       BatchFilter { predicate: ($1 = 'MIDDLE EAST':Varchar) }
                         BatchScan { table: region, columns: [r_regionkey, r_name] }
   stream_plan: |
-    StreamMaterialize { columns: [n_name, revenue], pk_columns: [revenue, n_name] }
+    StreamMaterialize { columns: [n_name, revenue], pk_columns: [n_name], order_descs: [revenue, n_name] }
       StreamProject { exprs: [$0, $2], expr_alias: [n_name, revenue] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
           StreamProject { exprs: [$2, ($0 * (1:Int32 - $1)), $4, $5, $6, $7, $8, $10], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
@@ -874,7 +874,7 @@
                       BatchExchange { order: [], dist: HashShard([1]) }
                         BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_comment] }
   stream_plan: |
-    StreamMaterialize { columns: [c_count, custdist], pk_columns: [custdist, c_count] }
+    StreamMaterialize { columns: [c_count, custdist], pk_columns: [c_count], order_descs: [custdist, c_count] }
       StreamProject { exprs: [$0, $2], expr_alias: [c_count, custdist] }
         StreamHashAgg { group_keys: [$0], aggs: [count, count] }
           StreamProject { exprs: [$2, $0], expr_alias: [ ,  ] }
