@@ -32,8 +32,8 @@ use risingwave_common::types::*;
 #[derive(Default)]
 pub struct EqGroups {
     indices: Vec<usize>,
-    offset: usize, // offset to next indices waiting for processing
-    limit: usize,  // 限制只能处理这么多groups
+    offset: usize, // offset to next index waiting for processing
+    limit: usize,  // limit the number of groups can be processed
 }
 
 impl EqGroups {
@@ -50,6 +50,10 @@ impl EqGroups {
 
     pub fn len(&self) -> usize {
         self.indices.len() - self.offset
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn set_offset(&mut self, offset: usize) {
@@ -196,9 +200,6 @@ where
         Ok(EqGroups::new(ret))
     }
 
-    /// 这个函数是使用detect_groups()生成好的分组信息(EqGroups)来准备分组
-    /// 将对应的group column放入group buidler中
-    /// 并且会更新Grouper的内部状态
     pub fn update_and_output_with_sorted_groups_concrete(
         &mut self,
         input: &T,
@@ -289,7 +290,6 @@ impl_sorted_grouper! { I64Array, Int64 }
 
 #[cfg(test)]
 mod tests {
-    use std::intrinsics::offset;
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
@@ -311,13 +311,13 @@ mod tests {
         let mut builder = I32ArrayBuilder::new(0)?;
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
-        let mut eq = g.detect_groups_concrete(&input)?;
-        g.update_and_output_with_sorted_groups_concrete(&input, 0, &mut builder, &mut eq)?;
+        let eq = g.detect_groups_concrete(&input)?;
+        g.update_and_output_with_sorted_groups_concrete(&input, 0, &mut builder, &eq)?;
         assert_eq!(eq.get_starting_indices(), &vec![2]);
 
         let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
-        let mut eq = g.detect_groups_concrete(&input)?;
-        g.update_and_output_with_sorted_groups_concrete(&input, 0, &mut builder, &mut eq)?;
+        let eq = g.detect_groups_concrete(&input)?;
+        g.update_and_output_with_sorted_groups_concrete(&input, 0, &mut builder, &eq)?;
         assert_eq!(eq.get_starting_indices(), &vec![1]);
 
         g.output_concrete(&mut builder)?;
@@ -347,12 +347,12 @@ mod tests {
         let mut a_builder = I64ArrayBuilder::new(0)?;
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
-        let mut eq0 = g0.detect_groups_concrete(&g0_input)?;
+        let eq0 = g0.detect_groups_concrete(&g0_input)?;
         let g1_input = I32Array::from_slice(&[Some(7), Some(8), Some(8)]).unwrap();
         let eq1 = g1.detect_groups_concrete(&g1_input)?;
-        let mut eq = EqGroups::intersect(&[eq0, eq1]);
-        g0.update_and_output_with_sorted_groups_concrete(&g0_input, 0, &mut g0_builder, &mut eq)?;
-        g1.update_and_output_with_sorted_groups_concrete(&g1_input, 0, &mut g1_builder, &mut eq)?;
+        let eq = EqGroups::intersect(&[eq0, eq1]);
+        g0.update_and_output_with_sorted_groups_concrete(&g0_input, 0, &mut g0_builder, &eq)?;
+        g1.update_and_output_with_sorted_groups_concrete(&g1_input, 0, &mut g1_builder, &eq)?;
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         a.update_and_output_with_sorted_groups_concrete(&a_input, 0, &mut a_builder, &eq)?;
 
@@ -360,9 +360,9 @@ mod tests {
         let eq0 = g0.detect_groups_concrete(&g0_input)?;
         let g1_input = I32Array::from_slice(&[Some(8), Some(8), Some(8)]).unwrap();
         let eq1 = g1.detect_groups_concrete(&g1_input)?;
-        let mut eq = EqGroups::intersect(&[eq0, eq1]);
-        g0.update_and_output_with_sorted_groups_concrete(&g0_input, 0, &mut g0_builder, &mut eq)?;
-        g1.update_and_output_with_sorted_groups_concrete(&g1_input, 0, &mut g1_builder, &mut eq)?;
+        let eq = EqGroups::intersect(&[eq0, eq1]);
+        g0.update_and_output_with_sorted_groups_concrete(&g0_input, 0, &mut g0_builder, &eq)?;
+        g1.update_and_output_with_sorted_groups_concrete(&g1_input, 0, &mut g1_builder, &eq)?;
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         a.update_and_output_with_sorted_groups_concrete(&a_input, 0, &mut a_builder, &eq)?;
 
@@ -404,8 +404,8 @@ mod tests {
         let mut a_builder = agg.return_type().create_array_builder(0).unwrap();
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
-        let mut eq = g0.detect_groups_concrete(&input).unwrap();
-        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &mut eq)
+        let eq = g0.detect_groups_concrete(&input).unwrap();
+        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
             &DataChunk::builder()
@@ -418,8 +418,8 @@ mod tests {
         .unwrap();
 
         let input = I32Array::from_slice(&[Some(3), Some(3), Some(3)]).unwrap();
-        let mut eq = g0.detect_groups_concrete(&input).unwrap();
-        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &mut eq)
+        let eq = g0.detect_groups_concrete(&input).unwrap();
+        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
             &DataChunk::builder()
@@ -432,8 +432,8 @@ mod tests {
         .unwrap();
 
         let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
-        let mut eq = g0.detect_groups_concrete(&input).unwrap();
-        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &mut eq)
+        let eq = g0.detect_groups_concrete(&input).unwrap();
+        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
             &DataChunk::builder()

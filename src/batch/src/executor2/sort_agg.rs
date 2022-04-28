@@ -93,7 +93,7 @@ impl BoxedExecutor2Builder for SortAggExecutor2 {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            output_size_limit: 0,
+            output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,
         }))
     }
 }
@@ -113,12 +113,13 @@ impl Executor2 for SortAggExecutor2 {
 }
 
 impl SortAggExecutor2 {
+    /// We assume output_size_limit() will return the size limit of child chunks,
+    /// which should not exceed `DEFAULT_CHUNK_BUFFER_SIZE`.
+    /// Adds one more capacity here to handle groups that continue in following chunks.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let chunk_size_limit = self.output_size_limit() + 1;
-
+        let output_size_limit = self.output_size_limit() + 1;
         let mut processed_group_cnt: usize = 0;
-
         let (mut group_builders, mut agg_builders) =
             SortAggExecutor2::create_builders(&self.group_keys, &self.agg_states);
 
@@ -140,9 +141,9 @@ impl SortAggExecutor2 {
 
             let mut groups = EqGroups::intersect(&groups);
 
-            assert!(chunk_size_limit > processed_group_cnt);
+            assert!(output_size_limit > processed_group_cnt);
             let limit = {
-                let left_size = chunk_size_limit - processed_group_cnt;
+                let left_size = output_size_limit - processed_group_cnt;
                 if left_size >= groups.len() {
                     0
                 } else {
@@ -167,7 +168,7 @@ impl SortAggExecutor2 {
                 0,
             )?;
 
-            if groups.len() == 0 {
+            if groups.is_empty() {
                 continue;
             }
             if groups.limit() != 0 {
@@ -177,7 +178,7 @@ impl SortAggExecutor2 {
                 processed_group_cnt += groups.len()
             }
 
-            if processed_group_cnt % chunk_size_limit == 0 {
+            if processed_group_cnt % output_size_limit == 0 {
                 // yield output chunk
                 let columns = group_builders
                     .into_iter()
@@ -243,9 +244,9 @@ impl SortAggExecutor2 {
     }
 
     fn build_sorted_groups(
-        sorted_groupers: &mut Vec<BoxedSortedGrouper>,
+        sorted_groupers: &mut [BoxedSortedGrouper],
         group_columns: &[ArrayRef],
-        group_builders: &mut Vec<ArrayBuilderImpl>,
+        group_builders: &mut [ArrayBuilderImpl],
         groups: &EqGroups,
         row_offset: usize,
     ) -> Result<()> {
@@ -259,9 +260,9 @@ impl SortAggExecutor2 {
     }
 
     fn build_agg_states(
-        agg_states: &mut Vec<BoxedAggState>,
+        agg_states: &mut [BoxedAggState],
         child_chunk: &DataChunk,
-        agg_builders: &mut Vec<ArrayBuilderImpl>,
+        agg_builders: &mut [ArrayBuilderImpl],
         groups: &EqGroups,
         row_offset: usize,
     ) -> Result<usize> {
@@ -277,8 +278,8 @@ impl SortAggExecutor2 {
     }
 
     fn create_builders(
-        group_keys: &Vec<BoxedExpression>,
-        agg_states: &Vec<BoxedAggState>,
+        group_keys: &[BoxedExpression],
+        agg_states: &[BoxedAggState],
     ) -> (Vec<ArrayBuilderImpl>, Vec<ArrayBuilderImpl>) {
         let group_builders = group_keys
             .iter()

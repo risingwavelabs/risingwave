@@ -50,12 +50,14 @@ impl Aggregator for CountStar {
         }
     }
 
+    // FIXME: count star for sort agg
     fn update_and_output_with_sorted_groups(
         &mut self,
         input: &DataChunk,
+        _offset: usize,
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let builder = match builder {
             ArrayBuilderImpl::Int64(b) => b,
             _ => {
@@ -80,7 +82,7 @@ impl Aggregator for CountStar {
         } else {
             self.result += input.cardinality();
         }
-        Ok(())
+        Ok(0)
     }
 
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {

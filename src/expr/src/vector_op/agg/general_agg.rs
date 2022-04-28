@@ -96,6 +96,7 @@ where
             }
             cur = self.f.eval(cur, v)?;
 
+            // reset state and exit when reach limit
             if groups.limit() != 0 && group_cnt == groups.limit() {
                 row_idx = offset + i;
                 cur = None;

@@ -117,9 +117,11 @@ where
             if self.exists.insert(scalar_impl) {
                 cur = self.f.eval(cur, v)?;
             }
+
+            // reset state and exit when reach limit
             if groups.limit() != 0 && group_cnt == groups.limit() {
                 row_idx = i;
-                cur = None; // reset agg state
+                cur = None;
                 break;
             }
         }
