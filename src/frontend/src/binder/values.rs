@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{least_restrictive, Expr as _, ExprImpl};
+use crate::expr::{align_types, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {
@@ -40,58 +40,38 @@ impl Binder {
 
         self.context.clause = Some(Clause::Values);
         let vec2d = values.0;
-        let bound = vec2d
+        let mut bound = vec2d
             .into_iter()
             .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
+        let num_columns = bound[0].len();
+        if bound.iter().any(|row| row.len() != num_columns) {
+            return Err(
+                ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
+            );
+        }
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
-                if types.len() != bound[0].len() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "values length mismatched: expected {}, given {}",
-                        types.len(),
-                        bound[0].len(),
-                    ))
-                    .into());
-                }
+                bound = bound
+                    .into_iter()
+                    .map(|vec| Self::cast_on_insert(types.clone(), vec))
+                    .try_collect()?;
+
                 types
             }
-            None => {
-                let mut types = bound[0]
-                    .iter()
-                    .map(|expr| expr.return_type())
-                    .collect::<Vec<DataType>>();
-                for vec in &bound {
-                    for (expr, ty) in vec.iter().zip_eq(types.iter_mut()) {
-                        if !expr.is_null() {
-                            *ty = least_restrictive(ty.clone(), expr.return_type())?
-                        }
-                    }
-                }
-                types
-            }
+            None => (0..num_columns)
+                .map(|col_index| align_types(bound.iter_mut().map(|row| &mut row[col_index])))
+                .try_collect()?,
         };
 
-        // Insert casts.
-        let rows = bound
-            .into_iter()
-            .map(|vec| {
-                vec.into_iter()
-                    .zip_eq(types.iter().cloned())
-                    // When `types` are from `INSERT`, cast-ability has not been checked yet.
-                    // When `types` are from `least_restrictive`, it's always ok.
-                    // Because `least_restrictive` uses implicit cast, all of which allowed in
-                    // assign context.
-                    .map(|(expr, ty)| expr.cast_assign(ty))
-                    .try_collect()
-            })
-            .try_collect()?;
-
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
-        Ok(BoundValues { rows, schema })
+        Ok(BoundValues {
+            rows: bound,
+            schema,
+        })
     }
 }
 
@@ -103,6 +83,7 @@ mod tests {
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
+    use crate::expr::Expr as _;
 
     #[test]
     fn test_bind_values() {

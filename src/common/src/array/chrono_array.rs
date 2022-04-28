@@ -119,7 +119,7 @@ macro_rules! get_chrono_array {
             impl ArrayBuilder for $builder {
                 type ArrayType = $array;
 
-                fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+                fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
                     Ok(Self {
                         bitmap: BitmapBuilder::with_capacity(capacity),
                         data: Vec::with_capacity(capacity),
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn test_naivedate_builder() {
         let v = (0..1000)
-            .map(NaiveDateWrapper::new_with_days)
+            .map(NaiveDateWrapper::with_days)
             .map(|x| x.ok())
             .collect_vec();
         let mut builder = NaiveDateArrayBuilder::new(0).unwrap();
@@ -203,9 +203,9 @@ mod tests {
     #[test]
     fn test_naivedate_array_to_protobuf() {
         let input = vec![
-            NaiveDateWrapper::new_with_days(12345).ok(),
+            NaiveDateWrapper::with_days(12345).ok(),
             None,
-            NaiveDateWrapper::new_with_days(67890).ok(),
+            NaiveDateWrapper::with_days(67890).ok(),
         ];
 
         let array = NaiveDateArray::from_slice(&input).unwrap();

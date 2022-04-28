@@ -14,9 +14,9 @@
 
 use std::fmt;
 
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ProjectNode;
 
 use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
@@ -103,7 +103,7 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(Expr::to_protobuf)
+            .map(Expr::to_expr_proto)
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
     }

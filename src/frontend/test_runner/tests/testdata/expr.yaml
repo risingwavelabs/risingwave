@@ -1,0 +1,129 @@
+- sql: |
+    /* bind typed literal */
+    select int '1';
+  logical_plan: |
+    LogicalProject { exprs: ['1':Varchar::Int32], expr_alias: [ ] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind typed literal */
+    SELECT bool 't'
+  logical_plan: |
+    LogicalProject { exprs: ['t':Varchar::Boolean], expr_alias: [ ] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    values(must_be_unimplemented_func(1));
+  binder_error: 'Feature is not yet implemented: unsupported function: "must_be_unimplemented_func", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- sql: |
+    values(cast(1 as bigint));
+  batch_plan: |
+    BatchValues { rows: [[1:Int32::Int64]] }
+- sql: |
+    values(not true);
+  batch_plan: |
+    BatchValues { rows: [[Not(true:Boolean)]] }
+- sql: |
+    create table t ();
+    select (((((false is not true) is true) is not false) is false) is not null) is null from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
+        BatchScan { table: t, columns: [] }
+- sql: |
+    /* bind between */
+    SELECT 1 between 2 and 3
+  logical_plan: |
+    LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))], expr_alias: [ ] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* in-list with aligned types */
+    SELECT 1::real in (3, 1.0, 2);
+  batch_plan: |
+    BatchProject { exprs: [In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32)], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    /* not in-list with aligned types */
+    SELECT 1::real not in (3, 1.0, 2);
+  batch_plan: |
+    BatchProject { exprs: [Not(In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32))], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    /* in-list with misaligned types */
+    SELECT true in (3, 1.0, 2);
+  binder_error: 'Bind error: types Boolean and Int32 cannot be matched'
+- sql: |
+    select +1.0, -2.0;
+  batch_plan: |
+    BatchProject { exprs: [1.0:Decimal, Neg(2.0:Decimal)], expr_alias: [ ,  ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    values(round(42.4382, 2));
+  batch_plan: |
+    BatchValues { rows: [[RoundDigit(42.4382:Decimal, 2:Int32)]] }
+- sql: |
+    values(round(42.4382));
+  batch_plan: |
+    BatchValues { rows: [[RoundDigit(42.4382:Decimal, 0:Int32)]] }
+- sql: |
+    values(round('abc'));
+  binder_error: 'Feature is not yet implemented: RoundDigit[Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- sql: |
+    values(extract(hour from timestamp '2001-02-16 20:38:40'));
+  batch_plan: |
+    BatchValues { rows: [[Extract('HOUR':Varchar, '2001-02-16 20:38:40':Varchar::Timestamp)]] }
+- sql: |
+    values('Postgres' not like 'Post%');
+  batch_plan: |
+    BatchValues { rows: [[Not(Like('Postgres':Varchar, 'Post%':Varchar))]] }
+- sql: |
+    values(1 not like 1.23);
+  binder_error: 'Feature is not yet implemented: Like[Int32, Decimal], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- sql: |
+    select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
+  batch_plan: |
+    BatchProject { exprs: [((Length(Rtrim('12':Varchar, '1':Varchar)) + Length(Ltrim('23':Varchar, '2':Varchar))) + Length(Trim('34':Varchar, '3':Varchar)))], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
+- sql: |
+    select position(replace('1','1','2'),'123') where '12' like '%1';
+  batch_plan: |
+    BatchProject { exprs: [Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar)], expr_alias: [ ] }
+      BatchFilter { predicate: Like('12':Varchar, '%1':Varchar) }
+        BatchValues { rows: [[]] }
+- sql: |
+    /* case searched form with else */
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamExchange { dist: HashShard([1]) }
+        StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1], expr_alias: [ ,  ] }
+          StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+- sql: |
+    /* case searched form without else */
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2.1 end) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2.1:Decimal)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* case simple form */
+    create table t (v1 int);
+    select (case v1 when 1 then 1 when 2.0 then 2 else 0.0 end) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2.0:Decimal), 2:Int32::Decimal, 0.0:Decimal)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* case misaligned result types */
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2 else true end) from t;
+  binder_error: 'Bind error: types Int32 and Boolean cannot be matched'
+- sql: |
+    /* case misaligned value types */
+    create table t (v1 int);
+    select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
+  binder_error: 'Feature is not yet implemented: Equal[Int32, Boolean], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'

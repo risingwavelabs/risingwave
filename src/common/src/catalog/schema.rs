@@ -15,7 +15,7 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan::Field as ProstField;
+use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
@@ -89,6 +89,10 @@ impl Schema {
 
     pub fn fields(&self) -> &[Field] {
         &self.fields
+    }
+
+    pub fn into_fields(self) -> Vec<Field> {
+        self.fields
     }
 
     /// Create array builders for all fields in this schema.
@@ -179,6 +183,14 @@ impl Index<usize> for Schema {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.fields[index]
+    }
+}
+
+impl FromIterator<Field> for Schema {
+    fn from_iter<I: IntoIterator<Item = Field>>(iter: I) -> Self {
+        Schema {
+            fields: iter.into_iter().collect::<Vec<_>>(),
+        }
     }
 }
 

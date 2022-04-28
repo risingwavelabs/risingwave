@@ -100,7 +100,7 @@ macro_rules! impl_to_batch {
         paste!{
             $(impl ToBatch for [<$convention $name>] {
                 fn to_batch(&self) -> PlanRef {
-                    panic!("convert into batch is only allowed on logical plan")
+                    panic!("converting into batch is only allowed on logical plan")
                 }
             })*
         }
@@ -115,12 +115,11 @@ macro_rules! impl_to_stream {
         paste!{
             $(impl ToStream for [<$convention $name>] {
                 fn to_stream(&self) -> PlanRef {
-                    panic!("convert into stream is only allowed on logical plan")
+                    panic!("converting to stream is only allowed on logical plan")
                 }
                 fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping){
-                    panic!("convert into stream is only allowed on logical plan")
+                    panic!("logical rewrite is only allowed on logical plan")
                 }
-
             })*
         }
     }
@@ -134,7 +133,7 @@ macro_rules! ban_to_distributed {
         paste!{
             $(impl ToDistributedBatch for [<$convention $name>] {
                 fn to_distributed(&self) -> PlanRef {
-                    panic!("convert into distributed is only allowed on batch plan")
+                    panic!("converting to distributed is only allowed on batch plan")
                 }
             })*
         }

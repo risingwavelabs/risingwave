@@ -129,6 +129,10 @@ pub enum ErrorCode {
     UnknownError(String),
 }
 
+pub fn internal_error(msg: impl Into<String>) -> RwError {
+    ErrorCode::InternalError(msg.into()).into()
+}
+
 #[derive(Clone)]
 pub struct RwError {
     inner: Arc<ErrorCode>,
@@ -441,7 +445,7 @@ macro_rules! ensure_eq {
         match (&$left, &$right) {
             (left_val, right_val) => {
                 if !(left_val == right_val) {
-                    gen_error!($crate::error::ErrorCode::InternalError(format!(
+                    $crate::gen_error!($crate::error::ErrorCode::InternalError(format!(
                         "{} == {} assertion failed ({} is {}, {} is {})",
                         stringify!($left),
                         stringify!($right),

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -32,14 +31,17 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use connector_source::ConnectorSource;
 use enum_as_inner::EnumAsInner;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
+use risingwave_connector::SplitImpl;
 pub use table_v2::*;
+
+use crate::connector_source::{ConnectorReaderContext, ConnectorSource, ConnectorStreamReader};
 
 pub mod parser;
 
@@ -49,6 +51,7 @@ mod manager;
 mod common;
 mod table_v2;
 
+extern crate core;
 extern crate maplit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,13 +69,57 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
+pub enum SourceStreamReaderImpl {
+    TableV2(TableV2StreamReader),
+    Connector(ConnectorStreamReader),
+}
+
+#[async_trait]
+impl StreamSourceReader for SourceStreamReaderImpl {
+    async fn next(&mut self) -> Result<StreamChunk> {
+        match self {
+            SourceStreamReaderImpl::TableV2(t) => t.next().await,
+            SourceStreamReaderImpl::Connector(c) => c.next().await,
+        }
+    }
+}
+
+pub enum SourceReaderContext {
+    None(()),
+    ConnectorReaderContext(Vec<SplitImpl>),
+}
+
+impl SourceImpl {
+    pub async fn stream_reader(
+        &self,
+        context: SourceReaderContext,
+        column_ids: Vec<ColumnId>,
+    ) -> Result<SourceStreamReaderImpl> {
+        log::debug!("Creating new stream reader");
+
+        match (self, context) {
+            (SourceImpl::TableV2(x), SourceReaderContext::None(_)) => x
+                .stream_reader(TableV2ReaderContext {}, column_ids)
+                .await
+                .map(SourceStreamReaderImpl::TableV2),
+            (SourceImpl::Connector(c), SourceReaderContext::ConnectorReaderContext(context)) => c
+                .stream_reader(ConnectorReaderContext { splits: context }, column_ids)
+                .await
+                .map(SourceStreamReaderImpl::Connector),
+            _ => Err(RwError::from(InternalError(
+                "unmatched source and context".to_string(),
+            ))),
+        }
+    }
+}
+
 #[async_trait]
 pub trait Source: Send + Sync + 'static {
     type ReaderContext;
     type StreamReader: StreamSourceReader;
 
     /// Create a stream reader
-    fn stream_reader(
+    async fn stream_reader(
         &self,
         context: Self::ReaderContext,
         column_ids: Vec<ColumnId>,
@@ -81,9 +128,6 @@ pub trait Source: Send + Sync + 'static {
 
 #[async_trait]
 pub trait StreamSourceReader: Send + Sync + 'static {
-    /// `init` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
     async fn next(&mut self) -> Result<StreamChunk>;

@@ -16,7 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 
-use super::error::{StreamExecutorResult, TracedStreamExecutorError};
+use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk};
 
 /// Executor which can handle [`StreamChunk`]s one by one.
@@ -66,7 +66,7 @@ impl<E> SimpleExecutorWrapper<E>
 where
     E: SimpleExecutor,
 {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let input = self.input.execute();
         let mut inner = self.inner;

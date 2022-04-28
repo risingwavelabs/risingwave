@@ -14,7 +14,7 @@
 
 use risingwave_pb::hummock::CompactTask;
 
-pub fn compact_task_to_string(compact_task: CompactTask) -> String {
+pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "Compaction task id: {:?}, target level: {:?}\n",
@@ -34,9 +34,17 @@ pub fn compact_task_to_string(compact_task: CompactTask) -> String {
     ));
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
+        let tables: Vec<u64> = level_entry
+            .level
+            .as_ref()
+            .unwrap()
+            .table_infos
+            .iter()
+            .map(|table| table.id)
+            .collect();
         s.push_str(&format!(
             "Level {:?}: {:?} \n",
-            level_entry.level_idx, level_entry.level
+            level_entry.level_idx, tables
         ));
     }
     s.push_str(&format!(

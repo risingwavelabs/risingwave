@@ -32,7 +32,10 @@ pub struct LogicalScan {
     pub base: PlanBase,
     table_name: String, // explain-only
     required_col_idx: Vec<usize>,
+    // Descriptor of the table
     table_desc: Rc<TableDesc>,
+    // Descriptors of all indexes on this table
+    indexes: Vec<(String, Rc<TableDesc>)>,
 }
 
 impl LogicalScan {
@@ -41,6 +44,7 @@ impl LogicalScan {
         table_name: String,           // explain-only
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
+        indexes: Vec<(String, Rc<TableDesc>)>,
         ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
@@ -74,6 +78,7 @@ impl LogicalScan {
             table_name,
             required_col_idx,
             table_desc,
+            indexes,
         }
     }
 
@@ -81,12 +86,14 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
+        indexes: Vec<(String, Rc<TableDesc>)>,
         ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
             table_name,
             (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
+            indexes,
             ctx,
         )
         .into())
@@ -118,6 +125,36 @@ impl LogicalScan {
             .map(|i| self.table_desc.columns[*i].clone())
             .collect()
     }
+
+    /// Get all indexes on this table
+    #[must_use]
+    pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
+        &self.indexes
+    }
+
+    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> LogicalScan {
+        let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
+        let all_columns = index
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(idx, desc)| (desc.column_id, idx))
+            .collect::<HashMap<_, _>>();
+
+        // create index scan plan to match the output order of the current table scan
+        for &col_idx in &self.required_col_idx {
+            let column_idx_in_index = all_columns[&self.table_desc.columns[col_idx].column_id];
+            new_required_col_idx.push(column_idx_in_index);
+        }
+
+        Self::new(
+            index_name.to_string(),
+            new_required_col_idx,
+            index.clone(),
+            vec![],
+            self.ctx(),
+        )
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
@@ -145,6 +182,7 @@ impl ColPrunable for LogicalScan {
             self.table_name.clone(),
             required_col_idx,
             self.table_desc.clone(),
+            self.indexes.clone(),
             self.base.ctx.clone(),
         )
         .into()
@@ -183,15 +221,17 @@ impl ToStream for LogicalScan {
                     .collect_vec();
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);
+                let new_len = required_col_idx.len();
                 (
                     Self::new(
                         self.table_name.clone(),
                         required_col_idx,
                         self.table_desc.clone(),
+                        self.indexes.clone(),
                         self.base.ctx.clone(),
                     )
                     .into(),
-                    ColIndexMapping::identity(self.schema().len()),
+                    ColIndexMapping::identity_or_none(self.schema().len(), new_len),
                 )
             }
             false => (

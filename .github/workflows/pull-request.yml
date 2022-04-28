@@ -12,17 +12,19 @@ on:
   push:
     branches:
       - "forks/*"
-      - staging
-      - trying
 env:
   RUST_TOOLCHAIN: nightly-2022-04-09
   CACHE_KEY_SUFFIX: v20220412
   CARGO_TERM_COLOR: always
-  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
+  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
+  AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
+permissions:
+  id-token: write
+  contents: read
 jobs:
   start-runner-a:
     name: ec2-start-a
@@ -34,8 +36,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Start EC2 runner
         id: start-ec2-runner
@@ -57,8 +59,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Start EC2 runner
         id: start-ec2-runner
@@ -82,8 +84,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Stop EC2 runner A
         uses: machulav/ec2-github-runner@v2
@@ -104,8 +106,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Stop EC2 runner B
         uses: machulav/ec2-github-runner@v2
@@ -181,7 +183,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
@@ -224,14 +226,21 @@ jobs:
         run: |
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
-      - name: e2e test, streaming, Rust frontend, 3 node
-        timeout-minutes: 2
+      - name: e2e, ci-3cn-1fe, streaming
+        timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test w/ Rust frontend ci-3node, batch, distributed
+      - name: e2e, ci-3cn-1fe, delta join
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e, ci-3cn-1fe, batch distributed
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
@@ -239,14 +248,14 @@ jobs:
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node
+      - name: e2e test streaming 3-node (legacy frontend)
         timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test batch 3-node
+      - name: e2e test batch 3-node (legacy frontend)
         timeout-minutes: 2
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
@@ -310,7 +319,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
       - name: Download sqllogictest
         run: |
           wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
@@ -405,7 +414,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -436,7 +445,7 @@ jobs:
           cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cargo build --profile dev --features=all-in-one
+          cargo build -p risingwave_cmd_all -p risedev -p risingwave_regress_test --profile dev
       - name: Compress RisingWave debug info
         run: |
           objcopy --compress-debug-sections=zlib-gnu target/debug/risingwave
@@ -474,7 +483,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -501,7 +510,7 @@ jobs:
           cargo doc --document-private-items --no-deps
       - name: Run rust test with coverage
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
+          cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -520,15 +529,12 @@ jobs:
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
           sudo apt install -y protobuf-compiler -o Acquire::Retries=3
           curl -sSL \
-            https://github.com/uber/prototool/releases/download/v1.8.0/prototool-$(uname -s)-$(uname -m).tar.gz | \
-            sudo tar -C /usr/local --strip-components 1 -xz
-          curl -sSL \
             "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m).tar.gz" | \
             sudo tar -xvzf - -C /usr/local --strip-components 1
         env:
           YQ_VERSION: v4.16.1
           BINARY: yq_linux_amd64
-          BUF_VERSION: 1.0.0-rc6
+          BUF_VERSION: "1.4.0"
       - name: Check CI workflows are up-to-date
         run: |
           ./.github/workflow-template/generate.sh --check
@@ -538,7 +544,7 @@ jobs:
           ignore_paths: legacy
       - name: Check protobuf code format
         run: |
-          prototool format -d
+          buf format -d --exit-code
         working-directory: proto
       - name: Lint protobuf
         run: |

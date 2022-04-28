@@ -14,9 +14,8 @@
 
 use std::fmt;
 
-use itertools::Itertools;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{ColumnOrder, OrderByNode};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::OrderByNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::Order;
@@ -65,23 +64,7 @@ impl ToDistributedBatch for BatchSort {
 
 impl ToBatchProst for BatchSort {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders_without_type = self.base.order.to_protobuf();
-        let column_types = self
-            .base
-            .order
-            .field_order
-            .iter()
-            .map(|field_order| self.schema()[field_order.index].data_type.to_protobuf())
-            .collect_vec();
-        let column_orders = column_orders_without_type
-            .into_iter()
-            .zip_eq(column_types.into_iter())
-            .map(|((input_ref, order_type), return_type)| ColumnOrder {
-                order_type: order_type as i32,
-                input_ref: Some(input_ref),
-                return_type: Some(return_type),
-            })
-            .collect_vec();
+        let column_orders = self.base.order.to_protobuf(&self.base.schema);
         NodeBody::OrderBy(OrderByNode { column_orders })
     }
 }

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
+use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
@@ -54,7 +54,7 @@ enum QueryState {
         runner: QueryRunner,
 
         /// Receiver of root stage info.
-        root_stage_receiver: oneshot::Receiver<QueryResultFetcher>,
+        root_stage_receiver: oneshot::Receiver<Result<QueryResultFetcher>>,
     },
 
     /// Running
@@ -80,13 +80,13 @@ struct QueryRunner {
     query: Arc<Query>,
     stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
     scheduled_stages_count: usize,
-    // Query messages receiver. For example, stage state change events, query commands.
+    /// Query messages receiver. For example, stage state change events, query commands.
     msg_receiver: Receiver<QueryMessage>,
     // Sender of above message receiver. We need to keep it so that we can pass it to stages.
     msg_sender: Sender<QueryMessage>,
 
-    // Will be set to `None` after all stage scheduled.
-    root_stage_sender: Option<oneshot::Sender<QueryResultFetcher>>,
+    /// Will be set to `None` after all stage scheduled.
+    root_stage_sender: Option<oneshot::Sender<Result<QueryResultFetcher>>>,
 
     epoch: u64,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -126,7 +126,8 @@ impl QueryExecution {
             Arc::new(stage_executions)
         };
 
-        let (root_stage_sender, root_stage_receiver) = oneshot::channel::<QueryResultFetcher>();
+        let (root_stage_sender, root_stage_receiver) =
+            oneshot::channel::<Result<QueryResultFetcher>>();
 
         let runner = QueryRunner {
             query: query.clone(),
@@ -174,7 +175,7 @@ impl QueryExecution {
 
                 let root_stage = root_stage_receiver.await.map_err(|e| {
                     InternalError(format!("Starting query execution failed: {:?}", e))
-                })?;
+                })??;
 
                 info!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
@@ -257,6 +258,29 @@ impl QueryRunner {
                         }
                     }
                 }
+                Stage(StageEvent::Failed { id, reason }) => {
+                    error!(
+                        "Query stage {:?}-{:?} failed: {}.",
+                        self.query.query_id, id, reason
+                    );
+
+                    // Consume sender here.
+                    let mut tmp_sender = None;
+                    swap(&mut self.root_stage_sender, &mut tmp_sender);
+                    // It's possible we receive stage failed event message multi times and the
+                    // sender has been consumed in first failed event.
+                    if let Some(sender) = tmp_sender {
+                        if let Err(e) = sender.send(Err(reason)) {
+                            warn!("Query execution dropped: {:?}", e);
+                        } else {
+                            debug!(
+                                "Root stage failure event for {:?} sent.",
+                                self.query.query_id
+                            );
+                        }
+                    }
+                    // TODO: We should can cancel all scheduled stages here.
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         "unsupported type for QueryRunner.run".to_string(),
@@ -299,7 +323,7 @@ impl QueryRunner {
         let mut tmp_sender = None;
         swap(&mut self.root_stage_sender, &mut tmp_sender);
 
-        if let Err(e) = tmp_sender.unwrap().send(root_stage_result) {
+        if let Err(e) = tmp_sender.unwrap().send(Ok(root_stage_result)) {
             warn!("Query execution dropped: {:?}", e);
         } else {
             debug!("Root stage for {:?} sent.", self.query.query_id);
@@ -321,5 +345,166 @@ impl QueryRunner {
 
     fn get_stage_execution_unchecked(&self, stage_id: &StageId) -> Arc<StageExecution> {
         self.stage_executions.get(stage_id).unwrap().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use risingwave_common::catalog::{ColumnDesc, TableDesc};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::common::{
+        HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
+    };
+    use risingwave_pb::plan_common::JoinType;
+
+    use crate::optimizer::plan_node::{
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+    };
+    use crate::optimizer::property::{Distribution, Order};
+    use crate::optimizer::PlanRef;
+    use crate::scheduler::execution::QueryExecution;
+    use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
+    use crate::scheduler::worker_node_manager::WorkerNodeManager;
+    use crate::scheduler::HummockSnapshotManager;
+    use crate::session::OptimizerContext;
+    use crate::test_utils::MockFrontendMetaClient;
+    use crate::utils::Condition;
+
+    #[tokio::test]
+    async fn test_query_should_not_hang_with_empty_worker() {
+        let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
+        let query_execution = QueryExecution::new(
+            create_query().await,
+            100,
+            worker_node_manager,
+            Arc::new(HummockSnapshotManager::new(Arc::new(
+                MockFrontendMetaClient {},
+            ))),
+        );
+
+        assert!(query_execution.start().await.is_err());
+    }
+
+    async fn create_query() -> Query {
+        // Construct a Hash Join with Exchange node.
+        // Logical plan:
+        //
+        //    HashJoin
+        //     /    \
+        //   Scan  Scan
+        //
+        let ctx = OptimizerContext::mock().await;
+
+        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+            "".to_string(),
+            vec![0, 1],
+            Rc::new(TableDesc {
+                table_id: 0.into(),
+                pk: vec![],
+                columns: vec![
+                    ColumnDesc {
+                        data_type: DataType::Int32,
+                        column_id: 0.into(),
+                        name: "a".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
+                    ColumnDesc {
+                        data_type: DataType::Float64,
+                        column_id: 1.into(),
+                        name: "b".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
+                ],
+            }),
+            vec![],
+            ctx,
+        ))
+        .into();
+        let batch_exchange_node1: PlanRef = BatchExchange::new(
+            batch_plan_node.clone(),
+            Order::default(),
+            Distribution::HashShard(vec![0, 1]),
+        )
+        .into();
+        let batch_exchange_node2: PlanRef = BatchExchange::new(
+            batch_plan_node.clone(),
+            Order::default(),
+            Distribution::HashShard(vec![0, 1]),
+        )
+        .into();
+        let hash_join_node: PlanRef = BatchHashJoin::new(
+            LogicalJoin::new(
+                batch_exchange_node1.clone(),
+                batch_exchange_node2.clone(),
+                JoinType::Inner,
+                Condition::true_cond(),
+            ),
+            EqJoinPredicate::create(0, 0, Condition::true_cond()),
+        )
+        .into();
+        let batch_exchange_node3: PlanRef = BatchExchange::new(
+            hash_join_node.clone(),
+            Order::default(),
+            Distribution::Single,
+        )
+        .into();
+
+        let worker1 = WorkerNode {
+            id: 0,
+            r#type: WorkerType::ComputeNode as i32,
+            host: Some(HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 5687,
+            }),
+            state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: generate_parallel_units(0, 0),
+        };
+        let worker2 = WorkerNode {
+            id: 1,
+            r#type: WorkerType::ComputeNode as i32,
+            host: Some(HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 5688,
+            }),
+            state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: generate_parallel_units(8, 1),
+        };
+        let worker3 = WorkerNode {
+            id: 2,
+            r#type: WorkerType::ComputeNode as i32,
+            host: Some(HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 5689,
+            }),
+            state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: generate_parallel_units(16, 2),
+        };
+        let workers = vec![worker1, worker2, worker3];
+        let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
+        // Break the plan node into fragments.
+        let fragmenter = BatchPlanFragmenter::new(worker_node_manager);
+        fragmenter.split(batch_exchange_node3.clone()).unwrap()
+    }
+
+    fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
+        let parallel_degree = 8;
+        let mut parallel_units = vec![ParallelUnit {
+            id: start_id,
+            r#type: ParallelUnitType::Single as i32,
+            worker_node_id: node_id,
+        }];
+        for id in start_id + 1..start_id + parallel_degree {
+            parallel_units.push(ParallelUnit {
+                id,
+                r#type: ParallelUnitType::Hash as i32,
+                worker_node_id: node_id,
+            });
+        }
+        parallel_units
     }
 }

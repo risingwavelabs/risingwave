@@ -17,6 +17,7 @@ pub use plan_node::PlanRef;
 pub mod property;
 
 mod heuristic;
+mod join_solver;
 mod plan_rewriter;
 mod plan_visitor;
 mod rule;
@@ -30,6 +31,7 @@ use risingwave_common::error::Result;
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
+use crate::catalog::TableId;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
@@ -132,6 +134,7 @@ impl PlanRoot {
                 FilterJoinRule::create(),
                 FilterProjectRule::create(),
                 FilterAggRule::create(),
+                FilterMergeRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
@@ -153,37 +156,23 @@ impl PlanRoot {
         plan
     }
 
-    /// optimize and generate a batch query plan
+    /// Optimize and generate a batch query plan.
+    /// Currently only used by test runner (Have distributed plan but not schedule yet).
+    /// Will be removed after dist execution.
     pub fn gen_batch_query_plan(&self) -> PlanRef {
+        // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order);
 
-        // TODO: Enable this when distributed e2e is OK.
-        // plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
-        // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the result.
-        // TODO: do a final column pruning after add the batch project, but now the column
-        // pruning is not used in batch node, need to think.
-
-        plan
-    }
-
-    /// Optimize and generate a batch query plan.
-    /// Currently only used by test runner (Have distributed plan but not schedule yet).
-    /// Will be removed after dist execution.
-    pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
-        let plan = self.gen_batch_query_plan();
-
+        // Convert to distributed plan
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    /// Optimize and generate a create materialize view plan.
-    ///
-    /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
-    /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = match self.plan.convention() {
+    /// Generate create index or create materialize view plan.
+    fn gen_stream_plan(&mut self) -> PlanRef {
+        let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream();
@@ -200,20 +189,44 @@ impl PlanRoot {
             Convention::Stream => self
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
-            _ => panic!(),
+            _ => unreachable!(),
         };
 
-        // Ignore the required_dist and required_order, as they are provided by user now.
-        // TODO: need more thinking and refactor.
+        // Rewrite joins with index to delta join
+        let plan = {
+            let rules = vec![IndexDeltaJoinRule::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
 
-        // Convert to physical plan node, using distribution of the input node
-        // After that, we will need to wrap a `MaterializeExecutor` on it in `gen_create_mv_plan`.
+        plan
+    }
 
+    /// Optimize and generate a create materialize view plan.
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_stream_plan();
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            None,
+        )
+    }
+
+    /// Optimize and generate a create index plan.
+    pub fn gen_create_index_plan(
+        &mut self,
+        mv_name: String,
+        index_on: TableId,
+    ) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_stream_plan();
+        StreamMaterialize::create(
+            stream_plan,
+            mv_name,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            Some(index_on),
         )
     }
 

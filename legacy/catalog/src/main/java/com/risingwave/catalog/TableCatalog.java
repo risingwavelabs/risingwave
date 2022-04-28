@@ -14,7 +14,7 @@ import com.risingwave.common.error.MetaServiceError;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.common.exception.RisingWaveException;
-import com.risingwave.proto.plan.RowFormatType;
+import com.risingwave.proto.plan_common.RowFormatType;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;

@@ -19,9 +19,8 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use super::Executor;
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{Executor as ExecutorV2, FilterExecutor as FilterExecutorV2};
+use crate::executor_v2::{BoxedExecutor, Executor, FilterExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct FilterExecutorBuilder;
@@ -32,17 +31,16 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
         let search_condition = build_from_prost(node.get_search_condition()?)?;
-        Ok(Box::new(
-            Box::new(FilterExecutorV2::new_from_v1(
-                params.input.remove(0),
-                search_condition,
-                params.executor_id,
-                params.op_info,
-            ))
-            .v1(),
-        ))
+
+        Ok(FilterExecutor::new_from_v1(
+            params.input.remove(0),
+            search_condition,
+            params.executor_id,
+            params.op_info,
+        )
+        .boxed())
     }
 }

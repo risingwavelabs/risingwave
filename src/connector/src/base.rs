@@ -62,13 +62,19 @@ pub struct ConnectorState {
     pub end_offset: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum ConnectorStateV2 {
+    State(ConnectorState),
+    Splits(Vec<SplitImpl>),
+    None,
+}
+
 #[async_trait]
 pub trait SplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
-
     /// `state` is used to recover from the formerly persisted state.
     /// If the reader is newly created via CREATE SOURCE, the state will be none.
-    async fn new(properties: Properties, state: Option<ConnectorState>) -> Result<Self>
+    async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized;
 }
@@ -86,7 +92,7 @@ impl SplitReaderImpl {
         }
     }
 
-    pub async fn create(config: Properties, state: Option<ConnectorState>) -> Result<Self> {
+    pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
         let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
         let connector = match upstream_type.as_str() {
             KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),

@@ -28,7 +28,7 @@ use risingwave_storage::monitor::StateStoreMetrics;
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
     batch_count: usize,
-) -> Vec<BoxedForwardHummockIterator<'static>> {
+) -> Vec<BoxedForwardHummockIterator> {
     let mut iterators = Vec::new();
     for i in 0..batch_count {
         let mut batch_data = vec![];
@@ -39,7 +39,7 @@ fn gen_interleave_shared_buffer_batch_iter(
             ));
         }
         let batch = SharedBufferBatch::new(batch_data, 2333);
-        iterators.push(Box::new(batch.iter()) as BoxedForwardHummockIterator);
+        iterators.push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator);
     }
     iterators
 }

@@ -25,7 +25,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
@@ -258,7 +258,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                                 join_expr,
                                 join_type,
                                 state: join_state,
-                                chunk_builder: DataChunkBuilder::new_with_default_size(
+                                chunk_builder: DataChunkBuilder::with_default_size(
                                     schema.data_types(),
                                 ),
                                 schema,
@@ -612,6 +612,7 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+    use crate::executor2::executor_wrapper::ExecutorWrapper;
 
     /// Test combine two chunk into one.
     #[test]
@@ -658,7 +659,7 @@ mod tests {
             join_expr: Box::new(InputRefExpression::new(DataType::Int32, 0)),
             join_type: JoinType::Inner,
             state: NestedLoopJoinState::Build,
-            chunk_builder: DataChunkBuilder::new_with_default_size(probe_side_schema.data_types()),
+            chunk_builder: DataChunkBuilder::with_default_size(probe_side_schema.data_types()),
             schema: Schema { fields: vec![] },
             last_chunk: None,
             probe_side_schema: probe_side_schema.data_types(),
@@ -835,7 +836,7 @@ mod tests {
                 join_type,
                 state: NestedLoopJoinState::Build,
                 schema: schema.clone(),
-                chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types()),
+                chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
                 last_chunk: None,
                 probe_side_schema,
                 probe_side_source: RowLevelIter::new(left_child),
@@ -850,8 +851,11 @@ mod tests {
             let join_executor = self.create_join_executor();
             let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
             expected_mock_exec.add(expected);
-
-            diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
+            diff_executor_output(
+                Box::new(ExecutorWrapper::from(join_executor)),
+                Box::new(expected_mock_exec),
+            )
+            .await;
         }
     }
 

@@ -29,6 +29,8 @@ use bytes::{Buf, BufMut};
 pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
+
 mod utils;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -74,6 +76,17 @@ impl Sstable {
     pub fn encoded_size(&self) -> usize {
         8 /* id */ + self.meta.encoded_size()
     }
+
+    pub fn get_sstable_info(&self) -> SstableInfo {
+        SstableInfo {
+            id: self.id,
+            key_range: Some(KeyRange {
+                left: self.meta.smallest_key.clone(),
+                right: self.meta.largest_key.clone(),
+                inf: false,
+            }),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -116,6 +129,7 @@ impl BlockMeta {
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
+    pub bitmap: Vec<u8>,
     pub estimated_size: u32,
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
@@ -131,6 +145,7 @@ impl SstableMeta {
     /// | N (4B) |
     /// | block meta 0 | ... | block meta N-1 |
     /// | bloom filter len (4B) | bloom filter |
+    /// | bitmap len (4B) | bitmap |
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
@@ -143,6 +158,7 @@ impl SstableMeta {
             block_meta.encode(&mut buf);
         }
         put_length_prefixed_slice(&mut buf, &self.bloom_filter);
+        put_length_prefixed_slice(&mut buf, &self.bitmap);
         buf.put_u32_le(self.estimated_size as u32);
         buf.put_u32_le(self.key_count as u32);
         put_length_prefixed_slice(&mut buf, &self.smallest_key);
@@ -180,6 +196,7 @@ impl SstableMeta {
             block_metas.push(BlockMeta::decode(buf));
         }
         let bloom_filter = get_length_prefixed_slice(buf);
+        let bitmap = get_length_prefixed_slice(buf);
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -188,6 +205,7 @@ impl SstableMeta {
         Ok(Self {
             block_metas,
             bloom_filter,
+            bitmap,
             estimated_size,
             key_count,
             smallest_key,
@@ -206,6 +224,8 @@ impl SstableMeta {
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
+            + 4 // bitmap len
+            + self.bitmap.len()
             + 4 // estimated size
             + 4 // key count
             + 4 // key len
@@ -238,6 +258,7 @@ mod tests {
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),
+            bitmap: b"".to_vec(),
             estimated_size: 123,
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),

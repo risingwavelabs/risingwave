@@ -18,13 +18,13 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
-use risingwave_pb::common::HostAddress;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{
+use risingwave_common::error::{Result, RwError};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
+use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClient;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -32,6 +32,7 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
+use StageEvent::Failed;
 
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::execution::stage::StageState::Pending;
@@ -66,7 +67,11 @@ enum StageMessage {
 #[derive(Debug)]
 pub enum StageEvent {
     Scheduled(StageId),
-    Failed(StageId),
+    /// Stage failed.
+    Failed {
+        id: StageId,
+        reason: RwError,
+    },
     Completed(StageId),
 }
 
@@ -230,14 +235,18 @@ impl StageExecution {
 
 impl StageRunner {
     async fn run(self) -> Result<()> {
-        for id in 0..self.stage.parallelism {
-            let task_id = TaskIdProst {
-                query_id: self.stage.query_id.id.clone(),
-                stage_id: self.stage.id,
-                task_id: id,
-            };
-            self.schedule_task(task_id, self.create_plan_fragment(id))
-                .await?;
+        if let Err(e) = self.schedule_tasks().await {
+            error!(
+                "Stage {:?}-{:?} failed to schedule tasks, error: {}",
+                self.stage.query_id, self.stage.id, e
+            );
+            // TODO: We should cancel all scheduled tasks
+            self.send_event(QueryMessage::Stage(Failed {
+                id: self.stage.id,
+                reason: e,
+            }))
+            .await?;
+            return Ok(());
         }
 
         {
@@ -264,6 +273,32 @@ impl StageRunner {
                 ))
             })?;
 
+        Ok(())
+    }
+
+    /// Send stage event to listener.
+    async fn send_event(&self, event: QueryMessage) -> Result<()> {
+        self.msg_sender.send(event).await.map_err(|e| {
+            {
+                InternalError(format!(
+                    "Failed to send stage scheduled event: {:?}, reason: {:?}",
+                    self.stage.id, e
+                ))
+            }
+            .into()
+        })
+    }
+
+    async fn schedule_tasks(&self) -> Result<()> {
+        for id in 0..self.stage.parallelism {
+            let task_id = TaskIdProst {
+                query_id: self.stage.query_id.id.clone(),
+                stage_id: self.stage.id,
+                task_id: id,
+            };
+            self.schedule_task(task_id, self.create_plan_fragment(id))
+                .await?;
+        }
         Ok(())
     }
 

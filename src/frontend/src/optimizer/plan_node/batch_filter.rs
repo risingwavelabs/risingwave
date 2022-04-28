@@ -14,8 +14,8 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::FilterNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
@@ -75,7 +75,9 @@ impl ToDistributedBatch for BatchFilter {
 impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
-            search_condition: Some(ExprImpl::from(self.logical.predicate().clone()).to_protobuf()),
+            search_condition: Some(
+                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
+            ),
         })
     }
 }

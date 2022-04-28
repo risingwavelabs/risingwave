@@ -108,9 +108,9 @@ pub trait HummockIterator: Send + Sync {
 pub trait ForwardHummockIterator = HummockIterator<Direction = Forward>;
 pub trait BackwardHummockIterator = HummockIterator<Direction = Backward>;
 
-pub type BoxedForwardHummockIterator<'a> = Box<dyn ForwardHummockIterator + 'a>;
-pub type BoxedBackwardHummockIterator<'a> = Box<dyn BackwardHummockIterator + 'a>;
-pub type BoxedHummockIterator<'a, D> = Box<dyn HummockIterator<Direction = D> + 'a>;
+pub type BoxedForwardHummockIterator = Box<dyn ForwardHummockIterator>;
+pub type BoxedBackwardHummockIterator = Box<dyn BackwardHummockIterator>;
+pub type BoxedHummockIterator<D> = Box<dyn HummockIterator<Direction = D>>;
 
 pub enum DirectionEnum {
     Forward,

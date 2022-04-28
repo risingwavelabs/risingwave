@@ -1,16 +1,16 @@
 - sql: |
-    create materialized view mv1 as select country from t;
-    select * from mv1;
+    create materialized view t as select country from s;
+    select * from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: mv1, columns: [country] }
+      BatchScan { table: t, columns: [country] }
   stream_plan: |
     StreamMaterialize { columns: [country, _row_id#0(hidden)], pk_columns: [_row_id#0] }
       StreamExchange { dist: HashShard([1]) }
-        StreamTableScan { table: mv1, columns: [country, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [country, _row_id#0], pk_indices: [1] }
   create_source:
     row_format: protobuf
-    name: t
+    name: s
     file: |
         syntax = "proto3";
         package test;
@@ -28,4 +28,291 @@
         message City {
           string address = 1;
           string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select (t).country.city,(t).country,(country).city.address from t;
+  logical_plan: |
+    LogicalProject { exprs: [Field($1, 1:Int32), $1, Field(Field($1, 1:Int32), 0:Int32)], expr_alias: [city, country, address] }
+      LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          string address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
+  logical_plan: |
+    LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), Field(Field($1, 1:Int32), 1:Int32), Field($2, 0:Int32), Field($2, 1:Int32), Field($2, 2:Int32), Field(Field($3, 1:Int32), 0:Int32), Field(Field($3, 1:Int32), 1:Int32)], expr_alias: [address, zipcode, address, city, zipcode, address, zipcode] }
+      LogicalScan { table: t, columns: [id, country1, country2, country3, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country1 = 3;
+          Country country2 = 3;
+          Country country3 = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          string address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select (c).zipcode from (select (t).country.city as c from t);
+  logical_plan: |
+    LogicalProject { exprs: [Field($0, 1:Int32)], expr_alias: [zipcode] }
+      LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [c] }
+        LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          string address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select (c).zipcode from (select min((t).country.city) as c from t);
+  logical_plan: |
+    LogicalProject { exprs: [Field($0, 1:Int32)], expr_alias: [zipcode] }
+      LogicalProject { exprs: [$0], expr_alias: [c] }
+        LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+          LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [ ] }
+            LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          string address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [c, id, country, zipcode, rate] }
+      LogicalJoin { type: Inner, on: (Field($0, 1:Int32) = Field($2, 2:Int32)) }
+        LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [c] }
+          LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+        LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          string address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select min((t.country).city.address) + max((t.country).city.address) * count(zipcode) from t;
+  logical_plan: |
+    LogicalProject { exprs: [($0 + ($1 * $2))], expr_alias: [ ] }
+      LogicalAgg { group_keys: [], agg_calls: [min($0), max($0), count($1)] }
+        LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), $2], expr_alias: [ ,  ] }
+          LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          int64 address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select count(1), count((country).city.zipcode) from t where (country).city.address>1;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [ ,  ] }
+      LogicalAgg { group_keys: [], agg_calls: [count($0), count($1)] }
+        LogicalProject { exprs: [1:Int32, Field(Field($1, 1:Int32), 1:Int32)], expr_alias: [ ,  ] }
+          LogicalFilter { predicate: (Field(Field($1, 1:Int32), 0:Int32) > 1:Int32) }
+            LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          City city = 2;
+          string zipcode = 3;
+        }
+        message City {
+          int64 address = 1;
+          string zipcode = 2;
+        }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select (v1).v2 from t;
+  binder_error: 'Item not found: Cannot get field from non nested column: v1'
+- sql: |
+    create materialized view t as select * from s;
+    select (country + country) from t;
+  binder_error: 'Feature is not yet implemented: Add[Struct, Struct], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          string zipcode = 3;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select avg(country) from t;
+  binder_error: 'Feature is not yet implemented: No function matches to avg(Struct { fields: [Varchar, Varchar] }), No tracking issue'
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          string zipcode = 3;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select (country).city from t;
+  binder_error: 'Item not found: Invalid field name: city'
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          string zipcode = 3;
+        }
+- sql: |
+    create materialized view t as select * from s;
+    select (country).address.* from t;
+  binder_error: 'Bind error: The field "address" is not a nested column'
+  create_source:
+    row_format: protobuf
+    name: s
+    file: |
+        syntax = "proto3";
+        package test;
+        message TestRecord {
+          int32 id = 1;
+          Country country = 3;
+          int64 zipcode = 4;
+          float rate = 5;
+        }
+        message Country {
+          string address = 1;
+          string zipcode = 3;
         }

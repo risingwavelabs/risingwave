@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package hummock;
 
+import "common.proto";
+
 option java_multiple_files = true;
 option java_package = "com.risingwave.proto.hummock";
 option optimize_for = SPEED;
-
-import "common.proto";
 
 message SstableRefId {
   uint64 id = 1;
@@ -39,9 +39,6 @@ message Level {
 
 message UncommittedEpoch {
   uint64 epoch = 1;
-  // We store SstableInfo here because key range information is needed to update
-  // CompactStatus.
-  // TODO: should we combine CompactStatus with HummockVersion?
   repeated SstableInfo tables = 2;
 }
 
@@ -154,15 +151,6 @@ message CompactTask {
   bool task_status = 9;
 }
 
-message SstableStat {
-  KeyRange key_range = 1;
-  uint64 table_id = 2;
-  message CompactTaskId {
-    uint64 id = 1;
-  }
-  CompactTaskId compact_task = 3;
-}
-
 message LevelHandler {
   message KeyRangeTaskId {
     KeyRange key_range = 1;
@@ -170,7 +158,7 @@ message LevelHandler {
     uint64 ssts = 3;
   }
   LevelType level_type = 1;
-  repeated SstableStat ssts = 2;
+  map<uint64, uint64> compacting_ssts = 2;
   repeated KeyRangeTaskId key_ranges = 3;
 }
 
@@ -280,3 +268,5 @@ service HummockManagerService {
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
 }
+
+service CompactorService {}

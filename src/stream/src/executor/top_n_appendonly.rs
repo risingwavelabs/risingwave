@@ -15,15 +15,13 @@
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{Executor, ExecutorBuilder};
-use crate::executor_v2::{
-    AppendOnlyTopNExecutor as AppendOnlyTopNExecutorV2, Executor as ExecutorV2,
-};
+use crate::executor::ExecutorBuilder;
+use crate::executor_v2::{AppendOnlyTopNExecutor, BoxedExecutor, Executor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct AppendOnlyTopNExecutorBuilder {}
@@ -34,7 +32,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
         let order_types: Vec<_> = node
             .get_order_types()
@@ -56,20 +54,19 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
-        Ok(Box::new(
-            Box::new(AppendOnlyTopNExecutorV2::new_from_v1(
-                params.input.remove(0),
-                order_types,
-                (node.offset as usize, limit),
-                params.pk_indices,
-                keyspace,
-                cache_size,
-                total_count,
-                params.executor_id,
-                params.op_info,
-                key_indices,
-            )?)
-            .v1(),
-        ))
+
+        Ok(AppendOnlyTopNExecutor::new_from_v1(
+            params.input.remove(0),
+            order_types,
+            (node.offset as usize, limit),
+            params.pk_indices,
+            keyspace,
+            cache_size,
+            total_count,
+            params.executor_id,
+            params.op_info,
+            key_indices,
+        )?
+        .boxed())
     }
 }

@@ -18,6 +18,7 @@ use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Mutex;
 
 use super::{ObjectError, ObjectResult};
@@ -27,6 +28,7 @@ use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 #[derive(Default)]
 pub struct InMemObjectStore {
     objects: Mutex<HashMap<String, Bytes>>,
+    compactor_shutdown_sender: parking_lot::Mutex<Option<UnboundedSender<()>>>,
 }
 
 #[async_trait::async_trait]
@@ -80,6 +82,7 @@ impl InMemObjectStore {
     pub fn new() -> Self {
         Self {
             objects: Mutex::new(HashMap::new()),
+            compactor_shutdown_sender: parking_lot::Mutex::new(None),
         }
     }
 
@@ -93,6 +96,10 @@ impl InMemObjectStore {
             .get(path)
             .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
             .map(f)
+    }
+
+    pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
+        *self.compactor_shutdown_sender.lock() = Some(shutdown_sender);
     }
 }
 

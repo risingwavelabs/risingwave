@@ -15,17 +15,18 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::HashJoinNode;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use crate::catalog::TableId;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
-/// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
+/// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
 #[derive(Debug, Clone)]
@@ -36,7 +37,14 @@ pub struct StreamHashJoin {
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
+
+    /// Whether to force use delta join for this join node. If this is true, then indexes will
+    /// be create automatically when building the executors on meta service. For testing purpose
+    /// only. Will remove after we have fully support shared state and index.
+    is_delta: bool,
 }
+
+pub static DELTA_JOIN: &str = "RW_FORCE_DELTA_JOIN";
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
@@ -52,6 +60,13 @@ impl StreamHashJoin {
             &eq_join_predicate,
             &logical.l2o_col_mapping(),
         );
+
+        let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
+            config.is_set(false)
+        } else {
+            false
+        };
+
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
@@ -65,7 +80,13 @@ impl StreamHashJoin {
             base,
             logical,
             eq_join_predicate,
+            is_delta: force_delta,
         }
+    }
+
+    /// Get join type
+    pub fn join_type(&self) -> JoinType {
+        self.logical.join_type()
     }
 
     /// Get a reference to the batch hash join's eq join predicate.
@@ -73,7 +94,7 @@ impl StreamHashJoin {
         &self.eq_join_predicate
     }
 
-    fn derive_dist(
+    pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
         predicate: &EqJoinPredicate,
@@ -89,13 +110,32 @@ impl StreamHashJoin {
             (_, _) => panic!(),
         }
     }
+
+    /// Convert this hash join to a delta join plan
+    pub fn to_delta_join(
+        &self,
+        left_table_id: TableId,
+        right_table_id: TableId,
+    ) -> StreamDeltaJoin {
+        StreamDeltaJoin::new(
+            self.logical.clone(),
+            self.eq_join_predicate.clone(),
+            left_table_id,
+            right_table_id,
+        )
+    }
 }
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamHashJoin {{ type: {:?}, predicate: {} }}",
+            "{} {{ type: {:?}, predicate: {} }}",
+            if self.is_delta {
+                "StreamDeltaHashJoin"
+            } else {
+                "StreamHashJoin"
+            },
             self.logical.join_type(),
             self.eq_join_predicate()
         )
@@ -141,7 +181,7 @@ impl ToStreamProst for StreamHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_protobuf()),
+                .map(|x| x.to_expr_proto()),
             distribution_keys: self
                 .base
                 .dist
@@ -149,6 +189,8 @@ impl ToStreamProst for StreamHashJoin {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
+            is_delta_join: self.is_delta,
+            ..Default::default()
         })
     }
 }

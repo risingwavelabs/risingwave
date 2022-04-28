@@ -39,31 +39,23 @@ impl MetaNodeService {
             Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
         }
     }
-}
 
-impl Task for MetaNodeService {
-    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        ctx.service(self);
-        ctx.pb.set_message("starting...");
-
-        let mut cmd = self.meta_node()?;
-
-        cmd.env("RUST_BACKTRACE", "1");
-
+    /// Apply command args according to config
+    pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
         cmd.arg("--host")
-            .arg(format!("{}:{}", self.config.address, self.config.port))
+            .arg(format!("{}:{}", config.address, config.port))
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",
-                self.config.dashboard_address, self.config.dashboard_port
+                config.dashboard_address, config.dashboard_port
             ));
 
         cmd.arg("--prometheus-host").arg(format!(
             "{}:{}",
-            self.config.exporter_address, self.config.exporter_port
+            config.exporter_address, config.exporter_port
         ));
 
-        match self.config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
+        match config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
             Some([]) => {
                 cmd.arg("--backend").arg("mem");
             }
@@ -76,18 +68,36 @@ impl Task for MetaNodeService {
             _ => {
                 return Err(anyhow!(
                     "unexpected etcd config {:?}",
-                    self.config.provide_etcd_backend
+                    config.provide_etcd_backend
                 ))
             }
         }
 
-        if self.config.enable_dashboard_v2 {
+        if config.enable_dashboard_v2 {
             cmd.arg("--dashboard-ui-path").arg(env::var("PREFIX_UI")?);
         }
 
-        if self.config.unsafe_disable_recovery {
+        if config.unsafe_disable_recovery {
             cmd.arg("--disable-recovery");
         }
+
+        if let Some(interval) = config.checkpoint_interval {
+            cmd.arg("--checkpoint-interval").arg(interval.to_string());
+        }
+
+        Ok(())
+    }
+}
+
+impl Task for MetaNodeService {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        ctx.service(self);
+        ctx.pb.set_message("starting...");
+
+        let mut cmd = self.meta_node()?;
+
+        cmd.env("RUST_BACKTRACE", "1");
+        Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

@@ -24,6 +24,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, Stru
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
 };
+use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
@@ -43,12 +44,12 @@ impl ArrayBuilder for StructArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Result<Self> {
-        panic!("Must use new_with_meta.")
+        panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
-        Self::new_with_meta(
+        Self::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: Arc::new([]),
@@ -56,7 +57,7 @@ impl ArrayBuilder for StructArrayBuilder {
         )
     }
 
-    fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::Struct { children } = meta {
             let children_array = children
                 .iter()
@@ -108,8 +109,8 @@ impl ArrayBuilder for StructArrayBuilder {
         let children = self
             .children_array
             .into_iter()
-            .map(|b| b.finish())
-            .try_collect()?;
+            .map(|b| Ok(Arc::new(b.finish()?)))
+            .collect::<Result<Vec<ArrayRef>>>()?;
         Ok(StructArray {
             bitmap: self.bitmap.finish(),
             children,
@@ -122,7 +123,7 @@ impl ArrayBuilder for StructArrayBuilder {
 #[derive(Debug)]
 pub struct StructArray {
     bitmap: Bitmap,
-    children: Vec<ArrayImpl>,
+    children: Vec<ArrayRef>,
     children_type: Arc<[DataType]>,
     len: usize,
 }
@@ -181,7 +182,7 @@ impl Array for StructArray {
     }
 
     fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
-        let array_builder = StructArrayBuilder::new_with_meta(
+        let array_builder = StructArrayBuilder::with_meta(
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
@@ -209,8 +210,8 @@ impl StructArray {
         let children = array_data
             .children_array
             .iter()
-            .map(|child| ArrayImpl::from_protobuf(child, cardinality))
-            .collect::<Result<Vec<ArrayImpl>>>()?;
+            .map(|child| Ok(Arc::new(ArrayImpl::from_protobuf(child, cardinality)?)))
+            .collect::<Result<Vec<ArrayRef>>>()?;
         let children_type: Arc<[DataType]> = array_data
             .children_type
             .iter()
@@ -230,7 +231,10 @@ impl StructArray {
         &self.children_type
     }
 
-    #[cfg(test)]
+    pub fn get_children_by_index(&self, index: usize) -> ArrayRef {
+        self.children[index].clone()
+    }
+
     pub fn from_slices(
         null_bitmap: &[bool],
         children: Vec<ArrayImpl>,
@@ -238,6 +242,7 @@ impl StructArray {
     ) -> Result<StructArray> {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let children = children.into_iter().map(Arc::new).collect_vec();
         Ok(StructArray {
             bitmap,
             children_type: children_type.into(),
@@ -425,7 +430,7 @@ mod tests {
             ]
         );
 
-        let mut builder = StructArrayBuilder::new_with_meta(
+        let mut builder = StructArrayBuilder::with_meta(
             4,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Int32, DataType::Float32]),

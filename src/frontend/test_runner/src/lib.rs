@@ -17,12 +17,15 @@
 
 mod resolve_id;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_mv, create_source, create_table, drop_table};
+use risingwave_frontend::handler::{
+    create_index, create_mv, create_source, create_table, drop_table,
+};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -55,7 +58,7 @@ pub struct TestCase {
     /// Logical plan with optimization `.gen_optimized_logical_plan()`
     pub optimized_logical_plan: Option<String>,
 
-    /// Distributed batch plan `.gen_dist_batch_query_plan()`
+    /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
 
     /// Proto JSON of generated batch plan
@@ -78,6 +81,9 @@ pub struct TestCase {
 
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateSource>,
+
+    /// Provide config map to frontend
+    pub with_config_map: Option<HashMap<String, String>>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -99,7 +105,7 @@ pub struct TestCaseResult {
     /// Logical plan with optimization `.gen_optimized_logical_plan()`
     pub optimized_logical_plan: Option<String>,
 
-    /// Distributed batch plan `.gen_dist_batch_query_plan()`
+    /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
 
     /// Proto JSON of generated batch plan
@@ -149,6 +155,7 @@ impl TestCaseResult {
             optimizer_error: self.optimizer_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
+            with_config_map: original_test_case.with_config_map.clone(),
         };
         Ok(case)
     }
@@ -159,6 +166,12 @@ impl TestCase {
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
+
+        if let Some(ref config_map) = self.with_config_map {
+            for (key, val) in config_map {
+                session.set_config(key, val);
+            }
+        }
 
         let placeholder_empty_vec = vec![];
 
@@ -242,6 +255,15 @@ impl TestCase {
                 } => {
                     create_source::handle_create_source(context, is_materialized, stmt).await?;
                 }
+                Statement::CreateIndex {
+                    name,
+                    table_name,
+                    columns,
+                    // TODO: support unique and if_not_exist in planner test
+                    ..
+                } => {
+                    create_index::handle_create_index(context, name, table_name, columns).await?;
+                }
                 Statement::CreateView {
                     materialized: true,
                     or_replace: false,
@@ -305,7 +327,7 @@ impl TestCase {
         }
 
         if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
-            let batch_plan = logical_plan.gen_dist_batch_query_plan();
+            let batch_plan = logical_plan.gen_batch_query_plan();
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_plan.is_some() {

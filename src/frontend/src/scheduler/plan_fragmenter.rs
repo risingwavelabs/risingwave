@@ -17,8 +17,9 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{ExchangeInfo, Field as FieldProst};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::ExchangeInfo;
+use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
@@ -264,10 +265,6 @@ impl StageGraphBuilder {
 
     /// Link parent stage and child stage. Maintain the mappings of parent -> child and child ->
     /// parent.
-    ///
-    /// # Arguments
-    ///
-    /// * `exchange_id` - The operator id of exchange executor.
     pub fn link_to_child(&mut self, parent_id: StageId, child_id: StageId) {
         self.child_edges
             .get_mut(&parent_id)
@@ -392,11 +389,11 @@ mod tests {
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::types::DataType;
+    use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::{
         HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
     };
-    use risingwave_pb::plan::plan_node::NodeBody;
-    use risingwave_pb::plan::JoinType;
+    use risingwave_pb::plan_common::JoinType;
 
     use crate::optimizer::plan_node::{
         BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
@@ -443,6 +440,7 @@ mod tests {
                     },
                 ],
             }),
+            vec![],
             ctx,
         ))
         .into();

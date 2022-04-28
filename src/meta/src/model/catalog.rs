@@ -15,7 +15,7 @@
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::{Database, Schema, Table};
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::plan_common::{DatabaseRefId, SchemaRefId, TableRefId};
 
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
