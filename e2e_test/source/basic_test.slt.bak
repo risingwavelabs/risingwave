@@ -1,8 +1,11 @@
 statement ok
-create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest' ) row format json
+
+statement ok
+flush;
 
 query IT rowsort
-select * from s
+select * from s1
 ----
 1 1
 2 22
@@ -10,13 +13,16 @@ select * from s
 4 4444
 
 statement ok
-drop source s
+drop source s1
 
 statement ok
-create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create materialized source s2 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
+
+statement ok
+flush;
 
 query IT rowsort
-select * from s
+select * from s2
 ----
 1 1
 2 22
@@ -24,13 +30,16 @@ select * from s
 4 4444
 
 statement ok
-drop source s
+drop source s2
 
 statement ok
-create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create materialized source s3 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
+
+statement ok
+flush;
 
 query IT rowsort
-select * from s
+select * from s3
 ----
 1 1
 2 22
@@ -38,13 +47,16 @@ select * from s
 4 4444
 
 statement ok
-drop source s
+drop source s3
 
 statement ok
-create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create materialized source s4 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
+
+statement ok
+flush;
 
 query IT rowsort
-select * from s
+select * from s4
 ----
 1 1
 2 22
@@ -52,32 +64,38 @@ select * from s
 4 4444
 
 statement ok
-drop source s
+drop source s4
 
 statement ok
-create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create materialized source s5 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
+
+statement ok
+flush;
 
 query I
-select count(*) from s
+select count(*) from s5
 ----
 100
 
 statement ok
-drop source s
+drop source s5
 
 statement ok
-create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_1_partition_mv_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create materialized source s6 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_mv_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest'  ) row format json
+
+statement ok
+flush;
 
 query I
-select count(*) from s
+select count(*) from s6
 ----
 20
 
 statement ok
-create materialized view source_mv1 as select * from s;
+create materialized view source_mv1 as select * from s6;
 
 statement ok
-create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s where v1 > 3;
+create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s6 where v1 > 3;
 
 # Wait for source
 sleep 30s
@@ -126,4 +144,4 @@ statement ok
 drop materialized view source_mv2
 
 statement ok
-drop source s
+drop source s6

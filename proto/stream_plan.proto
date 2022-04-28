@@ -77,6 +77,7 @@ message SimpleAggNode {
 message HashAggNode {
   repeated int32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
+  repeated uint32 table_ids = 3;
 }
 
 message TopNNode {
@@ -157,7 +158,6 @@ message BatchPlanNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
-  // TODO: make hash_mapping more compact. (e.g. store ranges)
   ParallelUnitMapping hash_mapping = 4;
   uint32 parallel_unit_id = 5;
 }
@@ -256,6 +256,9 @@ message Dispatcher {
   repeated uint32 column_indices = 2;
   // The hash mapping for consistent hash.
   ActorMapping hash_mapping = 3;
+  // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
+  // For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // For cross-MV dispatchers, there will only be one broadcast dispatcher of id 0.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;

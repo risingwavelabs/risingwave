@@ -37,11 +37,11 @@ select v4, v1, v3, v5 from iii_index;
 
 # create MV using index
 
-# statement ok
-# create index iii_index_1 on iii_t1(v1);
+statement ok
+create index iii_index_1 on iii_t1(v1);
 
-# statement ok
-# create index iii_index_2 on iii_t2(v3);
+statement ok
+create index iii_index_2 on iii_t2(v3);
 
 # statement ok
 # create materialized view iii_mv2 as select * from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
@@ -57,11 +57,11 @@ select v4, v1, v3, v5 from iii_index;
 # statement ok
 # drop materialized view iii_mv2
 
-# statement ok
-# drop materialized view iii_index_2
+statement ok
+drop materialized view iii_index_2
 
-# statement ok
-# drop materialized view iii_index_1
+statement ok
+drop materialized view iii_index_1
 
 # TODO: support drop index
 

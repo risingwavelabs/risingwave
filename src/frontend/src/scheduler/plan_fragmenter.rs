@@ -265,10 +265,6 @@ impl StageGraphBuilder {
 
     /// Link parent stage and child stage. Maintain the mappings of parent -> child and child ->
     /// parent.
-    ///
-    /// # Arguments
-    ///
-    /// * `exchange_id` - The operator id of exchange executor.
     pub fn link_to_child(&mut self, parent_id: StageId, child_id: StageId) {
         self.child_edges
             .get_mut(&parent_id)
@@ -426,7 +422,8 @@ mod tests {
             vec![0, 1],
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pk: vec![],
+                pks: vec![],
+                order_desc: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -443,6 +440,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
+                distribution_keys: vec![],
             }),
             vec![],
             ctx,
