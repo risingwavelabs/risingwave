@@ -21,11 +21,11 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::top_n::variants::TOP_N_MAX;
-use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::managed_state::top_n::variants::TOP_N_MAX;
+use super::managed_state::top_n::ManagedTopNState;
+use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
+use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record

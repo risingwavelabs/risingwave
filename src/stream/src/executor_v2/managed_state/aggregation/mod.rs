@@ -26,7 +26,7 @@ use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 pub use value::*;
 
-use super::super::PkDataTypes;
+use crate::executor::PkDataTypes;
 use crate::executor_v2::aggregation::AggCall;
 
 mod extreme;

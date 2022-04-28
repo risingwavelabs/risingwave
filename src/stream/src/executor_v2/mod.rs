@@ -34,6 +34,7 @@ mod hop_window;
 mod local_simple_agg;
 mod lookup;
 mod lookup_union;
+mod managed_state;
 pub mod merge;
 pub(crate) mod mview;
 mod project;

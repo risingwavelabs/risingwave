@@ -36,10 +36,10 @@ use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::PkDataTypes;
 use crate::executor_v2::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor_v2::managed_state::aggregation::ManagedStateImpl;
 use crate::executor_v2::Executor;
 
 mod agg_call;

@@ -48,7 +48,6 @@ mod filter;
 mod global_simple_agg;
 mod hash_agg;
 mod local_simple_agg;
-pub(crate) mod managed_state;
 mod merge;
 pub mod monitor;
 mod mview;
@@ -59,7 +58,7 @@ mod top_n_appendonly;
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
-mod test_utils;
+pub(crate) mod test_utils;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;

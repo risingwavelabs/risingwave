@@ -31,9 +31,9 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
+use super::managed_state::join::*;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
-use crate::executor::managed_state::join::*;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 

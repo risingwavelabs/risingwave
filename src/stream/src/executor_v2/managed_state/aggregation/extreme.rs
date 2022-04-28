@@ -28,8 +28,8 @@ use risingwave_storage::storage_value::{StorageValue, ValueMeta};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 use crate::executor::PkDataTypes;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 

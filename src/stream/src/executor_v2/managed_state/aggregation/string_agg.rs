@@ -28,8 +28,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::aggregation::ManagedTableState;
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
+use super::ManagedTableState;
 
 pub struct ManagedStringAggState<S: StateStore> {
     cache: BTreeMap<Bytes, FlushStatus<ScalarImpl>>,
@@ -275,9 +275,8 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::{Keyspace, StateStore};
 
+    use super::super::ManagedTableState;
     use super::*;
-    use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
-    use crate::executor::managed_state::aggregation::ManagedTableState;
     use crate::executor::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(
