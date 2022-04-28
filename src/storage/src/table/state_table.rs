@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
@@ -46,7 +47,12 @@ impl<S: StateStore> StateTable<S> {
         Self {
             order_types: order_types.clone(),
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTable::new_for_test(keyspace, column_descs, order_types),
+            cell_based_table: CellBasedTable::new(
+                keyspace,
+                column_descs,
+                Some(OrderedRowSerializer::new(order_types)),
+                Arc::new(StateStoreMetrics::unused()),
+            ),
         }
     }
 
@@ -84,6 +90,14 @@ impl<S: StateStore> StateTable<S> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.cell_based_table
             .batch_write_rows(mem_table, new_epoch)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
+        self.cell_based_table
+            .batch_write_rows_with_value_meta(mem_table, new_epoch)
             .await?;
         Ok(())
     }

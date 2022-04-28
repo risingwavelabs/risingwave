@@ -121,7 +121,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
                     self.state_table
-                        .commit(b.epoch.prev)
+                        .commit_with_value_meta(b.epoch.prev)
                         .await
                         .map_err(StreamExecutorError::executor_v1)?;
                     Message::Barrier(b)
@@ -213,7 +213,10 @@ mod tests {
 
         let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
         let order_types = vec![OrderType::Ascending];
-        let column_descs = vec![ColumnDesc::unnamed(column_ids[1], DataType::Int32)];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
         let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
@@ -233,7 +236,7 @@ mod tests {
                     .get_row(&Row(vec![Some(3_i32.into())]), u64::MAX)
                     .await
                     .unwrap();
-                assert_eq!(row, Some(Row(vec![Some(6_i32.into())])));
+                assert_eq!(row, Some(Row(vec![Some(3_i32.into()), Some(6_i32.into())])));
             }
             _ => unreachable!(),
         }
@@ -245,7 +248,7 @@ mod tests {
                     .get_row(&Row(vec![Some(7_i32.into())]), u64::MAX)
                     .await
                     .unwrap();
-                assert_eq!(row, Some(Row(vec![Some(8_i32.into())])));
+                assert_eq!(row, Some(Row(vec![Some(7_i32.into()), Some(8_i32.into())])));
             }
             _ => unreachable!(),
         }

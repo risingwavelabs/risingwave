@@ -139,25 +139,27 @@ impl StreamMaterialize {
         // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
         ColumnCatalog::generate_increment_id(&mut columns);
 
-        let mut in_pk = FixedBitSet::with_capacity(schema.len());
-        let mut pk_desc = vec![];
+        let mut in_order = FixedBitSet::with_capacity(schema.len());
+        let mut order_desc = vec![];
+
         for field in &user_order_by.field_order {
             let idx = field.index;
-            pk_desc.push(OrderedColumnDesc {
+            order_desc.push(OrderedColumnDesc {
                 column_desc: columns[idx].column_desc.clone(),
                 order: field.direct.into(),
             });
-            in_pk.insert(idx);
+            in_order.insert(idx);
         }
-        for idx in pk_indices.clone() {
-            if in_pk.contains(idx) {
+
+        for &idx in pk_indices {
+            if in_order.contains(idx) {
                 continue;
             }
-            pk_desc.push(OrderedColumnDesc {
+            order_desc.push(OrderedColumnDesc {
                 column_desc: columns[idx].column_desc.clone(),
                 order: OrderType::Ascending,
             });
-            in_pk.insert(idx);
+            in_order.insert(idx);
         }
 
         let table = TableCatalog {
@@ -165,8 +167,10 @@ impl StreamMaterialize {
             associated_source_id: None,
             name: mv_name,
             columns,
-            pk_desc,
+            order_desc,
+            pks: pk_indices.clone(),
             is_index_on,
+            distribution_keys: base.dist.dist_column_indices().to_vec(),
         };
 
         Ok(Self { base, input, table })
@@ -191,25 +195,39 @@ impl StreamMaterialize {
 
 impl fmt::Display for StreamMaterialize {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let column_names = self
-            .table()
+        let table = self.table();
+
+        let column_names = table
             .columns()
             .iter()
             .map(|c| c.name_with_hidden())
             .join(", ");
 
-        let pk_column_names = self
-            .table()
-            .pk_desc()
+        let pk_column_names = table
+            .pks
             .iter()
-            .map(|c| &c.column_desc.name)
+            .map(|&pk| &table.columns[pk].column_desc.name)
             .join(", ");
 
-        write!(
-            f,
-            "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
-            column_names, pk_column_names
-        )
+        let order_descs = table
+            .order_desc
+            .iter()
+            .map(|order| &order.column_desc.name)
+            .join(", ");
+
+        if pk_column_names != order_descs {
+            write!(
+                f,
+                "StreamMaterialize {{ columns: [{}], pk_columns: [{}], order_descs: [{}] }}",
+                column_names, pk_column_names, order_descs
+            )
+        } else {
+            write!(
+                f,
+                "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
+                column_names, pk_column_names
+            )
+        }
     }
 }
 
@@ -245,7 +263,7 @@ impl ToStreamProst for StreamMaterialize {
                 .collect(),
             column_orders: self
                 .table()
-                .pk_desc()
+                .order_desc()
                 .iter()
                 .map(|col| {
                     let idx = self.col_id_to_idx(col.column_desc.column_id);

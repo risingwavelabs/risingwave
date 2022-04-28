@@ -187,9 +187,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{
-        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
-    };
+    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::*;
 
@@ -235,7 +233,7 @@ mod tests {
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
-            .stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])
+            .stream_reader(vec![0.into(), 1.into(), 2.into()])
             .await?;
 
         // Insert

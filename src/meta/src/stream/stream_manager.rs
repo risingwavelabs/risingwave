@@ -23,7 +23,6 @@ use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
-use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
@@ -38,7 +37,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -48,7 +47,7 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
-    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
@@ -59,8 +58,6 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Consistent hash mapping, used in hash dispatcher.
     pub hash_mapping: Vec<ParallelUnitId>,
-    /// Distribution key of materialize node in current mview.
-    pub distribution_keys: Vec<i32>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// TODO: remove this when we deprecate Java frontend.
@@ -114,7 +111,7 @@ where
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
         hash_mapping: &Vec<ParallelUnitId>,
-        dispatches: &mut HashMap<ActorId, Vec<ActorId>>,
+        dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
@@ -125,7 +122,7 @@ where
             tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             locations: &'a ScheduledLocations,
 
-            dispatches: &'a mut HashMap<ActorId, Vec<ActorId>>,
+            dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
             upstream_node_actors: &'a mut HashMap<WorkerId, Vec<ActorId>>,
         }
 
@@ -189,8 +186,6 @@ where
                 }
                 let batch_stream_node = &mut stream_node.input[1];
                 if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
-                    // TODO: we can also insert distribution keys here, make fragmenter
-                    // even simpler.
                     let (original_indices, data) = compress_data(self.hash_mapping);
                     batch_query.hash_mapping = Some(ParallelUnitMapping {
                         original_indices,
@@ -203,7 +198,7 @@ where
 
                 // finally, we should also build dispatcher infos here.
                 self.dispatches
-                    .entry(*upstream_actor_id)
+                    .entry((*upstream_actor_id, 0))
                     .or_default()
                     .push(actor_id);
 
@@ -231,15 +226,9 @@ where
         };
 
         for fragment in table_fragments.fragments.values_mut() {
-            // TODO: currently materialize and chain node will be in separate fragments, but they
-            // could be merged into one fragment if they shared the same distribution. We should
-            // also consider FragmentType::Sink once we support merging materialize and
-            // chain into the same fragment.
-            if fragment.fragment_type == FragmentType::Others as i32 {
-                for actor in &mut fragment.actors {
-                    if let Some(ref mut stream_node) = actor.nodes {
-                        env.resolve_chain_node_inner(stream_node, actor.actor_id)?;
-                    }
+            for actor in &mut fragment.actors {
+                if let Some(ref mut stream_node) = actor.nodes {
+                    env.resolve_chain_node_inner(stream_node, actor.actor_id)?;
                 }
             }
         }
@@ -266,7 +255,6 @@ where
             dependent_table_ids,
             affiliated_source,
             hash_mapping,
-            distribution_keys: _,
             table_id_offset: _,
             is_legacy_frontend,
         }: CreateMaterializedViewContext,
@@ -471,6 +459,11 @@ where
             })
             .collect::<HashMap<_, _>>();
 
+        let up_id_to_down_info = dispatches
+            .iter()
+            .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info.clone()))
+            .collect::<HashMap<_, _>>();
+
         let mut node_hanging_channels = upstream_node_actors
             .iter()
             .map(|(node_id, up_ids)| {
@@ -479,7 +472,7 @@ where
                     up_ids
                         .iter()
                         .flat_map(|up_id| {
-                            dispatches
+                            up_id_to_down_info
                                 .get(up_id)
                                 .expect("expected dispatches info")
                                 .iter()
@@ -887,7 +880,7 @@ mod tests {
                 actors: actors.clone(),
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments, vec![]);
+        let table_fragments = TableFragments::new(table_id, fragments);
 
         let ctx = CreateMaterializedViewContext::default();
 

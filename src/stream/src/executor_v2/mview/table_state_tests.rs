@@ -18,10 +18,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::Keyspace;
 
-use crate::executor_v2::mview::ManagedMViewState;
+// use crate::executor_v2::mview::ManagedMViewState;
 
 #[tokio::test]
 async fn test_cell_based_table_iter() {
@@ -36,28 +37,41 @@ async fn test_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
 
-    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
-    state.put(
-        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into()),
-        ]),
-    );
-    state.put(
-        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(22_i32.into()),
-            Some(222_i32.into()),
-        ]),
-    );
-    state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
-    state.flush(epoch).await.unwrap();
+    state
+        .insert(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .delete(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
     let mut iter = table.iter(epoch).await.unwrap();
@@ -99,61 +113,94 @@ async fn test_multi_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
 
-    let mut state_1 =
-        ManagedMViewState::new(keyspace_1.clone(), column_ids.clone(), order_types.clone());
-    let mut state_2 = ManagedMViewState::new(keyspace_2.clone(), column_ids, order_types.clone());
+    let mut state_1 = StateTable::new(
+        keyspace_1.clone(),
+        column_descs_1.clone(),
+        order_types.clone(),
+    );
+    let mut state_2 = StateTable::new(
+        keyspace_2.clone(),
+        column_descs_2.clone(),
+        order_types.clone(),
+    );
 
     let table_1 =
         CellBasedTable::new_for_test(keyspace_1.clone(), column_descs_1, order_types.clone());
     let table_2 = CellBasedTable::new_for_test(keyspace_2.clone(), column_descs_2, order_types);
 
-    state_1.put(
-        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into()),
-        ]),
-    );
-    state_1.put(
-        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(22_i32.into()),
-            Some(222_i32.into()),
-        ]),
-    );
-    state_1.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
+    state_1
+        .insert(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state_1
+        .insert(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state_1
+        .delete(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
 
-    state_2.put(
-        Row(vec![
-            Some("1".to_string().into()),
-            Some("11".to_string().into()),
-        ]),
-        Row(vec![
-            Some("1".to_string().into()),
-            Some("11".to_string().into()),
-            Some("111".to_string().into()),
-        ]),
-    );
-    state_2.put(
-        Row(vec![
-            Some("2".to_string().into()),
-            Some("22".to_string().into()),
-        ]),
-        Row(vec![
-            Some("2".to_string().into()),
-            Some("22".to_string().into()),
-            Some("222".to_string().into()),
-        ]),
-    );
-    state_2.delete(Row(vec![
-        Some("2".to_string().into()),
-        Some("22".to_string().into()),
-    ]));
+    state_2
+        .insert(
+            Row(vec![
+                Some("1".to_string().into()),
+                Some("11".to_string().into()),
+            ]),
+            Row(vec![
+                Some("1".to_string().into()),
+                Some("11".to_string().into()),
+                Some("111".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state_2
+        .insert(
+            Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+            ]),
+            Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+                Some("222".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state_2
+        .delete(
+            Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+            ]),
+            Row(vec![
+                Some("2".to_string().into()),
+                Some("22".to_string().into()),
+                Some("222".to_string().into()),
+            ]),
+        )
+        .unwrap();
 
-    state_1.flush(epoch).await.unwrap();
-    state_2.flush(epoch).await.unwrap();
+    state_1.commit(epoch).await.unwrap();
+    state_2.commit(epoch).await.unwrap();
 
     let mut iter_1 = table_1.iter(epoch).await.unwrap();
     let mut iter_2 = table_2.iter(epoch).await.unwrap();
@@ -198,27 +245,31 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
 
-    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
-    state.put(
-        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into()),
-        ]),
-    );
-    state.put(
-        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(22_i32.into()),
-            Some(222_i32.into()),
-        ]),
-    );
-    state.flush(epoch).await.unwrap();
+    state
+        .insert(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
     let chunk = {
         let mut iter = table.iter(u64::MAX).await.unwrap();
@@ -242,25 +293,36 @@ async fn test_get_row_by_scan() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
-    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
-    state.put(
-        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![Some(1_i32.into()), None, None]),
-    );
-    state.put(
-        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-    );
-    state.put(
-        Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-        Row(vec![Some(3_i32.into()), None, None]),
-    );
+    state
+        .insert(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![Some(1_i32.into()), None, None]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
+            Row(vec![Some(3_i32.into()), None, None]),
+        )
+        .unwrap();
 
-    state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
-    state.flush(epoch).await.unwrap();
+    state
+        .delete(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
@@ -307,29 +369,42 @@ async fn test_get_row_by_muti_get() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
-    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
-    state.put(
-        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![Some(1_i32.into()), None, None]),
-    );
-    state.put(
-        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-    );
-    state.put(
-        Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-        Row(vec![Some(3_i32.into()), None, None]),
-    );
-    state.put(
-        Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-        Row(vec![None, None, None]),
-    );
+    state
+        .insert(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![Some(1_i32.into()), None, None]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
+            Row(vec![Some(3_i32.into()), None, None]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
+            Row(vec![None, None, None]),
+        )
+        .unwrap();
 
-    state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
-    state.flush(epoch).await.unwrap();
+    state
+        .delete(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
@@ -381,37 +456,50 @@ async fn test_get_row_for_string() {
         ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
-    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
-    state.put(
-        Row(vec![
-            Some("1".to_string().into()),
-            Some("11".to_string().into()),
-        ]),
-        Row(vec![
-            Some("1".to_string().into()),
-            Some("11".to_string().into()),
-            Some("111".to_string().into()),
-        ]),
-    );
-    state.put(
-        Row(vec![
-            Some("4".to_string().into()),
-            Some("44".to_string().into()),
-        ]),
-        Row(vec![
-            Some("4".to_string().into()),
-            Some("44".to_string().into()),
-            Some("444".to_string().into()),
-        ]),
-    );
-    state.delete(Row(vec![
-        Some("4".to_string().into()),
-        Some("44".to_string().into()),
-    ]));
-    state.flush(epoch).await.unwrap();
+    state
+        .insert(
+            Row(vec![
+                Some("1".to_string().into()),
+                Some("11".to_string().into()),
+            ]),
+            Row(vec![
+                Some("1".to_string().into()),
+                Some("11".to_string().into()),
+                Some("111".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![
+                Some("4".to_string().into()),
+                Some("44".to_string().into()),
+            ]),
+            Row(vec![
+                Some("4".to_string().into()),
+                Some("44".to_string().into()),
+                Some("444".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .delete(
+            Row(vec![
+                Some("4".to_string().into()),
+                Some("44".to_string().into()),
+            ]),
+            Row(vec![
+                Some("4".to_string().into()),
+                Some("44".to_string().into()),
+                Some("444".to_string().into()),
+            ]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
     let get_row1_res = table
@@ -458,29 +546,42 @@ async fn test_shuffled_column_id_for_get_row() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
-    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
-    state.put(
-        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-        Row(vec![Some(1_i32.into()), None, None]),
-    );
-    state.put(
-        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
-    );
-    state.put(
-        Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
-        Row(vec![Some(3_i32.into()), None, None]),
-    );
-    state.put(
-        Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-        Row(vec![None, None, None]),
-    );
+    state
+        .insert(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![Some(1_i32.into()), None, None]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
+            Row(vec![Some(3_i32.into()), None, None]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
+            Row(vec![None, None, None]),
+        )
+        .unwrap();
 
-    state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
-    state.flush(epoch).await.unwrap();
+    state
+        .delete(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+            Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
