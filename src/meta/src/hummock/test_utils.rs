@@ -93,6 +93,7 @@ pub fn generate_test_tables(epoch: u64, table_ids: Vec<u64>) -> Vec<SstableInfo>
                 right: iterator_test_key_of_epoch(table_id, (i + 1) * 10, epoch),
                 inf: false,
             }),
+            file_size: 1,
         });
     }
     sst_info
