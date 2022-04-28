@@ -23,7 +23,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
-use risingwave_pb::ProstFieldNotFound;
 
 use crate::cluster::WorkerId;
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
@@ -446,17 +445,21 @@ impl StreamGraphBuilder {
             Node::ChainNode(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                if let Node::HashJoinNode(node) = new_stream_node
-                    .node
-                    .as_mut()
-                    .ok_or(ProstFieldNotFound("prost stream node field not found"))?
-                {
+                if let Node::HashJoinNode(node) = new_stream_node.node.as_mut().unwrap() {
                     // The operator id must be assigned with table ids. Otherwise it is a logic
                     // error.
                     let left_table_id = node.left_table_id + table_id_offset;
                     let right_table_id = left_table_id + 1;
                     node.left_table_id = left_table_id;
                     node.right_table_id = right_table_id;
+                }
+
+                if let Node::HashAggNode(node) = new_stream_node.node.as_mut().unwrap() {
+                    assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                    // In-place update the table id. Convert from local to global.
+                    for table_id in &mut node.table_ids {
+                        *table_id += table_id_offset;
+                    }
                 }
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
