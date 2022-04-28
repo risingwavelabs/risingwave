@@ -234,6 +234,7 @@ impl MockCatalogWriter {
     }
 
     fn gen_id(&self) -> u32 {
+        // jump out the 0 value.
         self.id.fetch_add(1, Ordering::SeqCst) + 1
     }
 

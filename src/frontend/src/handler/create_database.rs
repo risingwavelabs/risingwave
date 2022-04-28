@@ -32,6 +32,7 @@ pub async fn handle_create_database(
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader.get_database_by_name(&database_name).is_ok() {
+            // If `if_not_exist` is true, not return error.
             return if is_not_exist {
                 Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
             } else {
@@ -55,11 +56,11 @@ mod tests {
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
 
-        frontend.run_sql("CREATE DATABASE t1").await.unwrap();
+        frontend.run_sql("CREATE DATABASE d1").await.unwrap();
 
         let database = catalog_reader
             .read_guard()
-            .get_database_by_name("t1")
+            .get_database_by_name("d1")
             .ok()
             .cloned();
         assert!(database.is_some());

@@ -14,37 +14,41 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{AstOption, DropMode, Ident};
+use risingwave_sqlparser::ast::{AstOption, DropMode, ObjectName};
 
+use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_database(
     context: OptimizerContext,
-    database_name: Ident,
+    database_name: ObjectName,
     if_exist: bool,
     mode: AstOption<DropMode>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
+    let database_name = Binder::resolve_database_name(database_name)?;
 
     let database = {
         let reader = catalog_reader.read_guard();
-        match reader.get_database_by_name(&database_name.value) {
+        match reader.get_database_by_name(&database_name) {
             Ok(db) => db.clone(),
             Err(err) => {
+                // If `if_exist` is true, not return error.
                 return if if_exist {
                     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
                 } else {
                     Err(err)
-                }
+                };
             }
         }
     };
     let database_id = {
+        // If the mode is `Restrict` or `None`, the `database` need to be empty.
         if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
             if !database.is_empty() {
-                return Err(CatalogError::NotFound("database", database_name.value).into());
+                return Err(CatalogError::NotFound("database", database_name).into());
             }
             database.id()
         } else {
@@ -67,13 +71,13 @@ mod tests {
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
 
-        frontend.run_sql("CREATE DATABASE t1").await.unwrap();
+        frontend.run_sql("CREATE DATABASE d1").await.unwrap();
 
-        frontend.run_sql("DROP DATABASE t1").await.unwrap();
+        frontend.run_sql("DROP DATABASE d1").await.unwrap();
 
         let database = catalog_reader
             .read_guard()
-            .get_database_by_name("t1")
+            .get_database_by_name("d1")
             .ok()
             .cloned();
         assert!(database.is_none());

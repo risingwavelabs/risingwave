@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, TableAlias, TableFactor};
+use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
@@ -45,20 +45,29 @@ pub enum Relation {
 }
 
 impl Binder {
-    /// return the (`schema_name`, `table_name`)
-    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
-        let mut identifiers = name.0;
-        let table_name = identifiers
+    /// return first and second name in identifiers,
+    /// if identifiers not have first name will report error.
+    fn resolve_double_name(
+        mut identifiers: Vec<Ident>,
+        err_str: &str,
+        default_second_name: &str,
+    ) -> Result<(String, String)> {
+        let first_name = identifiers
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("empty table name".into()))?
+            .ok_or_else(|| ErrorCode::InternalError(err_str.into()))?
             .value;
 
-        let schema_name = identifiers
+        let second_name = identifiers
             .pop()
             .map(|ident| ident.value)
-            .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
+            .unwrap_or_else(|| default_second_name.into());
 
-        Ok((schema_name, table_name))
+        Ok((first_name, second_name))
+    }
+
+    /// return the (`schema_name`, `table_name`)
+    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
+        Self::resolve_double_name(name.0, "empty table name", DEFAULT_SCHEMA_NAME)
     }
 
     /// return the ( `database_name`, `schema_name`)
@@ -66,18 +75,7 @@ impl Binder {
         default_db_name: &str,
         name: ObjectName,
     ) -> Result<(String, String)> {
-        let mut identifiers = name.0;
-        let schema_name = identifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError("empty schema name".into()))?
-            .value;
-
-        let database_name = identifiers
-            .pop()
-            .map(|ident| ident.value)
-            .unwrap_or_else(|| default_db_name.into());
-
-        Ok((database_name, schema_name))
+        Self::resolve_double_name(name.0, "empty schema name", default_db_name)
     }
 
     /// return the `database_name`

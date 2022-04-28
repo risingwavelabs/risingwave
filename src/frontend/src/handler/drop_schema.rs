@@ -14,25 +14,29 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{AstOption, DropMode, Ident};
+use risingwave_sqlparser::ast::{AstOption, DropMode, ObjectName};
 
+use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_schema(
     context: OptimizerContext,
-    schema_name: Ident,
+    schema_name: ObjectName,
     if_exist: bool,
     mode: AstOption<DropMode>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
+    let (database_name, schema_name) =
+        Binder::resolve_schema_name(session.database(), schema_name)?;
 
     let schema = {
         let reader = catalog_reader.read_guard();
-        match reader.get_schema_by_name(session.database(), &schema_name.value) {
+        match reader.get_schema_by_name(&database_name, &schema_name) {
             Ok(schema) => schema.clone(),
             Err(err) => {
+                // If `if_exist` is true, not return error.
                 if if_exist {
                     return Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA));
                 } else {
@@ -42,9 +46,10 @@ pub async fn handle_drop_schema(
         }
     };
     let schema_id = {
+        // If the mode is `Restrict` or `None`, the `schema` need to be empty.
         if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
             if !schema.is_empty() {
-                return Err(CatalogError::NotFound("schema", schema_name.value).into());
+                return Err(CatalogError::NotFound("schema", schema_name).into());
             }
             schema.id()
         } else {

@@ -36,6 +36,7 @@ pub async fn handle_create_schema(
             .get_schema_by_name(&database_name, &schema_name)
             .is_ok()
         {
+            // If `if_not_exist` is true, not return error.
             return if is_not_exist {
                 Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
             } else {
