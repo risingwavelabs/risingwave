@@ -56,8 +56,12 @@ impl EqGroups {
         self.len() == 0
     }
 
-    pub fn set_offset(&mut self, offset: usize) {
-        self.offset = offset
+    pub fn advance_offset(&mut self) {
+        if self.limit == 0 {
+            self.offset = self.indices.len();
+        } else {
+            self.offset += self.limit;
+        }
     }
 
     pub fn offset(&self) -> usize {
