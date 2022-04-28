@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_create_database(
@@ -31,11 +31,12 @@ pub async fn handle_create_database(
     {
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(&database_name).is_ok() && !is_not_exist {
-            return Err(RwError::from(InternalError(format!(
-                "database {:?} already exists",
-                database_name,
-            ))));
+        if reader.get_database_by_name(&database_name).is_ok() {
+            return if is_not_exist {
+                Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
+            } else {
+                return Err(CatalogError::Duplicated("database", database_name).into());
+            };
         }
     }
 

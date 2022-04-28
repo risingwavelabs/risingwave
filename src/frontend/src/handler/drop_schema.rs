@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{AstOption, DropMode, Ident};
 
+use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_schema(
@@ -43,10 +44,7 @@ pub async fn handle_drop_schema(
     let schema_id = {
         if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
             if !schema.is_empty() {
-                return Err(ErrorCode::InternalError(
-                    "Please drop tables and sources in this schema before drop it".to_string(),
-                )
-                .into());
+                return Err(CatalogError::NotFound("schema", schema_name.value).into());
             }
             schema.id()
         } else {

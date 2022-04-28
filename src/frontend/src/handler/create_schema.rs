@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_create_schema(
@@ -35,12 +35,12 @@ pub async fn handle_create_schema(
         if reader
             .get_schema_by_name(&database_name, &schema_name)
             .is_ok()
-            && !is_not_exist
         {
-            return Err(RwError::from(InternalError(format!(
-                "schema {:?} already exists",
-                schema_name,
-            ))));
+            return if is_not_exist {
+                Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
+            } else {
+                return Err(CatalogError::Duplicated("schema", schema_name).into());
+            };
         }
         reader.get_database_by_name(&database_name)?.id()
     };
