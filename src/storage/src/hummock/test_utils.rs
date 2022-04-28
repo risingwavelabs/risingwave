@@ -27,8 +27,8 @@ use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
-    SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStateStoreIter, HummockStorage, InMemSstableWriter, LruCache,
+    SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
 use crate::store::StateStoreIter;
@@ -81,15 +81,17 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
-pub fn gen_test_sstable_data(
+pub async fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
-    let mut b = SSTableBuilder::new(opts);
+    let writer = InMemSstableWriter::new(opts.capacity);
+    let mut b = SSTableBuilder::new(opts, writer, true);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice())
+        b.add(&key, value.as_slice()).await.unwrap()
     }
-    b.finish()
+    let output = b.finish().await.unwrap();
+    (output.writer_output, output.meta)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -100,7 +102,7 @@ pub async fn gen_test_sstable_inner(
     sstable_store: SstableStoreRef,
     poliy: CachePolicy,
 ) -> Sstable {
-    let (data, meta) = gen_test_sstable_data(opts, kv_iter);
+    let (data, meta) = gen_test_sstable_data(opts, kv_iter).await;
     let sst = Sstable { id: sst_id, meta };
     sstable_store.put(&sst, data, poliy).await.unwrap();
     sst

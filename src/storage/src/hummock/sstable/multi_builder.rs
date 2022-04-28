@@ -12,54 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 
-use super::SstableMeta;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuilder};
-
-struct SSTableBuilderWrapper {
-    id: u64,
-    builder: SSTableBuilder,
-    sealed: bool,
-}
+use crate::hummock::{HummockResult, SSTableBuildOutput, SSTableBuilder, SstableWriter};
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
-pub struct CapacitySplitTableBuilder<B> {
+pub struct CapacitySplitTableBuilder<B, W: SstableWriter> {
     /// When creating a new [`SSTableBuilder`], caller use this closure to specify the id and
     /// options.
     get_id_and_builder: B,
 
-    /// Wrapped [`SSTableBuilder`]s. The last one is what we are operating on.
-    builders: Vec<SSTableBuilderWrapper>,
+    finished_ssts: Vec<(u64, SSTableBuildOutput<W::WriterOutput>)>,
+
+    current_builder: Option<(u64, SSTableBuilder<W>)>,
 }
 
-impl<B, F> CapacitySplitTableBuilder<B>
+impl<B, F, W: SstableWriter> CapacitySplitTableBuilder<B, W>
 where
     B: FnMut() -> F,
-    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    F: Future<Output = HummockResult<(u64, SSTableBuilder<W>)>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B) -> Self {
         Self {
             get_id_and_builder,
-            builders: Vec::new(),
+            finished_ssts: Vec::new(),
+            current_builder: None,
         }
     }
 
     /// Returns the number of [`SSTableBuilder`]s.
     pub fn len(&self) -> usize {
-        self.builders.len()
+        self.finished_ssts.len() + if self.current_builder.is_some() { 1 } else { 0 }
     }
 
     /// Returns true if no builder is created.
     pub fn is_empty(&self) -> bool {
-        self.builders.is_empty()
+        self.finished_ssts.is_empty() && self.current_builder.is_none()
     }
 
     /// Adds a user key-value pair to the underlying builders, with given `epoch`.
@@ -91,24 +85,25 @@ where
         value: HummockValue<&[u8]>,
         allow_split: bool,
     ) -> HummockResult<()> {
-        let last_is_full = self
-            .builders
-            .last()
-            .map(|b| b.builder.reach_capacity() || b.sealed)
-            .unwrap_or(true);
-        let new_builder_required = self.builders.is_empty() || (allow_split && last_is_full);
-
-        if new_builder_required {
-            let (id, builder) = (self.get_id_and_builder)().await?;
-            self.builders.push(SSTableBuilderWrapper {
-                id,
-                builder,
-                sealed: false,
-            });
+        // Seal current builder if it reaches capacity and allow split
+        if self.current_builder.is_some()
+            && allow_split
+            && self.current_builder.as_mut().unwrap().1.reach_capacity()
+        {
+            let (table_id, current_builder) = self.current_builder.take().unwrap();
+            let output = current_builder.finish().await?;
+            self.finished_ssts.push((table_id, output));
         }
 
-        let builder = &mut self.builders.last_mut().unwrap().builder;
-        builder.add(full_key.into_inner(), value);
+        // Initialize a new builder if there is no current builder
+        let builder = if self.current_builder.is_none() {
+            let (id, builder) = (self.get_id_and_builder)().await?;
+            &mut self.current_builder.insert((id, builder)).1
+        } else {
+            &mut self.current_builder.as_mut().unwrap().1
+        };
+
+        builder.add(full_key.into_inner(), value).await?;
         Ok(())
     }
 
@@ -116,21 +111,20 @@ where
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub fn seal_current(&mut self) {
-        if let Some(b) = self.builders.last_mut() {
-            b.sealed = true;
+    pub async fn seal_current(&mut self) -> HummockResult<()> {
+        if self.current_builder.is_some() {
+            let (id, builder) = self.current_builder.take().unwrap();
+            self.finished_ssts.push((id, builder.finish().await?));
         }
+        Ok(())
     }
 
-    /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta)> {
-        self.builders
-            .into_iter()
-            .map(|b| {
-                let (data, meta) = b.builder.finish();
-                (b.id, data, meta)
-            })
-            .collect()
+    /// Finalizes all the tables to be ids and sstable builder output
+    pub async fn finish(
+        mut self,
+    ) -> HummockResult<Vec<(u64, SSTableBuildOutput<W::WriterOutput>)>> {
+        self.seal_current().await?;
+        Ok(self.finished_ssts)
     }
 }
 
@@ -139,12 +133,13 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering::SeqCst;
 
+    use futures::executor::block_on;
     use itertools::Itertools;
 
     use super::*;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
-    use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{InMemSstableWriter, SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
@@ -154,17 +149,21 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                }),
+                SSTableBuilder::new(
+                    SSTableBuilderOptions {
+                        capacity: table_capacity,
+                        block_capacity: block_size,
+                        restart_interval: DEFAULT_RESTART_INTERVAL,
+                        bloom_false_positive: 0.1,
+                        compression_algorithm: CompressionAlgorithm::None,
+                    },
+                    InMemSstableWriter::new(table_capacity),
+                    true,
+                ),
             ))
         };
         let builder = CapacitySplitTableBuilder::new(get_id_and_builder);
-        let results = builder.finish();
+        let results = block_on(builder.finish()).unwrap();
         assert!(results.is_empty());
     }
 
@@ -177,13 +176,17 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                }),
+                SSTableBuilder::new(
+                    SSTableBuilderOptions {
+                        capacity: table_capacity,
+                        block_capacity: block_size,
+                        restart_interval: DEFAULT_RESTART_INTERVAL,
+                        bloom_false_positive: 0.1,
+                        compression_algorithm: CompressionAlgorithm::None,
+                    },
+                    InMemSstableWriter::new(table_capacity),
+                    true,
+                ),
             ))
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
@@ -199,7 +202,7 @@ mod tests {
                 .unwrap();
         }
 
-        let results = builder.finish();
+        let results = block_on(builder.finish()).unwrap();
         assert!(results.len() > 1);
         assert_eq!(results.iter().map(|p| p.0).duplicates().count(), 0);
     }
@@ -208,9 +211,11 @@ mod tests {
     async fn test_table_seal() {
         let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(|| async {
+            let opt = default_builder_opt_for_test();
+            let writer = InMemSstableWriter::new(opt.capacity);
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(default_builder_opt_for_test()),
+                SSTableBuilder::new(opt, writer, true),
             ))
         });
         let mut epoch = 100;
@@ -226,22 +231,22 @@ mod tests {
         }
 
         assert_eq!(builder.len(), 0);
-        builder.seal_current();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 0);
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
-        builder.seal_current();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 2);
-        builder.seal_current();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
-        builder.seal_current();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
 
-        let results = builder.finish();
+        let results = builder.finish().await.unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -249,9 +254,11 @@ mod tests {
     async fn test_initial_not_allowed_split() {
         let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(|| async {
+            let opt = default_builder_opt_for_test();
+            let writer = InMemSstableWriter::new(opt.capacity);
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(default_builder_opt_for_test()),
+                SSTableBuilder::new(opt, writer, true),
             ))
         });
 

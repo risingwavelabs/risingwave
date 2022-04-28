@@ -74,23 +74,12 @@ impl SstableStore {
     ) -> HummockResult<usize> {
         let timer = self.stats.sst_store_put_remote_duration.start_timer();
 
-        let meta = Bytes::from(sst.meta.encode_to_bytes());
-        let len = data.len();
-
-        let data_path = self.get_sst_data_path(sst.id);
-        self.store
-            .upload(&data_path, data.clone())
-            .await
-            .map_err(HummockError::object_io_error)?;
+        self.put_sst_data(sst.id, data.clone()).await?;
 
         fail_point!("metadata_upload_err");
-        let meta_path = self.get_sst_meta_path(sst.id);
-        if let Err(e) = self.store.upload(&meta_path, meta).await {
-            self.store
-                .delete(&data_path)
-                .await
-                .map_err(HummockError::object_io_error)?;
-            return Err(HummockError::object_io_error(e));
+        if let Err(e) = self.put_meta(sst).await {
+            self.delete_sst_data(sst.id).await?;
+            return Err(e);
         }
 
         timer.observe_duration();
@@ -100,14 +89,51 @@ impl SstableStore {
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;
-                let block = Box::new(Block::decode(data.slice(offset..offset + len))?);
-                self.block_cache.insert(sst.id, block_idx as u64, block);
+                self.add_block_cache(sst.id, block_idx as u64, data.slice(offset..offset + len))
+                    .await
+                    .unwrap();
             }
             self.meta_cache
                 .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst.clone()));
         }
 
-        Ok(len)
+        Ok(data.len())
+    }
+
+    pub async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
+        let meta_path = self.get_sst_meta_path(sst.id);
+        let meta = Bytes::from(sst.meta.encode_to_bytes());
+        self.store
+            .upload(&meta_path, meta)
+            .await
+            .map_err(HummockError::object_io_error)
+    }
+
+    pub async fn put_sst_data(&self, sst_id: u64, data: Bytes) -> HummockResult<()> {
+        let data_path = self.get_sst_data_path(sst_id);
+        self.store
+            .upload(&data_path, data)
+            .await
+            .map_err(HummockError::object_io_error)
+    }
+
+    pub async fn delete_sst_data(&self, sst_id: u64) -> HummockResult<()> {
+        let data_path = self.get_sst_data_path(sst_id);
+        self.store
+            .delete(&data_path)
+            .await
+            .map_err(HummockError::object_io_error)
+    }
+
+    pub async fn add_block_cache(
+        &self,
+        table_id: u64,
+        block_idx: u64,
+        block_data: Bytes,
+    ) -> HummockResult<()> {
+        let block = Box::new(Block::decode(block_data)?);
+        self.block_cache.insert(table_id, block_idx, block);
+        Ok(())
     }
 
     pub async fn get(

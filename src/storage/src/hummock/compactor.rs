@@ -37,10 +37,9 @@ use super::iterator::{
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
-use super::{
-    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
-};
+use super::{HummockError, HummockResult, SSTableBuilder, SSTableIterator, Sstable};
 use crate::hummock::vacuum::Vacuum;
+use crate::hummock::{InMemSstableWriter, SSTableBuilderOptions, SstableWriter};
 use crate::monitor::StateStoreMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
@@ -154,7 +153,7 @@ impl Compactor {
                 }
                 Err(e) => {
                     compact_success = false;
-                    tracing::warn!("Shared Buffer Compaction failed with error: {}", e);
+                    tracing::warn!("Shared Buffer Compaction failed with error: {:?}", e);
                     err = Some(e);
                 }
             }
@@ -208,7 +207,7 @@ impl Compactor {
                 Err(e) => {
                     compact_success = false;
                     tracing::warn!(
-                        "Compaction task {} failed with error: {}",
+                        "Compaction task {} failed with error: {:?}",
                         compact_task.task_id,
                         e
                     );
@@ -271,6 +270,7 @@ impl Compactor {
     }
 
     /// Compact the given key range and merge iterator.
+    /// Upon a successful return, the built SSTs are already uploaded to object store.
     async fn compact_key_range(
         &self,
         split_index: usize,
@@ -291,7 +291,11 @@ impl Compactor {
                 .get_new_table_id()
                 .await
                 .map_err(HummockError::meta_error)?;
-            let builder = HummockStorage::get_builder(&self.context.options);
+            let builder = SSTableBuilder::new(
+                SSTableBuilderOptions::from_storage_config(&self.context.options),
+                InMemSstableWriter::new(self.context.options.sstable_size as usize),
+                false,
+            );
             Ok((table_id, builder))
         });
 
@@ -313,18 +317,18 @@ impl Compactor {
             timer.observe_duration();
         }
 
-        // Seal.
-        builder.seal_current();
-
         let mut ssts: Vec<Sstable> = Vec::new();
         ssts.reserve(builder.len());
         // TODO: decide upload concurrency
-        for (table_id, data, meta) in builder.finish() {
-            let sst = Sstable { id: table_id, meta };
+        for (table_id, output) in builder.finish().await? {
+            let sst = Sstable {
+                id: table_id,
+                meta: output.meta,
+            };
             let len = self
                 .context
                 .sstable_store
-                .put(&sst, data, super::CachePolicy::Fill)
+                .put(&sst, output.writer_output, super::CachePolicy::Fill)
                 .await?;
 
             if self.context.is_share_buffer_compact {
@@ -404,7 +408,7 @@ impl Compactor {
                     tracing::debug!("Finish vacuuming SSTs");
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to vacuum SSTs. {}", e);
+                    tracing::warn!("Failed to vacuum SSTs. {:?}", e);
                 }
             }
         }
@@ -504,8 +508,8 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F>(
-        sst_builder: &mut CapacitySplitTableBuilder<B>,
+    async fn compact_and_build_sst<B, F, W: SstableWriter>(
+        sst_builder: &mut CapacitySplitTableBuilder<B, W>,
         kr: KeyRange,
         mut iter: MergeIterator,
         has_user_key_overlap: bool,
@@ -513,7 +517,7 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: FnMut() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder<W>)>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem::size_of;
+
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::config::StorageConfig;
+use risingwave_common::error::Result;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::user_key;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -23,6 +29,8 @@ use super::{
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
+use crate::hummock::{HummockError, HummockResult};
+use crate::object::ObjectError;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
@@ -41,6 +49,19 @@ pub struct SSTableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
+impl SSTableBuilderOptions {
+    pub fn from_storage_config(options: &StorageConfig) -> SSTableBuilderOptions {
+        SSTableBuilderOptions {
+            capacity: options.sstable_size as usize,
+            block_capacity: options.block_size as usize,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: options.bloom_false_positive,
+            // TODO: Make this configurable.
+            compression_algorithm: CompressionAlgorithm::None,
+        }
+    }
+}
+
 impl Default for SSTableBuilderOptions {
     fn default() -> Self {
         Self {
@@ -53,12 +74,99 @@ impl Default for SSTableBuilderOptions {
     }
 }
 
+#[async_trait::async_trait]
+pub trait SstableWriter {
+    type WriterOutput;
+
+    fn flushed_len(&self) -> usize;
+    async fn flush(&mut self, data: Bytes) -> HummockResult<()>;
+    async fn finish(self) -> HummockResult<Self::WriterOutput>;
+}
+
+pub struct InMemSstableWriter {
+    pub buf: BytesMut,
+}
+
+impl InMemSstableWriter {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            buf: BytesMut::with_capacity(capacity),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriter for InMemSstableWriter {
+    type WriterOutput = Bytes;
+
+    fn flushed_len(&self) -> usize {
+        self.buf.len()
+    }
+
+    async fn flush(&mut self, data: Bytes) -> HummockResult<()> {
+        self.buf.put_slice(&data);
+        Ok(())
+    }
+
+    async fn finish(self) -> HummockResult<Bytes> {
+        Ok(self.buf.freeze())
+    }
+}
+
+pub struct ConcurrentUploadSstableWriter {
+    tx: Sender<Bytes>,
+    upload_join_handle: JoinHandle<Result<()>>,
+    flushed_len: usize,
+}
+
+impl ConcurrentUploadSstableWriter {
+    pub fn new(tx: Sender<Bytes>, upload_join_handle: JoinHandle<Result<()>>) -> Self {
+        Self {
+            tx,
+            upload_join_handle,
+            flushed_len: 0,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriter for ConcurrentUploadSstableWriter {
+    type WriterOutput = JoinHandle<Result<()>>;
+
+    fn flushed_len(&self) -> usize {
+        self.flushed_len
+    }
+
+    async fn flush(&mut self, data: Bytes) -> HummockResult<()> {
+        self.flushed_len += data.len();
+        self.tx.send(data).await.map_err(|err| {
+            HummockError::object_io_error(ObjectError::internal(format!(
+                "Failed to send data to upload thread. Err: {:?}",
+                err
+            )))
+        })?;
+        Ok(())
+    }
+
+    async fn finish(self) -> HummockResult<JoinHandle<Result<()>>> {
+        Ok(self.upload_join_handle)
+    }
+}
+
+pub struct SSTableBuildOutput<WO> {
+    pub writer_output: WO,
+    pub meta: SstableMeta,
+    /// Store the bytes of each block. Store for adding to block cache later
+    pub block_bytes: Option<Vec<Bytes>>,
+}
+
 pub const VNODE_BITMAP_LEN: usize = 1 << (VirtualNode::BITS - 3);
-pub struct SSTableBuilder {
-    /// Options.
+pub struct SSTableBuilder<W: SstableWriter> {
     options: SSTableBuilderOptions,
-    /// Write buffer.
-    buf: BytesMut,
+    /// Writer
+    writer: W,
+    /// Block collector
+    block_collector: Option<Vec<Bytes>>,
     /// Current block builder.
     block_builder: Option<BlockBuilder>,
     /// Block metadata vec.
@@ -72,11 +180,16 @@ pub struct SSTableBuilder {
     key_count: usize,
 }
 
-impl SSTableBuilder {
-    pub fn new(options: SSTableBuilderOptions) -> Self {
+impl<W: SstableWriter> SSTableBuilder<W> {
+    pub fn new(options: SSTableBuilderOptions, writer: W, collect_all_blocks: bool) -> Self {
         Self {
             options: options.clone(),
-            buf: BytesMut::with_capacity(options.capacity),
+            writer,
+            block_collector: if collect_all_blocks {
+                Some(Vec::new())
+            } else {
+                None
+            },
             block_builder: None,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
@@ -87,7 +200,7 @@ impl SSTableBuilder {
     }
 
     /// Add kv pair to sstable.
-    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) {
+    pub async fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_none() {
             self.last_full_key.clear();
@@ -97,7 +210,7 @@ impl SSTableBuilder {
                 compression_algorithm: self.options.compression_algorithm,
             }));
             self.block_metas.push(BlockMeta {
-                offset: self.buf.len() as u32,
+                offset: self.writer.flushed_len() as u32,
                 len: 0,
                 smallest_key: vec![],
             })
@@ -123,9 +236,10 @@ impl SSTableBuilder {
         self.last_full_key = Bytes::copy_from_slice(full_key);
 
         if block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block();
+            self.build_block().await?;
         }
         self.key_count += 1;
+        Ok(())
     }
 
     /// Finish building sst.
@@ -140,11 +254,13 @@ impl SSTableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (Bytes, SstableMeta) {
+    pub async fn finish(mut self) -> HummockResult<SSTableBuildOutput<W::WriterOutput>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
-        self.build_block();
-        self.buf.put_u32_le(self.block_metas.len() as u32);
+        self.build_block().await?;
+        let mut size_footer = BytesMut::with_capacity(size_of::<u32>());
+        size_footer.put_u32_le(self.block_metas.len() as u32);
+        self.writer.flush(size_footer.freeze()).await?;
 
         let meta = SstableMeta {
             block_metas: self.block_metas,
@@ -158,29 +274,43 @@ impl SSTableBuilder {
                 vec![]
             },
             bitmap: self.bitmap.to_vec(),
-            estimated_size: self.buf.len() as u32,
+            estimated_size: self.writer.flushed_len() as u32,
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
             version: VERSION,
         };
 
-        (self.buf.freeze(), meta)
+        Ok(SSTableBuildOutput {
+            writer_output: self.writer.finish().await?,
+            meta,
+            block_bytes: self.block_collector,
+        })
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.buf.len() + 4
+        self.writer.flushed_len()
+            + self
+                .block_builder
+                .as_ref()
+                .map(|b| b.approximate_len())
+                .unwrap_or(0)
+            + 4
     }
 
-    fn build_block(&mut self) {
+    async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_none() {
-            return;
+            return Ok(());
         }
-        let mut block_meta = self.block_metas.last_mut().unwrap();
+
         let block = self.block_builder.take().unwrap().build();
-        self.buf.put_slice(&block);
-        block_meta.len = self.buf.len() as u32 - block_meta.offset;
+        if let Some(collector) = &mut self.block_collector {
+            collector.push(block.clone());
+        }
+        self.block_metas.last_mut().unwrap().len = block.len() as u32;
+        self.writer.flush(block).await?;
+        Ok(())
     }
 
     pub fn len(&self) -> usize {
@@ -199,6 +329,9 @@ impl SSTableBuilder {
 
 #[cfg(test)]
 pub(super) mod tests {
+
+    use futures::executor::block_on;
+
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
@@ -217,23 +350,26 @@ pub(super) mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
 
-        let b = SSTableBuilder::new(opt);
+        let buf = InMemSstableWriter::new(opt.capacity);
 
-        b.finish();
+        let b = SSTableBuilder::new(opt, buf, false);
+        block_on(b.finish()).unwrap();
     }
 
     #[test]
     fn test_smallest_key_and_largest_key() {
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+        let opt = default_builder_opt_for_test();
+        let buf = InMemSstableWriter::new(opt.capacity);
+        let mut b = SSTableBuilder::new(opt, buf, false);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
+            block_on(b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))).unwrap();
         }
 
-        let (_, meta) = b.finish();
+        let output = block_on(b.finish()).unwrap();
 
-        assert_eq!(test_key_of(0), meta.smallest_key);
-        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
+        assert_eq!(test_key_of(0), output.meta.smallest_key);
+        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), output.meta.largest_key);
     }
 
     async fn test_with_bloom_filter(with_blooms: bool) {

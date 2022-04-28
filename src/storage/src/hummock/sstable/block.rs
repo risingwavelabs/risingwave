@@ -50,11 +50,13 @@ impl Block {
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = Decoder::new(buf.reader())
                     .map_err(HummockError::decode_error)
+                    // Q: should we unwrap here or report the error
                     .unwrap();
                 let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
                 decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)
+                    // Q: should we unwrap here or report the error
                     .unwrap();
                 Bytes::from(decoded)
             }

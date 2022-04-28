@@ -117,17 +117,6 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            capacity: options.sstable_size as usize,
-            block_capacity: options.block_size as usize,
-            restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: options.bloom_false_positive,
-            // TODO: Make this configurable.
-            compression_algorithm: CompressionAlgorithm::None,
-        })
-    }
-
     async fn get_from_table(
         &self,
         table: TableHolder,
