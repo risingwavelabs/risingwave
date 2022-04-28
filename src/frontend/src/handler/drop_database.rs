@@ -73,11 +73,17 @@ mod tests {
 
         frontend.run_sql("CREATE DATABASE database").await.unwrap();
 
-        frontend.run_sql("CREATE SCHEMA database.schema").await.unwrap();
+        frontend
+            .run_sql("CREATE SCHEMA database.schema")
+            .await
+            .unwrap();
 
         assert!(frontend.run_sql("DROP DATABASE database").await.is_err());
 
-        frontend.run_sql("DROP SCHEMA database.schema").await.unwrap();
+        frontend
+            .run_sql("DROP SCHEMA database.schema")
+            .await
+            .unwrap();
 
         frontend.run_sql("DROP DATABASE database").await.unwrap();
 

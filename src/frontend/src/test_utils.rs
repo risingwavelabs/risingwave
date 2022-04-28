@@ -146,7 +146,7 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
-        self.add_table_id(table.id, table.schema_id,table.database_id);
+        self.add_table_id(table.id, table.schema_id, table.database_id);
         Ok(())
     }
 
@@ -265,7 +265,7 @@ impl MockCatalogWriter {
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
         self.catalog.write().create_source(source.clone());
-        self.add_table_id(source.id, source.schema_id,source.database_id);
+        self.add_table_id(source.id, source.schema_id, source.database_id);
         Ok(source.id)
     }
 
