@@ -50,11 +50,10 @@ pub struct SortAggExecutor2 {
 impl BoxedExecutor2Builder for SortAggExecutor2 {
     fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
-        let proto_child = source
-            .plan_node()
-            .get_children()
-            .get(0)
-            .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
+        let proto_child =
+            source.plan_node().get_children().get(0).ok_or_else(|| {
+                ErrorCode::InternalError("SortAgg must have child node".to_string())
+            })?;
         let child = source.clone_for_plan(proto_child).build2()?;
 
         let sort_agg_node = try_match_expand!(

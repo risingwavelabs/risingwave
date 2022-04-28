@@ -108,7 +108,6 @@ impl EqGroups {
             }
             ret.push(*ri);
         }
-        // EqGroups(ret)
         EqGroups::new(ret)
     }
 }
@@ -130,8 +129,6 @@ pub trait SortedGrouper: Send + 'static {
     /// to `builder` immediately along the way. After this call, the internal state
     /// is about the last group which may continue in the next chunk. It can be
     /// obtained with `output` when there are no more upstream data.
-    ///
-    /// Siyuan: prepare sorted group to builder
     fn update_and_output_with_sorted_groups(
         &mut self,
         input: &ArrayImpl,
