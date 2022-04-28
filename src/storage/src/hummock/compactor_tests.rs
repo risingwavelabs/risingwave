@@ -115,15 +115,7 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task
-                .input_ssts
-                .first()
-                .unwrap()
-                .level
-                .as_ref()
-                .unwrap()
-                .table_infos
-                .len(),
+            compact_task.input_ssts.first().unwrap().table_infos.len(),
             kv_count
         );
 
