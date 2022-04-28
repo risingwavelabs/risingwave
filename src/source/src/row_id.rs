@@ -79,6 +79,7 @@ impl RowIdGenerator {
         } else {
             // If the sequence reaches the upper bound, spin loop here and wait for next
             // millisecond.
+            tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
             std::thread::sleep(std::time::Duration::from_millis(1));
             self.next()
         }
