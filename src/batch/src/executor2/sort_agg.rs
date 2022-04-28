@@ -30,14 +30,14 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-/// `SortAggExecutor` implements the sort aggregate algorithm, which requires
-/// that the input tuples has already been sorted by group columns.
+/// `SortAggExecutor` implements the sort aggregate algorithm, which assumes
+/// that the input chunks has already been sorted by group columns.
 /// The aggregation will be applied to tuples within the same group.
 /// And the output schema is `[group columns, agg result]`.
 ///
 /// As a special case, simple aggregate without groups satisfies the requirement
 /// automatically because all tuples should be aggregated together.
-pub(crate) struct SortAggExecutor2 {
+pub struct SortAggExecutor2 {
     agg_states: Vec<BoxedAggState>,
     group_keys: Vec<BoxedExpression>,
     sorted_groupers: Vec<BoxedSortedGrouper>,
@@ -356,7 +356,6 @@ mod tests {
             group_keys: vec![],
             sorted_groupers: vec![],
             child: Box::new(child),
-            child_done: false,
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,
@@ -400,9 +399,6 @@ mod tests {
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
 
-        // [1 2 3]
-        // [3 4 4]
-        // [8 8 8]
         let chunk = DataChunk::builder()
             .columns(vec![
                 Column::new(anchor.clone()),
@@ -463,7 +459,6 @@ mod tests {
             group_keys: group_exprs,
             sorted_groupers,
             child: Box::new(child),
-            child_done: false,
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit,

@@ -23,7 +23,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
-use top_n::*;
 
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
@@ -35,11 +34,10 @@ use crate::executor::join::HashJoinExecutorBuilder;
 use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
-use crate::executor2::sort_agg::*;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2, TopNExecutor2,
-    TraceExecutor2, ValuesExecutor2,
+    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2, SortAggExecutor2,
+    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
