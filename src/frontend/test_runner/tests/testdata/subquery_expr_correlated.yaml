@@ -168,3 +168,42 @@
         LogicalScan { table: t1, columns: [x, y] }
         LogicalProject { exprs: [$1, $0], expr_alias: [y,  ] }
           LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y from t2 where t1.x + t2.x = 100 and t1.y = 1000);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalFilter { predicate: ((CorrelatedInputRef { index: 1, depth: 1 } + $1) = 100:Int32) AND (CorrelatedInputRef { index: 2, depth: 1 } = 1000:Int32) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND (($0 + $3) = 100:Int32) AND ($1 = 1000:Int32) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$1, $0], expr_alias: [y,  ] }
+          LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y from t2 where t1.x > t2.x + 1000);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } > ($1 + 1000:Int32)) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 > ($3 + 1000:Int32)) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$1, $0], expr_alias: [y,  ] }
+          LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
+  binder_error: 'Bind error: subquery must return only one column'
