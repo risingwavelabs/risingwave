@@ -75,7 +75,7 @@ impl MetaNodeService {
 
         if config.enable_dashboard_v2 {
             cmd.arg("--dashboard-ui-path")
-                .arg(env::var("PREFIX_UI").unwrap_or(".risingwave/ui".to_owned()));
+                .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
         }
 
         if config.unsafe_disable_recovery {
