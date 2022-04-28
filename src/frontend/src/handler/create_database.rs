@@ -26,7 +26,7 @@ pub async fn handle_create_database(
     is_not_exist: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let database_name = Binder::resolve_single_name(database_name)?;
+    let database_name = Binder::resolve_database_name(database_name)?;
 
     {
         let catalog_reader = session.env().catalog_reader();

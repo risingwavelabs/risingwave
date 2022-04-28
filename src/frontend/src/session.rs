@@ -347,6 +347,12 @@ impl SessionManager for SessionManagerImpl {
             database.to_string(),
         )))
     }
+
+    fn check_database_name(&self, database: &str) -> bool {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        reader.get_database_by_name(database).is_ok()
+    }
 }
 
 impl SessionManagerImpl {

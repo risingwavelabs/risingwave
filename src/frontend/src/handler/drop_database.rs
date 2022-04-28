@@ -58,3 +58,21 @@ pub async fn handle_drop_database(
     catalog_writer.drop_database(database_id).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_drop_database() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        frontend.run_sql("CREATE DATABASE t1").await.unwrap();
+
+        frontend.run_sql("CREATE SCHEMA t1.s1").await.unwrap();
+
+        frontend.run_sql("DROP DATABASE t1").await.unwrap();
+
+        assert_eq!(1, 2);
+    }
+}

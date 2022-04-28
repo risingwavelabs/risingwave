@@ -26,13 +26,14 @@ pub async fn handle_create_schema(
     is_not_exist: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let schema_name = Binder::resolve_single_name(schema_name)?;
+    let (database_name, schema_name) =
+        Binder::resolve_schema_name(session.database(), schema_name)?;
 
     let db_id = {
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
-            .get_schema_by_name(session.database(), &schema_name)
+            .get_schema_by_name(&database_name, &schema_name)
             .is_ok()
             && !is_not_exist
         {
@@ -41,7 +42,7 @@ pub async fn handle_create_schema(
                 schema_name,
             ))));
         }
-        reader.get_database_by_name(session.database())?.id()
+        reader.get_database_by_name(&database_name)?.id()
     };
 
     let catalog_writer = session.env().catalog_writer();

@@ -55,6 +55,12 @@ impl SessionManager for LocalFrontend {
     ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
         Ok(self.session_ref())
     }
+
+    fn check_database_name(&self, database: &str) -> bool {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        reader.get_database_by_name(database).is_ok()
+    }
 }
 
 impl LocalFrontend {
@@ -123,14 +129,14 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_database(&self, db_name: &str) -> Result<()> {
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
-            id: 0,
+            id: self.gen_id(),
         });
         Ok(())
     }
 
     async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
         self.catalog.write().create_schema(ProstSchema {
-            id: 0,
+            id: self.gen_id(),
             name: schema_name.to_string(),
             database_id: db_id,
         });
@@ -226,7 +232,7 @@ impl MockCatalogWriter {
     }
 
     fn gen_id(&self) -> u32 {
-        self.id.fetch_add(1, Ordering::SeqCst)
+        self.id.fetch_add(1, Ordering::SeqCst) + 1
     }
 
     fn add_table_id(&self, table_id: u32, schema_id: SchemaId, database_id: DatabaseId) {

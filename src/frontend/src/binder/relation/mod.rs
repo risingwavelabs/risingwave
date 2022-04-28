@@ -61,15 +61,34 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    /// return the single `name`
-    pub fn resolve_single_name(name: ObjectName) -> Result<String> {
+    /// return the ( `database_name`, `schema_name`)
+    pub fn resolve_schema_name(
+        default_db_name: &str,
+        name: ObjectName,
+    ) -> Result<(String, String)> {
         let mut identifiers = name.0;
-        let single_name = identifiers
+        let schema_name = identifiers
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("empty name".into()))?
+            .ok_or_else(|| ErrorCode::InternalError("empty schema name".into()))?
             .value;
 
-        Ok(single_name)
+        let database_name = identifiers
+            .pop()
+            .map(|ident| ident.value)
+            .unwrap_or_else(|| default_db_name.into());
+
+        Ok((database_name, schema_name))
+    }
+
+    /// return the `database_name`
+    pub fn resolve_database_name(name: ObjectName) -> Result<String> {
+        let mut identifiers = name.0;
+        let database_name = identifiers
+            .pop()
+            .ok_or_else(|| ErrorCode::InternalError("empty database name".into()))?
+            .value;
+
+        Ok(database_name)
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.

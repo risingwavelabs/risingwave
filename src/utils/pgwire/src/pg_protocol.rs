@@ -107,9 +107,15 @@ where
         }
     }
 
-    fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
-        // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
-        self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
+    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> Result<()> {
+        let db_name = match msg.config_map.get("database") {
+            None => "dev",
+            Some(name) => match self.session_mgr.check_database_name(name) {
+                true => name,
+                false => "dev",
+            },
+        };
+        self.session = Some(self.session_mgr.connect(db_name).map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::Encoding("utf8"),
