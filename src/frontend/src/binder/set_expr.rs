@@ -37,35 +37,6 @@ impl BoundSetExpr {
         }
     }
 
-    /// The names returned by this [`BoundSetExpr`].
-    pub fn names(&self) -> Vec<String> {
-        match self {
-            BoundSetExpr::Select(s) => s.names(),
-            BoundSetExpr::Values(v) => v.schema.fields().iter().map(|f| f.name.clone()).collect(),
-        }
-    }
-
-    /// The fields returned by this [`BoundSetExpr`].
-    pub fn fields(&self) -> Vec<Field> {
-        match self {
-            BoundSetExpr::Select(s) => s.schema.fields.clone(),
-            BoundSetExpr::Values(v) => v.schema.fields.clone(),
-        }
-    }
-
-    /// The types returned by this [`BoundSetExpr`].
-    pub fn data_types(&self) -> Vec<DataType> {
-        match self {
-            BoundSetExpr::Select(s) => s.data_types(),
-            BoundSetExpr::Values(v) => v
-                .schema
-                .fields()
-                .iter()
-                .map(|f| f.data_type.clone())
-                .collect(),
-        }
-    }
-
     pub fn is_correlated(&self) -> bool {
         match self {
             BoundSetExpr::Select(s) => s.is_correlated(),
