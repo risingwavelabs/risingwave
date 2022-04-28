@@ -37,6 +37,9 @@ use crate::storage::{self, MetaStore, Transaction};
 /// A global, unique indentifier of an actor
 pub type ActorId = u32;
 
+/// Should be used together with `ActorId` to uniquely identify a dispatcher
+pub type DispatcherId = u64;
+
 /// A global, unique identifier of a fragment
 pub type FragmentId = u32;
 

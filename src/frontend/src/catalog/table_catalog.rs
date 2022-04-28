@@ -28,12 +28,25 @@ use crate::catalog::TableId;
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,
+
     pub associated_source_id: Option<TableId>, // TODO: use SourceId
+
     pub name: String,
+
+    /// All columns in this table
     pub columns: Vec<ColumnCatalog>,
-    pub pk_desc: Vec<OrderedColumnDesc>,
-    pub is_index_on: Option<TableId>,
+
+    /// Keys used as materialize's storage key prefix, including MV order keys and pks.
+    pub order_desc: Vec<OrderedColumnDesc>,
+
+    /// Primary key columns indices.
+    pub pks: Vec<usize>,
+
+    /// Distribution key column indices.
     pub distribution_keys: Vec<usize>,
+
+    /// If set to Some(TableId), then this table is an index on another table.
+    pub is_index_on: Option<TableId>,
 }
 
 impl TableCatalog {
@@ -54,15 +67,16 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn pk_desc(&self) -> &[OrderedColumnDesc] {
-        self.pk_desc.as_ref()
+    pub fn order_desc(&self) -> &[OrderedColumnDesc] {
+        self.order_desc.as_ref()
     }
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         TableDesc {
             table_id: self.id,
-            pk: self.pk_desc.clone(),
+            order_desc: self.order_desc.clone(),
+            pks: self.pks.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_keys: self.distribution_keys.clone(),
         }
@@ -78,8 +92,8 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        let (pk_column_ids, pk_orders) = self
-            .pk_desc()
+        let (order_column_ids, orders) = self
+            .order_desc()
             .iter()
             .map(|col| {
                 (
@@ -95,8 +109,9 @@ impl TableCatalog {
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
-            pk_column_ids,
-            pk_orders,
+            order_column_ids,
+            orders,
+            pk: self.pks.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
@@ -132,12 +147,13 @@ impl From<ProstTable> for TableCatalog {
                 col_descs.insert(col_id, col_desc);
             }
         }
-        let pk_desc = tb
-            .pk_column_ids
+
+        let order_desc = tb
+            .order_column_ids
             .clone()
             .into_iter()
             .zip_eq(
-                tb.pk_orders
+                tb.orders
                     .into_iter()
                     .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
             )
@@ -151,7 +167,7 @@ impl From<ProstTable> for TableCatalog {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
-            pk_desc,
+            order_desc,
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
@@ -163,6 +179,7 @@ impl From<ProstTable> for TableCatalog {
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
+            pks: tb.pk.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -223,8 +240,9 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            pk_column_ids: vec![0],
-            pk_orders: vec![OrderType::Ascending.to_prost() as i32],
+            order_column_ids: vec![0],
+            pk: vec![0],
+            orders: vec![OrderType::Ascending.to_prost() as i32],
             dependent_relations: vec![],
             distribution_keys: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
@@ -269,7 +287,8 @@ mod tests {
                         is_hidden: false
                     }
                 ],
-                pk_desc: vec![OrderedColumnDesc {
+                pks: vec![0],
+                order_desc: vec![OrderedColumnDesc {
                     column_desc: row_id_column_desc(),
                     order: OrderType::Ascending
                 }],
