@@ -439,6 +439,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
+                distribution_keys: vec![],
             }),
             vec![],
             ctx,

@@ -31,7 +31,9 @@ impl Rule for IndexDeltaJoinRule {
             return Some(plan);
         }
 
-        // FIXME: https://github.com/singularity-data/risingwave/issues/2098, so there won't be any exchange
+        /// FIXME: Exchanges still may exist after table scan, because table scan's distribution
+        /// follows upstream materialize node(e.g. subset of pk), whereas join distributes by join
+        /// key.
         fn match_through_exchange(plan: PlanRef) -> Option<PlanRef> {
             if let Some(exchange) = plan.as_stream_exchange() {
                 match_through_exchange(exchange.input())
@@ -90,9 +92,15 @@ impl Rule for IndexDeltaJoinRule {
 
         fn replace_across_exchange(plan: PlanRef, index_scan: PlanRef) -> PlanRef {
             if let Some(exchange) = plan.as_stream_exchange() {
-                exchange
-                    .clone_with_input(replace_across_exchange(exchange.input(), index_scan))
-                    .into()
+                if index_scan.distribution().satisfies(exchange.distribution()) {
+                    // When the index scan has the same distribution as downstream
+                    // nodes, exchange can be removed.
+                    index_scan
+                } else {
+                    exchange
+                        .clone_with_input(replace_across_exchange(exchange.input(), index_scan))
+                        .into()
+                }
             } else if plan.as_stream_table_scan().is_some() {
                 index_scan
             } else {
