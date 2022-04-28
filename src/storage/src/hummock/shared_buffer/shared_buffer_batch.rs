@@ -33,7 +33,7 @@ use crate::storage_value::VALUE_META_SIZE;
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
 pub(crate) struct SharedBufferBatchInner {
-    data: Vec<SharedBufferItem>,
+    payload: Vec<SharedBufferItem>,
     size: usize,
     buffer_size_tracker: Arc<AtomicUsize>,
 }
@@ -42,7 +42,7 @@ impl Deref for SharedBufferBatchInner {
     type Target = [SharedBufferItem];
 
     fn deref(&self) -> &Self::Target {
-        self.data.as_slice()
+        self.payload.as_slice()
     }
 }
 
@@ -56,19 +56,18 @@ impl Debug for SharedBufferBatchInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "SharedBufferBatchInner {{ data: {:?}, size: {} }}",
-            self.data, self.size
+            "SharedBufferBatchInner {{ payload: {:?}, size: {} }}",
+            self.payload, self.size
         )
     }
 }
 
 impl PartialEq for SharedBufferBatchInner {
     fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
+        self.payload == other.payload
     }
 }
 
-// TODO: Remove `pub(super)`.
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedBufferBatch {
@@ -76,6 +75,7 @@ pub struct SharedBufferBatch {
     epoch: HummockEpoch,
 }
 
+/// `{ end key -> batch }`
 pub(crate) type IndexedSharedBufferBatches = BTreeMap<Vec<u8>, SharedBufferBatch>;
 
 impl SharedBufferBatch {
@@ -91,7 +91,7 @@ impl SharedBufferBatch {
 
         Self {
             inner: Arc::new(SharedBufferBatchInner {
-                data: sorted_items,
+                payload: sorted_items,
                 size,
                 buffer_size_tracker,
             }),
@@ -133,7 +133,7 @@ impl SharedBufferBatch {
         SharedBufferBatchIterator::<Backward>::new(self.inner)
     }
 
-    pub fn get_data(&self) -> &[SharedBufferItem] {
+    pub fn get_payload(&self) -> &[SharedBufferItem] {
         &self.inner
     }
 

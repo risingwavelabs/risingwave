@@ -108,7 +108,7 @@ impl LocalVersionManager {
             || false,
         )
         .await
-        .expect("should be `Some` is `break_condition` is always false")
+        .expect("should be `Some` since `break_condition` is always false")
         .expect("should be able to pinned the first version");
 
         let global_upload_batches_size = Arc::new(AtomicUsize::new(0));
@@ -461,7 +461,9 @@ impl LocalVersionManager {
                     local_version_manager.try_update_pinned_version(pinned_version);
                 }
                 Some(Err(_)) => {
-                    unreachable!("since the max_retry is `usize::MAX`, this should return `Err`");
+                    unreachable!(
+                        "since the max_retry is `usize::MAX`, this should never return `Err`"
+                    );
                 }
                 None => {
                     tracing::info!("Shutdown hummock pin worker");

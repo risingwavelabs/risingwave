@@ -24,12 +24,11 @@ use itertools::Itertools;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::shared_buffer_batch::IndexedSharedBufferBatches;
-use crate::hummock::shared_buffer::shared_buffer_uploader::{UploadTaskData, UploadTaskId};
+use crate::hummock::shared_buffer::shared_buffer_uploader::{UploadTaskId, UploadTaskPayload};
 use crate::hummock::utils::range_overlap;
 
 #[derive(Default, Debug)]
 pub struct SharedBuffer {
-    /// `{ end key -> batch }`
     non_upload_batches: IndexedSharedBufferBatches,
     replicate_batches: IndexedSharedBufferBatches,
     uploading_batches: HashMap<UploadTaskId, IndexedSharedBufferBatches>,
@@ -107,7 +106,7 @@ impl SharedBuffer {
     pub fn new_upload_task(
         &mut self,
         task_gen: impl Fn(&mut IndexedSharedBufferBatches) -> IndexedSharedBufferBatches,
-    ) -> (UploadTaskId, UploadTaskData) {
+    ) -> (UploadTaskId, UploadTaskPayload) {
         let task_id = self.next_upload_task_id;
         self.next_upload_task_id += 1;
         let indexed_batches = task_gen(&mut self.non_upload_batches);

@@ -29,7 +29,7 @@ use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskId = u64;
-pub(crate) type UploadTaskData = Vec<SharedBufferBatch>;
+pub(crate) type UploadTaskPayload = Vec<SharedBufferBatch>;
 pub(crate) type UploadTaskResult =
     BTreeMap<(HummockEpoch, UploadTaskId), HummockResult<Vec<SstableInfo>>>;
 
@@ -37,12 +37,12 @@ pub(crate) type UploadTaskResult =
 pub struct UploadTask {
     pub(crate) id: UploadTaskId,
     pub(crate) epoch: HummockEpoch,
-    pub(crate) data: UploadTaskData,
+    pub(crate) payload: UploadTaskPayload,
 }
 
 impl UploadTask {
-    pub fn new(id: UploadTaskId, epoch: HummockEpoch, data: UploadTaskData) -> Self {
-        Self { id, epoch, data }
+    pub fn new(id: UploadTaskId, epoch: HummockEpoch, payload: UploadTaskPayload) -> Self {
+        Self { id, epoch, payload }
     }
 }
 
@@ -106,7 +106,7 @@ impl SharedBufferUploader {
             for UploadTask {
                 id: task_id,
                 epoch,
-                data,
+                payload,
             } in item.tasks
             {
                 // If a previous task failed, this task will also fail
@@ -118,7 +118,7 @@ impl SharedBufferUploader {
                         )),
                     );
                 } else {
-                    match self.flush(epoch, &data).await {
+                    match self.flush(epoch, &payload).await {
                         Ok(tables) => {
                             task_results.insert((epoch, task_id), Ok(tables));
                         }
@@ -147,7 +147,7 @@ impl SharedBufferUploader {
 
         if let Some(detector) = &self.write_conflict_detector {
             for batch in batches {
-                detector.check_conflict_and_track_write_batch(batch.get_data(), epoch);
+                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
             }
         }
 
