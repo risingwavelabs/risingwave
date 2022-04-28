@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
-    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
@@ -253,6 +253,7 @@ impl Compactor {
                         right: sst.meta.largest_key.clone(),
                         inf: false,
                     }),
+                    file_size: sst.meta.estimated_size as u64,
                 }));
         }
 
@@ -345,13 +346,10 @@ impl Compactor {
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
-        for LevelEntry {
-            level_idx: _,
-            level: opt_level,
-            ..
-        } in &self.compact_task.input_ssts
-        {
-            let level = opt_level.as_ref().unwrap();
+        for level in &self.compact_task.input_ssts {
+            if level.table_infos.is_empty() {
+                continue;
+            }
             // Do not need to filter the table because manager has done it.
             // let read_statistics: &mut TableSetStatistics = if *level_idx ==
             // compact_task.target_level {

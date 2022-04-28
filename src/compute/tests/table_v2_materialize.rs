@@ -91,7 +91,7 @@ async fn test_table_v2_materialize() -> Result<()> {
             .clone()
             .monitored(Arc::new(StateStoreMetrics::unused())),
     );
-    let source_manager = Arc::new(MemSourceManager::new());
+    let source_manager = Arc::new(MemSourceManager::default());
     let source_table_id = TableId::default();
     let table_columns = vec![
         // data
@@ -188,7 +188,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         Box::new(ExecutorWrapper::from(insert_inner)),
-        0,
         false,
     ));
 
@@ -246,6 +245,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Poll `Materialize`, should output the same insertion stream chunk
     let message = materialize.next().await?;
+    let mut col_row_ids = vec![];
     match message {
         Message::Chunk(c) => {
             let col_data = c.columns()[0].array_ref().as_float64();
@@ -253,8 +253,8 @@ async fn test_table_v2_materialize() -> Result<()> {
             assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
 
             let col_row_id = c.columns()[1].array_ref().as_int64();
-            assert_eq!(col_row_id.value_at(0).unwrap(), 0);
-            assert_eq!(col_row_id.value_at(1).unwrap(), 1);
+            col_row_ids.push(col_row_id.value_at(0).unwrap());
+            col_row_ids.push(col_row_id.value_at(1).unwrap());
         }
         Message::Barrier(_) => panic!(),
     }
@@ -297,7 +297,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv"
     let columns = vec![
         column_nonnull! { F64Array, [1.14] },
-        column_nonnull! { I64Array, [0] }, // row id column
+        column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let delete_inner: Box<dyn BatchExecutor> =
@@ -322,7 +322,7 @@ async fn test_table_v2_materialize() -> Result<()> {
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
 
             let col_row_id = c.columns()[1].array_ref().as_int64();
-            assert_eq!(col_row_id.value_at(0).unwrap(), 0);
+            assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
         }
         Message::Barrier(_) => panic!(),
     }

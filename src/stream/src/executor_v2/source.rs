@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
@@ -48,9 +46,6 @@ pub struct SourceExecutor {
     column_ids: Vec<ColumnId>,
     schema: Schema,
     pk_indices: PkIndices,
-
-    /// current allocated row id
-    next_row_id: AtomicU64,
 
     /// Identity string
     identity: String,
@@ -146,12 +141,6 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
         stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
-        // todo(chen): dirty code to generate row_id start position
-        let row_id_start = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        let row_id_start = row_id_start << 32;
         Ok(Self {
             source_id,
             source_desc,
@@ -159,8 +148,6 @@ impl SourceExecutor {
             schema,
             pk_indices,
             barrier_receiver: Some(barrier_receiver),
-            // fixme(chen): may conflict
-            next_row_id: AtomicU64::from(row_id_start),
             identity: format!("SourceExecutor {:X}", executor_id),
             metrics: streaming_metrics,
             stream_source_splits,
@@ -174,7 +161,7 @@ impl SourceExecutor {
 
         for _ in 0..len {
             builder
-                .append(Some(self.next_row_id.fetch_add(1, Ordering::Relaxed) as i64))
+                .append(Some(self.source_desc.next_row_id()))
                 .unwrap();
         }
 
@@ -277,12 +264,6 @@ impl SourceExecutor {
                 Message::Barrier(barrier) => yield Message::Barrier(barrier),
                 // If there's barrier, this branch will be deferred.
                 Message::Chunk(mut chunk) => {
-                    // Refill row id only if not a table source.
-                    // Note(eric): Currently, rows from external sources are filled with row_ids
-                    // here, but rows from tables (by insert statements)
-                    // are filled in InsertExecutor.
-                    //
-                    // TODO: in the future, we may add row_id column here for TableV2 as well
                     if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                         chunk = self.refill_row_id_column(chunk);
                     }
@@ -374,7 +355,7 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
-        let source_manager = MemSourceManager::new();
+        let source_manager = MemSourceManager::default();
         source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
@@ -501,7 +482,7 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
-        let source_manager = MemSourceManager::new();
+        let source_manager = MemSourceManager::default();
         source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;

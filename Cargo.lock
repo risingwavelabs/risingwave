@@ -3795,6 +3795,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tracing",
  "twox-hash",
  "url",
  "workspace-hack",
