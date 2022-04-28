@@ -52,7 +52,6 @@ pub struct ActorInfos {
 pub struct BuildGraphInfo {
     pub table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
     pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
-    pub upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -345,8 +344,6 @@ where
                         .insert(*table_id, table_fragment.node_actor_ids());
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
-                    info.upstream_distribution_keys
-                        .insert(*table_id, table_fragment.distribution_keys().clone());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

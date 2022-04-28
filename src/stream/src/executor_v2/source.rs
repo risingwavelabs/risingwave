@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
@@ -49,9 +47,6 @@ pub struct SourceExecutor {
     schema: Schema,
     pk_indices: PkIndices,
 
-    /// current allocated row id
-    next_row_id: AtomicU64,
-
     /// Identity string
     identity: String,
 
@@ -62,7 +57,6 @@ pub struct SourceExecutor {
     metrics: Arc<StreamingMetrics>,
 
     /// Split info for stream source
-    #[allow(dead_code)]
     stream_source_splits: Vec<SplitImpl>,
 
     source_identify: String,
@@ -103,17 +97,14 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .map(|i| ColumnId::from(*i))
             .collect();
         let mut fields = Vec::with_capacity(column_ids.len());
-        for &column_id in &column_ids {
+        fields.extend(column_ids.iter().map(|column_id| {
             let column_desc = source_desc
                 .columns
                 .iter()
-                .find(|c| c.column_id == column_id)
+                .find(|c| &c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::with_name(
-                column_desc.data_type.clone(),
-                column_desc.name.clone(),
-            ));
-        }
+            Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
+        }));
         let schema = Schema::new(fields);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
 
@@ -150,12 +141,6 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
         stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
-        // todo(chen): dirty code to generate row_id start position
-        let row_id_start = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        let row_id_start = row_id_start << 32;
         Ok(Self {
             source_id,
             source_desc,
@@ -163,8 +148,6 @@ impl SourceExecutor {
             schema,
             pk_indices,
             barrier_receiver: Some(barrier_receiver),
-            // fixme(chen): may conflict
-            next_row_id: AtomicU64::from(row_id_start),
             identity: format!("SourceExecutor {:X}", executor_id),
             metrics: streaming_metrics,
             stream_source_splits,
@@ -172,12 +155,13 @@ impl SourceExecutor {
         })
     }
 
-    fn gen_row_column(&mut self, len: usize) -> Column {
+    /// Generate a row ID column.
+    fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len).unwrap();
 
         for _ in 0..len {
             builder
-                .append(Some(self.next_row_id.fetch_add(1, Ordering::Relaxed) as i64))
+                .append(Some(self.source_desc.next_row_id()))
                 .unwrap();
         }
 
@@ -185,18 +169,17 @@ impl SourceExecutor {
     }
 
     fn refill_row_id_column(&mut self, chunk: StreamChunk) -> StreamChunk {
-        if let Some(row_id_index) = self.source_desc.row_id_index {
-            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+        let row_id_index = self.source_desc.row_id_index;
+        let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
-            if let Some(idx) = self
-                .column_ids
-                .iter()
-                .position(|column_id| *column_id == row_id_column_id)
-            {
-                let (ops, mut columns, bitmap) = chunk.into_inner();
-                columns[idx] = self.gen_row_column(columns[idx].array().len());
-                return StreamChunk::new(ops, columns, bitmap);
-            }
+        if let Some(idx) = self
+            .column_ids
+            .iter()
+            .position(|column_id| *column_id == row_id_column_id)
+        {
+            let (ops, mut columns, bitmap) = chunk.into_inner();
+            columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+            return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
     }
@@ -256,20 +239,17 @@ impl SourceExecutor {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         // todo: use epoch from msg to restore state from state store
-        let stream_reader = self
-            .source_desc
-            .source
-            .stream_reader(
-                match self.source_desc.source.as_ref() {
-                    SourceImpl::TableV2(_) => SourceReaderContext::None(()),
-                    SourceImpl::Connector(_c) => SourceReaderContext::ConnectorReaderContext(
-                        self.stream_source_splits.clone(),
-                    ),
-                },
-                self.column_ids.clone(),
-            )
-            .await
-            .map_err(StreamExecutorError::source_error)?;
+        let stream_reader = match self.source_desc.source.as_ref() {
+            SourceImpl::TableV2(t) => t
+                .stream_reader(self.column_ids.clone())
+                .await
+                .map(SourceStreamReaderImpl::TableV2),
+            SourceImpl::Connector(c) => c
+                .stream_reader(self.stream_source_splits.clone(), self.column_ids.clone())
+                .await
+                .map(SourceStreamReaderImpl::Connector),
+        }
+        .map_err(StreamExecutorError::source_error)?;
 
         let reader = SourceReader {
             stream_reader: Box::new(stream_reader),
@@ -284,12 +264,6 @@ impl SourceExecutor {
                 Message::Barrier(barrier) => yield Message::Barrier(barrier),
                 // If there's barrier, this branch will be deferred.
                 Message::Chunk(mut chunk) => {
-                    // Refill row id only if not a table source.
-                    // Note(eric): Currently, rows from external sources are filled with row_ids
-                    // here, but rows from tables (by insert statements)
-                    // are filled in InsertExecutor.
-                    //
-                    // TODO: in the future, we may add row_id column here for TableV2 as well
                     if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                         chunk = self.refill_row_id_column(chunk);
                     }
@@ -381,7 +355,7 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
-        let source_manager = MemSourceManager::new();
+        let source_manager = MemSourceManager::default();
         source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
@@ -508,7 +482,7 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
-        let source_manager = MemSourceManager::new();
+        let source_manager = MemSourceManager::default();
         source_manager.create_table_source(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;

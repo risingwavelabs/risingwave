@@ -35,9 +35,6 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<u64> = level_entry
-            .level
-            .as_ref()
-            .unwrap()
             .table_infos
             .iter()
             .map(|table| table.id)

@@ -55,6 +55,14 @@ impl Array for DecimalArray {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Decimal> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.data[idx])
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.data.len()
     }
