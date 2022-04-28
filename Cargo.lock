@@ -592,7 +592,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tower",
- "tower-http 0.3.0",
+ "tower-http",
  "tower-layer",
  "tower-service",
 ]
@@ -2192,7 +2192,7 @@ dependencies = [
  "tagptr",
  "thiserror",
  "triomphe",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3193,7 +3193,7 @@ dependencies = [
  "cc",
  "libc",
  "once_cell",
- "spin",
+ "spin 0.5.2",
  "untrusted",
  "web-sys",
  "winapi",
@@ -3372,7 +3372,7 @@ dependencies = [
  "toml",
  "tonic",
  "tower",
- "tower-http 0.2.5",
+ "tower-http",
  "twox-hash",
  "value-encoding",
  "workspace-hack",
@@ -3442,7 +3442,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
- "tower-http 0.2.5",
+ "tower-http",
  "tracing",
  "twox-hash",
  "url",
@@ -3595,7 +3595,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
- "uuid",
+ "uuid 1.0.0",
  "workspace-hack",
 ]
 
@@ -3697,9 +3697,9 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
- "tower-http 0.2.5",
+ "tower-http",
  "tracing",
- "uuid",
+ "uuid 1.0.0",
  "workspace-hack",
 ]
 
@@ -3875,7 +3875,7 @@ dependencies = [
  "risingwave_rpc_client",
  "serde",
  "smallvec",
- "spin",
+ "spin 0.9.3",
  "thiserror",
  "tokio",
  "tokio-retry",
@@ -3883,7 +3883,7 @@ dependencies = [
  "tonic",
  "tracing",
  "twox-hash",
- "uuid",
+ "uuid 1.0.0",
  "value-encoding",
  "workspace-hack",
 ]
@@ -4298,6 +4298,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
+name = "spin"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c530c2b0d0bf8b69304b39fe2001993e267461948b890cd037d8ad4293fa1a0d"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4703,9 +4712,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.2.5"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aba3f3efabf7fb41fae8534fc20a817013dd1c12cb45441efb6c82e6556b4cd8"
+checksum = "79dd37121c38240c4b4fe6520332406218bbf876f2f690fe9e406020189366fd"
 dependencies = [
  "bitflags",
  "bytes",
@@ -4721,25 +4730,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util 0.7.1",
- "tower",
- "tower-layer",
- "tower-service",
-]
-
-[[package]]
-name = "tower-http"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79dd37121c38240c4b4fe6520332406218bbf876f2f690fe9e406020189366fd"
-dependencies = [
- "bitflags",
- "bytes",
- "futures-core",
- "futures-util",
- "http",
- "http-body",
- "http-range-header",
- "pin-project-lite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -4937,6 +4927,15 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom 0.2.6",
+]
+
+[[package]]
+name = "uuid"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cfcd319456c4d6ea10087ed423473267e1a071f3bc0aa89f80d60997843c6f0"
 dependencies = [
  "getrandom 0.2.6",
 ]
@@ -5243,11 +5242,12 @@ dependencies = [
  "tokio-util 0.6.9",
  "tokio-util 0.7.1",
  "tower",
- "tower-http 0.2.5",
+ "tower-http",
  "tracing",
  "tracing-core",
  "tracing-futures",
  "url",
+ "uuid 1.0.0",
 ]
 
 [[package]]
