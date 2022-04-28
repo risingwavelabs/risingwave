@@ -219,6 +219,10 @@ impl StreamActorBuilder {
         if dispatcher.is_empty() {
             dispatcher = vec![Dispatcher {
                 r#type: DispatcherType::Broadcast.into(),
+                // Currently when create MV on MV, we will add outputs to this dispatcher with id 0
+                // (cross-MV dispatcher).
+                // See also the rustdoc of this field.
+                dispatcher_id: 0,
                 ..Default::default()
             }]
         }
