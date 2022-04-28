@@ -18,6 +18,7 @@ mod delete;
 mod filter;
 mod generic_exchange;
 mod hash_agg;
+mod hop_window;
 mod insert;
 mod limit;
 mod project;
