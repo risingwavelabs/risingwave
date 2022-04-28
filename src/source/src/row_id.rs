@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
 const WORKER_ID_SHIFT_BITS: u8 = 12;
@@ -55,17 +55,18 @@ impl RowIdGenerator {
     }
 
     pub fn next(&mut self) -> RowId {
-        let current_duration = self.epoch.elapsed().unwrap().as_millis() as i64;
-        if current_duration < self.last_duration_ms {
+        let current_duration = self.epoch.elapsed().unwrap();
+        let current_duration_ms = current_duration.as_millis() as i64;
+        if current_duration_ms < self.last_duration_ms {
             tracing::warn!(
                 "Clock moved backwards: last_duration={}, current_duration={}",
                 self.last_duration_ms,
-                current_duration
+                current_duration_ms
             );
         }
 
-        if current_duration > self.last_duration_ms {
-            self.last_duration_ms = current_duration;
+        if current_duration_ms > self.last_duration_ms {
+            self.last_duration_ms = current_duration_ms;
             self.sequence = 0;
         }
 
@@ -78,9 +79,15 @@ impl RowIdGenerator {
             row_id
         } else {
             // If the sequence reaches the upper bound, spin loop here and wait for next
-            // millisecond.
+            // millisecond. Here we do not consider time goes backwards, it can also be covered
+            // here.
             tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::thread::sleep(
+                Duration::new(
+                    current_duration.as_secs(),
+                    1_000_000 * (current_duration.subsec_millis() + 1),
+                ) - current_duration,
+            );
             self.next()
         }
     }
