@@ -94,6 +94,14 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
+    pub async fn commit_with_value_meta(&mut self, new_epoch: u64) -> StorageResult<()> {
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
+        self.cell_based_table
+            .batch_write_rows_with_value_meta(mem_table, new_epoch)
+            .await?;
+        Ok(())
+    }
+
     pub async fn iter(&self, _pk: Row) -> StorageResult<StateTableRowIter<S>> {
         todo!()
     }
