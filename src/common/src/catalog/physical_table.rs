@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan_common::ColumnOrder;
+
 use super::{ColumnDesc, OrderedColumnDesc, TableId};
 
 /// the table descriptor of table with cell based encoding in state store and include all
@@ -30,4 +33,20 @@ pub struct TableDesc {
     pub distribution_keys: Vec<usize>,
     /// Column indices for primary keys.
     pub pks: Vec<usize>,
+}
+
+impl TableDesc {
+    pub fn column_orders_prost(&self) -> Vec<ColumnOrder> {
+        // Set materialize key as arrange key + pk
+        self.order_desc
+            .iter()
+            .map(|x| ColumnOrder {
+                order_type: x.order.to_prost() as i32,
+                input_ref: Some(InputRefExpr {
+                    column_idx: x.column_desc.column_id.get_id(),
+                }),
+                return_type: None,
+            })
+            .collect()
+    }
 }
