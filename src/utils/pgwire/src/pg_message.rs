@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 use std::str;
 
@@ -34,30 +33,7 @@ pub enum FeMessage {
     Terminate,
 }
 
-pub struct FeStartupMessage {
-    pub config_map: HashMap<String, String>,
-}
-
-impl FeStartupMessage {
-    pub fn build(sql_bytes: Bytes) -> Self {
-        let mut config_map: HashMap<String, String> = HashMap::new();
-        match std::str::from_utf8(&sql_bytes[..]) {
-            Ok(v) => {
-                let strings = v.split('\0');
-                let mut key = String::new();
-                for (i, s) in strings.into_iter().enumerate() {
-                    if i % 2 == 0 {
-                        key = s.to_string();
-                    } else {
-                        config_map.insert(key.clone(), s.to_string());
-                    }
-                }
-                Self { config_map }
-            }
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-        }
-    }
-}
+pub struct FeStartupMessage {}
 
 /// Query message contains the string sql.
 pub struct FeQueryMessage {
@@ -107,11 +83,9 @@ impl FeStartupMessage {
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
-        let sql_bytes = Bytes::from(payload);
-
         match protocol_num {
             // code from: https://www.postgresql.org/docs/current/protocol-message-formats.html
-            196608 => Ok(FeMessage::Startup(FeStartupMessage::build(sql_bytes))),
+            196608 => Ok(FeMessage::Startup(FeStartupMessage {})),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => Ok(FeMessage::CancelQuery),

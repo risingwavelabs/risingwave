@@ -55,12 +55,6 @@ impl SessionManager for LocalFrontend {
     ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
         Ok(self.session_ref())
     }
-
-    fn check_database_name(&self, database: &str) -> bool {
-        let catalog_reader = self.env.catalog_reader();
-        let reader = catalog_reader.read_guard();
-        reader.get_database_by_name(database).is_ok()
-    }
 }
 
 impl LocalFrontend {
@@ -225,11 +219,13 @@ impl MockCatalogWriter {
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
         });
+        let mut map: HashMap<u32, DatabaseId> = HashMap::new();
+        map.insert(0_u32, 0_u32);
         Self {
             catalog,
             id: AtomicU32::new(0),
             table_id_to_schema_id: Default::default(),
-            schema_id_to_database_id: Default::default(),
+            schema_id_to_database_id: RwLock::new(map),
         }
     }
 
@@ -238,11 +234,10 @@ impl MockCatalogWriter {
         self.id.fetch_add(1, Ordering::SeqCst) + 1
     }
 
-    fn add_table_id(&self, table_id: u32, schema_id: SchemaId, database_id: DatabaseId) {
+    fn add_table_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
         self.table_id_to_schema_id
             .write()
             .insert(table_id, schema_id);
-        self.add_schema_id(schema_id, database_id);
     }
 
     fn drop_table_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
