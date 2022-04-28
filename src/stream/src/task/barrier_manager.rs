@@ -97,7 +97,7 @@ enum BarrierState {
 /// barriers to and collect them from all actors, and finally report the progress.
 pub struct LocalBarrierManager {
     /// Stores all materialized view source sender.
-    senders: HashMap<ActorId, UnboundedSender<Message>>,
+    senders: HashMap<ActorId, UnboundedSender<Barrier>>,
 
     /// Span of the current epoch.
     #[allow(dead_code)]
@@ -128,7 +128,7 @@ impl LocalBarrierManager {
     }
 
     /// Register sender for source actors, used to send barriers.
-    pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
+    pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         tracing::trace!(actor_id = actor_id, "register sender");
         self.senders.insert(actor_id, sender);
     }
@@ -181,7 +181,7 @@ impl LocalBarrierManager {
                 .senders
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            sender.send(Message::Barrier(barrier.clone())).unwrap();
+            sender.send(barrier.clone()).unwrap();
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.

@@ -64,8 +64,6 @@ struct BuildFragmentGraphState {
 
     /// dependent table ids
     dependent_table_ids: HashSet<TableId>,
-    /// current materialize view's distribution keys
-    distribution_keys: Vec<i32>,
 }
 
 impl BuildFragmentGraphState {
@@ -152,7 +150,6 @@ impl StreamFragmenter {
                 mut fragment_graph,
                 next_local_fragment_id,
                 next_operator_id: _,
-                distribution_keys,
                 dependent_table_ids,
                 next_table_id: next_local_table_id,
             } = {
@@ -161,8 +158,7 @@ impl StreamFragmenter {
                 state
             };
 
-            // save distribution key and dependent table ids in ctx
-            ctx.distribution_keys = distribution_keys;
+            // save dependent table ids in ctx
             ctx.dependent_table_ids = dependent_table_ids;
 
             let fragment_len = fragment_graph.fragment_len() as u32;
@@ -263,7 +259,7 @@ impl StreamFragmenter {
             let input = match child_node.get_node()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                Node::HashAggNode(_) | Node::HashJoinNode(_) => {
+                Node::HashAggNode(_) | Node::HashJoinNode(_) | Node::DeltaIndexJoin(_) => {
                     // We didn't make `fields` available on Java frontend yet, so we check if schema
                     // is available (by `child_node.fields.is_empty()`) before deciding to do the
                     // rewrite.
@@ -340,12 +336,7 @@ impl StreamFragmenter {
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
 
-            Node::MaterializeNode(ref node) => {
-                current_fragment.fragment_type = FragmentType::Sink;
-                // store distribution keys, later it will be persisted with `TableFragment`
-                assert!(state.distribution_keys.is_empty()); // should have only one sink node.
-                state.distribution_keys = node.distribution_keys.clone();
-            }
+            Node::MaterializeNode(_) => current_fragment.fragment_type = FragmentType::Sink,
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
@@ -380,6 +371,23 @@ impl StreamFragmenter {
                         "only inner join without non-equal condition is supported for delta joins"
                     );
                 }
+            }
+        }
+
+        if let Node::DeltaIndexJoin(delta_index_join) = stream_node.node.as_mut().unwrap() {
+            if delta_index_join.get_join_type()? == JoinType::Inner
+                && delta_index_join.condition.is_none()
+            {
+                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
+            } else {
+                panic!("only inner join without non-equal condition is supported for delta joins");
+            }
+        }
+
+        // Rewrite hash agg. One agg call -> one table id.
+        if let Node::HashAggNode(hash_agg_node) = stream_node.node.as_mut().unwrap() {
+            for _ in &hash_agg_node.agg_calls {
+                hash_agg_node.table_ids.push(state.gen_table_id());
             }
         }
 

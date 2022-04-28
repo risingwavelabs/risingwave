@@ -132,6 +132,22 @@ impl LogicalScan {
         &self.indexes
     }
 
+    /// distribution keys stored in catalog only contains `table_idx` (see [`LogicalScan::new`])
+    /// so we need to convert it to `operator_idx` when filling distributions.
+    pub fn map_distribution_keys(&self) -> Vec<usize> {
+        let tb_idx_to_op_idx = self
+            .required_col_idx
+            .iter()
+            .enumerate()
+            .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
+            .collect::<HashMap<_, _>>();
+        self.table_desc
+            .distribution_keys
+            .iter()
+            .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
+            .collect()
+    }
+
     pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> LogicalScan {
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
         let all_columns = index

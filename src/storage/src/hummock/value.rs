@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::{Buf, BufMut, Bytes};
+use risingwave_common::hash::VirtualNode;
 
 use super::{HummockError, HummockResult};
 use crate::storage_value::{StorageValue, ValueMeta, VALUE_META_SIZE};
@@ -56,18 +57,20 @@ where
     }
 
     /// Encodes the object
-    pub fn encode(&self, buffer: &mut impl BufMut) {
+    pub fn encode(&self, buffer: &mut impl BufMut) -> VirtualNode {
         match self {
             HummockValue::Put(meta, val) => {
                 // set flag
                 buffer.put_u8(VALUE_PUT);
                 meta.encode(buffer);
                 buffer.put_slice(val.as_ref());
+                meta.vnode
             }
             HummockValue::Delete(meta) => {
                 // set flag
                 buffer.put_u8(VALUE_DELETE);
                 meta.encode(buffer);
+                meta.vnode
             }
         }
     }
