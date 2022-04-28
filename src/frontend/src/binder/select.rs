@@ -117,7 +117,7 @@ impl Binder {
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
         BoundSelect::create(
-            &self,
+            self,
             select.distinct,
             select_items,
             aliases,

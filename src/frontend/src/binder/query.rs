@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
