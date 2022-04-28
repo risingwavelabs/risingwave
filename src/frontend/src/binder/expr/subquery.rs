@@ -29,7 +29,7 @@ impl Binder {
             && query.data_types().len() != 1
         {
             return Err(
-                ErrorCode::BindError("subquery must return only one column".to_string()).into(),
+                ErrorCode::BindError("Subquery must return only one column".to_string()).into(),
             );
         }
         Ok(Subquery::new(query, kind).into())

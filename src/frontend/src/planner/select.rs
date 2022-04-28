@@ -87,8 +87,8 @@ impl Planner {
         ))
     }
 
-    /// For `... AND (NOT) subquery AND ...`, we can plan it as `LeftSemi/LeftAnti`
-    /// [`LogicalApply`] (correlated) or [`LogicalJoin`].
+    /// For `... AND (NOT) subquery AND ...` or `(NOT) IN subquery`, we can plan it as
+    /// `LeftSemi/LeftAnti` [`LogicalApply`] (correlated) or [`LogicalJoin`].
     ///
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
     /// [`LogicalJoin`] using [`Self::substitute_subqueries`].
@@ -166,33 +166,36 @@ impl Planner {
         };
         match expr {
             ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::In => {
-                let (_, mut inputs, _) = func_call.decompose();
-                assert_eq!(inputs.len(), 2);
+                let (_, mut input_exprs, _) = func_call.decompose();
+                assert_eq!(input_exprs.len(), 2);
 
-                let subquery = inputs.pop().unwrap().into_subquery().unwrap();
+                let subquery = input_exprs.pop().unwrap().into_subquery().unwrap();
                 let is_correlated = subquery.is_correlated();
 
-                let left = inputs.pop().unwrap();
-                let right = InputRef::new(input.schema().fields().len(), subquery.return_type());
-                let eq_cond = FunctionCall::new(ExprType::Equal, vec![left, right.into()])?;
+                let eq_cond = {
+                    let left_expr = input_exprs.pop().unwrap();
+                    let right_expr =
+                        InputRef::new(input.schema().fields().len(), subquery.return_type());
+                    FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?
+                };
 
-                let right_child = self.plan_query(subquery.query)?.as_subplan();
+                let right_plan = self.plan_query(subquery.query)?.as_subplan();
 
                 *input = Self::create_apply_or_join(
                     is_correlated,
                     input.clone(),
-                    right_child,
+                    right_plan,
                     eq_cond.into(),
                     join_type,
                 );
             }
             ExprImpl::Subquery(subquery) if subquery.kind == SubqueryKind::Existential => {
                 let is_correlated = subquery.is_correlated();
-                let right = self.plan_query(subquery.query)?.as_subplan();
+                let right_plan = self.plan_query(subquery.query)?.as_subplan();
                 *input = Self::create_apply_or_join(
                     is_correlated,
                     input.clone(),
-                    right,
+                    right_plan,
                     ExprImpl::literal_bool(true),
                     join_type,
                 );

@@ -171,6 +171,10 @@
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
+    select x from t1 where y not in (select y from t2 where t1.x = t2.x);
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
     select x from t1 where y in (select y from t2 where t1.x + t2.x = 100 and t1.y = 1000);
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [x] }
