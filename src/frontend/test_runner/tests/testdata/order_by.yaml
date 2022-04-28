@@ -6,7 +6,7 @@
       BatchSort { order: [$0 DESC] }
         BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [v1, _row_id#0] }
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [_row_id#0], order_descs: [v1, _row_id#0] }
       StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
