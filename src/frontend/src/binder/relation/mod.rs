@@ -93,7 +93,7 @@ impl Binder {
                     table_name.clone(),
                     begin + index,
                     catalog.is_hidden,
-                    catalog.column_desc,
+                    (&catalog.column_desc).into(),
                 ));
                 self.context
                     .indexs_of
