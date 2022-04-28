@@ -72,7 +72,7 @@ pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
     Ok(NaiveDateTimeWrapper::new(
-        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
+        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f")
             .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
     ))
 }

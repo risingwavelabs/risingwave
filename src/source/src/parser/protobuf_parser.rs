@@ -27,7 +27,7 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use super::common::str_to_date;
+use crate::parser::common::{str_to_date, str_to_timestamp};
 use crate::{Event, SourceColumnDesc, SourceParser};
 
 /// Parser for Protobuf-encoded bytes.
@@ -266,6 +266,16 @@ impl SourceParser for ProtobufParser {
                         }
                         _ => None,
                     }).map(ScalarImpl::NaiveDate)
+                }
+                DataType::Timestamp =>{
+                    value.and_then(|v| match v {
+                        Value::String(b) => str_to_timestamp(&b).ok(),
+                        Value::Option(Some(boxed_value)) => match *boxed_value {
+                            Value::String(b) => str_to_timestamp(&b).ok(),
+                            _ => None,
+                        }
+                        _ => None,
+                    }).map(ScalarImpl::NaiveDateTime)
                 }
                 _ => unimplemented!(),
             }
