@@ -177,7 +177,7 @@ impl SortAggExecutor2 {
                 processed_group_cnt += groups.len()
             }
 
-            if processed_group_cnt % output_size_limit == 0 {
+            if processed_group_cnt >= output_size_limit {
                 // yield output chunk
                 let columns = group_builders
                     .into_iter()
