@@ -175,7 +175,7 @@ impl<'a> Iterator for RowRefIter<'a> {
     type Item = DatumRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // for `RowRef`, the index is always in bound.
+        // SAFETY: for `RowRef`, the index is always in bound.
         unsafe {
             self.columns
                 .next()

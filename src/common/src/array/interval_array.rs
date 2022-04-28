@@ -62,7 +62,7 @@ impl Array for IntervalArray {
 
     unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
         if !self.is_null_unchecked(idx) {
-            Some(self.interval_buffer[idx])
+            Some(*self.interval_buffer.get_unchecked(idx))
         } else {
             None
         }

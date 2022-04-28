@@ -124,7 +124,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         if self.is_null_unchecked(idx) {
             None
         } else {
-            Some(self.data[idx])
+            Some(*self.data.get_unchecked(idx))
         }
     }
 

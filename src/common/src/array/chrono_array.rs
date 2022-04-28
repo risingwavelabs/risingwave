@@ -61,7 +61,7 @@ macro_rules! get_chrono_array {
 
                 unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
                     if !self.is_null_unchecked(idx) {
-                        Some(self.data[idx])
+                        Some(*self.data.get_unchecked(idx))
                     } else {
                         None
                     }
