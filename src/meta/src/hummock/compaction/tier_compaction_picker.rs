@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet};
+use std::collections::HashSet;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
@@ -213,11 +213,8 @@ impl TierCompactionPicker {
                 continue;
             }
             let mut overlap = false;
-            for j in 0..idx {
-                if self
-                    .overlap_strategy
-                    .check_overlap(&select_table, &select_level.table_infos[j])
-                {
+            for other in &select_level.table_infos[..idx] {
+                if self.overlap_strategy.check_overlap(&select_table, other) {
                     overlap = true;
                     break;
                 }
