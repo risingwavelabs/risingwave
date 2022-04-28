@@ -58,3 +58,51 @@ drop materialized view ddl_t;
 # Now, we can drop the base table.
 statement ok
 drop table ddl_t;
+
+# Create a database.
+statement ok
+create database ddl_database;
+
+# Create another database with duplicated name.
+statement error
+create database ddl_database;
+
+# Create another database with duplicated name and if not exists.
+statement ok
+create database if not exists ddl_database;
+
+# Drop the database.
+statement ok
+drop database ddl_database;
+
+# Drop it again.
+statement error
+drop database ddl_database;
+
+# Drop it again with if exists.
+statement ok
+drop database if exists ddl_database;
+
+# Create a schema.
+statement ok
+create schema ddl_schema;
+
+# Create another schema with duplicated name.
+statement error
+create schema ddl_schema;
+
+# Create another schema with duplicated name and if not exists.
+statement ok
+create schema if not exists ddl_schema;
+
+# Drop the schema.
+statement ok
+drop schema ddl_schema;
+
+# Drop it again.
+statement error
+drop schema ddl_schema;
+
+# Drop it again with if exists.
+statement ok
+drop schema if exists ddl_schema;
