@@ -68,14 +68,20 @@ impl RowIdGenerator {
             self.last_duration_ms = current_duration;
             self.sequence = 0;
         }
-        assert!(self.sequence < SEQUENCE_UPPER_BOUND);
 
-        let row_id = self.last_duration_ms << TIMESTAMP_SHIFT_BITS
-            | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
-            | self.sequence as i64;
-        self.sequence += 1;
+        if self.sequence < SEQUENCE_UPPER_BOUND {
+            let row_id = self.last_duration_ms << TIMESTAMP_SHIFT_BITS
+                | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
+                | self.sequence as i64;
+            self.sequence += 1;
 
-        row_id
+            row_id
+        } else {
+            // If the sequence reaches the upper bound, spin loop here and wait for next
+            // millisecond.
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            self.next()
+        }
     }
 }
 
@@ -87,7 +93,7 @@ mod tests {
     fn test_generator() {
         let mut generator = RowIdGenerator::new(0);
         let mut last_row_id = generator.next();
-        for _ in 0..1000 {
+        for _ in 0..100000 {
             let row_id = generator.next();
             assert!(row_id > last_row_id);
             last_row_id = row_id;
