@@ -261,7 +261,9 @@ impl SourceExecutor {
                 .stream_reader(self.stream_source_splits.clone(), self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::Connector),
-        }?;
+        }
+        .map_err(StreamExecutorError::source_error)?;
+
         let reader = SourceReader {
             stream_reader: Box::new(stream_reader),
             barrier_receiver,
