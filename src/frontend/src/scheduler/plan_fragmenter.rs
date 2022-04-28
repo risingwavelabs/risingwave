@@ -265,10 +265,6 @@ impl StageGraphBuilder {
 
     /// Link parent stage and child stage. Maintain the mappings of parent -> child and child ->
     /// parent.
-    ///
-    /// # Arguments
-    ///
-    /// * `exchange_id` - The operator id of exchange executor.
     pub fn link_to_child(&mut self, parent_id: StageId, child_id: StageId) {
         self.child_edges
             .get_mut(&parent_id)

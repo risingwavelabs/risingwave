@@ -270,7 +270,8 @@ where
                             cluster_manager
                                 .env
                                 .notification_manager()
-                                .delete_sender(WorkerKey(key.clone()));
+                                .delete_sender(WorkerKey(key.clone()))
+                                .await;
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
                                 worker.worker_id(),

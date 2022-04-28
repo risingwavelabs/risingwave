@@ -828,7 +828,6 @@ mod tests {
         async fn stop(self) {
             for shutdown_tx in self.shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-                tokio::time::sleep(Duration::from_millis(150)).await;
             }
             for join_handle in self.join_handles {
                 join_handle.await.unwrap();
