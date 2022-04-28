@@ -19,10 +19,10 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamHopWindow,
-    ToBatch, ToStream,
+    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::InputRef;
+use crate::expr::{InputRef, InputRefDisplay};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -90,6 +90,17 @@ impl LogicalHopWindow {
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         ColIndexMapping::identity_or_none(self.input.schema().len(), self.schema().len())
     }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        write!(
+            f,
+            "{} {{ time_col: {} slide: {} size: {} }}",
+            name,
+            InputRefDisplay(self.time_col.index),
+            self.window_slide,
+            self.window_size
+        )
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalHopWindow {
@@ -130,11 +141,7 @@ impl_plan_tree_node_for_unary! {LogicalHopWindow}
 
 impl fmt::Display for LogicalHopWindow {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalHopWindow {{ time_col: {}, slide: {}, size: {} }}",
-            self.time_col, self.window_slide, self.window_size,
-        )
+        self.fmt_with_name(f, "LogicalHopWindow")
     }
 }
 
@@ -180,7 +187,9 @@ impl ColPrunable for LogicalHopWindow {
 
 impl ToBatch for LogicalHopWindow {
     fn to_batch(&self) -> PlanRef {
-        unimplemented!("LogicalHopWindow::ToBatch")
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchHopWindow::new(new_logical).into()
     }
 }
 

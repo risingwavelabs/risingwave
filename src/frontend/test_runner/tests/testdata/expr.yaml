@@ -98,9 +98,8 @@
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([1]) }
-        StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1], expr_alias: [ ,  ] }
-          StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1], expr_alias: [ ,  ] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     /* case searched form without else */
     create table t (v1 int);

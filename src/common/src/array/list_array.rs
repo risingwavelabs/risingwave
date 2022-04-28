@@ -139,6 +139,14 @@ impl Array for ListArray {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<ListRef<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(ListRef::Indexed { arr: self, idx })
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.len
     }

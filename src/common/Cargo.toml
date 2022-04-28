@@ -14,6 +14,7 @@ chrono = "0.4"
 comfy-table = "5.0"
 crc32fast = "1"
 either = "1"
+hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
@@ -22,6 +23,7 @@ memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.2"
 num-traits = "0.2"
 paste = "1"
+prometheus = { version = "0.13" }
 prost = "0.10"
 risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
@@ -32,6 +34,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", 
 tokio-stream = "0.1"
 toml = "0.5"
 tonic = "0.7"
+tower = { version = "0.4", features = ["util", "load-shed"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors"] }
 twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

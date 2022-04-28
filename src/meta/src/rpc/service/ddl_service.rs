@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
 use std::collections::HashSet;
 
 use risingwave_common::catalog::CatalogVersion;
@@ -428,7 +427,7 @@ where
             &mut ctx,
         )
         .await?;
-        let table_fragments = TableFragments::new(mview_id, graph, ctx.distribution_keys.clone());
+        let table_fragments = TableFragments::new(mview_id, graph);
 
         // Create on compute node.
         self.stream_manager

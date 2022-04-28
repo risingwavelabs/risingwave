@@ -131,6 +131,7 @@ where
             // 1. Pick a compactor.
             let compactor = match compactor_manager.next_compactor() {
                 None => {
+                    tracing::warn!("No compactor is available.");
                     continue;
                 }
                 Some(compactor) => compactor,
@@ -147,7 +148,12 @@ where
                     continue;
                 }
                 Err(err) => {
-                    tracing::warn!("Failed to get compact task. {}", err);
+                    tracing::warn!(
+                        "Failed to get compact task for compactor {}. {}",
+                        compactor.context_id(),
+                        err
+                    );
+                    // TODO: remove compactor if context is stale
                     continue;
                 }
             };

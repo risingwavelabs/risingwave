@@ -185,6 +185,7 @@ where
         // 1. Pick a worker.
         let compactor = match vacuum.compactor_manager.next_compactor() {
             None => {
+                tracing::warn!("No vacuum worker is available.");
                 return Ok(vec![]);
             }
             Some(compactor) => compactor,

@@ -594,7 +594,12 @@ where
         };
 
         if should_commit {
-            commit_multi_var!(self, None, compact_status, compact_task_assignment)?;
+            commit_multi_var!(
+                self,
+                Some(assignee_context_id),
+                compact_status,
+                compact_task_assignment
+            )?;
         } else {
             abort_multi_var!(compact_status);
         }
@@ -617,11 +622,13 @@ where
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
         let mut compact_task_assignment =
             VarTransaction::new(&mut compaction.compact_task_assignment);
-        // The task is not found.
-        if !compact_task_assignment.contains_key(&compact_task.task_id) {
-            return Ok(false);
-        }
-        compact_task_assignment.remove(&compact_task.task_id);
+        let assignee_context_id = match compact_task_assignment.remove(&compact_task.task_id) {
+            None => {
+                // The task is not found.
+                return Ok(false);
+            }
+            Some(assignment) => assignment.context_id,
+        };
         compact_status.report_compact_task(&compact_task);
         if compact_task.task_status {
             // The compact task is finished.
@@ -666,7 +673,7 @@ where
 
             commit_multi_var!(
                 self,
-                None,
+                Some(assignee_context_id),
                 compact_status,
                 compact_task_assignment,
                 current_version_id,
@@ -676,7 +683,12 @@ where
             )?;
         } else {
             // The compact task is cancelled.
-            commit_multi_var!(self, None, compact_status, compact_task_assignment)?;
+            commit_multi_var!(
+                self,
+                Some(assignee_context_id),
+                compact_status,
+                compact_task_assignment
+            )?;
         }
 
         tracing::info!(

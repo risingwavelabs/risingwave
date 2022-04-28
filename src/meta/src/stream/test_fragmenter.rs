@@ -278,7 +278,7 @@ async fn test_fragmenter() -> Result<()> {
         &mut ctx,
     )
     .await?;
-    let table_fragments = TableFragments::new(TableId::default(), graph, vec![]);
+    let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();

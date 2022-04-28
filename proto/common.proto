@@ -29,6 +29,7 @@ enum WorkerType {
   FRONTEND = 0;
   COMPUTE_NODE = 1;
   RISE_CTL = 2;
+  COMPACTOR = 3;
 }
 
 enum ParallelUnitType {

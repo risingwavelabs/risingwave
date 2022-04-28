@@ -11,8 +11,7 @@
       BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([2]) }
-        StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+      StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -26,9 +25,8 @@
         BatchScan { table: t, columns: [] }
   stream_plan: |
     StreamMaterialize { columns: [_row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([0]) }
-        StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
-          StreamTableScan { table: t, columns: [_row_id#0], pk_indices: [0] }
+      StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
+        StreamTableScan { table: t, columns: [_row_id#0], pk_indices: [0] }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
@@ -38,9 +36,8 @@
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [v1, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([1]) }
-        StreamFilter { predicate: ($0 < 1:Int32) }
-          StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+      StreamFilter { predicate: ($0 < 1:Int32) }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     /* test boolean expression common factor extraction */
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
@@ -73,8 +70,7 @@
       BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [v1, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamExchange { dist: HashShard([1]) }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+      StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: select 1
   batch_plan: |
     BatchProject { exprs: [1:Int32], expr_alias: [ ] }

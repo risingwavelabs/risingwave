@@ -20,6 +20,7 @@ members = [
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
+  "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/stream",
   "src/tests/regress",
