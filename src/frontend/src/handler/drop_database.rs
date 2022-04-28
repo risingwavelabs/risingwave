@@ -48,7 +48,7 @@ pub async fn handle_drop_database(
         // If the mode is `Restrict` or `None`, the `database` need to be empty.
         if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
             if !database.is_empty() {
-                return Err(CatalogError::NotFound("database", database_name).into());
+                return Err(CatalogError::NotEmpty("database", database_name).into());
             }
             database.id()
         } else {

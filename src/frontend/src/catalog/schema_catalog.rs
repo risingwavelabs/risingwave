@@ -116,7 +116,7 @@ impl SchemaCatalog {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.table_by_name.is_empty() || self.source_by_name.is_empty()
+        self.table_by_name.is_empty() && self.source_by_name.is_empty()
     }
 }
 

@@ -43,6 +43,7 @@ pub(crate) fn make_prost_source(
         .catalog_reader()
         .read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+
     Ok(ProstSource {
         id: 0,
         schema_id,

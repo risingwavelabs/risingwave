@@ -49,7 +49,7 @@ pub async fn handle_drop_schema(
         // If the mode is `Restrict` or `None`, the `schema` need to be empty.
         if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
             if !schema.is_empty() {
-                return Err(CatalogError::NotFound("schema", schema_name).into());
+                return Err(CatalogError::NotEmpty("schema", schema_name).into());
             }
             schema.id()
         } else {

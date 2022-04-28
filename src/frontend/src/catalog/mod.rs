@@ -74,6 +74,8 @@ pub enum CatalogError {
     NotFound(&'static str, String),
     #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
+    #[error("{0} with name {1} is not empty")]
+    NotEmpty(&'static str, String),
 }
 
 impl From<CatalogError> for RwError {

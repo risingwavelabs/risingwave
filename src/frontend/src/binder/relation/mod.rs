@@ -46,23 +46,23 @@ pub enum Relation {
 
 impl Binder {
     /// return first and second name in identifiers,
-    /// if identifiers not have first name will report error.
+    /// must have one name and can use default name as other one.
     fn resolve_double_name(
         mut identifiers: Vec<Ident>,
         err_str: &str,
-        default_second_name: &str,
+        default_name: &str,
     ) -> Result<(String, String)> {
-        let first_name = identifiers
+        let second_name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError(err_str.into()))?
             .value;
 
-        let second_name = identifiers
+        let first_name = identifiers
             .pop()
             .map(|ident| ident.value)
-            .unwrap_or_else(|| default_second_name.into());
+            .unwrap_or_else(|| default_name.into());
 
-        Ok((second_name, first_name))
+        Ok((first_name, second_name))
     }
 
     /// return the (`schema_name`, `table_name`)

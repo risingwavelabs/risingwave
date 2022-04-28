@@ -111,11 +111,11 @@ create schema if not exists ddl_schema;
 statement ok
 create table ddl_schema.ddl_table;
 
-# Cannot drop the database when it is not empty.
+# Cannot drop the schema when it is not empty.
 statement error
 drop schema ddl_schema;
 
-# Drop the schema.
+# Drop the table.
 statement ok
 drop table ddl_schema.ddl_table;
 

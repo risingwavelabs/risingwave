@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
-use std::str;
 
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
