@@ -122,11 +122,13 @@
           columnId: 1
           name: "_row_id#0"
         isHidden: true
-    pkColumnIds:
+    orderColumnIds:
       - 1
-    pkOrders:
+    orders:
       - ASCENDING
     distributionKeys:
+      - 1
+    pk:
       - 1
 - sql: |
     /* test projection */
@@ -221,11 +223,13 @@
           columnId: 1
           name: "_row_id#0"
         isHidden: true
-    pkColumnIds:
+    orderColumnIds:
       - 1
-    pkOrders:
+    orders:
       - ASCENDING
     distributionKeys:
+      - 1
+    pk:
       - 1
 - sql: |
     /* test projection for single column */
@@ -324,11 +328,13 @@
           columnId: 1
           name: "_row_id#0"
         isHidden: true
-    pkColumnIds:
+    orderColumnIds:
       - 1
-    pkOrders:
+    orders:
       - ASCENDING
     distributionKeys:
+      - 1
+    pk:
       - 1
 - sql: |
     /* test simple agg */
@@ -470,12 +476,15 @@
             isNullable: true
           columnId: 1
           name: "agg#1"
-    pkColumnIds:
+    orderColumnIds:
       - 0
       - 1
-    pkOrders:
+    orders:
       - ASCENDING
       - ASCENDING
+    pk:
+      - 0
+      - 1
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
@@ -698,9 +707,11 @@
           columnId: 1
           name: v2
         isHidden: true
-    pkColumnIds:
+    orderColumnIds:
       - 1
-    pkOrders:
+    orders:
       - ASCENDING
     distributionKeys:
+      - 1
+    pk:
       - 1
