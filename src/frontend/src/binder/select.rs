@@ -38,6 +38,12 @@ pub struct BoundSelect {
 }
 
 impl BoundSelect {
+    /// The schema returned by this [`BoundSelect`].
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
     /// The names returned by this [`BoundSelect`].
     pub fn names(&self) -> Vec<String> {
         self.aliases

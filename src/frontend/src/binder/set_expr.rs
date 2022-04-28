@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::SetExpr;
@@ -28,6 +28,15 @@ pub enum BoundSetExpr {
 }
 
 impl BoundSetExpr {
+    /// The schema returned by this [`BoundSetExpr`].
+
+    pub fn schema(&self) -> &Schema {
+        match self {
+            BoundSetExpr::Select(s) => s.schema(),
+            BoundSetExpr::Values(v) => v.schema(),
+        }
+    }
+
     /// The names returned by this [`BoundSetExpr`].
     pub fn names(&self) -> Vec<String> {
         match self {
