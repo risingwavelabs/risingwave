@@ -82,12 +82,11 @@ impl RowIdGenerator {
             // millisecond. Here we do not consider time goes backwards, it can also be covered
             // here.
             tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
-            std::thread::sleep(
-                Duration::new(
-                    current_duration.as_secs(),
-                    1_000_000 * (current_duration.subsec_millis() + 1),
-                ) - current_duration,
-            );
+            std::thread::sleep(Duration::new(
+                0,
+                1_000_000 * (current_duration.subsec_millis() + 1)
+                    - current_duration.subsec_nanos(),
+            ));
             self.next()
         }
     }
