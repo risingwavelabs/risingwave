@@ -35,7 +35,6 @@ pub struct InsertExecutor2 {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-    worker_id: u32,
 
     child: BoxedExecutor2,
     schema: Schema,
@@ -51,13 +50,11 @@ impl InsertExecutor2 {
         table_id: TableId,
         source_manager: SourceManagerRef,
         child: BoxedExecutor2,
-        worker_id: u32,
         frontend_v2: bool,
     ) -> Self {
         Self {
             table_id,
             source_manager,
-            worker_id,
             child,
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
@@ -99,9 +96,7 @@ impl InsertExecutor2 {
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder
-                    .append(Some(source.next_row_id(self.worker_id)))
-                    .unwrap();
+                builder.append(Some(source_desc.next_row_id())).unwrap();
             }
 
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
@@ -171,7 +166,6 @@ impl BoxedExecutor2Builder for InsertExecutor2 {
             table_id,
             source.global_batch_env().source_manager_ref(),
             child,
-            source.global_batch_env().worker_id(),
             insert_node.frontend_v2,
         )))
     }
@@ -187,9 +181,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{
-        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
-    };
+    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::*;
 
@@ -199,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::new());
+        let source_manager = Arc::new(MemSourceManager::default());
         let store = MemoryStateStore::new();
 
         // Schema for mock executor.
@@ -235,7 +227,7 @@ mod tests {
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
-            .stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])
+            .stream_reader(vec![0.into(), 1.into(), 2.into()])
             .await?;
 
         // Insert
@@ -243,7 +235,6 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
-            0,
             false,
         ));
         let handle = tokio::spawn(async move {
@@ -283,16 +274,6 @@ mod tests {
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-        );
-
-        // Row id column
-        assert_eq!(
-            chunk.columns()[2]
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
         );
 
         // There's nothing in store since `TableSourceV2` has no side effect.

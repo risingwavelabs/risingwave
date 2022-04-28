@@ -51,7 +51,7 @@ pub struct ComputeNodeOpts {
     #[clap(long)]
     pub port: Option<u16>,
 
-    #[clap(long, default_value = "in-memory")]
+    #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
 
     #[clap(long, default_value = "127.0.0.1:1222")]

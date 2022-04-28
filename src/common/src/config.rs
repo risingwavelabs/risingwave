@@ -23,6 +23,7 @@ use crate::error::{Result, RwError};
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     // For connection
     #[serde(default)]
@@ -42,6 +43,7 @@ pub struct ComputeNodeConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct FrontendConfig {
     // For connection
     #[serde(default)]
@@ -61,6 +63,7 @@ impl Default for ServerConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BatchConfig {
     #[serde(default = "default::chunk_size")]
     pub chunk_size: u32,
@@ -73,6 +76,7 @@ impl Default for BatchConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
     #[serde(default = "default::chunk_size")]
     pub chunk_size: u32,
@@ -86,6 +90,7 @@ impl Default for StreamingConfig {
 
 /// Currently all configurations are server before they can be specified with DDL syntaxes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// Target size of the SSTable.
     #[serde(default = "default::sst_size")]

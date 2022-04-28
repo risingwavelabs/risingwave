@@ -384,7 +384,7 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            1
+            3
         );
 
         // The vacuum task is not reported yet.
@@ -393,7 +393,7 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            1
+            3
         );
 
         // The vacuum task is reported.
