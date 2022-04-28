@@ -37,6 +37,7 @@ select * from s6;
 statement ok
 flush;
 
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 1s
 
 query IT rowsort
