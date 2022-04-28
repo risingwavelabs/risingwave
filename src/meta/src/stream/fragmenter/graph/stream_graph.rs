@@ -218,6 +218,10 @@ impl StreamActorBuilder {
         if dispatcher.is_empty() {
             dispatcher = vec![Dispatcher {
                 r#type: DispatcherType::Broadcast.into(),
+                // Currently when create MV on MV, we will add outputs to this dispatcher with id 0
+                // (cross-MV dispatcher).
+                // See also the rustdoc of this field.
+                dispatcher_id: 0,
                 ..Default::default()
             }]
         }
@@ -518,7 +522,7 @@ impl StreamGraphBuilder {
         if ctx.is_legacy_frontend {
             for &up_id in &upstream_actor_ids {
                 ctx.dispatches
-                    .entry(up_id)
+                    .entry((up_id, 0))
                     .or_default()
                     .push(actor_id.as_global_id());
             }

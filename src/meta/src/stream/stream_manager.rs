@@ -37,7 +37,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -47,7 +47,7 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
-    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
@@ -111,7 +111,7 @@ where
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
         hash_mapping: &Vec<ParallelUnitId>,
-        dispatches: &mut HashMap<ActorId, Vec<ActorId>>,
+        dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
@@ -122,7 +122,7 @@ where
             tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             locations: &'a ScheduledLocations,
 
-            dispatches: &'a mut HashMap<ActorId, Vec<ActorId>>,
+            dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
             upstream_node_actors: &'a mut HashMap<WorkerId, Vec<ActorId>>,
         }
 
@@ -198,7 +198,7 @@ where
 
                 // finally, we should also build dispatcher infos here.
                 self.dispatches
-                    .entry(*upstream_actor_id)
+                    .entry((*upstream_actor_id, 0))
                     .or_default()
                     .push(actor_id);
 
@@ -459,6 +459,11 @@ where
             })
             .collect::<HashMap<_, _>>();
 
+        let up_id_to_down_info = dispatches
+            .iter()
+            .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info.clone()))
+            .collect::<HashMap<_, _>>();
+
         let mut node_hanging_channels = upstream_node_actors
             .iter()
             .map(|(node_id, up_ids)| {
@@ -467,7 +472,7 @@ where
                     up_ids
                         .iter()
                         .flat_map(|up_id| {
-                            dispatches
+                            up_id_to_down_info
                                 .get(up_id)
                                 .expect("expected dispatches info")
                                 .iter()
