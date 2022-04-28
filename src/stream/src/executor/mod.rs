@@ -33,8 +33,8 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
-    BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
-    LookupExecutorBuilder, LookupUnionExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
+    BoxedExecutor, HashJoinExecutorBuilder, HopWindowExecutorBuilder, LookupExecutorBuilder,
+    LookupUnionExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
 };
 use crate::task::{
     ActorId, DispatcherId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION,
@@ -60,13 +60,11 @@ mod integration_tests;
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 use futures::Stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::common::ActorInfo;
@@ -358,88 +356,6 @@ impl Message {
     }
 }
 
-/// `Executor` supports handling of control messages.
-#[async_trait]
-pub trait ExecutorV1: Send + Debug + 'static {
-    async fn next(&mut self) -> Result<Message>;
-
-    /// Return the schema of the OUTPUT of the executor.
-    fn schema(&self) -> &Schema;
-
-    /// Return the primary key indices of the OUTPUT of the executor.
-    /// Schema is used by both OLAP and streaming, therefore
-    /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef;
-
-    fn pk_data_types(&self) -> PkDataTypes {
-        let schema = self.schema();
-        self.pk_indices()
-            .iter()
-            .map(|idx| schema.fields[*idx].data_type.clone())
-            .collect()
-    }
-
-    /// Identity string of the executor.
-    fn identity(&self) -> &str;
-
-    /// Logical Operator Information of the executor
-    fn logical_operator_info(&self) -> &str;
-
-    /// Clears the in-memory cache of the executor. It's no-op by default.
-    fn clear_cache(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn init(&mut self, _epoch: u64) -> Result<()> {
-        unreachable!()
-    }
-}
-
-#[derive(Debug)]
-pub enum ExecutorV1State {
-    /// Waiting for the first barrier
-    Init,
-    /// Can read from and write to storage
-    Active(u64),
-}
-
-impl ExecutorV1State {
-    pub fn epoch(&self) -> u64 {
-        match self {
-            ExecutorV1State::Init => panic!("Executor is not active when getting the epoch"),
-            ExecutorV1State::Active(epoch) => *epoch,
-        }
-    }
-}
-
-pub trait StatefulExecutorV1: ExecutorV1 {
-    fn executor_state(&self) -> &ExecutorV1State;
-
-    fn update_executor_state(&mut self, new_state: ExecutorV1State);
-
-    /// Try initializing the executor if not done.
-    /// Return:
-    /// - Some(Epoch) if the executor is successfully initialized
-    /// - None if the executor has been initialized
-    fn try_init_executor<'a>(
-        &'a mut self,
-        msg: impl TryInto<&'a Barrier, Error = ()>,
-    ) -> Option<Barrier> {
-        match self.executor_state() {
-            ExecutorV1State::Init => {
-                if let Ok(barrier) = msg.try_into() {
-                    // Move to Active state
-                    self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
-                    Some(barrier.clone())
-                } else {
-                    panic!("The first message the executor receives is not a barrier");
-                }
-            }
-            ExecutorV1State::Active(_) => None,
-        }
-    }
-}
-
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
@@ -464,29 +380,15 @@ pub fn pk_input_array_refs<'a>(
 }
 
 pub trait ExecutorBuilder {
-    /// For compatibility.
-    fn new_boxed_executor_v1(
-        _executor_params: ExecutorParams,
-        _node: &stream_plan::StreamNode,
-        _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn ExecutorV1>> {
-        unimplemented!()
-    }
-
-    /// Create an executor. May directly override this function to create an executor v2, or it will
-    /// create an [`ExecutorV1`] and wrap it to v2.
+    /// Create an executor.
     fn new_boxed_executor(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2().boxed())
-    }
+    ) -> Result<BoxedExecutor>;
 }
 
-#[macro_export]
 macro_rules! build_executor {
     ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node().unwrap() {

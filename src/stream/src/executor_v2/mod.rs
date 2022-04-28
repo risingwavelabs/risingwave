@@ -19,7 +19,7 @@ use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-pub use super::executor::{Barrier, ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef};
+pub use super::executor::{Barrier, Message, Mutation, PkIndices, PkIndicesRef};
 
 pub mod aggregation;
 mod barrier_align;

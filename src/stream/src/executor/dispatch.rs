@@ -767,47 +767,6 @@ impl Dispatcher for SimpleDispatcher {
 }
 
 #[cfg(test)]
-mod sender_consumer {
-    use super::*;
-    use crate::executor::ExecutorV1;
-
-    /// `SenderConsumer` consumes data from input executor and send it into a channel.
-    pub struct SenderConsumer {
-        input: Box<dyn ExecutorV1>,
-        channel: BoxedOutput,
-    }
-
-    impl SenderConsumer {
-        pub fn new(input: Box<dyn ExecutorV1>, channel: BoxedOutput) -> Self {
-            Self { input, channel }
-        }
-    }
-
-    impl StreamConsumer for SenderConsumer {
-        type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
-
-        fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-            #[try_stream]
-            async move {
-                loop {
-                    let msg = self.input.next().await?;
-                    let barrier = msg.as_barrier().cloned();
-
-                    self.channel.send(msg).await?;
-
-                    if let Some(barrier) = barrier {
-                        yield barrier;
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-pub use sender_consumer::SenderConsumer;
-
-#[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
