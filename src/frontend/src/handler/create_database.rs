@@ -56,11 +56,11 @@ mod tests {
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
 
-        frontend.run_sql("CREATE DATABASE d1").await.unwrap();
+        frontend.run_sql("CREATE DATABASE database").await.unwrap();
 
         let database = catalog_reader
             .read_guard()
-            .get_database_by_name("d1")
+            .get_database_by_name("database")
             .ok()
             .cloned();
         assert!(database.is_some());

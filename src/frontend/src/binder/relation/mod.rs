@@ -62,7 +62,7 @@ impl Binder {
             .map(|ident| ident.value)
             .unwrap_or_else(|| default_second_name.into());
 
-        Ok((first_name, second_name))
+        Ok((second_name, first_name))
     }
 
     /// return the (`schema_name`, `table_name`)

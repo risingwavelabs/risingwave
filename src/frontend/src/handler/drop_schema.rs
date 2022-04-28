@@ -72,13 +72,19 @@ mod tests {
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
 
-        frontend.run_sql("CREATE SCHEMA s1").await.unwrap();
+        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
 
-        frontend.run_sql("DROP SCHEMA s1").await.unwrap();
+        frontend.run_sql("CREATE TABLE schema.table").await.unwrap();
+
+        assert!(frontend.run_sql("DROP SCHEMA schema").await.is_err());
+
+        frontend.run_sql("DROP TABLE schema.table").await.unwrap();
+
+        frontend.run_sql("DROP SCHEMA schema").await.unwrap();
 
         let schema = catalog_reader
             .read_guard()
-            .get_database_by_name("s1")
+            .get_database_by_name("schema")
             .ok()
             .cloned();
         assert!(schema.is_none());

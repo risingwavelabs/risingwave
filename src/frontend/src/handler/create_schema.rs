@@ -63,11 +63,11 @@ mod tests {
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
 
-        frontend.run_sql("CREATE SCHEMA s1").await.unwrap();
+        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
 
         let schema = catalog_reader
             .read_guard()
-            .get_schema_by_name(DEFAULT_DATABASE_NAME, "s1")
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, "schema")
             .ok()
             .cloned();
         assert!(schema.is_some());
