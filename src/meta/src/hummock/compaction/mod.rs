@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod overlap_strategy;
 mod tier_compaction_picker;
 
 use std::io::Cursor;
@@ -25,6 +26,7 @@ use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
 };
 
+use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
@@ -134,7 +136,10 @@ impl CompactStatus {
 
     fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
         // only support compact L0 to L1 or L0 to L0
-        let picker = TierCompactionPicker::new(self.next_compact_task_id);
+        let picker = TierCompactionPicker::new(
+            self.next_compact_task_id,
+            Box::new(RangeOverlapStrategy::default()),
+        );
         picker.pick_compaction(levels, &mut self.level_handlers)
     }
 

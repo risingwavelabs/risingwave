@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashSet};
+
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -19,59 +21,40 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
 
 use super::SearchResult;
+use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
 const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
 const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
 const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 
-#[derive(Debug)]
 pub struct TierCompactionPicker {
     compact_task_id: u64,
     max_compaction_bytes: u64,
     level0_max_file_number: usize,
     level0_trigger_number: usize,
+    overlap_strategy: Box<dyn OverlapStrategy>,
 }
 
 #[derive(Default)]
-pub struct ConflictKeyRange {
-    key_range: Option<KeyRange>,
-}
-
-impl ConflictKeyRange {
-    fn check_pending_compact(&mut self, level_handler: &LevelHandler, table: &SstableInfo) -> bool {
-        let key_range = KeyRange::from(table.key_range.as_ref().unwrap());
-        if level_handler.is_pending_compact(&table.id) {
-            if let Some(range) = self.key_range.as_mut() {
-                range.full_key_extend(&key_range);
-            } else {
-                self.key_range = Some(key_range);
-            }
-            return true;
-        }
-        false
-    }
-
-    fn check_overlap(&self, table: &SstableInfo) -> bool {
-        let key_range = KeyRange::from(table.key_range.as_ref().unwrap());
-        if let Some(range) = self.key_range.as_ref() {
-            // This file is conflict with previous files in L0.
-            if key_range.full_key_overlap(range) {
-                return true;
-            }
-        }
-        false
-    }
+pub struct TargetFilesInfo {
+    tables: Vec<SstableInfo>,
+    table_ids: HashSet<u64>,
+    compaction_bytes: u64,
 }
 
 impl TierCompactionPicker {
-    pub fn new(compact_task_id: u64) -> TierCompactionPicker {
+    pub fn new(
+        compact_task_id: u64,
+        overlap_strategy: Box<dyn OverlapStrategy>,
+    ) -> TierCompactionPicker {
         TierCompactionPicker {
             compact_task_id,
             // TODO: set it by cluster configure or vertical group configure.
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
             level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
             level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
+            overlap_strategy,
         }
     }
 
@@ -136,28 +119,31 @@ impl TierCompactionPicker {
 
     fn pick_target_level_overlap_files(
         &self,
-        tier_key_range: &KeyRange,
+        select_table: &SstableInfo,
         level: &Level,
         level_handlers: &LevelHandler,
-        input_ssts: &mut Vec<SstableInfo>,
+        input_ssts: &mut TargetFilesInfo,
     ) -> bool {
-        let overlap_begin = level.table_infos.partition_point(|table_status| {
-            user_key(&table_status.key_range.as_ref().unwrap().right)
-                < user_key(&tier_key_range.left)
-        });
-        if overlap_begin >= level.table_infos.len() {
+        if level.table_infos.is_empty() {
             return true;
         }
+        let mut new_add_tables = vec![];
         // pick up files in L1 which are overlap with L0 to target level input.
-        for table in &level.table_infos[overlap_begin..] {
-            let end_range = KeyRange::from(table.key_range.as_ref().unwrap());
-            if user_key(&end_range.left) > user_key(&tier_key_range.right) {
-                break;
+        for table in &level.table_infos {
+            if !self.overlap_strategy.check_overlap(select_table, table) {
+                continue;
             }
             if level_handlers.is_pending_compact(&table.id) {
                 return false;
             }
-            input_ssts.push(table.clone());
+            if !input_ssts.table_ids.contains(&table.id) {
+                new_add_tables.push(table.clone());
+            }
+        }
+        for table in new_add_tables {
+            input_ssts.table_ids.insert(table.id);
+            input_ssts.compaction_bytes += table.file_size;
+            input_ssts.tables.push(table);
         }
         true
     }
@@ -221,62 +207,56 @@ impl TierCompactionPicker {
         select_level_handler: &LevelHandler,
         target_level_handler: &LevelHandler,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
-        let mut conflict_range = ConflictKeyRange::default();
         for idx in 0..select_level.table_infos.len() {
-            if conflict_range
-                .check_pending_compact(select_level_handler, &select_level.table_infos[idx])
-            {
+            let select_table = select_level.table_infos[idx].clone();
+            if select_level_handler.is_pending_compact(&select_table.id) {
+                continue;
+            }
+            let mut overlap = false;
+            for j in 0..idx {
+                if self
+                    .overlap_strategy
+                    .check_overlap(&select_table, &select_level.table_infos[j])
+                {
+                    overlap = true;
+                    break;
+                }
+            }
+            if overlap {
                 continue;
             }
 
-            if conflict_range.check_overlap(&select_level.table_infos[idx]) {
-                break;
-            }
-
-            let mut tiered_key_range =
-                KeyRange::from(select_level.table_infos[idx].key_range.as_ref().unwrap());
-            let mut target_level_ssts = vec![];
+            let mut target_level_ssts = TargetFilesInfo::default();
             if !self.pick_target_level_overlap_files(
-                &tiered_key_range,
+                &select_table,
                 target_level,
                 target_level_handler,
                 &mut target_level_ssts,
             ) {
                 break;
             }
-            let mut select_level_ssts = vec![select_level.table_infos[idx].clone()];
-            let mut compaction_bytes = target_level_ssts
-                .iter()
-                .map(|table| table.file_size)
-                .sum::<u64>()
-                + select_level_ssts[0].file_size;
+            let mut select_compaction_bytes = select_table.file_size;
+            let mut select_level_ssts = vec![select_table];
             // try expand more L0 files if the currenct compaction job is too small.
             for other in &select_level.table_infos[idx + 1..] {
-                if compaction_bytes >= self.max_compaction_bytes
+                if select_compaction_bytes + target_level_ssts.compaction_bytes
+                    >= self.max_compaction_bytes
                     || select_level_handler.is_pending_compact(&other.id)
                 {
                     break;
                 }
-                if conflict_range.check_overlap(other) {
-                    break;
-                }
-                // expand select range in L0.
-                tiered_key_range
-                    .full_key_extend(&KeyRange::from(other.key_range.as_ref().unwrap()));
-                let mut new_target_level_ssts = vec![];
                 if !self.pick_target_level_overlap_files(
-                    &tiered_key_range,
+                    other,
                     target_level,
                     target_level_handler,
-                    &mut new_target_level_ssts,
+                    &mut target_level_ssts,
                 ) {
-                    return (select_level_ssts, target_level_ssts);
+                    break;
                 }
-                compaction_bytes += other.file_size;
+                select_compaction_bytes += other.file_size;
                 select_level_ssts.push(other.clone());
-                target_level_ssts = new_target_level_ssts;
             }
-            return (select_level_ssts, target_level_ssts);
+            return (select_level_ssts, target_level_ssts.tables);
         }
         (vec![], vec![])
     }
@@ -287,6 +267,7 @@ mod tests {
     use risingwave_pb::hummock::KeyRange as RawKeyRange;
 
     use super::*;
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     fn generate_table(
@@ -309,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_compact_l0_to_l1() {
-        let picker = TierCompactionPicker::new(0);
+        let picker = TierCompactionPicker::new(0, Box::new(RangeOverlapStrategy::default()));
         let mut levels = vec![
             Level {
                 level_idx: 0,
@@ -355,7 +336,7 @@ mod tests {
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
-        let mut picker = TierCompactionPicker::new(1);
+        let mut picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
         levels[0]
             .table_infos
             .push(generate_table(7, 1, 222, 233, 3));
