@@ -64,8 +64,6 @@ struct BuildFragmentGraphState {
 
     /// dependent table ids
     dependent_table_ids: HashSet<TableId>,
-    /// current materialize view's distribution keys
-    distribution_keys: Vec<i32>,
 }
 
 impl BuildFragmentGraphState {
@@ -152,7 +150,6 @@ impl StreamFragmenter {
                 mut fragment_graph,
                 next_local_fragment_id,
                 next_operator_id: _,
-                distribution_keys,
                 dependent_table_ids,
                 next_table_id: next_local_table_id,
             } = {
@@ -161,8 +158,7 @@ impl StreamFragmenter {
                 state
             };
 
-            // save distribution key and dependent table ids in ctx
-            ctx.distribution_keys = distribution_keys;
+            // save dependent table ids in ctx
             ctx.dependent_table_ids = dependent_table_ids;
 
             let fragment_len = fragment_graph.fragment_len() as u32;
@@ -340,12 +336,7 @@ impl StreamFragmenter {
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
 
-            Node::MaterializeNode(ref node) => {
-                current_fragment.fragment_type = FragmentType::Sink;
-                // store distribution keys, later it will be persisted with `TableFragment`
-                assert!(state.distribution_keys.is_empty()); // should have only one sink node.
-                state.distribution_keys = node.distribution_keys.clone();
-            }
+            Node::MaterializeNode(_) => current_fragment.fragment_type = FragmentType::Sink,
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,

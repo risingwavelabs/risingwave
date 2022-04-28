@@ -132,8 +132,8 @@ impl LogicalScan {
         &self.indexes
     }
 
-    /// distribution keys stored in catalog only contains table_idx (see [`LogicalScan::new`])
-    /// so we need to convert it to operator_idx when filling distributions.
+    /// distribution keys stored in catalog only contains `table_idx` (see [`LogicalScan::new`])
+    /// so we need to convert it to `operator_idx` when filling distributions.
     pub fn map_distribution_keys(&self) -> Vec<usize> {
         let tb_idx_to_op_idx = self
             .required_col_idx

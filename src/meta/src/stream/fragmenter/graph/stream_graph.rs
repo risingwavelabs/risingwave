@@ -255,8 +255,6 @@ pub struct StreamGraphBuilder {
     table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
 
     table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
-
-    upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
 }
 
 impl StreamGraphBuilder {
@@ -264,7 +262,6 @@ impl StreamGraphBuilder {
     pub fn fill_info(&mut self, info: BuildGraphInfo) {
         self.table_node_actors = info.table_node_actors;
         self.table_sink_actor_ids = info.table_sink_actor_ids;
-        self.upstream_distribution_keys = info.upstream_distribution_keys;
     }
 
     /// Insert new generated actor.

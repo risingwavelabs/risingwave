@@ -23,7 +23,6 @@ use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
-use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
@@ -59,8 +58,6 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Consistent hash mapping, used in hash dispatcher.
     pub hash_mapping: Vec<ParallelUnitId>,
-    /// Distribution key of materialize node in current mview.
-    pub distribution_keys: Vec<i32>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// TODO: remove this when we deprecate Java frontend.
@@ -258,7 +255,6 @@ where
             dependent_table_ids,
             affiliated_source,
             hash_mapping,
-            distribution_keys: _,
             table_id_offset: _,
             is_legacy_frontend,
         }: CreateMaterializedViewContext,
@@ -880,7 +876,7 @@ mod tests {
                 actors: actors.clone(),
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments, vec![]);
+        let table_fragments = TableFragments::new(table_id, fragments);
 
         let ctx = CreateMaterializedViewContext::default();
 
