@@ -485,6 +485,7 @@ impl StreamFragmenter {
                             r#type: ty.into(),
                             column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
                             hash_mapping: None,
+                            dispatcher_id: dispatch_edge.link_id,
                             downstream_actor_id: vec![],
                         },
                         dispatch_edge.same_worker_node,
