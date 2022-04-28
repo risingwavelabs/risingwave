@@ -75,7 +75,9 @@ pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
-    pub row_id_index: Option<usize>,
+
+    // The column index of row ID. By default it's 0, which means the first column is row ID.
+    pub row_id_index: usize,
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -124,7 +126,7 @@ impl SourceManager for MemSourceManager {
             "expected row_id_index >= 0, got {}",
             info.row_id_index
         );
-        let row_id_index = Some(info.row_id_index as usize);
+        let row_id_index = info.row_id_index as usize;
 
         match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
             // TODO support more connector here
@@ -178,7 +180,7 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
-            row_id_index: Some(0), // always use the first column as row_id
+            row_id_index: 0, // always use the first column as row_id
         };
 
         sources.insert(*table_id, desc);

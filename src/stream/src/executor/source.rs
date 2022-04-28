@@ -82,7 +82,6 @@ pub struct SourceExecutor {
     metrics: Arc<StreamingMetrics>,
 
     /// Split info for stream source
-    #[allow(dead_code)]
     stream_source_splits: Vec<SplitImpl>,
 
     source_identify: String,
@@ -123,17 +122,14 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .map(|i| ColumnId::from(*i))
             .collect();
         let mut fields = Vec::with_capacity(column_ids.len());
-        for &column_id in &column_ids {
+        fields.extend(column_ids.iter().map(|column_id| {
             let column_desc = source_desc
                 .columns
                 .iter()
-                .find(|c| c.column_id == column_id)
+                .find(|c| &c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::with_name(
-                column_desc.data_type.clone(),
-                column_desc.name.clone(),
-            ));
-        }
+            Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
+        }));
         let schema = Schema::new(fields);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
 
@@ -194,7 +190,8 @@ impl SourceExecutor {
         })
     }
 
-    fn gen_row_column(&mut self, len: usize) -> Column {
+    /// Generate a row ID column.
+    fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len).unwrap();
 
         for _ in 0..len {
@@ -207,18 +204,17 @@ impl SourceExecutor {
     }
 
     fn refill_row_id_column(&mut self, chunk: StreamChunk) -> StreamChunk {
-        if let Some(row_id_index) = self.source_desc.row_id_index {
-            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+        let row_id_index = self.source_desc.row_id_index;
+        let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
-            if let Some(idx) = self
-                .column_ids
-                .iter()
-                .position(|column_id| *column_id == row_id_column_id)
-            {
-                let (ops, mut columns, bitmap) = chunk.into_inner();
-                columns[idx] = self.gen_row_column(columns[idx].array().len());
-                return StreamChunk::new(ops, columns, bitmap);
-            }
+        if let Some(idx) = self
+            .column_ids
+            .iter()
+            .position(|column_id| *column_id == row_id_column_id)
+        {
+            let (ops, mut columns, bitmap) = chunk.into_inner();
+            columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+            return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
     }
@@ -255,6 +251,7 @@ impl SourceReader {
         )));
     }
 
+    /// Prioritize the processing of barriers.
     fn prio_left(_: &mut ()) -> PollNext {
         PollNext::Left
     }
@@ -275,6 +272,7 @@ impl ExecutorV1 for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         match self.reader_stream.as_mut() {
             None => {
+                // Initialize `reader_stream` on the first `next`.
                 let msg = self
                     .barrier_receiver
                     .as_mut()
@@ -282,26 +280,22 @@ impl ExecutorV1 for SourceExecutor {
                     .recv()
                     .await
                     .unwrap();
+                debug!("Initialize reader stream for source {}", self.identity());
 
                 // todo: use epoch from msg to restore state from state store
 
                 assert!(matches!(msg, Message::Barrier(_)));
 
-                let reader = self
-                    .source_desc
-                    .source
-                    .stream_reader(
-                        match self.source_desc.source.as_ref() {
-                            SourceImpl::TableV2(_) => SourceReaderContext::None(()),
-                            SourceImpl::Connector(_c) => {
-                                SourceReaderContext::ConnectorReaderContext(
-                                    self.stream_source_splits.clone(),
-                                )
-                            }
-                        },
-                        self.column_ids.clone(),
-                    )
-                    .await?;
+                let reader = match self.source_desc.source.as_ref() {
+                    SourceImpl::TableV2(t) => t
+                        .stream_reader(self.column_ids.clone())
+                        .await
+                        .map(SourceStreamReaderImpl::TableV2),
+                    SourceImpl::Connector(c) => c
+                        .stream_reader(self.stream_source_splits.clone(), self.column_ids.clone())
+                        .await
+                        .map(SourceStreamReaderImpl::Connector),
+                }?;
 
                 let barrier = self.barrier_receiver.take().unwrap();
 
