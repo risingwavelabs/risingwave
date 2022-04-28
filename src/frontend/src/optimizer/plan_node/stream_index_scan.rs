@@ -42,7 +42,7 @@ impl StreamIndexScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::HashShard(logical.table_desc().distribution_keys.clone()),
+            Distribution::HashShard(logical.map_distribution_keys()),
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
@@ -106,9 +106,9 @@ impl StreamIndexScan {
                 })
                 .collect(),
             distribution_keys: self
-                .logical
-                .table_desc()
-                .distribution_keys
+                .base
+                .dist
+                .dist_column_indices()
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),

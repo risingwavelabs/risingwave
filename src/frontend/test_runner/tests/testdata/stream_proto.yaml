@@ -7,50 +7,25 @@
     input:
       - input:
           - input:
-              - input:
-                  - mergeNode: {}
-                  - pkIndices:
-                      - 1
-                    appendOnly: true
-                    batchPlanNode:
-                      tableRefId:
-                        tableId: 1
-                      columnDescs:
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
-                        - columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: "_row_id#0"
-                pkIndices:
+              - mergeNode: {}
+              - pkIndices:
                   - 1
-                fields:
-                  - dataType:
-                      typeName: INT32
-                      isNullable: true
-                    name: v1
-                  - dataType:
-                      typeName: INT64
-                      isNullable: true
-                    name: "_row_id#0"
-                chainNode:
+                appendOnly: true
+                batchPlanNode:
                   tableRefId:
                     tableId: 1
-                  upstreamFields:
-                    - dataType:
+                  columnDescs:
+                    - columnType:
+                        typeName: INT32
+                        isNullable: true
+                      columnId: 1
+                      name: v1
+                    - columnType:
                         typeName: INT64
                         isNullable: true
                       name: "_row_id#0"
-                    - dataType:
-                        typeName: INT32
-                        isNullable: true
-                      name: v1
-                  columnIds:
+                  distributionKeys:
                     - 1
-                    - 0
             pkIndices:
               - 1
             fields:
@@ -62,25 +37,21 @@
                   typeName: INT64
                   isNullable: true
                 name: "_row_id#0"
-            filterNode:
-              searchCondition:
-                exprType: LESS_THAN
-                returnType:
-                  typeName: BOOLEAN
-                  isNullable: true
-                funcCall:
-                  children:
-                    - exprType: INPUT_REF
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      inputRef: {}
-                    - exprType: CONSTANT_VALUE
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      constant:
-                        body: AAAAAQ==
+            chainNode:
+              tableRefId:
+                tableId: 1
+              upstreamFields:
+                - dataType:
+                    typeName: INT64
+                    isNullable: true
+                  name: "_row_id#0"
+                - dataType:
+                    typeName: INT32
+                    isNullable: true
+                  name: v1
+              columnIds:
+                - 1
+                - 0
         pkIndices:
           - 1
         fields:
@@ -92,11 +63,25 @@
               typeName: INT64
               isNullable: true
             name: "_row_id#0"
-        exchangeNode:
-          strategy:
-            type: HASH
-            columnIndices:
-              - 1
+        filterNode:
+          searchCondition:
+            exprType: LESS_THAN
+            returnType:
+              typeName: BOOLEAN
+              isNullable: true
+            funcCall:
+              children:
+                - exprType: INPUT_REF
+                  returnType:
+                    typeName: INT32
+                    isNullable: true
+                  inputRef: {}
+                - exprType: CONSTANT_VALUE
+                  returnType:
+                    typeName: INT32
+                    isNullable: true
+                  constant:
+                    body: AAAAAQ==
     pkIndices:
       - 1
     fields:
@@ -141,6 +126,8 @@
       - 1
     pkOrders:
       - ASCENDING
+    distributionKeys:
+      - 1
 - sql: |
     /* test projection */
     create table t (v1 int);
@@ -149,50 +136,25 @@
     ---
     input:
       - input:
-          - input:
-              - mergeNode: {}
-              - pkIndices:
-                  - 1
-                appendOnly: true
-                batchPlanNode:
-                  tableRefId:
-                    tableId: 1
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
-                    - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: "_row_id#0"
-            pkIndices:
+          - mergeNode: {}
+          - pkIndices:
               - 1
-            fields:
-              - dataType:
-                  typeName: INT32
-                  isNullable: true
-                name: v1
-              - dataType:
-                  typeName: INT64
-                  isNullable: true
-                name: "_row_id#0"
-            chainNode:
+            appendOnly: true
+            batchPlanNode:
               tableRefId:
                 tableId: 1
-              upstreamFields:
-                - dataType:
+              columnDescs:
+                - columnType:
+                    typeName: INT32
+                    isNullable: true
+                  columnId: 1
+                  name: v1
+                - columnType:
                     typeName: INT64
                     isNullable: true
                   name: "_row_id#0"
-                - dataType:
-                    typeName: INT32
-                    isNullable: true
-                  name: v1
-              columnIds:
+              distributionKeys:
                 - 1
-                - 0
         pkIndices:
           - 1
         fields:
@@ -204,11 +166,21 @@
               typeName: INT64
               isNullable: true
             name: "_row_id#0"
-        exchangeNode:
-          strategy:
-            type: HASH
-            columnIndices:
-              - 1
+        chainNode:
+          tableRefId:
+            tableId: 1
+          upstreamFields:
+            - dataType:
+                typeName: INT64
+                isNullable: true
+              name: "_row_id#0"
+            - dataType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+          columnIds:
+            - 1
+            - 0
     pkIndices:
       - 1
     fields:
@@ -253,6 +225,8 @@
       - 1
     pkOrders:
       - ASCENDING
+    distributionKeys:
+      - 1
 - sql: |
     /* test projection for single column */
     create table t (v1 int, v2 int);
@@ -261,54 +235,25 @@
     ---
     input:
       - input:
-          - input:
-              - mergeNode: {}
-              - pkIndices:
-                  - 1
-                appendOnly: true
-                batchPlanNode:
-                  tableRefId:
-                    tableId: 1
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
-                    - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: "_row_id#0"
-            pkIndices:
+          - mergeNode: {}
+          - pkIndices:
               - 1
-            fields:
-              - dataType:
-                  typeName: INT32
-                  isNullable: true
-                name: v1
-              - dataType:
-                  typeName: INT64
-                  isNullable: true
-                name: "_row_id#0"
-            chainNode:
+            appendOnly: true
+            batchPlanNode:
               tableRefId:
                 tableId: 1
-              upstreamFields:
-                - dataType:
+              columnDescs:
+                - columnType:
+                    typeName: INT32
+                    isNullable: true
+                  columnId: 1
+                  name: v1
+                - columnType:
                     typeName: INT64
                     isNullable: true
                   name: "_row_id#0"
-                - dataType:
-                    typeName: INT32
-                    isNullable: true
-                  name: v1
-                - dataType:
-                    typeName: INT32
-                    isNullable: true
-                  name: v2
-              columnIds:
+              distributionKeys:
                 - 1
-                - 0
         pkIndices:
           - 1
         fields:
@@ -320,11 +265,25 @@
               typeName: INT64
               isNullable: true
             name: "_row_id#0"
-        exchangeNode:
-          strategy:
-            type: HASH
-            columnIndices:
-              - 1
+        chainNode:
+          tableRefId:
+            tableId: 1
+          upstreamFields:
+            - dataType:
+                typeName: INT64
+                isNullable: true
+              name: "_row_id#0"
+            - dataType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+            - dataType:
+                typeName: INT32
+                isNullable: true
+              name: v2
+          columnIds:
+            - 1
+            - 0
     pkIndices:
       - 1
     fields:
@@ -369,6 +328,8 @@
       - 1
     pkOrders:
       - ASCENDING
+    distributionKeys:
+      - 1
 - sql: |
     /* test simple agg */
     create table t (v1 int);
@@ -396,6 +357,8 @@
                             typeName: INT64
                             isNullable: true
                           name: "_row_id#0"
+                      distributionKeys:
+                        - 1
                 pkIndices:
                   - 1
                 fields:
@@ -547,6 +510,8 @@
                                     typeName: INT64
                                     isNullable: true
                                   name: "_row_id#0"
+                              distributionKeys:
+                                - 2
                         pkIndices:
                           - 2
                         fields:
@@ -737,3 +702,5 @@
       - 1
     pkOrders:
       - ASCENDING
+    distributionKeys:
+      - 1

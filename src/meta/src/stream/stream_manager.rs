@@ -229,15 +229,9 @@ where
         };
 
         for fragment in table_fragments.fragments.values_mut() {
-            // TODO: currently materialize and chain node will be in separate fragments, but they
-            // could be merged into one fragment if they shared the same distribution. We should
-            // also consider FragmentType::Sink once we support merging materialize and
-            // chain into the same fragment.
-            if fragment.fragment_type == FragmentType::Others as i32 {
-                for actor in &mut fragment.actors {
-                    if let Some(ref mut stream_node) = actor.nodes {
-                        env.resolve_chain_node_inner(stream_node, actor.actor_id)?;
-                    }
+            for actor in &mut fragment.actors {
+                if let Some(ref mut stream_node) = actor.nodes {
+                    env.resolve_chain_node_inner(stream_node, actor.actor_id)?;
                 }
             }
         }
