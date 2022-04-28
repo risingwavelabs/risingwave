@@ -347,7 +347,7 @@ impl NestedLoopJoinExecutor {
         Ok(None)
     }
 
-    /// Similar to [`super::hash_join::HashJoinExecutor::probe_remaining`]. For nested loop join,
+    /// Similar to [`crate::executor2::hash_join::HashJoinState::ProbeRemaining`]. For nested loop join,
     /// iterate the build table and append row if not matched in [`NestedLoopJoinState::Probe`].
     fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
         match self.join_type {

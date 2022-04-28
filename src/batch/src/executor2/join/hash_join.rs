@@ -228,7 +228,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
 }
 
 #[derive(PartialEq)]
-enum HashJoinState {
+pub enum HashJoinState {
     Probe,
     ProbeRemaining,
     Done,
