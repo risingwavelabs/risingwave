@@ -47,6 +47,12 @@ enum StreamExecutorErrorInner {
     #[error("TopN state error: {0}")]
     TopNStateError(RwError),
 
+    #[error("Hash join error: {0}")]
+    HashJoinError(RwError),
+
+    #[error("Source error: {0}")]
+    SourceError(RwError),
+
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
 
@@ -77,6 +83,14 @@ impl StreamExecutorError {
 
     pub fn top_n_state_error(error: impl Into<RwError>) -> Self {
         StreamExecutorErrorInner::TopNStateError(error.into()).into()
+    }
+
+    pub fn hash_join_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::HashJoinError(error.into()).into()
+    }
+
+    pub fn source_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::SourceError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {

@@ -145,9 +145,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
-    use risingwave_source::{
-        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
-    };
+    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -155,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::new());
+        let source_manager = Arc::new(MemSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -189,9 +187,7 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
-        let mut reader = source
-            .stream_reader(TableV2ReaderContext, vec![0.into(), 1.into()])
-            .await?;
+        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor2::new(

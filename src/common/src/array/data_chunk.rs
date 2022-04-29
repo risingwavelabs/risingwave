@@ -261,6 +261,7 @@ impl DataChunk {
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
     /// When the total cardinality of all the chunks is not evenly divided by the `each_size_limit`,
     /// the last new chunk will be the remainder.
+    ///
     /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending
     /// on the demand
     pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> Result<Vec<DataChunk>> {
@@ -468,8 +469,7 @@ impl DataChunkTestExt for DataChunk {
     ///
     /// # Example
     /// ```
-    /// use risingwave_common::array::stream_chunk::DataChunkTestExt as _;
-    /// use risingwave_common::array::DataChunk;
+    /// use risingwave_common::array::{DataChunk, DataChunkTestExt};
     /// let chunk = DataChunk::from_pretty(
     ///     "I I I I      // type chars
     ///      2 5 . .      // '.' means NULL

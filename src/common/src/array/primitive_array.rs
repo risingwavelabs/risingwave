@@ -109,10 +109,22 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type RefItem<'a> = T;
 
     fn value_at(&self, idx: usize) -> Option<T> {
-        if !self.is_null(idx) {
-            Some(self.data[idx])
-        } else {
+        if self.is_null(idx) {
             None
+        } else {
+            Some(self.data[idx])
+        }
+    }
+
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not check whether the index is within the bounds of
+    /// the array.
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T> {
+        if self.is_null_unchecked(idx) {
+            None
+        } else {
+            Some(*self.data.get_unchecked(idx))
         }
     }
 

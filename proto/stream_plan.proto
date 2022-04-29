@@ -77,6 +77,7 @@ message SimpleAggNode {
 message HashAggNode {
   repeated int32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
+  repeated uint32 table_ids = 3;
 }
 
 message TopNNode {
@@ -114,6 +115,10 @@ message DeltaIndexJoinNode {
   uint32 left_table_id = 7;
   // Table id of the right index.
   uint32 right_table_id = 8;
+  // Info about the left index
+  ArrangementInfo left_info = 9;
+  // Info about the right index
+  ArrangementInfo right_info = 10;
 }
 
 message HopWindowNode {
@@ -157,16 +162,25 @@ message BatchPlanNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
-  // TODO: make hash_mapping more compact. (e.g. store ranges)
   ParallelUnitMapping hash_mapping = 4;
   uint32 parallel_unit_id = 5;
+}
+
+message ArrangementInfo {
+  // Order keys of the arrangement, including order by keys and pks from the materialize
+  // executor.
+  repeated plan_common.ColumnOrder arrange_key_orders = 1;
+  // Column descs of the arrangement
+  repeated plan_common.ColumnDesc column_descs = 2;
 }
 
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
 // produce a special Materialize executor, which materializes data for downstream to query.
 message ArrangeNode {
-  // The keys used to group the rows, aka. arrange key.
-  repeated int32 arrange_key_indexes = 1;
+  // Table Id of the arrangement
+  uint32 table_id = 2;
+  // Info about the arrangement
+  ArrangementInfo table_info = 3;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -181,41 +195,46 @@ message LookupNode {
   // By default, lookup executor will produce `<arrangement side, stream side>`. We
   // will then apply the column mapping to the combined result.
   repeated int32 column_mapping = 4;
-  // The fragment id of upstream arrangement
-  // TODO: record arrangements in catalog and use table_id
-  uint32 arrange_fragment_id = 5;
-  // Temporarily used when generating fragments on meta node. When generating lookup
-  // fragments, the global fragment id of upstream arrange won't be available. Therefore,
-  // we record local id here, and rewrite it into global id when sealing fragments.
-  uint32 arrange_local_fragment_id = 6;
-  // The operator id of upstream arrangement
-  uint64 arrange_operator_id = 7;
+  oneof arrangement_table_id {
+    // Table Id of the arrangement (when created along with join plan)
+    uint32 table_id = 5;
+    // Table Id of the arrangement (when using index)
+    uint32 index_id = 6;
+  }
+  // Info about the arrangement
+  ArrangementInfo arrangement_table_info = 7;
 }
 
-// Special node for shared state. Merge and align barrier from upstreams.
+// Acts like a merger, but on different inputs.
 message UnionNode {}
+
+// Special node for shared state. Merge and align barrier from upstreams. Pipe inputs in order.
+message LookupUnionNode {
+  repeated uint32 order = 1;
+}
 
 message StreamNode {
   oneof node {
-    SourceNode source_node = 4;
-    ProjectNode project_node = 5;
-    FilterNode filter_node = 6;
-    MaterializeNode materialize_node = 7;
-    SimpleAggNode local_simple_agg_node = 16;
-    SimpleAggNode global_simple_agg_node = 8;
-    HashAggNode hash_agg_node = 9;
-    TopNNode append_only_top_n_node = 10;
-    HashJoinNode hash_join_node = 11;
-    TopNNode top_n_node = 12;
-    HopWindowNode hop_window_node = 23;
-    MergeNode merge_node = 13;
-    ExchangeNode exchange_node = 14;
-    ChainNode chain_node = 15;
-    BatchPlanNode batch_plan_node = 17;
-    LookupNode lookup_node = 20;
-    ArrangeNode arrange_node = 21;
-    UnionNode union_node = 22;
-    DeltaIndexJoinNode delta_index_join = 25;
+    SourceNode source_node = 100;
+    ProjectNode project_node = 101;
+    FilterNode filter_node = 102;
+    MaterializeNode materialize_node = 103;
+    SimpleAggNode local_simple_agg_node = 104;
+    SimpleAggNode global_simple_agg_node = 105;
+    HashAggNode hash_agg_node = 106;
+    TopNNode append_only_top_n_node = 107;
+    HashJoinNode hash_join_node = 108;
+    TopNNode top_n_node = 109;
+    HopWindowNode hop_window_node = 110;
+    MergeNode merge_node = 111;
+    ExchangeNode exchange_node = 112;
+    ChainNode chain_node = 113;
+    BatchPlanNode batch_plan_node = 114;
+    LookupNode lookup_node = 115;
+    ArrangeNode arrange_node = 116;
+    LookupUnionNode lookup_union_node = 117;
+    UnionNode union_node = 118;
+    DeltaIndexJoinNode delta_index_join = 119;
   }
   // The id for the operator.
   uint64 operator_id = 1;
@@ -256,6 +275,10 @@ message Dispatcher {
   repeated uint32 column_indices = 2;
   // The hash mapping for consistent hash.
   ActorMapping hash_mapping = 3;
+  // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
+  // For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // For cross-MV dispatchers, there will only be one broadcast dispatcher of id 0.
+  uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }

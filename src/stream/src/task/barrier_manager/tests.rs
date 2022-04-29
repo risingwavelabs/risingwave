@@ -51,14 +51,8 @@ async fn test_managed_barrier_collection() -> Result<()> {
     let collected_barriers = rxs
         .iter_mut()
         .map(|(actor_id, rx)| {
-            let msg = rx.try_recv().unwrap();
-            let barrier = match msg {
-                Message::Barrier(b) => {
-                    assert_eq!(b.epoch.curr, epoch);
-                    b
-                }
-                _ => unreachable!(),
-            };
+            let barrier = rx.try_recv().unwrap();
+            assert_eq!(barrier.epoch.curr, epoch);
             (*actor_id, barrier)
         })
         .collect_vec();
@@ -117,14 +111,8 @@ async fn test_managed_barrier_collection_before_send_request() -> Result<()> {
     let collected_barriers = rxs
         .iter_mut()
         .map(|(actor_id, rx)| {
-            let msg = rx.try_recv().unwrap();
-            let barrier = match msg {
-                Message::Barrier(b) => {
-                    assert_eq!(b.epoch.curr, epoch);
-                    b
-                }
-                _ => unreachable!(),
-            };
+            let barrier = rx.try_recv().unwrap();
+            assert_eq!(barrier.epoch.curr, epoch);
             (*actor_id, barrier)
         })
         .collect_vec();

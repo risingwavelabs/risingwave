@@ -21,6 +21,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::next_key;
@@ -31,7 +32,7 @@ use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
-use crate::storage_value::StorageValue;
+use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
@@ -261,6 +262,99 @@ impl<S: StateStore> CellBasedTable<S> {
                                         local.put(
                                             insert_pk,
                                             StorageValue::new_default_put(insert_row),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        batch.ingest(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn batch_write_rows_with_value_meta(
+        &mut self,
+        buffer: BTreeMap<Row, RowOp>,
+        epoch: u64,
+    ) -> StorageResult<()> {
+        // stateful executors need to compute vnode.
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut local = batch.prefixify(&self.keyspace);
+        let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
+        let hash_builder = CRC32FastBuilder {};
+        for (pk, row_op) in buffer {
+            let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
+            let vnode = pk.hash_row(&hash_builder).to_vnode();
+            let value_meta = ValueMeta::with_vnode(vnode);
+            match row_op {
+                RowOp::Insert(row) => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, row, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, value) in bytes {
+                        local.put(key, StorageValue::new_put(value_meta, value))
+                    }
+                }
+                RowOp::Delete(old_row) => {
+                    // TODO(wcy-fdu): only serialize key on deletion
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, _) in bytes {
+                        local.delete_with_value_meta(key, value_meta);
+                    }
+                }
+                RowOp::Update((old_row, new_row)) => {
+                    let delete_bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .map_err(err)?;
+                    let insert_bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, new_row, &self.column_ids)
+                        .map_err(err)?;
+                    let mut insert_bytes_iter = insert_bytes.into_iter().fuse().peekable();
+                    let mut delete_bytes_iter = delete_bytes.into_iter().fuse().peekable();
+                    loop {
+                        match (insert_bytes_iter.peek(), delete_bytes_iter.peek()) {
+                            (None, None) => break,
+                            (None, Some((delete_pk, _))) => {
+                                local.delete_with_value_meta(delete_pk, value_meta);
+                                delete_bytes_iter.next();
+                            }
+                            (Some(_), None) => {
+                                let (insert_pk, insert_row) = insert_bytes_iter.next().unwrap();
+                                local.put(insert_pk, StorageValue::new_put(value_meta, insert_row));
+                            }
+                            (Some((insert_pk, _)), Some((delete_pk, _))) => {
+                                let delete_cell_id = gengrate_cell_id_from_pk(delete_pk)?;
+                                let insert_cell_id = gengrate_cell_id_from_pk(insert_pk)?;
+                                match delete_cell_id.cmp(insert_cell_id) {
+                                    std::cmp::Ordering::Less => {
+                                        local.delete_with_value_meta(delete_pk, value_meta);
+                                        delete_bytes_iter.next();
+                                    }
+                                    std::cmp::Ordering::Equal => {
+                                        let (insert_pk, insert_row) =
+                                            insert_bytes_iter.next().unwrap();
+                                        local.put(
+                                            insert_pk,
+                                            StorageValue::new_put(value_meta, insert_row),
+                                        );
+
+                                        delete_bytes_iter.next();
+                                    }
+                                    std::cmp::Ordering::Greater => {
+                                        let (insert_pk, insert_row) =
+                                            insert_bytes_iter.next().unwrap();
+                                        local.put(
+                                            insert_pk,
+                                            StorageValue::new_put(value_meta, insert_row),
                                         );
                                     }
                                 }

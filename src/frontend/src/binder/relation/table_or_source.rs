@@ -31,7 +31,7 @@ pub struct BoundBaseTable {
     pub table_indexes: Vec<Arc<TableCatalog>>,
 }
 
-/// `BoundTableSource` is used by DML statement on table source like insert, updata
+/// `BoundTableSource` is used by DML statement on table source like insert, update.
 #[derive(Debug)]
 pub struct BoundTableSource {
     pub name: String,       // explain-only

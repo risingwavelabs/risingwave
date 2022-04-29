@@ -146,16 +146,18 @@ message StopMutation {
   repeated uint32 actors = 1;
 }
 
-message Actors {
-  repeated common.ActorInfo info = 1;
+message DispatcherMutation {
+  uint32 actor_id = 1;
+  uint64 dispatcher_id = 2;
+  repeated common.ActorInfo info = 3;
 }
 
 message UpdateMutation {
-  map<uint32, Actors> actors = 1;
+  repeated DispatcherMutation mutations = 1;
 }
 
 message AddMutation {
-  map<uint32, Actors> actors = 1;
+  repeated DispatcherMutation mutations = 1;
 }
 
 message Epoch {
