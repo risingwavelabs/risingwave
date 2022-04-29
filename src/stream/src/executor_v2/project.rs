@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
 use super::{
-    Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
+    Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
 use crate::executor_v2::error::StreamExecutorError;
@@ -29,9 +29,17 @@ use crate::executor_v2::error::StreamExecutorError;
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 
 impl ProjectExecutor {
-    pub fn new(input: Box<dyn Executor>, exprs: Vec<BoxedExpression>, execuotr_id: u64) -> Self {
-        let info = input.info();
-
+    pub fn new(
+        input: Box<dyn Executor>,
+        pk_indices: PkIndices,
+        exprs: Vec<BoxedExpression>,
+        execuotr_id: u64,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema: input.schema().to_owned(),
+            pk_indices,
+            identity: "Project".to_owned(),
+        };
         SimpleExecutorWrapper {
             input,
             inner: SimpleProjectExecutor::new(info, exprs, execuotr_id),
@@ -165,7 +173,12 @@ mod tests {
             Box::new(right_expr),
         );
 
-        let project = Box::new(ProjectExecutor::new(Box::new(source), vec![test_expr], 1));
+        let project = Box::new(ProjectExecutor::new(
+            Box::new(source),
+            vec![],
+            vec![test_expr],
+            1,
+        ));
         let mut project = project.execute();
 
         let msg = project.next().await.unwrap().unwrap();
