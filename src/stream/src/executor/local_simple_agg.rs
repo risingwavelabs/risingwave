@@ -24,7 +24,7 @@ use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::{BoxedExecutor, Executor, LocalSimpleAggExecutor};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
-pub struct LocalSimpleAggExecutorBuilder {}
+pub struct LocalSimpleAggExecutorBuilder;
 
 impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
     fn new_boxed_executor(

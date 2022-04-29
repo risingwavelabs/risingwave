@@ -19,16 +19,10 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::*;
-use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// Merges data from multiple inputs with order. If `order = [2, 1, 0]`, then
 /// it will first pipe data from the third input; after the third input gets a barrier, it will then
@@ -141,23 +135,6 @@ impl LookupUnionExecutor {
                 yield Message::Barrier(this_barrier.take().unwrap());
             }
         }
-    }
-}
-
-pub struct LookupUnionExecutorBuilder {}
-
-impl ExecutorBuilder for LookupUnionExecutorBuilder {
-    fn new_boxed_executor(
-        params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<BoxedExecutor> {
-        let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;
-        Ok(
-            LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())
-                .boxed(),
-        )
     }
 }
 

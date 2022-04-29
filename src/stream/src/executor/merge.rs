@@ -12,17 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::StateStore;
+use super::*;
 
-use super::Result;
-use crate::executor::ExecutorBuilder;
-use crate::executor_v2::BoxedExecutor;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
-
-pub struct MergeExecutorBuilder {}
+pub struct MergeExecutorBuilder;
 
 impl ExecutorBuilder for MergeExecutorBuilder {
     fn new_boxed_executor(

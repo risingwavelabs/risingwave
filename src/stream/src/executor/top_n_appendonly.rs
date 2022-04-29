@@ -23,7 +23,7 @@ use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{AppendOnlyTopNExecutor, BoxedExecutor, Executor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-pub struct AppendOnlyTopNExecutorBuilder {}
+pub struct AppendOnlyTopNExecutorBuilder;
 
 impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
     fn new_boxed_executor(

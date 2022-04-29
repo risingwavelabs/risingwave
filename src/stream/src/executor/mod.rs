@@ -17,36 +17,47 @@ mod chain;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
+mod hash_join;
+mod hop_window;
 mod local_simple_agg;
+mod lookup;
+mod lookup_union;
 mod merge;
 mod mview;
 mod project;
+mod source;
 mod top_n;
 mod top_n_appendonly;
+mod union;
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::StateStore;
+use risingwave_storage::{Keyspace, StateStore};
 
 use self::batch_query::*;
 use self::chain::*;
 use self::filter::*;
 use self::global_simple_agg::*;
 use self::hash_agg::*;
+use self::hash_join::*;
+use self::hop_window::*;
 use self::local_simple_agg::*;
+use self::lookup::*;
+use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
 use self::project::*;
+use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
-use crate::executor_v2::{
-    BoxedExecutor, HashJoinExecutorBuilder, HopWindowExecutorBuilder, LookupExecutorBuilder,
-    LookupUnionExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
-};
+use self::union::*;
+use crate::executor_v2::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-pub trait ExecutorBuilder {
+trait ExecutorBuilder {
     /// Create an executor.
     fn new_boxed_executor(
         executor_params: ExecutorParams,
