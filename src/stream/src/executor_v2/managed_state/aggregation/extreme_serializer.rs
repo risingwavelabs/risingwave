@@ -20,7 +20,7 @@ use risingwave_common::types::{
 };
 use smallvec::SmallVec;
 
-use crate::executor::PkDataTypes;
+use crate::executor_v2::PkDataTypes;
 
 type ExtremePkItem = Datum;
 

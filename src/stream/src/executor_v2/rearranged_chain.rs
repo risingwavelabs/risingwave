@@ -93,16 +93,19 @@ impl RearrangedChainExecutor {
         upstream: BoxedExecutor,
         upstream_indices: Vec<usize>,
         notifier: FinishCreateMviewNotifier,
-        actor_id: ActorId,
-        info: ExecutorInfo,
+        schema: Schema,
     ) -> Self {
         Self {
+            info: ExecutorInfo {
+                schema,
+                pk_indices: upstream.pk_indices().to_owned(),
+                identity: "RearrangedChain".to_owned(),
+            },
             snapshot,
             upstream,
             upstream_indices: upstream_indices.into(),
+            actor_id: notifier.actor_id,
             notifier,
-            actor_id,
-            info,
         }
     }
 

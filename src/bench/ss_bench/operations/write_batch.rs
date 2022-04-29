@@ -104,7 +104,7 @@ impl Operations {
                     // the assumption required by LocalVersionManager. It may result in some pinned
                     // versions never get unpinned. This can be fixed after
                     // LocalVersionManager::start_workers is modified into push-based.
-                    let last_pinned_id = local_version_manager.get_pinned_version().unwrap().id();
+                    let last_pinned_id = local_version_manager.get_pinned_version().id();
                     let version = self.meta_client.pin_version(last_pinned_id).await.unwrap();
                     local_version_manager.try_update_pinned_version(version);
                 }

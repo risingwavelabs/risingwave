@@ -25,12 +25,11 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
-use crate::executor::Epoch;
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::lookup::cache::LookupCache;
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
-use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor_v2::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -276,9 +275,13 @@ impl<S: StateStore> LookupExecutor<S> {
                     self.process_barrier(barrier.clone())
                         .await
                         .map_err(StreamExecutorError::eval_error)?;
-                    yield Message::Barrier(barrier)
+                    if self.arrangement.use_current_epoch {
+                        // When lookup this epoch, stream side barrier always come after arrangement
+                        // ready, so we can forward barrier now.
+                        yield Message::Barrier(barrier);
+                    }
                 }
-                ArrangeMessage::ArrangeReady(arrangement_chunks) => {
+                ArrangeMessage::ArrangeReady(arrangement_chunks, barrier) => {
                     // The arrangement is ready, and we will receive a bunch of stream messages for
                     // the next poll.
 
@@ -293,6 +296,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         // If we are using previous epoch, arrange barrier should always come after
                         // stream barrier. So we flush now.
                         self.lookup_cache.flush();
+
+                        // When look prev epoch, arrange ready will always come after stream
+                        // barrier. So we yield barrier now.
+                        yield Message::Barrier(barrier);
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {

@@ -122,8 +122,8 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
-    use crate::executor::test_utils::create_in_memory_keyspace;
     use crate::executor_v2::aggregation::AggArgs;
+    use crate::executor_v2::test_utils::create_in_memory_keyspace;
 
     fn create_test_count_state() -> AggCall {
         AggCall {

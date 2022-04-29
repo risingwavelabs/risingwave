@@ -23,8 +23,8 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use super::{BoxedExecutor, Executor, Message, PkIndicesRef};
-use crate::executor::{ExecutorBuilder, PkIndices};
+use super::*;
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -123,7 +123,6 @@ mod tests {
     use risingwave_common::array::StreamChunk;
 
     use super::*;
-    use crate::executor::Barrier;
 
     #[tokio::test]
     async fn union() {

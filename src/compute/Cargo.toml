@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_compute"
-version = "0.1.5"
+version = "0.1.6"
 
 [dependencies]
 anyhow = "1"
@@ -51,7 +51,7 @@ tokio = { version = "1", features = [
 tokio-stream = "0.1"
 tonic = "0.7"
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.2", features = ["add-extension", "cors"] }
+tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = { version = "0.1" }
 twox-hash = "1"
 url = "2"

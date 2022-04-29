@@ -54,9 +54,6 @@ select v1, v2, v3, v4 from iii_mv2;
 0 0 0 3
 1 0 1 2
 
-# TODO: support drop lookup mv
-halt
-
 statement ok
 drop materialized view iii_mv2
 
@@ -65,8 +62,6 @@ drop materialized view iii_index_2
 
 statement ok
 drop materialized view iii_index_1
-
-# TODO: support drop index
 
 statement ok
 drop materialized view iii_index;

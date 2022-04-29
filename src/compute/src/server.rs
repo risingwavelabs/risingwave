@@ -32,7 +32,7 @@ use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor_v2::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;

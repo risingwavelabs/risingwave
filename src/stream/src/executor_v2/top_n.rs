@@ -21,11 +21,11 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
-use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
-use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
+use super::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
+use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
+use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.

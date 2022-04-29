@@ -26,17 +26,15 @@ use risingwave_pb::batch_plan::PlanNode;
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::generate_series::GenerateSeriesI32Executor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
-use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2,
-    ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2, TopNExecutor2, TraceExecutor2,
-    ValuesExecutor2,
+    GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
+    LimitExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2,
+    StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -46,11 +44,9 @@ mod drop_stream;
 mod drop_table;
 pub mod executor2_wrapper;
 mod fuse;
-mod generate_series;
 mod join;
 mod merge_sort_exchange;
 mod order_by;
-mod stream_scan;
 #[cfg(test)]
 pub mod test_utils;
 mod trace;
@@ -193,7 +189,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::SortAgg => SortAggExecutor2,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
-            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
@@ -203,7 +199,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
-            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
         }?;
         let input_desc = real_executor.identity().to_string();
@@ -223,7 +219,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::SortAgg => SortAggExecutor2,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
-            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
@@ -233,7 +229,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
-            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
         }?;
         let input_desc = real_executor.identity().to_string();

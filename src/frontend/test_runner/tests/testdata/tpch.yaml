@@ -1093,7 +1093,37 @@
       o_totalprice desc,
       o_orderdate
     LIMIT 100;
-  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "o_orderkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "l_orderkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [Identifier(Ident { value: "l_orderkey", quote_style: None })], having: Some(BinaryOp { left: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }), op: Gt, right: Value(Number("1", false)) }) }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  logical_plan: |
+    LogicalTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
+      LogicalProject { exprs: [$0, $1, $2, $3, $4, $5], expr_alias: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity] }
+        LogicalAgg { group_keys: [0, 1, 2, 3, 4], agg_calls: [sum($5)] }
+          LogicalProject { exprs: [$2, $1, $10, $14, $13, $24], expr_alias: [ ,  ,  ,  ,  ,  ] }
+            LogicalFilter { predicate: ($1 = $11) AND ($10 = $20) }
+              LogicalJoin { type: LeftSemi, on: ($10 = $36) }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
+                    LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
+                  LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+                LogicalProject { exprs: [$0], expr_alias: [l_orderkey] }
+                  LogicalAgg { group_keys: [0], agg_calls: [] }
+                    LogicalProject { exprs: [$1], expr_alias: [ ] }
+                      LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+  optimized_logical_plan: |
+    LogicalTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
+      LogicalProject { exprs: [$0, $1, $2, $3, $4, $5], expr_alias: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity] }
+        LogicalAgg { group_keys: [0, 1, 2, 3, 4], agg_calls: [sum($5)] }
+          LogicalProject { exprs: [$1, $0, $2, $4, $3, $5], expr_alias: [ ,  ,  ,  ,  ,  ] }
+            LogicalJoin { type: LeftSemi, on: ($2 = $6) }
+              LogicalProject { exprs: [$0, $1, $2, $3, $4, $6], expr_alias: [ ,  ,  ,  ,  ,  ] }
+                LogicalJoin { type: Inner, on: ($2 = $5) }
+                  LogicalProject { exprs: [$0, $1, $2, $4, $5], expr_alias: [ ,  ,  ,  ,  ] }
+                    LogicalJoin { type: Inner, on: ($0 = $3) }
+                      LogicalScan { table: customer, columns: [c_custkey, c_name] }
+                      LogicalScan { table: orders, columns: [o_orderkey, o_custkey, o_totalprice, o_orderdate] }
+                  LogicalScan { table: lineitem, columns: [l_orderkey, l_quantity] }
+              LogicalAgg { group_keys: [0], agg_calls: [] }
+                LogicalScan { table: lineitem, columns: [l_orderkey] }
 - id: tpch_q19
   before:
     - create_tables
@@ -1203,4 +1233,46 @@
       and n_name = 'KENYA'
     order by
       s_name;
-  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "s_suppkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "ps_suppkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "partsupp", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: InSubquery { expr: Identifier(Ident { value: "ps_partkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "p_partkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "part", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: Identifier(Ident { value: "p_name", quote_style: None }), op: Like, right: Value(SingleQuotedString("forest%")) }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, op: And, right: BinaryOp { left: Identifier(Ident { value: "ps_availqty", quote_style: None }), op: Gt, right: Subquery(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(BinaryOp { left: Value(Number("0.5", false)), op: Multiply, right: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }) })], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: BinaryOp { left: BinaryOp { left: BinaryOp { left: Identifier(Ident { value: "l_partkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_partkey", quote_style: None }) }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_suppkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_suppkey", quote_style: None }) } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: GtEq, right: TypedString { data_type: Date, value: "1994-01-01" } } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: Lt, right: BinaryOp { left: TypedString { data_type: Date, value: "1994-01-01" }, op: Plus, right: Value(Interval { value: "1", leading_field: Some(Year), leading_precision: None, last_field: None, fractional_seconds_precision: None }) } } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }) } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  logical_plan: |
+    LogicalProject { exprs: [$2, $3], expr_alias: [s_name, s_address] }
+      LogicalFilter { predicate: ($4 = $9) AND ($10 = 'KENYA':Varchar) }
+        LogicalApply { type: LeftSemi, on: ($1 = $13) }
+          LogicalJoin { type: Inner, on: always }
+            LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
+            LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+          LogicalProject { exprs: [$2], expr_alias: [ps_suppkey] }
+            LogicalFilter { predicate: ($3 > $7) }
+              LogicalApply { type: LeftOuter, on: always }
+                LogicalJoin { type: LeftSemi, on: ($1 = $6) }
+                  LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
+                  LogicalProject { exprs: [$1], expr_alias: [p_partkey] }
+                    LogicalFilter { predicate: Like($2, 'forest%':Varchar) }
+                      LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
+                LogicalProject { exprs: [(0.5:Decimal * $0)], expr_alias: [ ] }
+                  LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+                    LogicalProject { exprs: [$5], expr_alias: [ ] }
+                      LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, depth: 1 }) AND ($3 = CorrelatedInputRef { index: 2, depth: 1 }) AND ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                        LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$1, $2], expr_alias: [s_name, s_address] }
+      LogicalJoin { type: LeftSemi, on: ($0 = $3) }
+        LogicalProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
+          LogicalJoin { type: Inner, on: ($3 = $4) }
+            LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey] }
+            LogicalProject { exprs: [$0], expr_alias: [ ] }
+              LogicalFilter { predicate: ($1 = 'KENYA':Varchar) }
+                LogicalScan { table: nation, columns: [n_nationkey, n_name] }
+        LogicalProject { exprs: [$0], expr_alias: [ps_suppkey] }
+          LogicalFilter { predicate: ($1 > (0.5:Decimal * $2)) }
+            LogicalProject { exprs: [$2, $3, $7], expr_alias: [ ,  ,  ] }
+              LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
+                LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
+                  LogicalJoin { type: LeftOuter, on: ($8 = $1) AND ($9 = $2) }
+                    LogicalJoin { type: LeftSemi, on: ($1 = $6) }
+                      LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
+                      LogicalProject { exprs: [$0], expr_alias: [p_partkey] }
+                        LogicalFilter { predicate: Like($1, 'forest%':Varchar) }
+                          LogicalScan { table: part, columns: [p_partkey, p_name] }
+                    LogicalProject { exprs: [$2, $0, $1], expr_alias: [ ,  ,  ] }
+                      LogicalFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                        LogicalScan { table: lineitem, columns: [l_partkey, l_suppkey, l_quantity, l_shipdate] }
