@@ -180,7 +180,7 @@ impl HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Iter<'a> = HummockStateStoreIter;
+    type Iter = HummockStateStoreIter;
 
     define_state_store_associated_type!();
 

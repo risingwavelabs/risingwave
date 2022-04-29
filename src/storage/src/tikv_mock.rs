@@ -32,7 +32,7 @@ impl TikvStateStore {
 }
 
 impl StateStore for TikvStateStore {
-    type Iter<'a> = TikvStateStoreIter;
+    type Iter = TikvStateStoreIter;
 
     define_state_store_associated_type!();
 
