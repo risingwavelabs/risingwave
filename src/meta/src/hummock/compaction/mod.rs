@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod overlap_strategy;
-mod tier_compaction_picker;
+pub mod compaction_picker;
+pub mod overlap_strategy;
+pub mod tier_compaction_picker;
 
 use std::io::Cursor;
 
@@ -26,8 +27,8 @@ use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
 };
 
-use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
+use crate::hummock::compaction::compaction_picker::CompactionPicker;
+use crate::hummock::compaction_group::CompactionPickerImpl;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
@@ -84,12 +85,20 @@ impl CompactStatus {
         }
     }
 
-    pub fn get_compact_task(&mut self, levels: Vec<Level>) -> Option<CompactTask> {
+    pub fn get_compact_task(
+        &mut self,
+        levels: Vec<Level>,
+        compaction_picker: &CompactionPickerImpl,
+    ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret = match self.pick_compaction(levels) {
+        let ret = match compaction_picker.try_pick_compaction(
+            levels,
+            &mut self.level_handlers,
+            self.next_compact_task_id,
+        ) {
             Some(ret) => ret,
             None => return None,
         };
@@ -132,15 +141,6 @@ impl CompactStatus {
         };
         self.next_compact_task_id += 1;
         Some(compact_task)
-    }
-
-    fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
-        // only support compact L0 to L1 or L0 to L0
-        let picker = TierCompactionPicker::new(
-            self.next_compact_task_id,
-            Box::new(RangeOverlapStrategy::default()),
-        );
-        picker.pick_compaction(levels, &mut self.level_handlers)
     }
 
     /// Declares a task is either finished or canceled.

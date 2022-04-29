@@ -29,6 +29,7 @@ pub struct Compactor {
 }
 
 impl Compactor {
+    // TODO: use try_send to indicate whether it's busy
     pub async fn send_task(
         &self,
         compact_task: Option<CompactTask>,

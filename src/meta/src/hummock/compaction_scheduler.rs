@@ -13,12 +13,16 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
-use crate::hummock::compaction_group::CompactionGroupId;
+use crate::hummock::compaction::compaction_picker::CompactionPicker;
+use crate::hummock::manager::compaction::CompactionGroupRef;
+use crate::hummock::utils::RetryableError;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::storage::MetaStore;
 
@@ -33,8 +37,8 @@ where
     compactor_manager: CompactorManagerRef,
     shutdown_tx: UnboundedSender<()>,
     shutdown_rx: Mutex<Option<UnboundedReceiver<()>>>,
-    request_tx: UnboundedSender<CompactionGroupId>,
-    request_rx: Mutex<Option<UnboundedReceiver<CompactionGroupId>>>,
+    request_tx: UnboundedSender<CompactionGroupRef>,
+    request_rx: Mutex<Option<UnboundedReceiver<CompactionGroupRef>>>,
 }
 
 impl<S> CompactionScheduler<S>
@@ -46,7 +50,7 @@ where
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupRef>();
         Self {
             hummock_manager,
             compactor_manager,
@@ -72,7 +76,7 @@ where
             .set_compaction_scheduler(self.request_tx.clone());
         tracing::info!("Start compaction scheduler.");
         'compaction_trigger: loop {
-            let compaction_group: CompactionGroupId = tokio::select! {
+            let compaction_group: CompactionGroupRef = tokio::select! {
                 compaction_group = request_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
@@ -91,31 +95,48 @@ where
         tracing::info!("Compaction scheduler is stopped");
     }
 
-    async fn pick_and_assign(&self, compaction_group: CompactionGroupId) {
+    async fn pick_and_assign(&self, compaction_group: CompactionGroupRef) {
         // 1. Select a compactor.
         let compactor = match self.compactor_manager.next_compactor() {
             None => {
                 tracing::warn!("No compactor is available.");
+                self.reschedule_compaction_group(compaction_group);
+                // Sleep to avoid spin as we've rescheduled the request.
+                tokio::time::sleep(Duration::from_secs(10)).await;
                 return;
             }
             Some(compactor) => compactor,
         };
+        let max_pending_compact_task = 2usize;
+        if self
+            .hummock_manager
+            .get_ongoing_compact_task_count(compactor.context_id())
+            .await
+            > max_pending_compact_task
+        {
+            tracing::warn!("Compactor is busy.");
+            self.reschedule_compaction_group(compaction_group);
+            // The selected compactor is busy. We use this to roughly indicate the whole scheduler
+            // is overloaded.
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            return;
+        }
 
         // 2. Pick a compact task and assign to the compactor.
-        // TODO: specify compaction_group in get_compact_task
         let mut compact_task = match self
             .hummock_manager
-            .get_compact_task(compactor.context_id())
+            .get_compact_task_by_compaction_group(compactor.context_id(), compaction_group.clone())
             .await
         {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compact task available.
+                compaction_group.write().set_is_scheduled(false);
                 return;
             }
             Err(err) => {
                 tracing::warn!(
-                    "Failed to get compact task for compactor {}. {}",
+                    "Failed to get compact task for compactor {}. {:?}",
                     compactor.context_id(),
                     err
                 );
@@ -134,8 +155,18 @@ where
                     compact_task_to_string(&compact_task),
                     compactor.context_id()
                 );
-                // TODO: decide if more compaction task available in compaction_group, then either
+                // Decide if more compaction task available in compaction_group, then either
                 // reschedule or unset compaction_group's is_scheduled.
+                let levels = self.hummock_manager.get_current_version().await.levels;
+                if compaction_group
+                    .read()
+                    .compaction_picker()
+                    .need_compaction(levels)
+                {
+                    self.reschedule_compaction_group(compaction_group);
+                } else {
+                    compaction_group.write().set_is_scheduled(false);
+                }
             }
             Err(err) => {
                 tracing::warn!(
@@ -144,19 +175,32 @@ where
                     err
                 );
                 compact_task.task_status = false;
-                if let Err(err) = self.hummock_manager.report_compact_task(compact_task).await {
-                    tracing::warn!(
-                        "Failed to cancel compaction task for worker {}: {}",
-                        compactor.context_id(),
-                        err
-                    );
-                    // Either the compactor will reestablish the stream and fetch this unfinished
-                    // compact task, or the compactor will lose connection and
-                    // its assigned compact task will be cancelled eventually.
-                }
                 self.compactor_manager
                     .remove_compactor(compactor.context_id());
                 self.reschedule_compaction_group(compaction_group);
+
+                // Retry only happens when meta store is undergoing failure.
+                let retry_strategy = ExponentialBackoff::from_millis(10)
+                    .max_delay(Duration::from_secs(60))
+                    .map(jitter);
+                tokio_retry::RetryIf::spawn(retry_strategy, || async {
+                    if let Err(err) = self.hummock_manager.report_compact_task(&compact_task).await {
+                        tracing::warn!(
+                            "Failed to cancel compaction task for worker {}: {:?}. Will retry.",
+                            compactor.context_id(),
+                            err
+                        );
+                        return Err(err);
+                    }
+                    Ok(())
+                }, RetryableError::default()).await
+                    .unwrap_or_else(|err|{
+                        tracing::warn!(
+                            "Failed to cancel compaction task for worker {}: unretryable error {:?}. The compaction task will be unassigned after the worker is removed from cluster",
+                            compactor.context_id(),
+                            err
+                        );
+                    });
             }
         }
     }
@@ -165,15 +209,15 @@ where
         self.shutdown_tx.clone()
     }
 
-    pub fn request_sender(&self) -> UnboundedSender<CompactionGroupId> {
+    pub fn request_sender(&self) -> UnboundedSender<CompactionGroupRef> {
         self.request_tx.clone()
     }
 
-    fn reschedule_compaction_group(&self, compaction_group: CompactionGroupId) {
+    fn reschedule_compaction_group(&self, compaction_group: CompactionGroupRef) {
         if let Err(err) = self.request_tx.send(compaction_group.clone()) {
             tracing::warn!(
-                "Failed to schedule compaction_group {:?}: {}",
-                compaction_group,
+                "Failed to schedule compaction_group {}: {}",
+                compaction_group.read().group_id(),
                 err
             );
         }

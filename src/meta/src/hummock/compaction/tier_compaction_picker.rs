@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
 
 use super::SearchResult;
+use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -29,7 +30,6 @@ const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
 const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 
 pub struct TierCompactionPicker {
-    compact_task_id: u64,
     max_compaction_bytes: u64,
     level0_max_file_number: usize,
     level0_trigger_number: usize,
@@ -44,12 +44,8 @@ pub struct TargetFilesInfo {
 }
 
 impl TierCompactionPicker {
-    pub fn new(
-        compact_task_id: u64,
-        overlap_strategy: Box<dyn OverlapStrategy>,
-    ) -> TierCompactionPicker {
+    pub fn new(overlap_strategy: Box<dyn OverlapStrategy>) -> TierCompactionPicker {
         TierCompactionPicker {
-            compact_task_id,
             // TODO: set it by cluster configure or vertical group configure.
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
             level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
@@ -62,12 +58,13 @@ impl TierCompactionPicker {
         &self,
         levels: Vec<Level>,
         level_handlers: &mut [LevelHandler],
+        compact_task_id: u64,
     ) -> Option<SearchResult> {
         let select_level = 0;
         // TODO: After support dynamic-leveled-compaction, use base-level as target-level.
         let target_level = 1;
 
-        let next_task_id = self.compact_task_id;
+        let next_task_id = compact_task_id;
         if levels[select_level].table_infos.is_empty() {
             return None;
         }
@@ -81,6 +78,7 @@ impl TierCompactionPicker {
             return self.pick_intra_l0_compaction(
                 &levels[select_level],
                 &mut level_handlers[select_level],
+                compact_task_id,
             );
         }
 
@@ -152,6 +150,7 @@ impl TierCompactionPicker {
         &self,
         level0: &Level,
         level0_handler: &mut LevelHandler,
+        compact_task_id: u64,
     ) -> Option<SearchResult> {
         if level0.table_infos.len() < self.level0_max_file_number {
             return None;
@@ -184,7 +183,7 @@ impl TierCompactionPicker {
         if select_level_inputs.len() < self.level0_trigger_number {
             return None;
         }
-        level0_handler.add_pending_task(self.compact_task_id, &select_level_inputs);
+        level0_handler.add_pending_task(compact_task_id, &select_level_inputs);
         Some(SearchResult {
             select_level: Level {
                 level_idx: 0,
@@ -266,6 +265,23 @@ impl TierCompactionPicker {
     }
 }
 
+impl CompactionPicker for TierCompactionPicker {
+    fn need_compaction(&self, levels: Vec<Level>) -> bool {
+        // TODO: It should exclude files under compaction, which in turn means TierCompactionPicker
+        // should maintain its own state?
+        levels.first().expect("level 0 not found").table_infos.len() >= self.level0_max_file_number
+    }
+
+    fn try_pick_compaction(
+        &self,
+        levels: Vec<Level>,
+        level_handlers: &mut [LevelHandler],
+        compact_task_id: u64,
+    ) -> Option<SearchResult> {
+        self.pick_compaction(levels, level_handlers, compact_task_id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_pb::hummock::KeyRange as RawKeyRange;
@@ -294,7 +310,8 @@ mod tests {
 
     #[test]
     fn test_compact_l0_to_l1() {
-        let picker = TierCompactionPicker::new(0, Box::new(RangeOverlapStrategy::default()));
+        let compact_task_id = 0;
+        let picker = TierCompactionPicker::new(Box::new(RangeOverlapStrategy::default()));
         let mut levels = vec![
             Level {
                 level_idx: 0,
@@ -317,7 +334,7 @@ mod tests {
         ];
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let ret = picker
-            .pick_compaction(levels.clone(), &mut levels_handler)
+            .pick_compaction(levels.clone(), &mut levels_handler, compact_task_id)
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 2);
@@ -334,7 +351,7 @@ mod tests {
         // pick table 5 and 0. but skip table 6 because [0_key_test_000100, 1_key_test_000333] will
         // be conflict with the previous job.
         let ret = picker
-            .pick_compaction(levels.clone(), &mut levels_handler)
+            .pick_compaction(levels.clone(), &mut levels_handler, compact_task_id)
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 3);
         assert_eq!(levels_handler[1].get_pending_file_count(), 3);
@@ -343,11 +360,12 @@ mod tests {
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
-        let mut picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
+        let compact_task_id = 1;
+        let mut picker = TierCompactionPicker::new(Box::new(RangeOverlapStrategy::default()));
         levels[0]
             .table_infos
             .push(generate_table(8, 1, 222, 233, 3));
-        let ret = picker.pick_compaction(levels.clone(), &mut levels_handler);
+        let ret = picker.pick_compaction(levels.clone(), &mut levels_handler, compact_task_id);
         assert!(ret.is_none());
 
         // compact L0 to L0
@@ -357,7 +375,7 @@ mod tests {
             .table_infos
             .push(generate_table(9, 1, 100, 200, 3));
         let ret = picker
-            .pick_compaction(levels.clone(), &mut levels_handler)
+            .pick_compaction(levels.clone(), &mut levels_handler, compact_task_id)
             .unwrap();
         assert_eq!(ret.select_level.table_infos[0].id, 7);
         assert_eq!(ret.select_level.table_infos[1].id, 8);
