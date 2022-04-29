@@ -22,9 +22,7 @@ env:
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
-permissions:
-  id-token: write
-  contents: read
+permissions: write-all
 jobs:
   start-runner-a:
     name: ec2-start-a
