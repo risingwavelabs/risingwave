@@ -17,16 +17,13 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use itertools::Itertools;
-use risingwave_hummock_sdk::key::{key_with_epoch, FullKey};
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator,
     ReverseConcatIterator, ReverseMergeIterator, ReverseUserIterator, UserIterator,
 };
-use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::utils::{validate_epoch, validate_table_key_range};
 use super::{HummockStorage, ReverseSSTableIterator, SSTableIterator};
 use crate::error::StorageResult;
@@ -53,7 +50,7 @@ impl HummockStorage {
         let mut overlapped_backward_iters = vec![];
 
         let (uncommitted_ssts, pinned_version) = {
-            let read_version = self.local_version_manager.read_version(epoch)?;
+            let read_version = self.local_version_manager.read_version(epoch);
 
             // Check epoch validity
             validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
@@ -193,7 +190,7 @@ impl StateStore for HummockStorage {
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let (uncommitted_ssts, pinned_version) = {
-                let read_version = self.local_version_manager.read_version(epoch)?;
+                let read_version = self.local_version_manager.read_version(epoch);
 
                 // check epoch validity
                 validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
@@ -246,10 +243,8 @@ impl StateStore for HummockStorage {
                         let table_idx = level
                             .table_infos
                             .partition_point(|table| {
-                                let ord = VersionedComparator::compare_key(
-                                    &table.key_range.as_ref().unwrap().left,
-                                    &FullKey::from_user_key_slice(key, epoch).into_inner(),
-                                );
+                                let ord =
+                                    user_key(&table.key_range.as_ref().unwrap().left).cmp(key);
                                 ord == Ordering::Less || ord == Ordering::Equal
                             })
                             .saturating_sub(1); // considering the boundary of 0
@@ -321,22 +316,9 @@ impl StateStore for HummockStorage {
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let batch = SharedBufferBatch::new(
-                kv_pairs
-                    .into_iter()
-                    .map(|(key, value)| {
-                        (
-                            Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                            value.into(),
-                        )
-                    })
-                    .collect_vec(),
-                epoch,
-            );
-            let size = batch.size();
-
-            self.local_version_manager
-                .write_shared_buffer(epoch, batch, false)
+            let size = self
+                .local_version_manager
+                .write_shared_buffer(epoch, kv_pairs, false)
                 .await?;
 
             if !self.options.async_checkpoint_enabled {
@@ -355,21 +337,8 @@ impl StateStore for HummockStorage {
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
-            let batch = SharedBufferBatch::new(
-                kv_pairs
-                    .into_iter()
-                    .map(|(key, value)| {
-                        (
-                            Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                            value.into(),
-                        )
-                    })
-                    .collect_vec(),
-                epoch,
-            );
-
             self.local_version_manager
-                .write_shared_buffer(epoch, batch, true)
+                .write_shared_buffer(epoch, kv_pairs, true)
                 .await?;
 
             Ok(())
