@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
+use std::sync::Arc;
+
+use futures::stream::select_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -21,14 +23,12 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, Message, PkIndicesRef, StreamExecutorResult};
-use crate::executor::{AlignedMessage, BarrierAligner, ExecutorBuilder, PkIndices};
+use super::{BoxedExecutor, Executor, Message, PkIndicesRef};
+use crate::executor::{ExecutorBuilder, PkIndices};
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-/// `UnionExecutor` merges data from multiple inputs. Currently this is done by using
-/// [`BarrierAligner`]. In the future we could have more efficient implementation.
+/// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
     inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
@@ -56,10 +56,10 @@ impl UnionExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for UnionExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        let streams = self.inputs.into_iter().map(|e| e.execute()).collect();
+        merge(streams)
     }
 
     fn schema(&self) -> &Schema {
@@ -75,79 +75,30 @@ impl Executor for UnionExecutor {
     }
 }
 
-struct BarrierAlignerWrapper(BarrierAligner, ExecutorInfo);
-
-impl Executor for BarrierAlignerWrapper {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.1.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.1.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.1.identity
-    }
-}
-
-impl BarrierAlignerWrapper {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self) {
-        loop {
-            match self.0.next().await {
-                AlignedMessage::Left(x) => {
-                    yield Message::Chunk(x.map_err(StreamExecutorError::input_error)?)
+/// Merges input streams and aligns with barriers.
+pub fn merge(inputs: Vec<BoxedMessageStream>) -> BoxedMessageStream {
+    let barrier = Arc::new(tokio::sync::Barrier::new(inputs.len()));
+    let mut streams = vec![];
+    for input in inputs {
+        let barrier = barrier.clone();
+        let stream = #[try_stream]
+        async move {
+            #[for_await]
+            for item in input {
+                match item? {
+                    msg @ Message::Chunk(_) => yield msg,
+                    msg @ Message::Barrier(_) => {
+                        if barrier.wait().await.is_leader() {
+                            // one leader is responsible for sending barrier
+                            yield msg;
+                        }
+                    }
                 }
-                AlignedMessage::Right(x) => {
-                    yield Message::Chunk(x.map_err(StreamExecutorError::input_error)?)
-                }
-                AlignedMessage::Barrier(x) => yield Message::Barrier(x),
             }
-        }
+        };
+        streams.push(stream.boxed());
     }
-}
-
-fn build_align_executor(mut inputs: Vec<BoxedExecutor>) -> StreamExecutorResult<BoxedExecutor> {
-    match inputs.len() {
-        0 => unreachable!(),
-        1 => Ok(inputs.remove(0)),
-        _ => {
-            let right = build_align_executor(inputs.split_off(inputs.len() / 2))?;
-            let left = build_align_executor(inputs)?;
-            let schema = left.schema().clone();
-            let pk_indices = right.pk_indices().to_vec();
-            assert_eq!(&schema, right.schema());
-            assert_eq!(pk_indices, right.pk_indices());
-            let aligner = BarrierAligner::new(Box::new(left.v1()), Box::new(right.v1()));
-            Ok(BarrierAlignerWrapper(
-                aligner,
-                ExecutorInfo {
-                    schema,
-                    pk_indices,
-                    identity: "BarrierAlignerWrapper".to_string(),
-                },
-            )
-            .boxed())
-        }
-    }
-}
-
-impl UnionExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
-        let executor = build_align_executor(self.inputs)?;
-        let stream = executor.execute();
-
-        #[for_await]
-        for item in stream {
-            yield item?;
-        }
-    }
+    select_all(streams).boxed()
 }
 
 pub struct UnionExecutorBuilder {}
@@ -161,5 +112,48 @@ impl ExecutorBuilder for UnionExecutorBuilder {
     ) -> risingwave_common::error::Result<BoxedExecutor> {
         try_match_expand!(node.get_node().unwrap(), Node::UnionNode)?;
         Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_stream::try_stream;
+    use futures::TryStreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
+
+    use super::*;
+    use crate::executor::Barrier;
+
+    #[tokio::test]
+    async fn union() {
+        let streams = vec![
+            try_stream! {
+                yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+                yield Message::Barrier(Barrier::new_test_barrier(1));
+                yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
+                yield Message::Barrier(Barrier::new_test_barrier(2));
+            }
+            .boxed(),
+            try_stream! {
+                yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+                yield Message::Barrier(Barrier::new_test_barrier(1));
+                yield Message::Barrier(Barrier::new_test_barrier(2));
+                yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
+            }
+            .boxed(),
+        ];
+        let output: Vec<_> = merge(streams).try_collect().await.unwrap();
+        assert_eq!(
+            output,
+            vec![
+                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+            ]
+        );
     }
 }

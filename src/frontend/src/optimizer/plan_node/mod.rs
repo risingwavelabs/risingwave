@@ -218,6 +218,7 @@ mod batch_exchange;
 mod batch_filter;
 mod batch_hash_agg;
 mod batch_hash_join;
+mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
 mod batch_project;
@@ -258,6 +259,7 @@ pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
@@ -339,6 +341,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Exchange }
             , { Batch, Limit }
             , { Batch, TopN }
+            , { Batch, HopWindow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -400,6 +403,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Exchange }
             , { Batch, Insert }
             , { Batch, Delete }
+            , { Batch, HopWindow }
         }
     };
 }

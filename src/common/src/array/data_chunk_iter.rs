@@ -99,8 +99,12 @@ impl<'a> RowRef<'a> {
 
     pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
-        // TODO: It's safe to use value_at_unchecked here.
-        self.chunk.columns()[pos].array_ref().value_at(self.idx)
+        // for `RowRef`, the index is always in bound.
+        unsafe {
+            self.chunk.columns()[pos]
+                .array_ref()
+                .value_at_unchecked(self.idx)
+        }
     }
 
     pub fn size(&self) -> usize {
@@ -171,10 +175,12 @@ impl<'a> Iterator for RowRefIter<'a> {
     type Item = DatumRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: It's safe to use value_at_unchecked here.
-        self.columns
-            .next()
-            .map(|col| col.array_ref().value_at(self.row_idx))
+        // SAFETY: for `RowRef`, the index is always in bound.
+        unsafe {
+            self.columns
+                .next()
+                .map(|col| col.array_ref().value_at_unchecked(self.row_idx))
+        }
     }
 }
 

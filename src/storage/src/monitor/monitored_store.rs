@@ -49,9 +49,9 @@ where
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
-    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
+    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
     where
-        I: Future<Output = StorageResult<S::Iter<'a>>>,
+        I: Future<Output = StorageResult<S::Iter>>,
     {
         let iter = iter.await?;
 
@@ -68,7 +68,7 @@ impl<S> StateStore for MonitoredStateStore<S>
 where
     S: StateStore,
 {
-    type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>> where Self: 'a;
+    type Iter = MonitoredStateStoreIter<S::Iter>;
 
     define_state_store_associated_type!();
 

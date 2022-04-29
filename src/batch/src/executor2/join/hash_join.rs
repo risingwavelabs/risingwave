@@ -13,20 +13,23 @@
 // limitations under the License.
 
 use std::convert::TryInto;
-use std::mem::take;
+use std::marker::PhantomData;
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
-use crate::executor::join::JoinType;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::join::hash_join_state::{BuildTable, ProbeTable};
+use crate::executor2::join::JoinType;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 use crate::task::TaskId;
 
 /// Parameters of equi-join.
@@ -60,48 +63,15 @@ pub(super) struct EquiJoinParams {
     pub cond: Option<BoxedExpression>,
 }
 
-/// Different states when executing a hash join.
-enum HashJoinState<K> {
-    /// Invalid state
-    Invalid,
-    /// Initial state of hash join.
-    ///
-    /// In this state, the executor [`crate::executor::Executor::open`] build side input, and calls
-    /// [`crate::executor::Executor::next`] of build side input till [`None`] is returned to create
-    /// `BuildTable`.
-    Build(BuildTable),
-    /// First state after finishing build state.
-    ///
-    /// It's different from [`HashJoinState::Probe`] in that we need to
-    /// [`crate::executor::Executor::open`] probe side input.
-    FirstProbe(ProbeTable<K>),
-    /// State for executing join.
-    ///
-    /// In this state, the executor calls [`crate::executor::Executor::open`]  method of probe side
-    /// input, and executes joining with the chunk against build table to create output.
-    Probe(ProbeTable<K>),
-    /// State for executing join remaining.
-    ///
-    /// See [`JoinType::need_join_remaining`]
-    ProbeRemaining(ProbeTable<K>),
-    /// Final state of hash join.
-    Done,
-}
-
-impl<K> Default for HashJoinState<K> {
-    fn default() -> Self {
-        HashJoinState::Invalid
-    }
-}
-
-pub(super) struct HashJoinExecutor<K> {
+pub(super) struct HashJoinExecutor2<K> {
     /// Probe side
-    left_child: BoxedExecutor,
+    left_child: Option<BoxedExecutor2>,
     /// Build side
-    right_child: BoxedExecutor,
-    state: HashJoinState<K>,
+    right_child: Option<BoxedExecutor2>,
+    params: EquiJoinParams,
     schema: Schema,
     identity: String,
+    _phantom: PhantomData<K>,
 }
 
 impl EquiJoinParams {
@@ -146,49 +116,7 @@ impl EquiJoinParams {
     }
 }
 
-#[async_trait::async_trait]
-impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
-    async fn open(&mut self) -> Result<()> {
-        match take(&mut self.state) {
-            HashJoinState::Build(build_table) => self.build(build_table).await?,
-            _ => unreachable!(),
-        }
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        loop {
-            match take(&mut self.state) {
-                HashJoinState::FirstProbe(probe_table) => {
-                    let ret = self.probe(true, probe_table).await?;
-                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
-                        return Ok(Some(data_chunk));
-                    }
-                }
-                HashJoinState::Probe(probe_table) => {
-                    let ret = self.probe(false, probe_table).await?;
-                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
-                        return Ok(Some(data_chunk));
-                    }
-                }
-                HashJoinState::ProbeRemaining(probe_table) => {
-                    let ret = self.probe_remaining(probe_table).await?;
-                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
-                        return Ok(Some(data_chunk));
-                    }
-                }
-                HashJoinState::Done => return Ok(None),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        self.left_child.close().await?;
-        self.right_child.close().await?;
-        Ok(())
-    }
-
+impl<K: HashKey + Send + Sync> Executor2 for HashJoinExecutor2<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -196,41 +124,39 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
     fn identity(&self) -> &str {
         &self.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
 }
 
-impl<K: HashKey> HashJoinExecutor<K> {
-    async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
-        self.right_child.open().await?;
-        while let Some(chunk) = self.right_child.next().await? {
+impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
+        let mut right_child_stream = self.right_child.take().unwrap().execute();
+        let mut build_table = BuildTable::with_params(self.params);
+
+        while let Some(chunk) = right_child_stream.next().await {
+            let chunk = chunk?;
             build_table.append_build_chunk(chunk)?;
         }
+        let mut probe_table: ProbeTable<K> = build_table.try_into()?;
 
-        let probe_table = build_table.try_into()?;
+        let mut state = HashJoinState::Probe;
+        let mut left_child_stream = self.left_child.take().unwrap().execute();
 
-        self.state = HashJoinState::FirstProbe(probe_table);
-        Ok(())
-    }
-
-    async fn probe(
-        &mut self,
-        first_probe: bool,
-        mut probe_table: ProbeTable<K>,
-    ) -> Result<Option<DataChunk>> {
-        if first_probe {
-            self.left_child.open().await?;
-
-            match self.left_child.next().await? {
-                Some(data_chunk) => {
-                    probe_table.set_probe_data(data_chunk)?;
-                }
-                None => {
-                    self.state = HashJoinState::Done;
-                    return Ok(None);
-                }
+        // first probe
+        match left_child_stream.next().await {
+            Some(data_chunk) => {
+                let data_chunk = data_chunk?;
+                probe_table.set_probe_data(data_chunk)?;
+            }
+            None => {
+                state = HashJoinState::Done;
             }
         }
-
-        loop {
+        // probe
+        while state == HashJoinState::Probe {
             if let Some(ret_data_chunk) = probe_table.join()? {
                 let data_chunk = if probe_table.has_non_equi_cond() {
                     probe_table.process_non_equi_condition(ret_data_chunk)?
@@ -245,12 +171,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
                 probe_table.reset_result_index();
 
-                self.state = HashJoinState::Probe(probe_table);
-
-                return Ok(output_data_chunk);
+                if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
+                    yield data_chunk;
+                }
             } else {
-                match self.left_child.next().await? {
+                match left_child_stream.next().await {
                     Some(data_chunk) => {
+                        let data_chunk = data_chunk?;
                         probe_table.set_probe_data(data_chunk)?;
                     }
                     None => {
@@ -268,96 +195,101 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_table.reset_result_index();
 
                         if probe_table.join_type().need_join_remaining() {
-                            self.state = HashJoinState::ProbeRemaining(probe_table);
+                            state = HashJoinState::ProbeRemaining;
                         } else {
-                            self.state = HashJoinState::Done;
+                            state = HashJoinState::Done;
                         }
-                        return Ok(output_data_chunk);
+                        if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
+                            yield data_chunk;
+                        }
                     }
                 }
             }
         }
-    }
+        // probe_remaining
+        while state == HashJoinState::ProbeRemaining {
+            let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+                let output_data_chunk =
+                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-    async fn probe_remaining(
-        &mut self,
-        mut probe_table: ProbeTable<K>,
-    ) -> Result<Option<DataChunk>> {
-        let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
-            let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+                probe_table.reset_result_index();
+                output_data_chunk
+            } else {
+                let ret_data_chunk = probe_table.consume_left()?;
+                let output_data_chunk =
+                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-            probe_table.reset_result_index();
-            self.state = HashJoinState::ProbeRemaining(probe_table);
-            output_data_chunk
-        } else {
-            let ret_data_chunk = probe_table.consume_left()?;
-            let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
-
-            self.state = HashJoinState::Done;
-            output_data_chunk
-        };
-        Ok(Some(output_data_chunk))
-    }
-}
-
-impl<K> HashJoinExecutor<K> {
-    fn new(
-        left_child: BoxedExecutor,
-        right_child: BoxedExecutor,
-        params: EquiJoinParams,
-        schema: Schema,
-        identity: String,
-    ) -> Self {
-        HashJoinExecutor {
-            left_child,
-            right_child,
-            state: HashJoinState::Build(BuildTable::with_params(params)),
-            schema,
-            identity,
+                state = HashJoinState::Done;
+                output_data_chunk
+            };
+            yield output_data_chunk
         }
     }
 }
 
-pub struct HashJoinExecutorBuilder {
+#[derive(PartialEq)]
+pub enum HashJoinState {
+    Probe,
+    ProbeRemaining,
+    Done,
+}
+
+impl<K> HashJoinExecutor2<K> {
+    fn new(
+        left_child: BoxedExecutor2,
+        right_child: BoxedExecutor2,
+        params: EquiJoinParams,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
+        HashJoinExecutor2 {
+            left_child: Some(left_child),
+            right_child: Some(right_child),
+            params,
+            schema,
+            identity,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+pub struct HashJoinExecutor2Builder {
     params: EquiJoinParams,
-    left_child: BoxedExecutor,
-    right_child: BoxedExecutor,
+    left_child: BoxedExecutor2,
+    right_child: BoxedExecutor2,
     schema: Schema,
     task_id: TaskId,
 }
 
-struct HashJoinExecutorBuilderDispatcher;
+struct HashJoinExecutor2BuilderDispatcher;
 
 /// A dispatcher to help create specialized hash join executor.
-impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
-    type Input = HashJoinExecutorBuilder;
-    type Output = BoxedExecutor;
+impl HashKeyDispatcher for HashJoinExecutor2BuilderDispatcher {
+    type Input = HashJoinExecutor2Builder;
+    type Output = BoxedExecutor2;
 
-    fn dispatch<K: HashKey>(input: HashJoinExecutorBuilder) -> Self::Output {
-        Box::new(
-            HashJoinExecutor::<K>::new(
-                input.left_child,
-                input.right_child,
-                input.params,
-                input.schema,
-                format!("HashJoinExecutor{:?}", input.task_id),
-            )
-            .fuse(),
-        )
+    fn dispatch<K: HashKey>(input: HashJoinExecutor2Builder) -> Self::Output {
+        Box::new(HashJoinExecutor2::<K>::new(
+            input.left_child,
+            input.right_child,
+            input.params,
+            input.schema,
+            format!("HashJoinExecutor{:?}", input.task_id),
+        ))
     }
 }
 
 /// Hash join executor builder.
-impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for HashJoinExecutor2Builder {
+    fn new_boxed_executor2(context: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
-            .build()?;
+            .build2()?;
         let right_child = context
             .clone_for_plan(&context.plan_node.get_children()[1])
-            .build()?;
+            .build2()?;
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),
@@ -422,7 +354,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 
-        let builder = HashJoinExecutorBuilder {
+        let builder = HashJoinExecutor2Builder {
             params,
             left_child,
             right_child,
@@ -432,7 +364,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             task_id: context.task_id.clone(),
         };
 
-        Ok(HashJoinExecutorBuilderDispatcher::dispatch_by_kind(
+        Ok(HashJoinExecutor2BuilderDispatcher::dispatch_by_kind(
             hash_key_kind,
             builder,
         ))
@@ -443,6 +375,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 mod tests {
     use std::sync::Arc;
 
+    use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array;
     use risingwave_common::array::column::Column;
@@ -455,11 +388,10 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
-    use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::BoxedExecutor;
-
+    use crate::executor2::join::hash_join::{EquiJoinParams, HashJoinExecutor2};
+    use crate::executor2::join::JoinType;
+    use crate::executor2::BoxedExecutor2;
     struct DataChunkMerger {
         data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
@@ -542,7 +474,7 @@ mod tests {
             }
         }
 
-        fn create_left_executor(&self) -> BoxedExecutor {
+        fn create_left_executor(&self) -> BoxedExecutor2 {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -582,7 +514,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_right_executor(&self) -> BoxedExecutor {
+        fn create_right_executor(&self) -> BoxedExecutor2 {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -666,7 +598,7 @@ mod tests {
             )
         }
 
-        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor {
+        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor2 {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -714,13 +646,13 @@ mod tests {
                 fields: schema_fields,
             };
 
-            Box::new(HashJoinExecutor::<Key32>::new(
+            Box::new(HashJoinExecutor2::<Key32>::new(
                 left_child,
                 right_child,
                 params,
                 schema,
-                "HashJoinExecutor".to_string(),
-            )) as BoxedExecutor
+                "HashJoinExecutor2".to_string(),
+            )) as BoxedExecutor2
         }
 
         fn select_from_chunk(&self, data_chunk: DataChunk) -> DataChunk {
@@ -739,11 +671,7 @@ mod tests {
         }
 
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {
-            let mut join_executor = self.create_join_executor(has_non_equi_cond);
-            join_executor
-                .open()
-                .await
-                .expect("Failed to init join executor.");
+            let join_executor = self.create_join_executor(has_non_equi_cond);
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
@@ -760,7 +688,10 @@ mod tests {
                 unreachable!()
             }
 
-            while let Some(data_chunk) = join_executor.next().await.unwrap() {
+            let mut stream = join_executor.execute();
+
+            while let Some(data_chunk) = stream.next().await {
+                let data_chunk = data_chunk.unwrap();
                 let data_chunk = data_chunk.compact().unwrap();
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
