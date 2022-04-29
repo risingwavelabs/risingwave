@@ -136,8 +136,8 @@ impl SortAggExecutor2 {
                 .collect::<Result<Vec<EqGroups>>>()?;
 
             let mut groups = EqGroups::intersect(&groups);
-            let mut row_offset = 0;
-            while row_offset < child_cardinality {
+            let mut chunk_offset = 0;
+            while chunk_offset < child_cardinality {
                 let limit = {
                     if left_capacity >= groups.len() {
                         left_capacity -= groups.len();
@@ -155,20 +155,18 @@ impl SortAggExecutor2 {
                     &group_columns,
                     &mut group_builders,
                     &groups,
-                    row_offset,
                 )?;
 
-                row_offset = SortAggExecutor2::build_agg_states(
+                chunk_offset = SortAggExecutor2::build_agg_states(
                     &mut self.agg_states,
                     &child_chunk,
                     &mut agg_builders,
                     &groups,
-                    row_offset,
                 )?;
 
                 // If no group key provided, usually means it's a simple agg
                 if groups.is_empty() {
-                    assert!(row_offset == child_cardinality);
+                    assert!(chunk_offset == child_cardinality);
                     break;
                 }
 
@@ -219,14 +217,13 @@ impl SortAggExecutor2 {
         group_columns: &[ArrayRef],
         group_builders: &mut [ArrayBuilderImpl],
         groups: &EqGroups,
-        row_offset: usize,
     ) -> Result<()> {
         sorted_groupers
             .iter_mut()
             .zip_eq(group_columns)
             .zip_eq(group_builders)
             .try_for_each(|((grouper, column), builder)| {
-                grouper.update_and_output_with_sorted_groups(column, row_offset, builder, groups)
+                grouper.update_and_output_with_sorted_groups(column, builder, groups)
             })
     }
 
@@ -235,13 +232,12 @@ impl SortAggExecutor2 {
         child_chunk: &DataChunk,
         agg_builders: &mut [ArrayBuilderImpl],
         groups: &EqGroups,
-        row_offset: usize,
     ) -> Result<usize> {
         let next_row_indices = agg_states
             .iter_mut()
             .zip_eq(agg_builders)
             .map(|(state, builder)| {
-                state.update_and_output_with_sorted_groups(child_chunk, row_offset, builder, groups)
+                state.update_and_output_with_sorted_groups(child_chunk, builder, groups)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -284,6 +280,260 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+
+    #[tokio::test]
+    #[allow(clippy::many_single_char_names)]
+    async fn execute_count_star_int32() -> Result<()> {
+        use risingwave_common::array::ArrayImpl;
+        let anchor: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3, 4] }.into());
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(anchor.clone()),
+                Column::new(Arc::new(array_nonnull! { I32Array, [1, 1, 3, 3] }.into())),
+                Column::new(Arc::new(array_nonnull! { I32Array, [7, 8, 8, 9] }.into())),
+            ])
+            .build();
+
+        // mock a child executor
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+            ],
+        };
+        let mut child = MockExecutor::new(schema);
+        child.add(chunk);
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(anchor.clone()),
+                Column::new(Arc::new(array_nonnull! { I32Array, [3, 4, 4, 5] }.into())),
+                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
+            ])
+            .build();
+        child.add(chunk);
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(anchor.clone()),
+                Column::new(Arc::new(array_nonnull! { I32Array, [5, 5, 5, 5] }.into())),
+                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
+            ])
+            .build();
+        child.add(chunk);
+
+        let prost = AggCall {
+            r#type: Type::Count as i32,
+            args: vec![],
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+        };
+
+        let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let group_exprs: Vec<BoxedExpression> = vec![];
+        let sorted_groupers = vec![];
+        let agg_states = vec![count_star];
+
+        // chain group key fields and agg state schema to get output schema for sort agg
+        let fields = group_exprs
+            .iter()
+            .map(|e| e.return_type())
+            .chain(agg_states.iter().map(|e| e.return_type()))
+            .map(Field::unnamed)
+            .collect::<Vec<Field>>();
+
+        let executor = Box::new(SortAggExecutor2 {
+            agg_states,
+            group_keys: group_exprs,
+            sorted_groupers,
+            child: Box::new(child),
+            schema: Schema { fields },
+            identity: "SortAggExecutor".to_string(),
+            output_size_limit: 3,
+        });
+
+        let fields = &executor.schema().fields;
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].data_type, DataType::Int64);
+
+        let mut stream = executor.execute();
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+        assert_matches!(stream.next().await, None);
+
+        let chunk = res?;
+        assert_eq!(chunk.cardinality(), 1);
+        let actual = chunk.column_at(0).array();
+        let actual_agg: &I64Array = actual.as_ref().into();
+        let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
+
+        // check the result
+        assert_eq!(v, vec![Some(12)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[allow(clippy::many_single_char_names)]
+    async fn execute_count_star_int32_grouped() -> Result<()> {
+        use risingwave_common::array::ArrayImpl;
+        let anchor: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3, 4, 5] }.into());
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(anchor.clone()),
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [1, 1, 3, 3, 4] }.into(),
+                )),
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [7, 8, 8, 9, 9] }.into(),
+                )),
+            ])
+            .build();
+
+        // mock a child executor
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+            ],
+        };
+        let mut child = MockExecutor::new(schema);
+        child.add(chunk);
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [1, 2, 3, 4, 5, 6, 7, 8] }.into(),
+                )),
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [4, 4, 4, 5, 6, 7, 7, 8] }.into(),
+                )),
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [9, 9, 9, 9, 9, 9, 9, 9] }.into(),
+                )),
+            ])
+            .build();
+        child.add(chunk);
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(anchor.clone()),
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [8, 8, 8, 8, 8] }.into(),
+                )),
+                Column::new(Arc::new(
+                    array_nonnull! { I32Array, [9, 9, 9, 9, 9] }.into(),
+                )),
+            ])
+            .build();
+        child.add(chunk);
+
+        let prost = AggCall {
+            r#type: Type::Count as i32,
+            args: vec![],
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+        };
+
+        let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let group_exprs = (1..=2)
+            .map(|idx| {
+                build_from_prost(&ExprNode {
+                    expr_type: InputRef as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+                })
+            })
+            .collect::<Result<Vec<BoxedExpression>>>()?;
+
+        let sorted_groupers = group_exprs
+            .iter()
+            .map(|e| create_sorted_grouper(e.return_type()))
+            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+
+        let agg_states = vec![count_star];
+
+        // chain group key fields and agg state schema to get output schema for sort agg
+        let fields = group_exprs
+            .iter()
+            .map(|e| e.return_type())
+            .chain(agg_states.iter().map(|e| e.return_type()))
+            .map(Field::unnamed)
+            .collect::<Vec<Field>>();
+
+        let executor = Box::new(SortAggExecutor2 {
+            agg_states,
+            group_keys: group_exprs,
+            sorted_groupers,
+            child: Box::new(child),
+            schema: Schema { fields },
+            identity: "SortAggExecutor".to_string(),
+            output_size_limit: 3,
+        });
+
+        let fields = &executor.schema().fields;
+        assert_eq!(fields[0].data_type, DataType::Int32);
+        assert_eq!(fields[1].data_type, DataType::Int32);
+        assert_eq!(fields[2].data_type, DataType::Int64);
+
+        let mut stream = executor.execute();
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+
+        let chunk = res?;
+        assert_eq!(chunk.cardinality(), 3);
+        let actual = chunk.column_at(2).array();
+        let actual_agg: &I64Array = actual.as_ref().into();
+        let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
+
+        // check the result
+        assert_eq!(v, vec![Some(1), Some(1), Some(1)]);
+        check_group_key_column(&chunk, 0, vec![Some(1), Some(1), Some(3)]);
+        check_group_key_column(&chunk, 1, vec![Some(7), Some(8), Some(8)]);
+
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+
+        let chunk = res?;
+        assert_eq!(chunk.cardinality(), 3);
+        let actual = chunk.column_at(2).array();
+        let actual_agg: &I64Array = actual.as_ref().into();
+        let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
+
+        assert_eq!(v, vec![Some(1), Some(4), Some(1)]);
+        check_group_key_column(&chunk, 0, vec![Some(3), Some(4), Some(5)]);
+        check_group_key_column(&chunk, 1, vec![Some(9), Some(9), Some(9)]);
+
+        // check the result
+        let res = stream.next().await.unwrap();
+        assert_matches!(res, Ok(_));
+
+        let chunk = res?;
+        assert_eq!(chunk.cardinality(), 3);
+        let actual = chunk.column_at(2).array();
+        let actual_agg: &I64Array = actual.as_ref().into();
+        let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
+
+        // check the result
+        assert_eq!(v, vec![Some(1), Some(2), Some(6)]);
+        check_group_key_column(&chunk, 0, vec![Some(6), Some(7), Some(8)]);
+        check_group_key_column(&chunk, 1, vec![Some(9), Some(9), Some(9)]);
+
+        assert_matches!(stream.next().await, None);
+        Ok(())
+    }
 
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
@@ -342,6 +592,7 @@ mod tests {
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(55)]);
 
+        assert_matches!(stream.next().await, None);
         Ok(())
     }
 
@@ -374,6 +625,15 @@ mod tests {
             .columns(vec![
                 Column::new(anchor.clone()),
                 Column::new(Arc::new(array_nonnull! { I32Array, [3, 4, 4, 5] }.into())),
+                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
+            ])
+            .build();
+        child.add(chunk);
+
+        let chunk = DataChunk::builder()
+            .columns(vec![
+                Column::new(anchor.clone()),
+                Column::new(Arc::new(array_nonnull! { I32Array, [5, 5, 5, 5] }.into())),
                 Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
             ])
             .build();
@@ -463,9 +723,11 @@ mod tests {
         let v = actual_agg2.iter().collect::<Vec<Option<i64>>>();
 
         // check the result
-        assert_eq!(v, vec![Some(5), Some(4)]);
+        assert_eq!(v, vec![Some(5), Some(14)]);
         check_group_key_column(&chunk, 0, vec![Some(4), Some(5)]);
         check_group_key_column(&chunk, 1, vec![Some(9), Some(9)]);
+
+        assert_matches!(stream.next().await, None);
         Ok(())
     }
 
@@ -604,6 +866,7 @@ mod tests {
         check_group_key_column(&chunk, 0, vec![Some(7)]);
         check_group_key_column(&chunk, 1, vec![Some(12)]);
 
+        assert_matches!(stream.next().await, None);
         Ok(())
     }
 

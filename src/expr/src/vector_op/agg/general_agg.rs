@@ -79,16 +79,16 @@ where
     pub(super) fn update_and_output_with_sorted_groups_concrete(
         &mut self,
         input: &T,
-        offset: usize,
         builder: &mut R::Builder,
         groups: &EqGroups,
     ) -> Result<usize> {
         let mut group_cnt = 0;
-        let mut groups_iter = groups.get_starting_indices().iter().peekable();
+        let mut groups_iter = groups.starting_indices().iter().peekable();
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        let mut row_idx = input.len();
-        for (i, v) in input.iter().skip(offset).enumerate() {
-            if groups_iter.peek() == Some(&&(i + offset)) {
+        let mut next_chunk_offset = input.len();
+        let chunk_offset = groups.chunk_offset();
+        for (i, v) in input.iter().skip(chunk_offset).enumerate() {
+            if groups_iter.peek() == Some(&&(i + chunk_offset)) {
                 groups_iter.next();
                 group_cnt += 1;
                 builder.append(cur)?;
@@ -98,13 +98,13 @@ where
 
             // reset state and exit when reach limit
             if groups.limit() != 0 && group_cnt == groups.limit() {
-                row_idx = offset + i;
+                next_chunk_offset = chunk_offset + i;
                 cur = None;
                 break;
             }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
-        Ok(row_idx)
+        Ok(next_chunk_offset)
     }
 }
 
@@ -161,14 +161,13 @@ macro_rules! impl_aggregator {
             fn update_and_output_with_sorted_groups(
                 &mut self,
                 input: &DataChunk,
-                offset: usize,
                 builder: &mut ArrayBuilderImpl,
                 groups: &EqGroups,
             ) -> Result<usize> {
                 if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$result_variant(b)) =
                     (input.column_at(self.input_col_idx).array_ref(), builder)
                 {
-                    self.update_and_output_with_sorted_groups_concrete(i, offset, b, groups)
+                    self.update_and_output_with_sorted_groups_concrete(i, b, groups)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {} or builder fail to match {}.",

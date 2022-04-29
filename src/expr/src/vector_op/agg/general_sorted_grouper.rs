@@ -44,7 +44,7 @@ impl EqGroups {
         }
     }
 
-    pub fn get_starting_indices(&self) -> &[usize] {
+    pub fn starting_indices(&self) -> &[usize] {
         &self.indices[self.offset..]
     }
 
@@ -54,6 +54,18 @@ impl EqGroups {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn is_reach_limit(&self, group_cnt: usize) -> bool {
+        self.limit != 0 && self.limit == group_cnt
+    }
+
+    pub fn chunk_offset(&self) -> usize {
+        if self.offset > 0 {
+            self.indices[self.offset - 1]
+        } else {
+            0
+        }
     }
 
     pub fn advance_offset(&mut self) {
@@ -99,12 +111,12 @@ impl EqGroups {
         use std::collections::BinaryHeap;
         let mut heap = BinaryHeap::new();
         for (ci, column) in columns.iter().enumerate() {
-            if let Some(ri) = column.get_starting_indices().get(0) {
+            if let Some(ri) = column.starting_indices().get(0) {
                 heap.push(Reverse((ri, ci, 0)));
             }
         }
         while let Some(Reverse((ri, ci, idx))) = heap.pop() {
-            if let Some(ri_next) = columns[ci].get_starting_indices().get(idx + 1) {
+            if let Some(ri_next) = columns[ci].starting_indices().get(idx + 1) {
                 heap.push(Reverse((ri_next, ci, idx + 1)));
             }
             if ret.last() == Some(ri) {
@@ -136,7 +148,6 @@ pub trait SortedGrouper: Send + 'static {
     fn update_and_output_with_sorted_groups(
         &mut self,
         input: &ArrayImpl,
-        offset: usize,
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
     ) -> Result<()>;
@@ -204,15 +215,16 @@ where
     pub fn update_and_output_with_sorted_groups_concrete(
         &mut self,
         input: &T,
-        offset: usize,
         builder: &mut T::Builder,
         groups: &EqGroups,
     ) -> Result<()> {
         let mut group_cnt = 0;
-        let mut groups_iter = groups.get_starting_indices().iter().peekable();
+        let mut groups_iter = groups.starting_indices().iter().peekable();
         let mut cur = self.group_value.as_ref().map(|x| x.as_scalar_ref());
-        for (i, v) in input.iter().skip(offset).enumerate() {
-            if groups_iter.peek() == Some(&&(i + offset)) {
+
+        let chunk_offset = groups.chunk_offset();
+        for (i, v) in input.iter().skip(chunk_offset).enumerate() {
+            if groups_iter.peek() == Some(&&(i + chunk_offset)) {
                 groups_iter.next();
                 group_cnt += 1;
                 ensure!(self.ongoing);
@@ -265,14 +277,13 @@ macro_rules! impl_sorted_grouper {
             fn update_and_output_with_sorted_groups(
                 &mut self,
                 input: &ArrayImpl,
-                offset: usize,
                 builder: &mut ArrayBuilderImpl,
                 groups: &EqGroups,
             ) -> Result<()> {
                 if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$input_variant(b)) =
                     (input, builder)
                 {
-                    self.update_and_output_with_sorted_groups_concrete(i, offset, b, groups)
+                    self.update_and_output_with_sorted_groups_concrete(i, b, groups)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {} or builder fail to match {}.",
@@ -313,13 +324,13 @@ mod tests {
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
-        g.update_and_output_with_sorted_groups_concrete(&input, 0, &mut builder, &eq)?;
-        assert_eq!(eq.get_starting_indices(), &vec![2]);
+        g.update_and_output_with_sorted_groups_concrete(&input, &mut builder, &eq)?;
+        assert_eq!(eq.starting_indices(), &vec![2]);
 
         let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
-        g.update_and_output_with_sorted_groups_concrete(&input, 0, &mut builder, &eq)?;
-        assert_eq!(eq.get_starting_indices(), &vec![1]);
+        g.update_and_output_with_sorted_groups_concrete(&input, &mut builder, &eq)?;
+        assert_eq!(eq.starting_indices(), &vec![1]);
 
         g.output_concrete(&mut builder)?;
         assert_eq!(
@@ -333,7 +344,7 @@ mod tests {
     fn group_intersect() {
         let groups = vec![EqGroups::new(vec![0, 2, 4]), EqGroups::new(vec![1, 2, 5])];
         assert_eq!(
-            EqGroups::intersect(&groups).get_starting_indices(),
+            EqGroups::intersect(&groups).starting_indices(),
             &vec![0, 1, 2, 4, 5]
         );
     }
@@ -352,20 +363,20 @@ mod tests {
         let g1_input = I32Array::from_slice(&[Some(7), Some(8), Some(8)]).unwrap();
         let eq1 = g1.detect_groups_concrete(&g1_input)?;
         let eq = EqGroups::intersect(&[eq0, eq1]);
-        g0.update_and_output_with_sorted_groups_concrete(&g0_input, 0, &mut g0_builder, &eq)?;
-        g1.update_and_output_with_sorted_groups_concrete(&g1_input, 0, &mut g1_builder, &eq)?;
+        g0.update_and_output_with_sorted_groups_concrete(&g0_input, &mut g0_builder, &eq)?;
+        g1.update_and_output_with_sorted_groups_concrete(&g1_input, &mut g1_builder, &eq)?;
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
-        a.update_and_output_with_sorted_groups_concrete(&a_input, 0, &mut a_builder, &eq)?;
+        a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq)?;
 
         let g0_input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
         let eq0 = g0.detect_groups_concrete(&g0_input)?;
         let g1_input = I32Array::from_slice(&[Some(8), Some(8), Some(8)]).unwrap();
         let eq1 = g1.detect_groups_concrete(&g1_input)?;
         let eq = EqGroups::intersect(&[eq0, eq1]);
-        g0.update_and_output_with_sorted_groups_concrete(&g0_input, 0, &mut g0_builder, &eq)?;
-        g1.update_and_output_with_sorted_groups_concrete(&g1_input, 0, &mut g1_builder, &eq)?;
+        g0.update_and_output_with_sorted_groups_concrete(&g0_input, &mut g0_builder, &eq)?;
+        g1.update_and_output_with_sorted_groups_concrete(&g1_input, &mut g1_builder, &eq)?;
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
-        a.update_and_output_with_sorted_groups_concrete(&a_input, 0, &mut a_builder, &eq)?;
+        a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq)?;
 
         g0.output_concrete(&mut g0_builder)?;
         g1.output_concrete(&mut g1_builder)?;
@@ -406,13 +417,12 @@ mod tests {
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g0.detect_groups_concrete(&input).unwrap();
-        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &eq)
+        g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
             &DataChunk::builder()
                 .columns(vec![Column::new(Arc::new(input.into()))])
                 .build(),
-            0,
             &mut a_builder,
             &eq,
         )
@@ -420,13 +430,12 @@ mod tests {
 
         let input = I32Array::from_slice(&[Some(3), Some(3), Some(3)]).unwrap();
         let eq = g0.detect_groups_concrete(&input).unwrap();
-        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &eq)
+        g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
             &DataChunk::builder()
                 .columns(vec![Column::new(Arc::new(input.into()))])
                 .build(),
-            0,
             &mut a_builder,
             &eq,
         )
@@ -434,13 +443,12 @@ mod tests {
 
         let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
         let eq = g0.detect_groups_concrete(&input).unwrap();
-        g0.update_and_output_with_sorted_groups_concrete(&input, 0, &mut g0_builder, &eq)
+        g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         agg.update_and_output_with_sorted_groups(
             &DataChunk::builder()
                 .columns(vec![Column::new(Arc::new(input.into()))])
                 .build(),
-            0,
             &mut a_builder,
             &eq,
         )
