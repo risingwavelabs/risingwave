@@ -186,10 +186,10 @@ mod tests {
     #[tokio::test]
     async fn test_no_chunk() -> Result<()> {
         let schema = schema_test_utils::ii();
-        let mut source = MockSource::new(schema, vec![2]);
-        source.push_barrier(1, false);
-        source.push_barrier(2, false);
-        source.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![2]);
+        tx.push_barrier(1, false);
+        tx.push_barrier(2, false);
+        tx.push_barrier(3, false);
 
         let agg_calls = vec![AggCall {
             kind: AggKind::RowCount,
@@ -223,27 +223,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_simple_agg() -> Result<()> {
-        let chunk1 = StreamChunk::from_pretty(
+        let schema = schema_test_utils::iii();
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
-        );
-        let chunk2 = StreamChunk::from_pretty(
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
             -  10  14 1002 D
             -   4 300 1003
             + 104 500 1004",
-        );
-        let schema = schema_test_utils::iii();
-
-        let mut source = MockSource::new(schema, vec![2]); // pk\
-        source.push_barrier(1, false);
-        source.push_chunks([chunk1].into_iter());
-        source.push_barrier(2, false);
-        source.push_chunks([chunk2].into_iter());
-        source.push_barrier(3, false);
+        ));
+        tx.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
@@ -277,7 +274,7 @@ mod tests {
         // Consume stream chunk
         let msg = simple_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.as_chunk().unwrap(),
+            msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I   I   I
                 + 3 114 514"
@@ -291,7 +288,7 @@ mod tests {
 
         let msg = simple_agg.next().await.unwrap().unwrap();
         assert_eq!(
-            *msg.as_chunk().unwrap(),
+            msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
                 + -1 0 0"

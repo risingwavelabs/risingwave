@@ -149,7 +149,7 @@ where
                 sstable_id_infos: Default::default(),
             }),
             compaction: Mutex::new(Compaction {
-                compact_status: CompactStatus::new(),
+                compact_status: CompactStatus::default(),
                 compact_task_assignment: Default::default(),
             }),
             metrics,
@@ -196,10 +196,12 @@ where
                 id: versioning_guard.current_version_id.id(),
                 levels: vec![
                     Level {
+                        level_idx: 0,
                         level_type: LevelType::Overlapping as i32,
                         table_infos: vec![],
                     },
                     Level {
+                        level_idx: 1,
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: vec![],
                     },
@@ -651,16 +653,9 @@ where
                 },
             );
             for level in &compact_task.input_ssts {
-                version_stale_sstables.id.extend(
-                    level
-                        .level
-                        .as_ref()
-                        .unwrap()
-                        .table_infos
-                        .iter()
-                        .map(|sst| sst.id)
-                        .collect_vec(),
-                );
+                version_stale_sstables
+                    .id
+                    .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
             }
             let mut new_version = CompactStatus::apply_compact_result(&compact_task, old_version);
             current_version_id.increase();
@@ -756,21 +751,18 @@ where
 
             // Commit tables by moving them into level0
             let version_first_level = new_hummock_version.levels.first_mut().unwrap();
-            match version_first_level.get_level_type()? {
-                LevelType::Overlapping => {
-                    uncommitted_epoch
-                        .tables
-                        .iter()
-                        .for_each(|t| version_first_level.table_infos.push(t.clone()));
-                }
-                LevelType::Nonoverlapping => {
-                    return Err(ErrorCode::NotImplemented(
-                        "unsupported LevelType::Nonoverlapping".to_string(),
-                        None.into(),
-                    )
-                    .into())
-                }
-            };
+            if version_first_level.level_idx == 0 {
+                uncommitted_epoch
+                    .tables
+                    .iter()
+                    .for_each(|t| version_first_level.table_infos.push(t.clone()));
+            } else {
+                return Err(ErrorCode::NotImplemented(
+                    "unsupported LevelType::Nonoverlapping".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
             // Remove the epoch from uncommitted_epochs
             new_hummock_version.uncommitted_epochs.swap_remove(idx);
         }

@@ -19,6 +19,7 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
+      checkpoint-interval: 100
     - use: compute-node
     - use: frontend
 
@@ -52,28 +53,35 @@ risedev:
     - use: meta-node
     - use: compute-node
       user-managed: true
-    - use: frontend-legacy
+    - use: frontend
 
-  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
   dev-frontend:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+      user-managed: true
+
+  dev-meta:
+    - use: meta-node
+      user-managed: true
+    - use: compute-node
+    - use: frontend
+
+
+  # TODO: Remove all legacy configs after java removed.
+  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
+  dev-frontend-legacy:
     - use: meta-node
     - use: compute-node
     - use: frontend-legacy
       user-managed: true
 
   # `dev-meta-node` have the same settings as default except the the meta node will be started by user.
-  dev-meta-node:
+  dev-meta-node-legacy:
     - use: meta-node
       user-managed: true
     - use: compute-node
     - use: frontend-legacy
-
-  dev-frontend-v2:
-    - use: minio
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
-      user-managed: true
 
   full:
     - use: minio
@@ -318,6 +326,9 @@ template:
 
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
+
+    # Compactors used by this Prometheus instance
+    provide-compactor: "compactor*"
 
   frontend-legacy:
     # Listen address of frontend-legacy

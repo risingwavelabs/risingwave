@@ -557,6 +557,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-start ci-kafka
+          ./scripts/source/prepare_ci_kafka.sh
           sqllogictest -p 4566 './e2e_test/source/**/*.slt'
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
@@ -719,7 +720,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -746,7 +747,7 @@ jobs:
           cargo doc --document-private-items --no-deps
       - name: Run rust test with coverage
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
+          cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

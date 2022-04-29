@@ -18,10 +18,16 @@ use super::{ColumnDesc, OrderedColumnDesc, TableId};
 /// information for compute node to access data of the table.
 #[derive(Debug, Clone, Default)]
 pub struct TableDesc {
-    /// id of the table, to find in Storage()
+    /// Id of the table, to find in storage.
     pub table_id: TableId,
-    /// the primary key columns' descriptor
-    pub pk: Vec<OrderedColumnDesc>,
-    /// all columns in the table, noticed it is NOT sorted by columnId in the vec
+    /// The keys used to sort in storage.
+    pub order_desc: Vec<OrderedColumnDesc>,
+    /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
+    /// Distribution keys of this table, which corresponds to the corresponding column of the
+    /// index. e.g., if `distribution_keys = [1, 2]`, then `columns[1]` and `columns[2]` are used
+    /// as distribution key.
+    pub distribution_keys: Vec<usize>,
+    /// Column indices for primary keys.
+    pub pks: Vec<usize>,
 }

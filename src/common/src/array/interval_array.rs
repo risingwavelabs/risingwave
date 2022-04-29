@@ -60,6 +60,14 @@ impl Array for IntervalArray {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(*self.interval_buffer.get_unchecked(idx))
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.interval_buffer.len()
     }
@@ -179,5 +187,9 @@ mod tests {
         assert_eq!(v.get_days(), 0);
         let v = ret_arr.value_at(1);
         assert_eq!(v, None);
+        let v = unsafe { ret_arr.value_at_unchecked(0).unwrap() };
+        assert_eq!(v.get_years(), 1);
+        assert_eq!(v.get_months(), 12);
+        assert_eq!(v.get_days(), 0);
     }
 }

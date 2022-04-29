@@ -294,19 +294,6 @@ mod tests {
     }
 
     async fn test_local_simple_aggregation(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::from_pretty(
-            "   I   I    I
-            + 100 200 1001
-            +  10  14 1002
-            +   4 300 1003",
-        );
-        let chunk2 = StreamChunk::from_pretty(
-            "   I   I    I
-            - 100 200 1001
-            -  10  14 1002 D
-            -   4 300 1003
-            + 104 500 1004",
-        );
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -315,13 +302,23 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-
-        let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_barrier(1, false);
-        source.push_chunks([chunk1].into_iter());
-        source.push_barrier(2, false);
-        source.push_chunks([chunk2].into_iter());
-        source.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I    I
+            + 100 200 1001
+            +  10  14 1002
+            +   4 300 1003",
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I    I
+            - 100 200 1001
+            -  10  14 1002 D
+            -   4 300 1003
+            + 104 500 1004",
+        ));
+        tx.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![

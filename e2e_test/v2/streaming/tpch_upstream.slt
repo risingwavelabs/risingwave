@@ -1,14 +1,14 @@
 include ../../tpch/create_tables.slt.part
 
 include ../../streaming/tpch/views/q1.slt.part
-# include ../../streaming/tpch/views/q3.slt.part # TopN pk mismatch
+include ../../streaming/tpch/views/q3.slt.part
 # include ../../streaming/tpch/views/q4.slt.part # LeftSemi
 include ../../streaming/tpch/views/q5.slt.part
 include ../../streaming/tpch/views/q6.slt.part
 include ../../streaming/tpch/views/q7.slt.part
 include ../../streaming/tpch/views/q8.slt.part
 include ../../streaming/tpch/views/q9.slt.part
-# include ../../streaming/tpch/views/q10.slt.part # TopN pk mismatch
+include ../../streaming/tpch/views/q10.slt.part
 include ../../streaming/tpch/views/q12.slt.part
 include ../../streaming/tpch/views/q13.slt.part
 include ../../streaming/tpch/views/q14.slt.part
@@ -28,14 +28,14 @@ statement ok
 flush;
 
 include ../../streaming/tpch/q1.slt.part
-# include ../../streaming/tpch/q3.slt.part
+include ../../streaming/tpch/q3.slt.part
 # include ../../streaming/tpch/q4.slt.part
 include ../../streaming/tpch/q5.slt.part
 include ../../streaming/tpch/q6.slt.part
 include ../../streaming/tpch/q7.slt.part
 include ../../streaming/tpch/q8.slt.part
 include ../../streaming/tpch/q9.slt.part
-# include ../../streaming/tpch/q10.slt.part
+include ../../streaming/tpch/q10.slt.part
 include ../../streaming/tpch/q12.slt.part
 include ../../streaming/tpch/q13.slt.part
 include ../../streaming/tpch/q14.slt.part
@@ -45,8 +45,8 @@ include ../../streaming/tpch/q19.slt.part
 statement ok
 drop materialized view tpch_q1;
 
-# statement ok
-# drop materialized view tpch_q3;
+statement ok
+drop materialized view tpch_q3;
 
 # statement ok
 # drop materialized view tpch_q4;
@@ -66,8 +66,8 @@ drop materialized view tpch_q8;
 statement ok
 drop materialized view tpch_q9;
 
-# statement ok
-# drop materialized view tpch_q10;
+statement ok
+drop materialized view tpch_q10;
 
 statement ok
 drop materialized view tpch_q12;
