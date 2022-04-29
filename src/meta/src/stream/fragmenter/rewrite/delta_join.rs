@@ -22,8 +22,7 @@ use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     ArrangeNode, ArrangementInfo, DeltaIndexJoinNode, DispatchStrategy, DispatcherType,
-    ExchangeNode, LookupNode, StreamNode, UnionNode,
-    LookupUnionNode, StreamNode,
+    ExchangeNode, LookupNode, LookupUnionNode, StreamNode,
 };
 
 use crate::stream::fragmenter::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
