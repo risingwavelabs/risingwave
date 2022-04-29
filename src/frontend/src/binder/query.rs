@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
@@ -32,14 +33,14 @@ pub struct BoundQuery {
 }
 
 impl BoundQuery {
-    /// The names returned by this [`BoundQuery`].
-    pub fn names(&self) -> Vec<String> {
-        self.body.names()
+    /// The schema returned by this [`BoundQuery`].
+    pub fn schema(&self) -> &Schema {
+        self.body.schema()
     }
 
     /// The types returned by this [`BoundQuery`].
     pub fn data_types(&self) -> Vec<DataType> {
-        self.body.data_types()
+        self.schema().data_types()
     }
 
     pub fn is_correlated(&self) -> bool {

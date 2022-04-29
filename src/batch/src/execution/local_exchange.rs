@@ -73,8 +73,8 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    use risingwave_pb::batch_plan::{TaskId, TaskOutputId};
     use risingwave_pb::data::DataChunk;
-    use risingwave_pb::plan::{TaskId, TaskOutputId};
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };

@@ -13,6 +13,11 @@ env:
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
+  AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
+
+permissions:
+      id-token: write
+      contents: read    # This is required for actions/checkout
 
 jobs:
   # Start 2 runners (a/b) to run build and test in parallel. Note that we also have runner C in main for release build.
@@ -26,8 +31,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Start EC2 runner
         id: start-ec2-runner
@@ -50,8 +55,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Start EC2 runner
         id: start-ec2-runner
@@ -76,8 +81,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Stop EC2 runner A
         uses: machulav/ec2-github-runner@v2
@@ -99,8 +104,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: GitHubActions
           aws-region: us-east-2
       - name: Stop EC2 runner B
         uses: machulav/ec2-github-runner@v2

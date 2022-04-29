@@ -44,6 +44,11 @@ impl Planner {
         LogicalScan::create(
             base_table.name,
             Rc::new(base_table.table_catalog.table_desc()),
+            base_table
+                .table_indexes
+                .iter()
+                .map(|x| (x.name.clone(), Rc::new(x.table_desc())))
+                .collect(),
             self.ctx(),
         )
     }

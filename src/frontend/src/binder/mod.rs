@@ -15,7 +15,7 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-mod bind_context;
+pub mod bind_context;
 mod delete;
 pub(crate) mod expr;
 mod insert;
@@ -24,6 +24,7 @@ mod relation;
 mod select;
 mod set_expr;
 mod statement;
+mod struct_field;
 mod values;
 
 pub use bind_context::BindContext;

@@ -15,7 +15,7 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan::Field as ProstField;
+use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
@@ -78,6 +78,10 @@ impl Schema {
 
     pub fn new(fields: Vec<Field>) -> Self {
         Self { fields }
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        self.fields().iter().map(|f| f.name.clone()).collect()
     }
 
     pub fn data_types(&self) -> Vec<DataType> {

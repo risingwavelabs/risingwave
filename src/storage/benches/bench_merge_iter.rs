@@ -39,7 +39,7 @@ fn gen_interleave_shared_buffer_batch_iter(
             ));
         }
         let batch = SharedBufferBatch::new(batch_data, 2333);
-        iterators.push(Box::new(batch.iter()) as BoxedForwardHummockIterator);
+        iterators.push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator);
     }
     iterators
 }

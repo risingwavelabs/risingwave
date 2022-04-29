@@ -1,7 +1,7 @@
 package com.risingwave.catalog;
 
 import com.google.common.collect.ImmutableMap;
-import com.risingwave.proto.plan.RowFormatType;
+import com.risingwave.proto.plan_common.RowFormatType;
 import java.util.Collection;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.schema.Schema;

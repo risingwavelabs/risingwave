@@ -250,57 +250,34 @@ impl HopWindowExecutor {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Op, Row};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::types::{DataType, IntervalUnit};
 
-    use crate::executor::Message;
     use crate::executor_v2::test_utils::MockSource;
     use crate::executor_v2::{Executor, ExecutorInfo, StreamChunk};
 
     #[tokio::test]
     async fn test_execute() {
-        let field1 = Field::unnamed(DataType::Int32);
-        let field2 = Field::unnamed(DataType::Int32);
+        let field1 = Field::unnamed(DataType::Int64);
+        let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
         let schema = Schema::new(vec![field1, field2, field3]);
         let pk_indices = vec![0];
 
-        let t = |hours, minutes| {
-            let date = NaiveDate::from_ymd(2022, 2, 2);
-            let time = NaiveTime::from_hms(hours, minutes, 0);
-            let dt = NaiveDateTime::new(date, time);
-            NaiveDateTimeWrapper(dt)
-        };
-
-        #[allow(clippy::zero_prefixed_literal)]
-        let rows = [
-            ('+', 1, 1, t(10, 00)),
-            ('+', 2, 3, t(10, 05)),
-            ('-', 3, 2, t(10, 14)),
-            ('+', 4, 1, t(10, 22)),
-            ('-', 5, 3, t(10, 33)),
-            ('+', 6, 2, t(10, 42)),
-            ('-', 7, 1, t(10, 51)),
-            ('+', 8, 3, t(11, 02)),
-        ];
-        let rows = rows
-            .into_iter()
-            .map(|(op, f1, f2, f3)| {
-                let op = if op == '+' { Op::Insert } else { Op::Delete };
-                let row = Row(vec![
-                    Some(ScalarImpl::Int32(f1)),
-                    Some(ScalarImpl::Int32(f2)),
-                    Some(ScalarImpl::NaiveDateTime(f3)),
-                ]);
-                (op, row)
-            })
-            .collect_vec();
-
-        let chunk = StreamChunk::from_rows(&rows, &schema.data_types()).unwrap();
+        let chunk = StreamChunk::from_pretty(
+            &"I I TS
+            + 1 1 ^10:00:00
+            + 2 3 ^10:05:00
+            - 3 2 ^10:14:00
+            + 4 1 ^10:22:00
+            - 5 3 ^10:33:00
+            + 6 2 ^10:42:00
+            - 7 1 ^10:51:00
+            + 8 3 ^11:02:00"
+                .replace('^', "2022-2-2T"),
+        );
 
         let input =
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
@@ -325,80 +302,38 @@ mod tests {
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
 
-        let Message::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
-            unreachable!();
-        };
-        let rows = chunk
-            .rows()
-            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
-            .collect_vec();
-        assert_eq!(rows.len(), 8);
+        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                &"I I TS        TS        TS
+                + 1 1 ^10:00:00 ^09:45:00 ^10:15:00
+                + 2 3 ^10:05:00 ^09:45:00 ^10:15:00
+                - 3 2 ^10:14:00 ^09:45:00 ^10:15:00
+                + 4 1 ^10:22:00 ^10:00:00 ^10:30:00
+                - 5 3 ^10:33:00 ^10:15:00 ^10:45:00
+                + 6 2 ^10:42:00 ^10:15:00 ^10:45:00
+                - 7 1 ^10:51:00 ^10:30:00 ^11:00:00
+                + 8 3 ^11:02:00 ^10:45:00 ^11:15:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
 
-        #[allow(clippy::zero_prefixed_literal)]
-        let expected_rows = [
-            ('+', 1, 1, t(10, 00), t(09, 45), t(10, 15)),
-            ('+', 2, 3, t(10, 05), t(09, 45), t(10, 15)),
-            ('-', 3, 2, t(10, 14), t(09, 45), t(10, 15)),
-            ('+', 4, 1, t(10, 22), t(10, 00), t(10, 30)),
-            ('-', 5, 3, t(10, 33), t(10, 15), t(10, 45)),
-            ('+', 6, 2, t(10, 42), t(10, 15), t(10, 45)),
-            ('-', 7, 1, t(10, 51), t(10, 30), t(11, 00)),
-            ('+', 8, 3, t(11, 02), t(10, 45), t(11, 15)),
-        ];
-        let expected_rows = expected_rows
-            .into_iter()
-            .map(|(op, f1, f2, f3, f4, f5)| {
-                let op = if op == '+' { Op::Insert } else { Op::Delete };
-                let row = Row(vec![
-                    Some(ScalarImpl::Int32(f1)),
-                    Some(ScalarImpl::Int32(f2)),
-                    Some(ScalarImpl::NaiveDateTime(f3)),
-                    Some(ScalarImpl::NaiveDateTime(f4)),
-                    Some(ScalarImpl::NaiveDateTime(f5)),
-                ]);
-                (op, row)
-            })
-            .collect_vec();
-        for (idx, (actual, expected)) in rows.into_iter().zip_eq(expected_rows).enumerate() {
-            assert_eq!(actual, expected, "on {}-th row", idx);
-        }
-
-        let Message::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
-            unreachable!();
-        };
-        let rows = chunk
-            .rows()
-            .map(|(op, row_ref)| (op, row_ref.to_owned_row()))
-            .collect_vec();
-        assert_eq!(rows.len(), 8);
-
-        #[allow(clippy::zero_prefixed_literal)]
-        let expected_rows = [
-            ('+', 1, 1, t(10, 00), t(10, 00), t(10, 30)),
-            ('+', 2, 3, t(10, 05), t(10, 00), t(10, 30)),
-            ('-', 3, 2, t(10, 14), t(10, 00), t(10, 30)),
-            ('+', 4, 1, t(10, 22), t(10, 15), t(10, 45)),
-            ('-', 5, 3, t(10, 33), t(10, 30), t(11, 00)),
-            ('+', 6, 2, t(10, 42), t(10, 30), t(11, 00)),
-            ('-', 7, 1, t(10, 51), t(10, 45), t(11, 15)),
-            ('+', 8, 3, t(11, 02), t(11, 00), t(11, 30)),
-        ];
-        let expected_rows = expected_rows
-            .into_iter()
-            .map(|(op, f1, f2, f3, f4, f5)| {
-                let op = if op == '+' { Op::Insert } else { Op::Delete };
-                let row = Row(vec![
-                    Some(ScalarImpl::Int32(f1)),
-                    Some(ScalarImpl::Int32(f2)),
-                    Some(ScalarImpl::NaiveDateTime(f3)),
-                    Some(ScalarImpl::NaiveDateTime(f4)),
-                    Some(ScalarImpl::NaiveDateTime(f5)),
-                ]);
-                (op, row)
-            })
-            .collect_vec();
-        for (idx, (actual, expected)) in rows.into_iter().zip_eq(expected_rows).enumerate() {
-            assert_eq!(actual, expected, "on {}-th row", idx);
-        }
+        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                &"I I TS        TS        TS
+                + 1 1 ^10:00:00 ^10:00:00 ^10:30:00
+                + 2 3 ^10:05:00 ^10:00:00 ^10:30:00
+                - 3 2 ^10:14:00 ^10:00:00 ^10:30:00
+                + 4 1 ^10:22:00 ^10:15:00 ^10:45:00
+                - 5 3 ^10:33:00 ^10:30:00 ^11:00:00
+                + 6 2 ^10:42:00 ^10:30:00 ^11:00:00
+                - 7 1 ^10:51:00 ^10:45:00 ^11:15:00
+                + 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
     }
 }

@@ -334,7 +334,7 @@ where
         }
 
         let mut local = write_batch.prefixify(&self.keyspace);
-        let value_meta = ValueMeta::new_with_vnode(self.vnode);
+        let value_meta = ValueMeta::with_vnode(self.vnode);
 
         // TODO: we can populate the cache while flushing, but that's hard.
 

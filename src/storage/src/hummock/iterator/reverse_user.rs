@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
 use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
-use crate::hummock::local_version_manager::ScopedLocalVersion;
+use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -49,7 +49,7 @@ pub struct ReverseUserIterator {
     read_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<ScopedLocalVersion>>,
+    _version: Option<Arc<PinnedVersion>>,
 }
 
 impl ReverseUserIterator {
@@ -59,15 +59,15 @@ impl ReverseUserIterator {
         iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_epoch(iterator, key_range, Epoch::MAX, None)
+        Self::with_epoch(iterator, key_range, Epoch::MAX, None)
     }
 
     /// Creates [`ReverseUserIterator`] with given `read_epoch`.
-    pub(crate) fn new_with_epoch(
+    pub(crate) fn with_epoch(
         iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
-        version: Option<Arc<ScopedLocalVersion>>,
+        version: Option<Arc<PinnedVersion>>,
     ) -> Self {
         Self {
             iterator,
@@ -276,7 +276,7 @@ mod tests {
     };
     use crate::hummock::iterator::{BoxedBackwardHummockIterator, BoxedForwardHummockIterator};
     use crate::hummock::sstable::Sstable;
-    use crate::hummock::test_utils::gen_test_sstable;
+    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{ReverseSSTableIterator, SstableStoreRef};
     use crate::monitor::StateStoreMetrics;
@@ -309,16 +309,15 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
+        let cache = create_small_table_cache();
+        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
+        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1));
+        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
+
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(
-                Arc::new(table2),
-                sstable_store.clone(),
-            )),
-            Box::new(ReverseSSTableIterator::new(
-                Arc::new(table1),
-                sstable_store.clone(),
-            )),
-            Box::new(ReverseSSTableIterator::new(Arc::new(table0), sstable_store)),
+            Box::new(ReverseSSTableIterator::new(handle1, sstable_store.clone())),
+            Box::new(ReverseSSTableIterator::new(handle2, sstable_store.clone())),
+            Box::new(ReverseSSTableIterator::new(handle0, sstable_store)),
         ];
 
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -366,16 +365,14 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
+        let cache = create_small_table_cache();
+        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
+        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1));
+        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(
-                Arc::new(table0),
-                sstable_store.clone(),
-            )),
-            Box::new(ReverseSSTableIterator::new(
-                Arc::new(table1),
-                sstable_store.clone(),
-            )),
-            Box::new(ReverseSSTableIterator::new(Arc::new(table2), sstable_store)),
+            Box::new(ReverseSSTableIterator::new(handle0, sstable_store.clone())),
+            Box::new(ReverseSSTableIterator::new(handle1, sstable_store.clone())),
+            Box::new(ReverseSSTableIterator::new(handle2, sstable_store)),
         ];
 
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -448,13 +445,16 @@ mod tests {
         ];
         let table1 =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
-
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
-                Arc::new(table0),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
-            Box::new(ReverseSSTableIterator::new(Arc::new(table1), sstable_store)),
+            Box::new(ReverseSSTableIterator::new(
+                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                sstable_store,
+            )),
         ];
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
@@ -498,10 +498,10 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(table),
-            sstable_store,
-        ))];
+        let cache = create_small_table_cache();
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        let iters: Vec<BoxedBackwardHummockIterator> =
+            vec![Box::new(ReverseSSTableIterator::new(handle, sstable_store))];
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
@@ -578,10 +578,10 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(table),
-            sstable_store,
-        ))];
+        let cache = create_small_table_cache();
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        let iters: Vec<BoxedBackwardHummockIterator> =
+            vec![Box::new(ReverseSSTableIterator::new(handle, sstable_store))];
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         let begin_key = Excluded(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
@@ -659,8 +659,9 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(table),
+            cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
         ))];
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -738,10 +739,11 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(table),
-            sstable_store,
-        ))];
+        let cache = create_small_table_cache();
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+
+        let iters: Vec<BoxedBackwardHummockIterator> =
+            vec![Box::new(ReverseSSTableIterator::new(handle, sstable_store))];
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
 
@@ -830,10 +832,10 @@ mod tests {
             Unbounded => key_from_num(999999999999),
             _ => unimplemented!(),
         };
-        let iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(clone_sst(&table)),
-            sstable_store,
-        ))];
+        let cache = create_small_table_cache();
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        let iters: Vec<BoxedBackwardHummockIterator> =
+            vec![Box::new(ReverseSSTableIterator::new(handle, sstable_store))];
         let rsi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
         let num_puts: usize = truth

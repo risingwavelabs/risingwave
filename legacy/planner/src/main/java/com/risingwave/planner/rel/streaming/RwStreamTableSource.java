@@ -11,7 +11,7 @@ import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan_common.TableRefId;
 import com.risingwave.proto.streaming.plan.SourceNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;

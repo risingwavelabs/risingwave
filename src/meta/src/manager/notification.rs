@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
-use tokio::time;
 use tonic::Status;
 
 use crate::cluster::WorkerKey;
@@ -34,9 +32,6 @@ type NotificationVersion = u64;
 pub enum LocalNotification {
     WorkerDeletion(WorkerNode),
 }
-
-/// Interval before retry when notify fail.
-const NOTIFY_RETRY_INTERVAL: Duration = Duration::from_micros(10);
 
 #[derive(Debug)]
 enum Target {
@@ -57,9 +52,6 @@ pub struct NotificationManager {
     core: Arc<Mutex<NotificationManagerCore>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
-    /// Sender used in `Self::delete_sender` method.
-    /// Tell `NotificationManagerCore` to skip some retry and delete senders.
-    stop_retry_tx: UnboundedSender<WorkerKey>,
 }
 
 pub type NotificationManagerRef = Arc<NotificationManager>;
@@ -68,8 +60,7 @@ impl NotificationManager {
     pub fn new() -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
-        let (stop_retry_tx, stop_retry_rx) = mpsc::unbounded_channel();
-        let core = Arc::new(Mutex::new(NotificationManagerCore::new(stop_retry_rx)));
+        let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
         let core_clone = core.clone();
 
         tokio::spawn(async move {
@@ -97,11 +88,10 @@ impl NotificationManager {
         Self {
             core: core_clone,
             task_tx,
-            stop_retry_tx,
         }
     }
 
-    /// Add a notifcation to the waiting queue and return immediately
+    /// Add a notification to the waiting queue and return immediately
     fn notify_asynchronously(&self, target: Target, operation: Operation, info: Info) {
         let task = Task {
             target,
@@ -158,9 +148,11 @@ impl NotificationManager {
         });
     }
 
-    /// Tell `NotificationManagerCore` to skip some retry and delete senders.
-    pub fn delete_sender(&self, worker_key: WorkerKey) {
-        self.stop_retry_tx.send(worker_key).unwrap();
+    /// Tell `NotificationManagerCore` to delete sender.
+    pub async fn delete_sender(&self, worker_key: WorkerKey) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.compute_senders.remove(&worker_key);
+        core_guard.frontend_senders.remove(&worker_key);
     }
 
     pub async fn insert_frontend_sender(
@@ -205,93 +197,51 @@ struct NotificationManagerCore {
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
-    /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
-    /// `StoredClusterManager::start_heartbeat_checker`.
-    stop_retry_rx: UnboundedReceiver<WorkerKey>,
 
     /// The current notification version.
     current_version: NotificationVersion,
 }
 
 impl NotificationManagerCore {
-    fn new(stop_retry_rx: UnboundedReceiver<WorkerKey>) -> Self {
+    fn new() -> Self {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             local_senders: vec![],
-            stop_retry_rx,
             current_version: 0,
         }
     }
 
     async fn notify_frontend(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
-        let mut keys = HashSet::new();
         self.current_version += 1;
         for (worker_key, sender) in &self.frontend_senders {
-            loop {
-                // Heartbeat may delete worker.
-                // We assume that after a worker is disconnected, before it recalls subscribe, we
-                // will call notify.
-                while let Ok(x) = self.stop_retry_rx.try_recv() {
-                    keys.insert(x);
-                }
-                if keys.contains(worker_key) {
-                    break;
-                }
-                let result = sender.send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: operation as i32,
-                    info: Some(info.clone()),
-                    version: self.current_version,
-                }));
-                if result.is_ok() {
-                    break;
-                }
-                time::sleep(NOTIFY_RETRY_INTERVAL).await;
+            if let Err(err) = sender.send(Ok(SubscribeResponse {
+                status: None,
+                operation: operation as i32,
+                info: Some(info.clone()),
+                version: self.current_version,
+            })) {
+                tracing::warn!("Failed to notify frontend {:?}: {}", worker_key, err);
             }
         }
-        self.remove_by_key(keys);
 
         self.current_version
     }
 
     /// Send a `SubscribeResponse` to backend.
     async fn notify_compute(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
-        let mut keys = HashSet::new();
         self.current_version += 1;
         for (worker_key, sender) in &self.compute_senders {
-            loop {
-                // Heartbeat may delete worker.
-                // We assume that after a worker is disconnected, before it recalls subscribe, we
-                // will call notify.
-                while let Ok(x) = self.stop_retry_rx.try_recv() {
-                    keys.insert(x);
-                }
-                if keys.contains(worker_key) {
-                    break;
-                }
-                let result = sender.send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: operation as i32,
-                    info: Some(info.clone()),
-                    version: self.current_version,
-                }));
-                if result.is_ok() {
-                    break;
-                }
-                time::sleep(NOTIFY_RETRY_INTERVAL).await;
+            if let Err(err) = sender.send(Ok(SubscribeResponse {
+                status: None,
+                operation: operation as i32,
+                info: Some(info.clone()),
+                version: self.current_version,
+            })) {
+                tracing::warn!("Failed to notify compute {:?}: {}", worker_key, err);
             }
         }
-        self.remove_by_key(keys);
 
         self.current_version
-    }
-
-    fn remove_by_key(&mut self, keys: HashSet<WorkerKey>) {
-        keys.into_iter().for_each(|key| {
-            self.frontend_senders
-                .remove(&key)
-                .or_else(|| self.compute_senders.remove(&key));
-        });
     }
 }

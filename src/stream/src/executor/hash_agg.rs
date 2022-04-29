@@ -17,6 +17,7 @@
 use std::marker::PhantomData;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::try_match_expand;
@@ -35,7 +36,7 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
-    keyspace: Keyspace<S>,
+    keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
     op_info: String,
@@ -79,7 +80,13 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
+        // Build vector of keyspace via table ids.
+        // One keyspace for one agg call.
+        let keyspace = node
+            .get_table_ids()
+            .iter()
+            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .collect();
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()

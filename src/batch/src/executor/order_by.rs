@@ -20,9 +20,7 @@ use std::vec::Vec;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -30,7 +28,7 @@ use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_enc
 use risingwave_common::util::sort_util::{
     compare_two_row, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -38,7 +36,7 @@ use crate::executor::{Executor, ExecutorBuilder};
 pub(super) struct OrderByExecutor {
     child: BoxedExecutor,
     sorted_indices: Vec<Vec<usize>>,
-    chunks: Vec<DataChunkRef>,
+    chunks: Vec<DataChunk>,
     vis_indices: Vec<usize>,
     min_heap: BinaryHeap<HeapElem>,
     order_pairs: Arc<Vec<OrderPair>>,
@@ -121,9 +119,9 @@ impl OrderByExecutor {
             if self.disable_encoding || !self.encodable {
                 compare_two_row(
                     self.order_pairs.as_ref(),
-                    self.chunks[idx].as_ref(),
+                    &self.chunks[idx],
                     *ia,
-                    self.chunks[idx].as_ref(),
+                    &self.chunks[idx],
                     *ib,
                 )
                 .unwrap_or(Ordering::Equal)
@@ -142,7 +140,7 @@ impl OrderByExecutor {
                 self.encoded_keys
                     .push(encode_chunk(&chunk, self.order_pairs.clone()));
             }
-            self.chunks.push(Arc::new(chunk));
+            self.chunks.push(chunk);
             self.sorted_indices
                 .push(self.get_order_index_from(self.chunks.len() - 1));
         }

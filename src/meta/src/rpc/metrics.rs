@@ -16,23 +16,17 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use hyper::{Body, Request, Response};
-use itertools::Itertools;
 use prometheus::{
-    histogram_opts, register_counter_vec_with_registry, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, CounterVec, Encoder,
-    Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry, TextEncoder,
-    DEFAULT_BUCKETS,
+    exponential_buckets, histogram_opts, register_counter_vec_with_registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, CounterVec, Encoder, Histogram, HistogramVec, IntCounterVec,
+    IntGauge, IntGaugeVec, Registry, TextEncoder,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 
-pub const BARRIER_BUCKETS: &[f64; 36] = &[
-    0.000005, 0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01,
-    0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6,
-    2.7, 2.8, 2.9, 3.0, 3.5, 4.0, 5.0,
-];
 pub struct MetaMetrics {
     registry: Registry,
 
@@ -40,6 +34,7 @@ pub struct MetaMetrics {
     pub grpc_latency: HistogramVec,
     /// latency of each barrier
     pub barrier_latency: Histogram,
+
     /// max committed epoch
     pub max_committed_epoch: IntGauge,
     /// num of uncommitted SSTs,
@@ -67,20 +62,18 @@ pub struct MetaMetrics {
 impl MetaMetrics {
     pub fn new() -> Self {
         let registry = prometheus::Registry::new();
-        let buckets = DEFAULT_BUCKETS;
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
-            buckets.iter().map(|x| *x * 0.1).collect_vec()
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let grpc_latency =
             register_histogram_vec_with_registry!(opts, &["path"], registry).unwrap();
 
-        let buckets = BARRIER_BUCKETS;
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
-            "barrier latency ",
-            buckets.to_vec()
+            "barrier latency",
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -172,8 +165,10 @@ impl MetaMetrics {
 
         Self {
             registry,
+
             grpc_latency,
             barrier_latency,
+
             max_committed_epoch,
             uncommitted_sst_num,
             level_sst_num,

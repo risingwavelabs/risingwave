@@ -18,44 +18,41 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
-pub use barrier_align::*;
 pub use batch_query::*;
 pub use chain::*;
 pub use dispatch::*;
 pub use filter::*;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
-pub use hash_join::*;
 pub use local_simple_agg::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
 pub use project::*;
-pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
-    BoxedExecutor, Executor, HopWindowExecutorBuilder, LookupExecutorBuilder, UnionExecutorBuilder,
+    BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
+    LookupExecutorBuilder, LookupUnionExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
 };
-use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
+use crate::task::{
+    ActorId, DispatcherId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION,
+};
 
 mod actor;
-mod barrier_align;
 mod batch_query;
 mod chain;
 mod dispatch;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
-mod hash_join;
 mod local_simple_agg;
 pub(crate) mod managed_state;
 mod merge;
 pub mod monitor;
 mod mview;
 mod project;
-mod source;
 mod top_n;
 mod top_n_appendonly;
 
@@ -77,8 +74,8 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{
-    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
-    NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
+    AddMutation, Barrier as ProstBarrier, DispatcherMutation, Epoch as ProstEpoch, NothingMutation,
+    StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -96,8 +93,8 @@ pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Se
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    UpdateOutputs(HashMap<ActorId, Vec<ActorInfo>>),
-    AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
+    UpdateOutputs(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
+    AddOutput(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -168,6 +165,11 @@ impl Barrier {
         }
     }
 
+    #[must_use]
+    pub fn with_stop(self) -> Self {
+        self.with_mutation(Mutation::Stop(HashSet::default()))
+    }
+
     // TODO: The barrier should always contain trace info after we migrated barrier generation to
     // meta service.
     #[must_use]
@@ -223,29 +225,23 @@ impl Barrier {
                 })),
                 Some(Mutation::UpdateOutputs(updates)) => {
                     Some(ProstMutation::Update(UpdateMutation {
-                        actors: updates
+                        mutations: updates
                             .iter()
-                            .map(|(&f, actors)| {
-                                (
-                                    f,
-                                    MutationActors {
-                                        info: actors.clone(),
-                                    },
-                                )
+                            .map(|(&(actor_id, dispatcher_id), actors)| DispatcherMutation {
+                                actor_id,
+                                dispatcher_id,
+                                info: actors.clone(),
                             })
                             .collect(),
                     }))
                 }
                 Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(AddMutation {
-                    actors: adds
+                    mutations: adds
                         .iter()
-                        .map(|(&id, actors)| {
-                            (
-                                id,
-                                MutationActors {
-                                    info: actors.clone(),
-                                },
-                            )
+                        .map(|(&(actor_id, dispatcher_id), actors)| DispatcherMutation {
+                            actor_id,
+                            dispatcher_id,
+                            info: actors.clone(),
                         })
                         .collect(),
                 })),
@@ -263,19 +259,29 @@ impl Barrier {
             ProstMutation::Update(update) => Some(
                 Mutation::UpdateOutputs(
                     update
-                        .actors
+                        .mutations
                         .iter()
-                        .map(|(&f, actors)| (f, actors.get_info().clone()))
-                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
+                        .map(|mutation| {
+                            (
+                                (mutation.actor_id, mutation.dispatcher_id),
+                                mutation.get_info().clone(),
+                            )
+                        })
+                        .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
             ProstMutation::Add(adds) => Some(
                 Mutation::AddOutput(
-                    adds.actors
+                    adds.mutations
                         .iter()
-                        .map(|(&id, actors)| (id, actors.get_info().clone()))
-                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
+                        .map(|mutation| {
+                            (
+                                (mutation.actor_id, mutation.dispatcher_id),
+                                mutation.get_info().clone(),
+                            )
+                        })
+                        .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
@@ -293,7 +299,7 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug, EnumAsInner, PartialEq)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -528,6 +534,7 @@ pub fn create_executor(
         Node::ArrangeNode => ArrangeExecutorBuilder,
         Node::LookupNode => LookupExecutorBuilder,
         Node::UnionNode => UnionExecutorBuilder,
+        Node::LookupUnionNode => LookupUnionExecutorBuilder,
     }
 }
 

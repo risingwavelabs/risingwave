@@ -11,7 +11,6 @@ byteorder = "1"
 bytes = "1"
 chrono = "0.4"
 crc32fast = "1"
-either = "1"
 enum-as-inner = "0.4"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -44,6 +43,7 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tonic = "0.7"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
 url = "2"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

@@ -30,7 +30,7 @@ use tracing::event;
 
 use super::{Barrier, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::executor_v2::BoxedExecutor;
-use crate::task::{ActorId, SharedContext};
+use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
@@ -185,43 +185,52 @@ impl DispatchExecutorInner {
 
         match mutation {
             Mutation::UpdateOutputs(updates) => {
-                if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
-                    let mut new_outputs = vec![];
+                for dispatcher in &mut self.dispatchers {
+                    if let Some((_, actor_infos)) =
+                        updates.get_key_value(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                    {
+                        let mut new_outputs = vec![];
 
-                    let actor_id = self.actor_id;
-                    // delete the old local connections in both local and remote pools;
-                    self.context.retain(|&(up_id, down_id)| {
-                        up_id != actor_id || actor_infos.iter().any(|info| info.actor_id == down_id)
-                    });
+                        let actor_id = self.actor_id;
+                        // delete the old local connections in both local and remote pools;
+                        self.context.retain(|&(up_id, down_id)| {
+                            up_id != actor_id
+                                || actor_infos.iter().any(|info| info.actor_id == down_id)
+                        });
 
-                    for actor_info in actor_infos.iter() {
-                        let down_id = actor_info.get_actor_id();
-                        let downstream_addr = actor_info.get_host()?.into();
-                        new_outputs.push(new_output(
-                            &self.context,
-                            downstream_addr,
-                            self.actor_id,
-                            down_id,
-                        )?);
+                        for actor_info in actor_infos.iter() {
+                            let down_id = actor_info.get_actor_id();
+                            let downstream_addr = actor_info.get_host()?.into();
+                            new_outputs.push(new_output(
+                                &self.context,
+                                downstream_addr,
+                                self.actor_id,
+                                down_id,
+                            )?);
+                        }
+                        dispatcher.set_outputs(new_outputs)
                     }
-                    self.single_inner_mut().set_outputs(new_outputs)
                 }
             }
 
             Mutation::AddOutput(adds) => {
-                if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
-                    let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
-                    for downstream_actor_info in downstream_actor_infos {
-                        let down_id = downstream_actor_info.get_actor_id();
-                        let downstream_addr = downstream_actor_info.get_host()?.into();
-                        outputs_to_add.push(new_output(
-                            &self.context,
-                            downstream_addr,
-                            self.actor_id,
-                            down_id,
-                        )?);
+                for dispatcher in &mut self.dispatchers {
+                    if let Some(downstream_actor_infos) =
+                        adds.get(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                    {
+                        let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
+                        for downstream_actor_info in downstream_actor_infos {
+                            let down_id = downstream_actor_info.get_actor_id();
+                            let downstream_addr = downstream_actor_info.get_host()?.into();
+                            outputs_to_add.push(new_output(
+                                &self.context,
+                                downstream_addr,
+                                self.actor_id,
+                                down_id,
+                            )?);
+                        }
+                        dispatcher.add_outputs(outputs_to_add);
                     }
-                    self.single_inner_mut().add_outputs(outputs_to_add);
                 }
             }
 
@@ -236,7 +245,9 @@ impl DispatchExecutorInner {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
             if !stops.contains(&self.actor_id) {
-                self.single_inner_mut().remove_outputs(stops);
+                for dispatcher in &mut self.dispatchers {
+                    dispatcher.remove_outputs(stops);
+                }
             }
         }
 
@@ -323,6 +334,12 @@ macro_rules! impl_dispatcher {
                     $(Self::$variant_name(inner) => inner.remove_outputs(actor_ids), )*
                 }
             }
+
+            pub fn get_dispatcher_id(&self) -> DispatcherId {
+                match self {
+                    $(Self::$variant_name(inner) => inner.get_dispatcher_id(), )*
+                }
+            }
         }
     }
 }
@@ -360,11 +377,14 @@ pub trait Dispatcher: Debug + 'static {
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
+
+    fn get_dispatcher_id(&self) -> DispatcherId;
 }
 
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<BoxedOutput>,
     cur: usize,
+    dispatcher_id: DispatcherId,
 }
 
 impl Debug for RoundRobinDataDispatcher {
@@ -376,8 +396,12 @@ impl Debug for RoundRobinDataDispatcher {
 }
 
 impl RoundRobinDataDispatcher {
-    pub fn new(outputs: Vec<BoxedOutput>) -> Self {
-        Self { outputs, cur: 0 }
+    pub fn new(outputs: Vec<BoxedOutput>, dispatcher_id: DispatcherId) -> Self {
+        Self {
+            outputs,
+            cur: 0,
+            dispatcher_id,
+        }
     }
 }
 
@@ -417,6 +441,10 @@ impl Dispatcher for RoundRobinDataDispatcher {
             .drain_filter(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
+
+    fn get_dispatcher_id(&self) -> DispatcherId {
+        self.dispatcher_id
+    }
 }
 
 pub struct HashDataDispatcher {
@@ -426,6 +454,7 @@ pub struct HashDataDispatcher {
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
     hash_mapping: Vec<ActorId>,
+    dispatcher_id: DispatcherId,
 }
 
 impl Debug for HashDataDispatcher {
@@ -443,12 +472,14 @@ impl HashDataDispatcher {
         outputs: Vec<BoxedOutput>,
         keys: Vec<usize>,
         hash_mapping: Vec<ActorId>,
+        dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             fragment_ids,
             outputs,
             keys,
             hash_mapping,
+            dispatcher_id,
         }
     }
 }
@@ -589,11 +620,16 @@ impl Dispatcher for HashDataDispatcher {
             .drain_filter(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
+
+    fn get_dispatcher_id(&self) -> DispatcherId {
+        self.dispatcher_id
+    }
 }
 
 /// `BroadcastDispatcher` dispatches message to all outputs.
 pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, BoxedOutput>,
+    dispatcher_id: DispatcherId,
 }
 
 impl Debug for BroadcastDispatcher {
@@ -605,9 +641,13 @@ impl Debug for BroadcastDispatcher {
 }
 
 impl BroadcastDispatcher {
-    pub fn new(outputs: impl IntoIterator<Item = BoxedOutput>) -> Self {
+    pub fn new(
+        outputs: impl IntoIterator<Item = BoxedOutput>,
+        dispatcher_id: DispatcherId,
+    ) -> Self {
         Self {
             outputs: Self::into_pairs(outputs).collect(),
+            dispatcher_id,
         }
     }
 
@@ -654,11 +694,16 @@ impl Dispatcher for BroadcastDispatcher {
             .drain_filter(|actor_id, _| actor_ids.contains(actor_id))
             .count();
     }
+
+    fn get_dispatcher_id(&self) -> DispatcherId {
+        self.dispatcher_id
+    }
 }
 
 /// `SimpleDispatcher` dispatches message to a single output.
 pub struct SimpleDispatcher {
     output: BoxedOutput,
+    dispatcher_id: DispatcherId,
 }
 
 impl Debug for SimpleDispatcher {
@@ -670,8 +715,11 @@ impl Debug for SimpleDispatcher {
 }
 
 impl SimpleDispatcher {
-    pub fn new(output: BoxedOutput) -> Self {
-        Self { output }
+    pub fn new(output: BoxedOutput, dispatcher_id: DispatcherId) -> Self {
+        Self {
+            output,
+            dispatcher_id,
+        }
     }
 }
 
@@ -704,6 +752,10 @@ impl Dispatcher for SimpleDispatcher {
         if actor_ids.contains(&self.output.actor_id()) {
             panic!("cannot remove outputs from SimpleDispatcher");
         }
+    }
+
+    fn get_dispatcher_id(&self) -> DispatcherId {
+        self.dispatcher_id
     }
 }
 
@@ -758,10 +810,9 @@ mod tests {
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::column_nonnull;
     use risingwave_common::hash::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
@@ -820,77 +871,50 @@ mod tests {
             outputs,
             key_indices.to_vec(),
             hash_mapping,
+            0,
         );
 
-        let chunk = StreamChunk::new(
-            vec![
-                Op::Insert,
-                Op::Insert,
-                Op::Insert,
-                Op::Delete,
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-            ],
-            vec![
-                column_nonnull! { I64Array, [4, 5, 0, 1, 2, 2, 3, 3] },
-                column_nonnull! { I64Array, [6, 7, 0, 1, 0, 0, 3, 3] },
-                column_nonnull! { I64Array, [8, 9, 0, 1, 2, 2, 2, 4] },
-            ],
-            Some(Bitmap::try_from(vec![true, true, true, false, true, true, true, true]).unwrap()),
+        let chunk = StreamChunk::from_pretty(
+            "  I I I
+            +  4 6 8
+            +  5 7 9
+            +  0 0 0
+            -  1 1 1 D
+            U- 2 0 2
+            U+ 2 0 2
+            U- 3 3 2
+            U+ 3 3 4",
         );
-
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
-        {
-            let guard = output_data_vecs[0].lock().unwrap();
-            match guard[0] {
-                Message::Chunk(ref chunk1) => {
-                    assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 5);
-                    assert!(chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
-                    assert_eq!(
-                        chunk1.ops()[6],
-                        Op::Delete,
-                        "Should rewrite UpdateDelete to Delete"
-                    );
-                }
-                _ => unreachable!(),
-            }
-        }
-        {
-            let guard = output_data_vecs[1].lock().unwrap();
-            match guard[0] {
-                Message::Chunk(ref chunk1) => {
-                    assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 2);
-                    assert!(
-                        !chunk1.visibility().as_ref().unwrap().is_set(3).unwrap(),
-                        "Should keep original invisible mark"
-                    );
-                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
-
-                    assert_eq!(
-                        chunk1.ops()[4],
-                        Op::UpdateDelete,
-                        "Should keep UpdateDelete"
-                    );
-                    assert_eq!(
-                        chunk1.ops()[5],
-                        Op::UpdateInsert,
-                        "Should keep UpdateInsert"
-                    );
-
-                    assert_eq!(
-                        chunk1.ops()[7],
-                        Op::Insert,
-                        "Should rewrite UpdateInsert to Insert"
-                    );
-                }
-                _ => unreachable!(),
-            }
-        }
+        assert_eq!(
+            *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I
+                +  4 6 8 D
+                +  5 7 9 D
+                +  0 0 0
+                -  1 1 1 D
+                U- 2 0 2
+                U+ 2 0 2
+                -  3 3 2    // Should rewrite UpdateDelete to Delete
+                +  3 3 4    // Should rewrite UpdateInsert to Insert",
+            )
+        );
+        assert_eq!(
+            *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I
+                +  4 6 8
+                +  5 7 9
+                +  0 0 0 D
+                -  1 1 1 D  // Should keep original invisible mark
+                U- 2 0 2 D  // Should keep UpdateDelete
+                U+ 2 0 2 D  // Should keep UpdateInsert
+                -  3 3 2 D  // Should rewrite UpdateDelete to Delete
+                +  3 3 4 D  // Should rewrite UpdateInsert to Insert",
+            )
+        );
     }
 
     fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
@@ -936,20 +960,24 @@ mod tests {
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
+        let dispatcher_id = 666;
 
         let executor = Box::new(DispatchExecutor::new(
             input,
-            vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
+            vec![DispatcherImpl::Simple(SimpleDispatcher::new(
+                output,
+                dispatcher_id,
+            ))],
             actor_id,
             ctx.clone(),
         ))
         .execute();
         pin_mut!(executor);
 
-        let mut updates1: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
+        let mut updates1: HashMap<(u32, u64), Vec<ActorInfo>> = HashMap::new();
 
         updates1.insert(
-            actor_id,
+            (actor_id, 0),
             vec![
                 helper_make_local_actor(234),
                 helper_make_local_actor(235),
@@ -967,8 +995,11 @@ mod tests {
             assert_eq!(tctx.get_channel_pair_number(), 3);
         }
 
-        let mut updates2: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
-        updates2.insert(actor_id, vec![helper_make_local_actor(235)]);
+        let mut updates2: HashMap<(u32, u64), Vec<ActorInfo>> = HashMap::new();
+        updates2.insert(
+            (actor_id, dispatcher_id),
+            vec![helper_make_local_actor(235)],
+        );
         add_local_channels(ctx.clone(), vec![(233, 235)]);
         let b2 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates2));
 
@@ -985,7 +1016,7 @@ mod tests {
             Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
                 let mut actors = HashMap::default();
                 actors.insert(
-                    233,
+                    (233, 666),
                     vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
                 );
                 actors
@@ -1025,6 +1056,7 @@ mod tests {
             outputs,
             key_indices.to_vec(),
             hash_mapping.clone(),
+            0,
         );
 
         let mut ops = Vec::new();

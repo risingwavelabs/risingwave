@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
 
-use crate::executor::JOIN_CACHE_SIZE;
+use crate::executor_v2::JOIN_CACHE_SIZE;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {

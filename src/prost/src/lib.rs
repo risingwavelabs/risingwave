@@ -13,7 +13,9 @@ pub mod expr;
 #[rustfmt::skip]
 pub mod meta;
 #[rustfmt::skip]
-pub mod plan;
+pub mod plan_common;
+#[rustfmt::skip]
+pub mod batch_plan;
 #[rustfmt::skip]
 pub mod task_service;
 #[rustfmt::skip]
@@ -42,8 +44,11 @@ pub mod expr_serde;
 #[path = "meta.serde.rs"]
 pub mod meta_serde;
 #[rustfmt::skip]
-#[path = "plan.serde.rs"]
-pub mod plan_serde;
+#[path = "plan_common.serde.rs"]
+pub mod plan_common_serde;
+#[rustfmt::skip]
+#[path = "batch_plan.serde.rs"]
+pub mod batch_plan_serde;
 #[rustfmt::skip]
 #[path = "task_service.serde.rs"]
 pub mod task_service_serde;
@@ -65,7 +70,7 @@ mod imp;
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
-    use crate::plan::{DatabaseRefId, SchemaRefId};
+    use crate::plan_common::{DatabaseRefId, SchemaRefId};
 
     #[test]
     fn test_getter() {

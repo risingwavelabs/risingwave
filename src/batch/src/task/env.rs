@@ -80,7 +80,7 @@ impl BatchEnvironment {
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new()),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            source_manager: std::sync::Arc::new(MemSourceManager::new()),
+            source_manager: std::sync::Arc::new(MemSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(

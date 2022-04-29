@@ -17,20 +17,18 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource, Executor,
-    ExecutorBuilder,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor2::{CreateSource, DefaultCreateSource};
 use crate::task::{BatchEnvironment, TaskId};
 
 pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
@@ -44,7 +42,7 @@ pub(super) struct MergeSortExchangeExecutorImpl<C> {
     server_addr: HostAddr,
     env: BatchEnvironment,
     /// keeps one data chunk of each source if any
-    source_inputs: Vec<Option<DataChunkRef>>,
+    source_inputs: Vec<Option<DataChunk>>,
     order_pairs: Arc<Vec<OrderPair>>,
     min_heap: BinaryHeap<HeapElem>,
     proto_sources: Vec<ProstExchangeSource>,
@@ -66,8 +64,7 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
         match res {
             Some(chunk) => {
                 assert_ne!(chunk.cardinality(), 0);
-                let _ =
-                    std::mem::replace(&mut self.source_inputs[source_idx], Some(Arc::new(chunk)));
+                let _ = std::mem::replace(&mut self.source_inputs[source_idx], Some(chunk));
             }
             None => {
                 let _ = std::mem::replace(&mut self.source_inputs[source_idx], None);

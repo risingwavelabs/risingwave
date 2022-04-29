@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
-    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
@@ -135,9 +135,9 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let iter = {
-                let iters = buffers
-                    .iter()
-                    .map(|m| Box::new(m.iter()) as BoxedForwardHummockIterator);
+                let iters = buffers.iter().map(|m| {
+                    Box::new(m.clone().into_forward_iter()) as BoxedForwardHummockIterator
+                });
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
@@ -181,7 +181,7 @@ impl Compactor {
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) {
         tracing::debug!(
             "Ready to handle compaction task: \n{}",
-            compact_task_to_string(compact_task.clone())
+            compact_task_to_string(&compact_task)
         );
 
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -253,6 +253,7 @@ impl Compactor {
                         right: sst.meta.largest_key.clone(),
                         inf: false,
                     }),
+                    file_size: sst.meta.estimated_size as u64,
                 }));
         }
 
@@ -345,17 +346,11 @@ impl Compactor {
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
-        for LevelEntry {
-            level_idx: _,
-            level: opt_level,
-            ..
-        } in &self.compact_task.input_ssts
-        {
-            let level = opt_level.as_ref().unwrap();
+        for level in &self.compact_task.input_ssts {
+            if level.table_infos.is_empty() {
+                continue;
+            }
             // Do not need to filter the table because manager has done it.
-            let table_idxs = level.table_infos.iter().map(|sst| sst.id).collect_vec();
-            let tables = self.context.sstable_store.sstables(&table_idxs).await?;
-
             // let read_statistics: &mut TableSetStatistics = if *level_idx ==
             // compact_task.target_level {
             //     compact_task.metrics.as_mut().unwrap().read_level_nplus1.as_mut().unwrap()
@@ -370,17 +365,18 @@ impl Compactor {
             match level.get_level_type().unwrap() {
                 LevelType::Nonoverlapping => {
                     table_iters.push(Box::new(ConcatIterator::new(
-                        tables,
+                        level.table_infos.clone(),
                         self.context.sstable_store.clone(),
                     )));
                 }
                 LevelType::Overlapping => {
-                    table_iters.extend(tables.iter().map(|table| -> BoxedForwardHummockIterator {
-                        Box::new(SSTableIterator::new(
-                            table.clone(),
+                    for table_info in &level.table_infos {
+                        let table = self.context.sstable_store.sstable(table_info.id).await?;
+                        table_iters.push(Box::new(SSTableIterator::new(
+                            table,
                             self.context.sstable_store.clone(),
-                        ))
-                    }));
+                        )));
+                    }
                 }
             }
         }

@@ -48,6 +48,15 @@ impl Array for Utf8Array {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&str> {
+        if !self.is_null_unchecked(idx) {
+            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
+            Some(std::str::from_utf8_unchecked(data_slice))
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.offset.len() - 1
     }
@@ -145,7 +154,7 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
         Ok(Self {
@@ -317,6 +326,7 @@ mod tests {
         let array = builder.finish()?;
         assert_eq!(array.len(), 1);
         assert_eq!(array.value_at(0), Some("ranran"));
+        assert_eq!(unsafe { array.value_at_unchecked(0) }, Some("ranran"));
 
         Ok(())
     }

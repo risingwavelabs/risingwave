@@ -31,10 +31,12 @@ use risingwave_pb::hummock::{
     SstableInfo, UncommittedEpoch,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
@@ -60,6 +62,9 @@ pub struct HummockManager<S: MetaStore> {
     versioning: RwLock<Versioning>,
 
     metrics: Arc<MetaMetrics>,
+
+    /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
+    compaction_scheduler: parking_lot::RwLock<Option<UnboundedSender<CompactionGroupId>>>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -112,6 +117,18 @@ struct Versioning {
     sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
 }
 
+impl Versioning {
+    pub fn current_version_ref(&self) -> &HummockVersion {
+        self.hummock_versions
+            .get(&self.current_version_id.id())
+            .expect("current version should always be available.")
+    }
+
+    pub fn current_version(&self) -> HummockVersion {
+        self.current_version_ref().clone()
+    }
+}
+
 impl<S> HummockManager<S>
 where
     S: MetaStore,
@@ -132,11 +149,12 @@ where
                 sstable_id_infos: Default::default(),
             }),
             compaction: Mutex::new(Compaction {
-                compact_status: CompactStatus::new(),
+                compact_status: CompactStatus::default(),
                 compact_task_assignment: Default::default(),
             }),
             metrics,
             cluster_manager,
+            compaction_scheduler: parking_lot::RwLock::new(None),
         };
 
         instance.load_meta_store_state().await?;
@@ -178,10 +196,12 @@ where
                 id: versioning_guard.current_version_id.id(),
                 levels: vec![
                     Level {
+                        level_idx: 0,
                         level_type: LevelType::Overlapping as i32,
                         table_infos: vec![],
                     },
                     Level {
+                        level_idx: 1,
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: vec![],
                     },
@@ -387,7 +407,6 @@ where
         current_version_id.increase();
         let mut new_hummock_version = hummock_versions
             .new_entry_txn_or_default(current_version_id.id(), current_hummock_version);
-
         new_hummock_version.id = current_version_id.id();
 
         // Create new_version by adding tables in UncommittedEpoch
@@ -581,7 +600,12 @@ where
         };
 
         if should_commit {
-            commit_multi_var!(self, None, compact_status, compact_task_assignment)?;
+            commit_multi_var!(
+                self,
+                Some(assignee_context_id),
+                compact_status,
+                compact_task_assignment
+            )?;
         } else {
             abort_multi_var!(compact_status);
         }
@@ -599,32 +623,28 @@ where
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     pub async fn report_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
-        let compact_metrics = compact_task.metrics.clone();
         let mut compaction_guard = self.compaction.lock().await;
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
         let mut compact_task_assignment =
             VarTransaction::new(&mut compaction.compact_task_assignment);
-        // The task is not found.
-        if !compact_task_assignment.contains_key(&compact_task.task_id) {
-            return Ok(false);
-        }
-        compact_task_assignment.remove(&compact_task.task_id);
+        let assignee_context_id = match compact_task_assignment.remove(&compact_task.task_id) {
+            None => {
+                // The task is not found.
+                return Ok(false);
+            }
+            Some(assignment) => assignment.context_id,
+        };
         compact_status.report_compact_task(&compact_task);
         if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
+            let old_version = versioning_guard.current_version();
             let versioning = versioning_guard.deref_mut();
             let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
             let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
             let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
             let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
-            let old_version = hummock_versions
-                .get(&current_version_id.id())
-                .unwrap()
-                .clone();
-            current_version_id.increase();
-
             let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
                 old_version.id,
                 HummockStaleSstables {
@@ -633,24 +653,14 @@ where
                 },
             );
             for level in &compact_task.input_ssts {
-                version_stale_sstables.id.extend(
-                    level
-                        .level
-                        .as_ref()
-                        .unwrap()
-                        .table_infos
-                        .iter()
-                        .map(|sst| sst.id)
-                        .collect_vec(),
-                );
+                version_stale_sstables
+                    .id
+                    .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
             }
-
-            let new_version = CompactStatus::apply_compact_result(
-                &compact_task,
-                old_version,
-                current_version_id.id(),
-            );
-            hummock_versions.insert(current_version_id.id(), new_version);
+            let mut new_version = CompactStatus::apply_compact_result(&compact_task, old_version);
+            current_version_id.increase();
+            new_version.id = current_version_id.id();
+            hummock_versions.insert(new_version.id, new_version);
 
             for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
                 match sstable_id_infos.get_mut(sst_id) {
@@ -669,7 +679,7 @@ where
 
             commit_multi_var!(
                 self,
-                None,
+                Some(assignee_context_id),
                 compact_status,
                 compact_task_assignment,
                 current_version_id,
@@ -679,17 +689,26 @@ where
             )?;
         } else {
             // The compact task is cancelled.
-            commit_multi_var!(self, None, compact_status, compact_task_assignment)?;
+            commit_multi_var!(
+                self,
+                Some(assignee_context_id),
+                compact_status,
+                compact_task_assignment
+            )?;
         }
 
         tracing::info!(
             "Reported compact task. {}",
-            compact_task_to_string(compact_task)
+            compact_task_to_string(&compact_task)
         );
 
-        trigger_sst_stat(&self.metrics, &compaction_guard.compact_status);
-        if let Some(compact_task_metrics) = compact_metrics {
-            trigger_rw_stat(&self.metrics, &compact_task_metrics);
+        trigger_sst_stat(
+            &self.metrics,
+            &compaction_guard.compact_status,
+            self.versioning.read().await.current_version_ref(),
+        );
+        if let Some(ref compact_task_metrics) = compact_task.metrics {
+            trigger_rw_stat(&self.metrics, compact_task_metrics);
         }
 
         #[cfg(test)]
@@ -703,14 +722,14 @@ where
 
     pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
+        let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
-        let old_version_id = current_version_id.increase();
-        let new_version_id = current_version_id.id();
-        let old_version_copy = hummock_versions.get(&old_version_id).unwrap().clone();
+        current_version_id.increase();
         let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(new_version_id, old_version_copy);
+            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+        new_hummock_version.id = current_version_id.id();
         // TODO: return error instead of panic
         if epoch <= new_hummock_version.max_committed_epoch {
             panic!(
@@ -732,27 +751,23 @@ where
 
             // Commit tables by moving them into level0
             let version_first_level = new_hummock_version.levels.first_mut().unwrap();
-            match version_first_level.get_level_type()? {
-                LevelType::Overlapping => {
-                    uncommitted_epoch
-                        .tables
-                        .iter()
-                        .for_each(|t| version_first_level.table_infos.push(t.clone()));
-                }
-                LevelType::Nonoverlapping => {
-                    return Err(ErrorCode::NotImplemented(
-                        "unsupported LevelType::Nonoverlapping".to_string(),
-                        None.into(),
-                    )
-                    .into())
-                }
-            };
+            if version_first_level.level_idx == 0 {
+                uncommitted_epoch
+                    .tables
+                    .iter()
+                    .for_each(|t| version_first_level.table_infos.push(t.clone()));
+            } else {
+                return Err(ErrorCode::NotImplemented(
+                    "unsupported LevelType::Nonoverlapping".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
             // Remove the epoch from uncommitted_epochs
             new_hummock_version.uncommitted_epochs.swap_remove(idx);
         }
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_hummock_version.max_committed_epoch = epoch;
-        new_hummock_version.id = new_version_id;
 
         let new_hummock_version_copy = new_hummock_version.clone();
         commit_multi_var!(self, None, new_hummock_version, current_version_id)?;
@@ -780,15 +795,16 @@ where
 
     pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
+        let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
-        let old_version_id = current_version_id.increase();
-        let new_version_id = current_version_id.id();
-        let old_hummock_version = hummock_versions.get(&old_version_id).unwrap().clone();
+        let old_version_id = old_version.id;
+        current_version_id.increase();
         let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(new_version_id, old_hummock_version);
+            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+        new_hummock_version.id = current_version_id.id();
 
         // Get and remove tables in the committing epoch
         let uncommitted_epoch = new_hummock_version
@@ -809,9 +825,6 @@ where
             version_stale_sstables
                 .id
                 .extend(epoch_info.tables.iter().map(|t| t.id));
-
-            // Create new_version
-            new_hummock_version.id = new_version_id;
 
             commit_multi_var!(
                 self,
@@ -1104,12 +1117,7 @@ where
 
         let mut invalid_context_ids = vec![];
         for active_context_id in &active_context_ids {
-            if self
-                .cluster_manager
-                .get_worker_by_id(*active_context_id)
-                .await
-                .is_none()
-            {
+            if !self.check_context(*active_context_id).await {
                 invalid_context_ids.push(*active_context_id);
             }
         }
@@ -1117,6 +1125,14 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    /// Checks whether `context_id` is valid.
+    pub async fn check_context(&self, context_id: HummockContextId) -> bool {
+        self.cluster_manager
+            .get_worker_by_id(context_id)
+            .await
+            .is_some()
     }
 
     /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
@@ -1166,5 +1182,9 @@ where
             .get(&versioning_guard.current_version_id.id())
             .unwrap()
             .clone()
+    }
+
+    pub fn set_compaction_scheduler(&self, sender: UnboundedSender<CompactionGroupId>) {
+        *self.compaction_scheduler.write() = Some(sender);
     }
 }

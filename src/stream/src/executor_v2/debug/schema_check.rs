@@ -80,9 +80,9 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, StreamExt};
-    use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -91,14 +91,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_ok() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { F64Array, [200.0, 14.0, 300.0] },
-            ],
-            None,
-        );
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -106,9 +98,14 @@ mod tests {
             ],
         };
 
-        let mut source = MockSource::new(schema, vec![1]);
-        source.push_chunks([chunk].into_iter());
-        source.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![1]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I     F
+            + 100 200.0
+            +  10  14.0
+            +   4 300.0",
+        ));
+        tx.push_barrier(1, false);
 
         let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -120,14 +117,6 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_schema_bad() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { I64Array, [200, 14, 300] },
-            ],
-            None,
-        );
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -135,9 +124,14 @@ mod tests {
             ],
         };
 
-        let mut source = MockSource::new(schema, vec![1]);
-        source.push_chunks([chunk].into_iter());
-        source.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![1]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I
+            + 100 200
+            +  10  14
+            +   4 300",
+        ));
+        tx.push_barrier(1, false);
 
         let checked = schema_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);

@@ -109,10 +109,22 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type RefItem<'a> = T;
 
     fn value_at(&self, idx: usize) -> Option<T> {
-        if !self.is_null(idx) {
-            Some(self.data[idx])
-        } else {
+        if self.is_null(idx) {
             None
+        } else {
+            Some(self.data[idx])
+        }
+    }
+
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not check whether the index is within the bounds of
+    /// the array.
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T> {
+        if self.is_null_unchecked(idx) {
+            None
+        } else {
+            Some(*self.data.get_unchecked(idx))
         }
     }
 
@@ -177,7 +189,7 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
