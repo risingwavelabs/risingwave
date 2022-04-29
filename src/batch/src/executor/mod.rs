@@ -29,7 +29,6 @@ use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
-use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
@@ -37,7 +36,7 @@ use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2,
-    ProjectExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    NestedLoopJoinExecutor2, ProjectExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -201,7 +200,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::DropSource => DropStreamExecutor,
@@ -231,7 +230,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::DropSource => DropStreamExecutor,

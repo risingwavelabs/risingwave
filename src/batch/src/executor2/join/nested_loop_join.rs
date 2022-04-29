@@ -15,23 +15,25 @@
 use std::option::Option::Some;
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::join::chunked_data::RowId;
-use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::JoinType;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-
+use crate::executor2::join::chunked_data::RowId;
+use crate::executor2::join::row_level_iter::RowLevelIter;
+use crate::executor2::join::JoinType;
+use crate::executor2::{
+    BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2, ExecutorBuilder,
+};
 /// Nested loop join executor.
 ///
 ///
@@ -39,13 +41,12 @@ use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBui
 /// 1. Iterate tuple from probe table.
 /// 2. Concatenated with inner chunk, eval expression and get sel vector
 /// 3. Create new chunk with new sel vector and yield to upper.
-pub struct NestedLoopJoinExecutor {
+pub struct NestedLoopJoinExecutor2 {
     /// Expression to eval join condition
     join_expr: BoxedExpression,
     /// Executor should handle different join type.
     join_type: JoinType,
-    /// Manage inner source and expression evaluation.
-    state: NestedLoopJoinState,
+    /// return self schema.
     schema: Schema,
     /// Return data chunk in batch.
     chunk_builder: DataChunkBuilder,
@@ -70,12 +71,13 @@ pub struct NestedLoopJoinExecutor {
 /// If current row finished probe, executor will advance to next row.
 /// If there is batched chunk generated in probing, return it. Note that:
 /// `None` do not mean no matched row find (it is written in
-/// [`NestedLoopJoinExecutor::chunk_builder`])
+/// [`NestedLoopJoinExecutor2::chunk_builder`])
 struct ProbeResult {
     cur_row_finished: bool,
     chunk: Option<DataChunk>,
 }
 
+#[derive(PartialEq)]
 enum NestedLoopJoinState {
     /// [`Self::Build`] should load all inner table into memory.
     Build,
@@ -89,73 +91,7 @@ enum NestedLoopJoinState {
     Done,
 }
 
-#[async_trait::async_trait]
-impl Executor for NestedLoopJoinExecutor {
-    async fn open(&mut self) -> Result<()> {
-        match self.state {
-            NestedLoopJoinState::Build => {
-                // TODO: Do not all read to memory if OOM.
-                self.build_table.load_data().await?;
-                self.state = NestedLoopJoinState::FirstProbe;
-            }
-            _ => unreachable!(),
-        }
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if let Some(last_chunk) = self.last_chunk.take() {
-            let (left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(last_chunk)?;
-            self.last_chunk = left_data_chunk;
-            if let Some(return_chunk_inner) = return_chunk {
-                return Ok(Some(return_chunk_inner));
-            }
-        }
-        // Make sure all buffered chunk are flushed before generate more chunks.
-        // It's impossible that: left chunk not null and return chunk is null.
-        assert!(self.last_chunk.is_none());
-
-        loop {
-            match self.state {
-                NestedLoopJoinState::Build => unreachable!(),
-
-                NestedLoopJoinState::FirstProbe => {
-                    let ret = self.probe(true).await?;
-                    self.state = NestedLoopJoinState::Probe;
-                    if let Some(data_chunk) = ret {
-                        return Ok(Some(data_chunk));
-                    }
-                }
-                NestedLoopJoinState::Probe => {
-                    let ret = self.probe(false).await?;
-                    if let Some(data_chunk) = ret {
-                        return Ok(Some(data_chunk));
-                    }
-                }
-
-                NestedLoopJoinState::ProbeRemaining => {
-                    let ret = self.probe_remaining()?;
-                    if let Some(data_chunk) = ret {
-                        return Ok(Some(data_chunk));
-                    }
-                    self.state = NestedLoopJoinState::Done;
-                }
-
-                NestedLoopJoinState::Done => {
-                    return if let Some(data_chunk) = self.chunk_builder.consume_all()? {
-                        Ok(Some(data_chunk))
-                    } else {
-                        Ok(None)
-                    };
-                }
-            }
-        }
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
+impl Executor2 for NestedLoopJoinExecutor2 {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -163,9 +99,59 @@ impl Executor for NestedLoopJoinExecutor {
     fn identity(&self) -> &str {
         &self.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
 }
 
-impl NestedLoopJoinExecutor {
+impl NestedLoopJoinExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
+        let mut state = NestedLoopJoinState::Build;
+        loop {
+            match state {
+                NestedLoopJoinState::Build => {
+                    self.build_table.load_data().await?;
+                    state = NestedLoopJoinState::FirstProbe;
+                }
+                NestedLoopJoinState::FirstProbe => {
+                    let ret = self.probe(true, &mut state).await?;
+                    if state == NestedLoopJoinState::FirstProbe {
+                        state = NestedLoopJoinState::Probe;
+                    }
+                    if let Some(data_chunk) = ret {
+                        yield data_chunk;
+                    }
+                }
+                NestedLoopJoinState::Probe => {
+                    let ret = self.probe(false, &mut state).await?;
+                    if let Some(data_chunk) = ret {
+                        yield data_chunk;
+                    }
+                }
+
+                NestedLoopJoinState::ProbeRemaining => {
+                    let ret = self.probe_remaining()?;
+                    if let Some(data_chunk) = ret {
+                        yield data_chunk;
+                    }
+                    state = NestedLoopJoinState::Done;
+                }
+
+                NestedLoopJoinState::Done => {
+                    if let Some(data_chunk) = self.chunk_builder.consume_all()? {
+                        yield data_chunk;
+                    } else {
+                        break;
+                    };
+                }
+            }
+        }
+    }
+}
+
+impl NestedLoopJoinExecutor2 {
     /// Create constant data chunk (one tuple repeat `num_tuples` times).
     fn convert_datum_refs_to_chunk(
         &self,
@@ -204,8 +190,8 @@ impl NestedLoopJoinExecutor {
     }
 }
 
-impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for NestedLoopJoinExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 2);
 
         let nested_loop_join_node = try_match_expand!(
@@ -221,9 +207,9 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build()?;
+                let left_child = source.clone_for_plan(left_plan).build2()?;
                 let probe_side_schema = left_child.schema().data_types();
-                let right_child = source.clone_for_plan(right_plan).build()?;
+                let right_child = source.clone_for_plan(right_plan).build2()?;
 
                 // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
                 let fields = match join_type {
@@ -252,26 +238,19 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                         // TODO: Support FULL OUTER.
                         let outer_table_source = RowLevelIter::new(left_child);
 
-                        let join_state = NestedLoopJoinState::Build;
-                        Ok(Box::new(
-                            Self {
-                                join_expr,
-                                join_type,
-                                state: join_state,
-                                chunk_builder: DataChunkBuilder::with_default_size(
-                                    schema.data_types(),
-                                ),
-                                schema,
-                                last_chunk: None,
-                                probe_side_schema,
-                                probe_side_source: outer_table_source,
-                                build_table: RowLevelIter::new(right_child),
-                                probe_remain_chunk_idx: 0,
-                                probe_remain_row_idx: 0,
-                                identity: "NestedLoopJoinExecutor".to_string(),
-                            }
-                            .fuse(),
-                        ))
+                        Ok(Box::new(Self {
+                            join_expr,
+                            join_type,
+                            chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
+                            schema,
+                            last_chunk: None,
+                            probe_side_schema,
+                            probe_side_source: outer_table_source,
+                            build_table: RowLevelIter::new(right_child),
+                            probe_remain_chunk_idx: 0,
+                            probe_remain_row_idx: 0,
+                            identity: "NestedLoopJoinExecutor2".to_string(),
+                        }))
                     }
                     _ => Err(ErrorCode::NotImplemented(
                         format!("Do not support {:?} join type now.", join_type),
@@ -284,15 +263,18 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         }
     }
 }
-
-impl NestedLoopJoinExecutor {
+impl NestedLoopJoinExecutor2 {
     /// Probe matched rows in `probe_table`.
     /// # Arguments
     /// * `first_probe`: whether the first probing. Init outer source if yes.
     /// * `probe_table`: Table to be probed.
     /// If nothing gained from `probe_table.join()`, Advance to next row until all outer tuples are
     /// exhausted.
-    async fn probe(&mut self, first_probe: bool) -> Result<Option<DataChunk>> {
+    async fn probe(
+        &mut self,
+        first_probe: bool,
+        state: &mut NestedLoopJoinState,
+    ) -> Result<Option<DataChunk>> {
         if first_probe {
             self.probe_side_source.load_data().await?;
         }
@@ -338,7 +320,7 @@ impl NestedLoopJoinExecutor {
                 }
             }
         } else {
-            self.state = if self.join_type.need_join_remaining() {
+            *state = if self.join_type.need_join_remaining() {
                 NestedLoopJoinState::ProbeRemaining
             } else {
                 NestedLoopJoinState::Done
@@ -592,7 +574,6 @@ impl NestedLoopJoinExecutor {
         Ok(data_chunk)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use std::convert::TryFrom;
@@ -607,13 +588,10 @@ mod tests {
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::executor::join::nested_loop_join::{
-        NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
-    };
-    use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
-    use crate::executor::BoxedExecutor;
-    use crate::executor2::executor_wrapper::ExecutorWrapper;
+    use crate::executor2::join::nested_loop_join::{NestedLoopJoinExecutor2, RowLevelIter};
+    use crate::executor2::join::JoinType;
+    use crate::executor2::BoxedExecutor2;
 
     /// Test combine two chunk into one.
     #[test]
@@ -635,7 +613,7 @@ mod tests {
             .columns(columns.clone())
             .visibility((bool_vec.clone()).try_into().unwrap())
             .build();
-        let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
+        let chunk = NestedLoopJoinExecutor2::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
@@ -656,10 +634,9 @@ mod tests {
         let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
         // Note that only probe side schema of this executor is meaningful. All other fields are
         // meaningless. They are just used to pass Rust checker.
-        let source = NestedLoopJoinExecutor {
+        let source = NestedLoopJoinExecutor2 {
             join_expr: Box::new(InputRefExpression::new(DataType::Int32, 0)),
             join_type: JoinType::Inner,
-            state: NestedLoopJoinState::Build,
             chunk_builder: DataChunkBuilder::with_default_size(probe_side_schema.data_types()),
             schema: Schema { fields: vec![] },
             last_chunk: None,
@@ -668,7 +645,7 @@ mod tests {
             build_table: RowLevelIter::new(build_source),
             probe_remain_chunk_idx: 0,
             probe_remain_row_idx: 0,
-            identity: "NestedLoopJoinExecutor".to_string(),
+            identity: "NestedLoopJoinExecutor2".to_string(),
         };
         let const_row_chunk = source
             .convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types())
@@ -710,7 +687,7 @@ mod tests {
             }
         }
 
-        fn create_left_executor(&self) -> BoxedExecutor {
+        fn create_left_executor(&self) -> BoxedExecutor2 {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -748,7 +725,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_right_executor(&self) -> BoxedExecutor {
+        fn create_right_executor(&self) -> BoxedExecutor2 {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -803,7 +780,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_join_executor(&self) -> BoxedExecutor {
+        fn create_join_executor(&self) -> BoxedExecutor2 {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -827,7 +804,7 @@ mod tests {
 
             let probe_side_schema = left_child.schema().data_types();
 
-            Box::new(NestedLoopJoinExecutor {
+            Box::new(NestedLoopJoinExecutor2 {
                 join_expr: new_binary_expr(
                     Type::Equal,
                     DataType::Boolean,
@@ -835,7 +812,6 @@ mod tests {
                     Box::new(InputRefExpression::new(DataType::Int32, 2)),
                 ),
                 join_type,
-                state: NestedLoopJoinState::Build,
                 schema: schema.clone(),
                 chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
                 last_chunk: None,
@@ -844,7 +820,7 @@ mod tests {
                 build_table: RowLevelIter::new(right_child),
                 probe_remain_chunk_idx: 0,
                 probe_remain_row_idx: 0,
-                identity: "NestedLoopJoinExecutor".to_string(),
+                identity: "NestedLoopJoinExecutor2".to_string(),
             })
         }
 
@@ -852,11 +828,7 @@ mod tests {
             let join_executor = self.create_join_executor();
             let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
             expected_mock_exec.add(expected);
-            diff_executor_output(
-                Box::new(ExecutorWrapper::from(join_executor)),
-                Box::new(expected_mock_exec),
-            )
-            .await;
+            diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
         }
     }
 

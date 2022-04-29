@@ -15,9 +15,12 @@
 mod chunked_data;
 pub mod hash_join;
 mod hash_join_state;
+pub mod nested_loop_join;
+mod row_level_iter;
 
 pub use chunked_data::*;
 pub use hash_join::*;
+pub use nested_loop_join::*;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 
 use crate::executor2::join::JoinType::Inner;
