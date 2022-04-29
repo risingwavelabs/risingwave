@@ -183,14 +183,14 @@ pub enum StreamStrategy {
 ///
 /// ## Input
 ///
-/// [`JoinSolver`] needs the information of the cost of joining two tables. You'll need to provide
-/// edges of the join graph. Each [`JoinEdge`] `(a, b) -> cost` describes the cost of inner join a
-/// and b.
+/// [`DeltaJoinSolver`] needs the information of the cost of joining two tables. You'll need to
+/// provide edges of the join graph. Each [`JoinEdge`] `(a, b) -> cost` describes the cost of inner
+/// join a and b.
 ///
 /// ## Output
 ///
 /// The `solve` function will return a vector of [`LookupPath`]. See [`LookupPath`] for more.
-pub struct JoinSolver {
+pub struct DeltaJoinSolver {
     /// Strategy of arrangement placement, see docs of [`ArrangeStrategy`] for more details.
     arrange_strategy: ArrangeStrategy,
 
@@ -248,7 +248,7 @@ struct SolverEnv {
 }
 
 impl SolverEnv {
-    fn build_from(solver: &JoinSolver) -> Self {
+    fn build_from(solver: &DeltaJoinSolver) -> Self {
         let mut join_edge = BTreeMap::new();
 
         for table in &solver.join_order {
@@ -277,7 +277,7 @@ impl SolverEnv {
     }
 }
 
-impl JoinSolver {
+impl DeltaJoinSolver {
     /// Generate a lookup path using the user provided strategy. The lookup path is generated in the
     /// following way:
     ///
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_2way_join() {
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::LeftFirst,
             stream_strategy: StreamStrategy::LeftThisEpoch,
             edges: vec![JoinEdge {
@@ -448,7 +448,7 @@ mod tests {
             ]
         );
 
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::RightFirst,
             stream_strategy: StreamStrategy::LeftThisEpoch,
             edges: vec![JoinEdge {
@@ -470,7 +470,7 @@ mod tests {
             ]
         );
 
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::LeftFirst,
             stream_strategy: StreamStrategy::RightThisEpoch,
             edges: vec![JoinEdge {
@@ -492,7 +492,7 @@ mod tests {
             ]
         );
 
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::RightFirst,
             stream_strategy: StreamStrategy::RightThisEpoch,
             edges: vec![JoinEdge {
@@ -522,7 +522,7 @@ mod tests {
         // Table 3: [1, 1] (composite key x)
         // t1.x == t2.x == t3.x
 
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::LeftFirst,
             stream_strategy: StreamStrategy::LeftThisEpoch,
             edges: vec![
@@ -569,7 +569,7 @@ mod tests {
         //
         // t1 cannot directly join with t3 in this case, as they don't share the same key
 
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::LeftFirst,
             stream_strategy: StreamStrategy::LeftThisEpoch,
             edges: vec![
@@ -603,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_invalid_plan() {
-        let solver = JoinSolver {
+        let solver = DeltaJoinSolver {
             arrange_strategy: ArrangeStrategy::LeftFirst,
             stream_strategy: StreamStrategy::LeftThisEpoch,
             edges: vec![JoinEdge {

@@ -192,30 +192,36 @@ message LookupNode {
   uint64 arrange_operator_id = 7;
 }
 
-// Special node for shared state. Merge and align barrier from upstreams.
+// Acts like a merger, but on different inputs.
 message UnionNode {}
+
+// Special node for shared state. Merge and align barrier from upstreams. Pipe inputs in order.
+message LookupUnionNode {
+  repeated uint32 order = 1;
+}
 
 message StreamNode {
   oneof node {
-    SourceNode source_node = 4;
-    ProjectNode project_node = 5;
-    FilterNode filter_node = 6;
-    MaterializeNode materialize_node = 7;
-    SimpleAggNode local_simple_agg_node = 16;
-    SimpleAggNode global_simple_agg_node = 8;
-    HashAggNode hash_agg_node = 9;
-    TopNNode append_only_top_n_node = 10;
-    HashJoinNode hash_join_node = 11;
-    TopNNode top_n_node = 12;
-    HopWindowNode hop_window_node = 23;
-    MergeNode merge_node = 13;
-    ExchangeNode exchange_node = 14;
-    ChainNode chain_node = 15;
-    BatchPlanNode batch_plan_node = 17;
-    LookupNode lookup_node = 20;
-    ArrangeNode arrange_node = 21;
-    UnionNode union_node = 22;
-    DeltaIndexJoinNode delta_index_join = 25;
+    SourceNode source_node = 100;
+    ProjectNode project_node = 101;
+    FilterNode filter_node = 102;
+    MaterializeNode materialize_node = 103;
+    SimpleAggNode local_simple_agg_node = 104;
+    SimpleAggNode global_simple_agg_node = 105;
+    HashAggNode hash_agg_node = 106;
+    TopNNode append_only_top_n_node = 107;
+    HashJoinNode hash_join_node = 108;
+    TopNNode top_n_node = 109;
+    HopWindowNode hop_window_node = 110;
+    MergeNode merge_node = 111;
+    ExchangeNode exchange_node = 112;
+    ChainNode chain_node = 113;
+    BatchPlanNode batch_plan_node = 114;
+    LookupNode lookup_node = 115;
+    ArrangeNode arrange_node = 116;
+    LookupUnionNode lookup_union_node = 117;
+    UnionNode union_node = 118;
+    DeltaIndexJoinNode delta_index_join = 119;
   }
   // The id for the operator.
   uint64 operator_id = 1;

@@ -18,7 +18,7 @@ use risingwave_pb::plan_common::Field;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     ArrangeNode, DeltaIndexJoinNode, DispatchStrategy, DispatcherType, ExchangeNode, LookupNode,
-    StreamNode, UnionNode,
+    LookupUnionNode, StreamNode,
 };
 
 use crate::stream::fragmenter::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
@@ -261,7 +261,7 @@ impl StreamFragmenter {
             identity: "Union".into(),
             fields: node.fields.clone(),
             pk_indices: node.pk_indices.clone(),
-            node: Some(Node::UnionNode(UnionNode {})),
+            node: Some(Node::LookupUnionNode(LookupUnionNode { order: vec![1, 0] })),
             input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
             append_only: node.append_only,
         };
