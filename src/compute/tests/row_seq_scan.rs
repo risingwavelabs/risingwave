@@ -14,7 +14,7 @@ use std::sync::Arc;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use futures::StreamExt;
-use risingwave_batch::executor::monitor::BatchMetrics;
+use risingwave_batch::executor2::monitor::BatchMetrics;
 use risingwave_batch::executor2::{Executor2, RowSeqScanExecutor2};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};

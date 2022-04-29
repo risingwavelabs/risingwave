@@ -49,7 +49,6 @@ mod fuse;
 mod generate_series;
 mod join;
 mod merge_sort_exchange;
-pub mod monitor;
 mod order_by;
 mod sort_agg;
 mod stream_scan;

@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{CreateTableExecutor, Executor as BatchExecutor};
 use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
+use risingwave_batch::executor2::monitor::BatchMetrics;
 use risingwave_batch::executor2::{
     DeleteExecutor2, Executor2, InsertExecutor2, RowSeqScanExecutor2,
 };

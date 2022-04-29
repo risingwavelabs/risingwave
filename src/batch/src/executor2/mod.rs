@@ -21,7 +21,7 @@ mod hash_agg;
 mod insert;
 mod join;
 mod limit;
-mod monitor;
+pub mod monitor;
 mod project;
 mod row_seq_scan;
 mod top_n;

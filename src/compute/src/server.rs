@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::executor::monitor::BatchMetrics;
+use risingwave_batch::executor2::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
