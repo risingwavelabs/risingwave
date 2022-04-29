@@ -276,9 +276,13 @@ impl<S: StateStore> LookupExecutor<S> {
                     self.process_barrier(barrier.clone())
                         .await
                         .map_err(StreamExecutorError::eval_error)?;
-                    yield Message::Barrier(barrier)
+                    if self.arrangement.use_current_epoch {
+                        // When lookup this epoch, stream side barrier always come after arrangement
+                        // ready, so we can forward barrier now.
+                        yield Message::Barrier(barrier);
+                    }
                 }
-                ArrangeMessage::ArrangeReady(arrangement_chunks) => {
+                ArrangeMessage::ArrangeReady(arrangement_chunks, barrier) => {
                     // The arrangement is ready, and we will receive a bunch of stream messages for
                     // the next poll.
 
@@ -293,6 +297,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         // If we are using previous epoch, arrange barrier should always come after
                         // stream barrier. So we flush now.
                         self.lookup_cache.flush();
+
+                        // When look prev epoch, arrange ready will always come after stream
+                        // barrier. So we yield barrier now.
+                        yield Message::Barrier(barrier);
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
