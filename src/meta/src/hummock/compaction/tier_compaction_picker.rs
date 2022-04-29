@@ -289,6 +289,7 @@ mod tests {
                 inf: false,
             }),
             file_size: 1,
+            vnode_bitmap: vec![],
         }
     }
 
