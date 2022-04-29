@@ -24,6 +24,9 @@ use crate::types::{
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
 };
 
+pub mod error;
+use error::ValueEncodingError;
+
 /// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
@@ -149,14 +152,16 @@ fn deserialize_str(mut data: impl Buf) -> Result<String> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    Ok(String::from_utf8(bytes).map_err(ErrorCode::InvalidUtf8)?)
+    Ok(String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)?)
 }
 
 fn deserialize_bool(mut data: impl Buf) -> Result<bool> {
     match data.get_u8() {
         1 => Ok(true),
         0 => Ok(false),
-        value => Err(RwError::from(ErrorCode::InvalidBoolEncoding(value))),
+        value => Err(RwError::from(ValueEncodingError::InvalidBoolEncoding(
+            value,
+        ))),
     }
 }
 

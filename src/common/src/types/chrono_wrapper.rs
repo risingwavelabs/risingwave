@@ -18,9 +18,9 @@ use std::io::Write;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
-use crate::error::ErrorCode::{self, InternalError, IoError};
+use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
-
+use crate::util::value_encoding::error::ValueEncodingError;
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
@@ -101,7 +101,7 @@ impl NaiveDateWrapper {
     pub fn new_with_days_value_encoding(days: i32) -> Result<Self> {
         Ok(NaiveDateWrapper::new(
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(ErrorCode::InvalidNaiveDateEncoding(days))?,
+                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
@@ -130,7 +130,7 @@ impl NaiveTimeWrapper {
     pub fn new_with_secs_nano_value_encoding(secs: u32, nano: u32) -> Result<Self> {
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(ErrorCode::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -164,8 +164,9 @@ impl NaiveDateTimeWrapper {
 
     pub fn new_with_secs_nsecs_value_encoding(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs)
-                .ok_or(ErrorCode::InvalidNaiveDateTimeEncoding(secs, nsecs))?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
+                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
+            )?
         }))
     }
 
