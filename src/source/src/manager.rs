@@ -34,7 +34,6 @@ use crate::{SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
-const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
 
@@ -140,7 +139,7 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = info.row_id_index as usize;
 
-        match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
+        match properties.get_connector_type()?.as_str() {
             // TODO support more connector here
             KINESIS_SOURCE | KAFKA_SOURCE => {}
             other => {
