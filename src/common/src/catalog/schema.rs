@@ -80,6 +80,10 @@ impl Schema {
         Self { fields }
     }
 
+    pub fn names(&self) -> Vec<String> {
+        self.fields().iter().map(|f| f.name.clone()).collect()
+    }
+
     pub fn data_types(&self) -> Vec<DataType> {
         self.fields
             .iter()

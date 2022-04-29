@@ -39,6 +39,7 @@ impl Binder {
         let sub_query_id = self.next_subquery_id();
         let columns = query
             .body
+            .schema()
             .fields()
             .iter()
             .map(ColumnDesc::from_field_without_column_id)
