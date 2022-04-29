@@ -46,6 +46,7 @@ mod test_utils;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
+mod union;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
@@ -67,6 +68,7 @@ pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use source::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use union::{UnionExecutor, UnionExecutorBuilder};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
