@@ -28,7 +28,7 @@ pub(crate) struct RowLevelIter {
     /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
     /// avoid OOM.
     data: Vec<DataChunk>,
-
+    schema: Schema,
     /// Pos of chunk in inner table.
     chunk_idx: usize,
     /// Pos of row in current chunk.
@@ -43,9 +43,11 @@ pub(crate) struct RowLevelIter {
 
 impl RowLevelIter {
     pub fn new(data_source: BoxedExecutor2) -> Self {
+        let schema = data_source.schema().clone();
         Self {
             data_source: Some(data_source),
             data: vec![],
+            schema,
             chunk_idx: 0,
             build_matched: None,
             row_idx: 0,
@@ -141,7 +143,7 @@ impl RowLevelIter {
     }
 
     pub fn get_schema(&self) -> &Schema {
-        self.data_source.as_ref().take().unwrap().schema()
+        &self.schema
     }
 
     pub fn set_cur_row_matched(&mut self, val: bool) {
