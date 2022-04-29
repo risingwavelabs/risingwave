@@ -193,8 +193,8 @@ impl Binder {
         column_binding
             .map(|c| {
                 (
-                    InputRef::new(c.index, c.desc.data_type.clone()).into(),
-                    Some(c.desc.name.clone()),
+                    InputRef::new(c.index, c.field.data_type.clone()).into(),
+                    Some(c.field.name.clone()),
                 )
             })
             .unzip()
