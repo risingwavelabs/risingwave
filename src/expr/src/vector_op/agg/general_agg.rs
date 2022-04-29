@@ -97,7 +97,7 @@ where
             cur = self.f.eval(cur, v)?;
 
             // reset state and exit when reach limit
-            if groups.limit() != 0 && group_cnt == groups.limit() {
+            if groups.is_reach_limit(group_cnt) {
                 next_chunk_offset = chunk_offset + i;
                 cur = None;
                 break;

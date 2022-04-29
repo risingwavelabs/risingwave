@@ -164,12 +164,6 @@ impl SortAggExecutor2 {
                     &groups,
                 )?;
 
-                // If no group key provided, usually means it's a simple agg
-                if groups.is_empty() {
-                    assert!(chunk_offset == child_cardinality);
-                    break;
-                }
-
                 groups.advance_offset();
 
                 if left_capacity == 0 {
@@ -192,6 +186,7 @@ impl SortAggExecutor2 {
             }
         }
 
+        assert!(left_capacity > 0);
         // process the last group
         self.sorted_groupers
             .iter()
