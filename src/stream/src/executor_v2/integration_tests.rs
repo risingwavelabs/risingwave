@@ -25,6 +25,7 @@ use risingwave_expr::expr::*;
 
 use super::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
+use crate::executor_v2::dispatch::*;
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::test_utils::create_in_memory_keyspace;
 use crate::executor_v2::{

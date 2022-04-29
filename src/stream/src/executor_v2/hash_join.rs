@@ -694,8 +694,8 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
-    use crate::executor::{Barrier, Epoch, Message};
     use crate::executor_v2::test_utils::{MessageSender, MockSource};
+    use crate::executor_v2::{Barrier, Epoch, Message};
 
     fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();

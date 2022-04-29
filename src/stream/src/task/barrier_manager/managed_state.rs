@@ -18,7 +18,7 @@ use std::iter::once;
 use tokio::sync::oneshot;
 
 use super::{CollectResult, FinishedCreateMview};
-use crate::executor::Barrier;
+use crate::executor_v2::Barrier;
 use crate::task::ActorId;
 
 /// The state machine of local barrier manager.

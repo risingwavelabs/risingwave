@@ -25,8 +25,8 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedExecutor, Executor, Message, PkIndicesRef};
-use crate::executor::{ExecutorBuilder, PkIndices};
+use super::*;
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -170,7 +170,6 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::executor::Barrier;
     use crate::executor_v2::test_utils::MockSource;
 
     #[tokio::test]

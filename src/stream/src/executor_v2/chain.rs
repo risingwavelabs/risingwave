@@ -146,9 +146,8 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
-    use crate::executor::{Barrier, Message, PkIndices};
     use crate::executor_v2::test_utils::MockSource;
-    use crate::executor_v2::Executor;
+    use crate::executor_v2::{Barrier, Executor, Message, PkIndices};
     use crate::task::{FinishCreateMviewNotifier, LocalBarrierManager};
 
     #[tokio::test]

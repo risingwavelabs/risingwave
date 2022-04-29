@@ -29,8 +29,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
-use crate::executor::StreamConsumer;
-use crate::executor_v2::{Barrier, BoxedExecutor, Message, Mutation};
+use crate::executor_v2::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.

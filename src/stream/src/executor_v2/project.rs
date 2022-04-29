@@ -20,8 +20,10 @@ use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
-use super::{Executor, ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper, StreamExecutorResult};
-use crate::executor::PkIndicesRef;
+use super::{
+    Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
+    StreamExecutorResult,
+};
 use crate::executor_v2::error::StreamExecutorError;
 
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;

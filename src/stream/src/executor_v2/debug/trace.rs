@@ -19,10 +19,9 @@ use futures_async_stream::try_stream;
 use tracing::event;
 use tracing_futures::Instrument;
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::monitor::StreamingMetrics;
-use crate::executor_v2::{ExecutorInfo, MessageStream};
+use crate::executor_v2::{ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
 
 /// Streams wrapped by `trace` will print data passing in the stream graph to stdout.

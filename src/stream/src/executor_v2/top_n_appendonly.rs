@@ -307,10 +307,9 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
-    use crate::executor::{Barrier, Epoch, Message, PkIndices};
     use crate::executor_v2::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor_v2::Executor;
+    use crate::executor_v2::{Barrier, Epoch, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(

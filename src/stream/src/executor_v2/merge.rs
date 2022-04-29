@@ -26,9 +26,7 @@ use tonic::Streaming;
 use tracing_futures::Instrument;
 
 use super::error::StreamExecutorError;
-use super::{Executor, Message, PkIndicesRef};
-use crate::executor::PkIndices;
-use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
+use super::*;
 use crate::task::UpDownActorIds;
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
@@ -223,9 +221,8 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::executor::{Barrier, Mutation};
     use crate::executor_v2::merge::RemoteInput;
-    use crate::executor_v2::Executor;
+    use crate::executor_v2::{Barrier, Executor, Mutation};
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.

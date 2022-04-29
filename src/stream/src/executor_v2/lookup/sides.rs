@@ -24,9 +24,8 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{Barrier, Executor, MessageStream};
+use crate::executor_v2::{Barrier, Executor, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
