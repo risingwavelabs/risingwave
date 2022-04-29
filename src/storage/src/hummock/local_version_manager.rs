@@ -247,9 +247,10 @@ impl LocalVersionManager {
             self.sync_shared_buffer(None).await?;
         }
 
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::new_with_size(
             sorted_items,
             epoch,
+            batch_size,
             if is_remote_batch {
                 self.buffer_tracker.replicate_size.clone()
             } else {
@@ -344,7 +345,7 @@ impl LocalVersionManager {
                     Ok(ssts) => {
                         guard.add_uncommitted_ssts(epoch, ssts);
                         if let Some(shared_buffer) = guard.get_shared_buffer(epoch) {
-                            shared_buffer.write().success_upload_task(task_id);
+                            shared_buffer.write().succeed_upload_task(task_id);
                         }
                         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
                             conflict_detector.archive_epoch(epoch);

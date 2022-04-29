@@ -121,7 +121,7 @@ impl SharedBuffer {
         self.non_upload_batches.extend(task_batches);
     }
 
-    pub fn success_upload_task(&mut self, upload_task_id: UploadTaskId) {
+    pub fn succeed_upload_task(&mut self, upload_task_id: UploadTaskId) {
         debug_assert!(self.uploading_batches.contains_key(&upload_task_id));
         let task_batches = self.uploading_batches.remove(&upload_task_id).unwrap();
         for batch in task_batches.into_values() {

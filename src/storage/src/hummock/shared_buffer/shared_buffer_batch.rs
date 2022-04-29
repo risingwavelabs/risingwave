@@ -84,9 +84,16 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         buffer_size_tracker: Arc<AtomicUsize>,
     ) -> Self {
-        // size = Sum(length of full key + length of user value)
         let size: usize = Self::measure_batch_size(&sorted_items);
+        Self::new_with_size(sorted_items, epoch, size, buffer_size_tracker)
+    }
 
+    pub fn new_with_size(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        size: usize,
+        buffer_size_tracker: Arc<AtomicUsize>,
+    ) -> Self {
         buffer_size_tracker.fetch_add(size, Relaxed);
 
         Self {
@@ -100,6 +107,7 @@ impl SharedBufferBatch {
     }
 
     pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {
+        // size = Sum(length of full key + length of user value)
         batches
             .iter()
             .map(|(k, v)| {
