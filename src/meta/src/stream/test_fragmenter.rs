@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::{
 
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
-use crate::stream::fragmenter::StreamFragmenter;
+use crate::stream::stream_graph::StreamFragmenter;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
 
 fn make_table_ref_id(id: i32) -> TableRefId {

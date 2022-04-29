@@ -20,9 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
-use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::stream_plan::StreamActor;
+use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ParallelUnitId, WorkerId};

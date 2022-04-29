@@ -89,12 +89,12 @@ where
             ..Default::default()
         };
 
-        let graph = StreamFragmenter::generate_graph(
+        let graph = crate::stream::StreamFragmenter::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
             true,
-            req.get_stream_node().map_err(tonic_err)?,
+            req.get_fragment_graph().map_err(tonic_err)?,
             &mut ctx,
         )
         .await
