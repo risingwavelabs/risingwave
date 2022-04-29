@@ -176,6 +176,7 @@ impl SharedBufferUploader {
                     right: sst.meta.largest_key.clone(),
                     inf: false,
                 }),
+                file_size: sst.meta.estimated_size as u64,
             })
             .collect();
 

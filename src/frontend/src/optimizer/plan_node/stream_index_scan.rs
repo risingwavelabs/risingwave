@@ -42,8 +42,8 @@ impl StreamIndexScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::AnyShard, // Mark as `AnyShard` cause we don't know the distribution yet.
-            false,                  // TODO: determine the `append-only` field of table scan
+            Distribution::HashShard(logical.map_distribution_keys()),
+            false, // TODO: determine the `append-only` field of table scan
         );
         Self {
             base,
@@ -105,9 +105,13 @@ impl StreamIndexScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            /// StreamIndexScan should follow the same distribution as upstream materialize node.
-            /// So this will be filled in meta.
-            distribution_keys: vec![],
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|k| *k as i32)
+                .collect_vec(),
             // Will fill when resolving chain node.
             hash_mapping: None,
             parallel_unit_id: 0,
@@ -116,7 +120,7 @@ impl StreamIndexScan {
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
-            fields: vec![], // TODO: fill this later
+            fields: self.schema().to_prost(),
             input: vec![
                 // The merge node should be empty
                 ProstStreamPlan {

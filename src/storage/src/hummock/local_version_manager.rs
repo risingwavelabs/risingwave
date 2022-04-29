@@ -591,6 +591,7 @@ mod tests {
                 right: max_key,
                 inf: false,
             }),
+            file_size: batches.len() as u64,
         }
     }
 

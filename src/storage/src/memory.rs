@@ -81,7 +81,7 @@ impl MemoryStateStore {
 }
 
 impl StateStore for MemoryStateStore {
-    type Iter<'a> = MemoryStateStoreIter;
+    type Iter = MemoryStateStoreIter;
 
     define_state_store_associated_type!();
 

@@ -46,9 +46,6 @@ pub struct TableFragments {
 
     /// The status of actors
     actor_status: BTreeMap<ActorId, ActorStatus>,
-
-    /// distribution key of materialize node
-    distribution_keys: Vec<i32>,
 }
 
 impl MetadataModel for TableFragments {
@@ -64,7 +61,6 @@ impl MetadataModel for TableFragments {
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            distribution_keys: self.distribution_keys.clone(),
         }
     }
 
@@ -73,7 +69,6 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            distribution_keys: prost.distribution_keys,
         }
     }
 
@@ -83,16 +78,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(
-        table_id: TableId,
-        fragments: BTreeMap<FragmentId, Fragment>,
-        distribution_keys: Vec<i32>,
-    ) -> Self {
+    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            distribution_keys,
         }
     }
 
@@ -150,11 +140,6 @@ impl TableFragments {
     /// Returns sink actor ids.
     pub fn sink_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, FragmentType::Sink)
-    }
-
-    /// Returns distribution keys.
-    pub fn distribution_keys(&self) -> &Vec<i32> {
-        self.distribution_keys.as_ref()
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {

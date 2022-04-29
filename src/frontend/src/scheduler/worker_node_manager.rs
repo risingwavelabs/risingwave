@@ -78,65 +78,47 @@ impl WorkerNodeManager {
     }
 }
 
-// TODO: with a good MockMeta and then we can open the tests.
-// #[cfg(test)]
-// mod tests {
-//     use std::sync::Arc;
-//     use std::time::Duration;
+#[cfg(test)]
+mod tests {
 
-//     use risingwave_pb::common::{HostAddress, WorkerType};
-//     use risingwave_rpc_client::MetaClient;
-//     use tokio::sync::watch;
+    use risingwave_common::util::addr::HostAddr;
+    use risingwave_pb::common::worker_node;
 
-//     use super::WorkerNodeManager;
-//     use crate::observer::observer_manager::ObserverManager;
-//     use crate::test_utils::FrontendMockMetaClient;
+    #[test]
+    fn test_worker_node_manager() {
+        use super::*;
 
-//     #[tokio::test]
-//     async fn test_add_and_delete_worker_node() {
-//         let mut meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
+        let manager = WorkerNodeManager::mock(vec![]);
+        assert_eq!(manager.worker_node_count(), 0);
+        assert_eq!(manager.list_worker_nodes(), vec![]);
 
-//         let (catalog_updated_tx, _) = watch::channel(0);
-//         let catalog_cache = Arc::new(RwLock::new(
-//             CatalogCache::new(meta_client.clone()).await.unwrap(),
-//         ));
-//         let worker_node_manager =
-//             Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
+        let worker_nodes = vec![
+            WorkerNode {
+                id: 1,
+                r#type: WorkerType::ComputeNode as i32,
+                host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
+                state: worker_node::State::Running as i32,
+                parallel_units: vec![],
+            },
+            WorkerNode {
+                id: 2,
+                r#type: WorkerType::ComputeNode as i32,
+                host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
+                state: worker_node::State::Running as i32,
+                parallel_units: vec![],
+            },
+        ];
+        worker_nodes
+            .iter()
+            .for_each(|w| manager.add_worker_node(w.clone()));
+        assert_eq!(manager.worker_node_count(), 2);
+        assert_eq!(manager.list_worker_nodes(), worker_nodes);
 
-//         let observer_manager = ObserverManager::new(
-//             meta_client.clone(),
-//             "127.0.0.1:12345".parse().unwrap(),
-//             worker_node_manager.clone(),
-//             catalog_cache,
-//             catalog_updated_tx,
-//         )
-//         .await;
-//         observer_manager.start();
-
-//         // Add worker node
-//         let socket_addr = "127.0.0.1:6789".parse().unwrap();
-//         meta_client
-//             .register(socket_addr, WorkerType::ComputeNode)
-//             .await
-//             .unwrap();
-//         meta_client.activate(socket_addr).await.unwrap();
-//         tokio::time::sleep(Duration::from_millis(100)).await;
-//         let mut worker_nodes = worker_node_manager.list_worker_nodes();
-//         assert_eq!(1, worker_nodes.len());
-//         let worker_node_0 = worker_nodes.pop().unwrap();
-//         assert_eq!(WorkerType::ComputeNode, worker_node_0.r#type());
-//         assert_eq!(
-//             &HostAddress {
-//                 host: "127.0.0.1".to_string(),
-//                 port: 6789
-//             },
-//             worker_node_0.get_host().unwrap()
-//         );
-
-//         // Delete worker node
-//         meta_client.unregister(socket_addr).await.unwrap();
-//         tokio::time::sleep(Duration::from_millis(100)).await;
-//         let worker_nodes = worker_node_manager.list_worker_nodes();
-//         assert_eq!(0, worker_nodes.len());
-//     }
-// }
+        manager.remove_worker_node(worker_nodes[0].clone());
+        assert_eq!(manager.worker_node_count(), 1);
+        assert_eq!(
+            manager.list_worker_nodes(),
+            worker_nodes.as_slice()[1..].to_vec()
+        );
+    }
+}

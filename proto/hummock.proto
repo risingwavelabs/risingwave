@@ -25,6 +25,7 @@ message SstableIdInfo {
 message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
+  uint64 file_size = 3;
 }
 
 enum LevelType {
@@ -33,8 +34,9 @@ enum LevelType {
 }
 
 message Level {
-  LevelType level_type = 1;
-  repeated SstableInfo table_infos = 2;
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
 }
 
 message UncommittedEpoch {
@@ -109,11 +111,6 @@ message UnpinSnapshotResponse {
   common.Status status = 1;
 }
 
-message LevelEntry {
-  uint32 level_idx = 1;
-  Level level = 2;
-}
-
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
@@ -134,7 +131,7 @@ message CompactMetrics {
 
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
-  repeated LevelEntry input_ssts = 1;
+  repeated Level input_ssts = 1;
   // In ideal case, the compaction will generate `splits.len()` tables which have key range
   // corresponding to that in [`splits`], respectively
   repeated KeyRange splits = 2;
@@ -152,14 +149,12 @@ message CompactTask {
 }
 
 message LevelHandler {
-  message KeyRangeTaskId {
-    KeyRange key_range = 1;
-    uint64 task_id = 2;
-    uint64 ssts = 3;
+  message SstTask {
+    uint64 task_id = 1;
+    repeated uint64 ssts = 2;
   }
-  LevelType level_type = 1;
-  map<uint64, uint64> compacting_ssts = 2;
-  repeated KeyRangeTaskId key_ranges = 3;
+  uint32 level = 1;
+  repeated SstTask tasks = 3;
 }
 
 message CompactStatus {
@@ -268,3 +263,5 @@ service HummockManagerService {
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
 }
+
+service CompactorService {}

@@ -107,7 +107,7 @@ async fn distribute_execute(
     let (query, pg_descs) = {
         let plan = Planner::new(context.into())
             .plan(stmt)?
-            .gen_dist_batch_query_plan();
+            .gen_batch_query_plan();
 
         info!(
             "Generated distributed plan: {:?}",

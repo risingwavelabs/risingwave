@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_connector::{ConnectorStateV2, Properties, SplitImpl, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
-use crate::{Source, SourceColumnDesc, SourceParserImpl, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
 /// processing. [`ConnectorSource`] introduces schema at this level while [`SplitReaderImpl`]
@@ -59,31 +59,22 @@ impl ConnectorSource {
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
-}
 
-pub struct ConnectorReaderContext {
-    pub(crate) splits: Vec<SplitImpl>,
-}
-
-#[async_trait]
-impl Source for ConnectorSource {
-    type ReaderContext = ConnectorReaderContext;
-    type StreamReader = ConnectorStreamReader;
-
-    async fn stream_reader(
+    /// Create a new stream reader.
+    pub async fn stream_reader(
         &self,
-        context: ConnectorReaderContext,
+        splits: Vec<SplitImpl>,
         column_ids: Vec<ColumnId>,
-    ) -> Result<Self::StreamReader> {
+    ) -> Result<ConnectorStreamReader> {
         log::debug!(
             "Creating new connector source with config {:?}, splits {:?}",
             self.config,
-            context.splits
+            splits
         );
 
         let reader = SplitReaderImpl::create(
             Properties::new(self.config.0.clone()),
-            ConnectorStateV2::Splits(context.splits),
+            ConnectorStateV2::Splits(splits),
         )
         .await
         .to_rw_result()?;

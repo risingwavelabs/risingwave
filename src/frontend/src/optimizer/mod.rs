@@ -16,6 +16,7 @@ pub mod plan_node;
 pub use plan_node::PlanRef;
 pub mod property;
 
+mod delta_join_solver;
 mod heuristic;
 mod plan_rewriter;
 mod plan_visitor;
@@ -155,28 +156,17 @@ impl PlanRoot {
         plan
     }
 
-    /// optimize and generate a batch query plan
+    /// Optimize and generate a batch query plan.
+    /// Currently only used by test runner (Have distributed plan but not schedule yet).
+    /// Will be removed after dist execution.
     pub fn gen_batch_query_plan(&self) -> PlanRef {
+        // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order);
 
-        // TODO: Enable this when distributed e2e is OK.
-        // plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
-        // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the result.
-        // TODO: do a final column pruning after add the batch project, but now the column
-        // pruning is not used in batch node, need to think.
-
-        plan
-    }
-
-    /// Optimize and generate a batch query plan.
-    /// Currently only used by test runner (Have distributed plan but not schedule yet).
-    /// Will be removed after dist execution.
-    pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
-        let plan = self.gen_batch_query_plan();
-
+        // Convert to distributed plan
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 

@@ -17,7 +17,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
+use risingwave_hummock_sdk::key::{key_with_epoch, FullKey};
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::LevelType;
 
@@ -178,7 +178,7 @@ impl HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Iter<'a> = HummockStateStoreIter;
+    type Iter = HummockStateStoreIter;
 
     define_state_store_associated_type!();
 
@@ -245,8 +245,8 @@ impl StateStore for HummockStorage {
                             .table_infos
                             .partition_point(|table| {
                                 let ord = VersionedComparator::compare_key(
-                                    user_key(&table.key_range.as_ref().unwrap().left),
-                                    key,
+                                    &table.key_range.as_ref().unwrap().left,
+                                    &FullKey::from_user_key_slice(key, epoch).into_inner(),
                                 );
                                 ord == Ordering::Less || ord == Ordering::Equal
                             })
