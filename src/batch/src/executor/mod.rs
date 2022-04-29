@@ -15,14 +15,13 @@
 use drop_stream::*;
 use drop_table::*;
 use merge_sort_exchange::*;
-use order_by::*;
+use order_by::OrderByExecutor;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
-use sort_agg::*;
 
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
@@ -35,11 +34,12 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2,
-    ProjectExecutor2, RowSeqScanExecutor2Builder, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2,
+    TopNExecutor2, TraceExecutor2, ValuesExecutor2, HashJoinExecutor2Builder, RowSeqScanExecutor2Builder, SortAggExecutor2
 };
 use crate::task::{BatchEnvironment, TaskId};
 
+mod order_by;
 mod create_source;
 mod create_table;
 mod drop_stream;
@@ -49,8 +49,6 @@ mod fuse;
 mod generate_series;
 mod join;
 mod merge_sort_exchange;
-mod order_by;
-mod sort_agg;
 mod stream_scan;
 #[cfg(test)]
 pub mod test_utils;
@@ -112,7 +110,7 @@ pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
     env: BatchEnvironment,
-    pub epoch: u64,
+    epoch: u64,
 }
 
 macro_rules! build_executor {
@@ -191,7 +189,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::SortAgg => SortAggExecutor2,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,
@@ -221,7 +219,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::SortAgg => SortAggExecutor2,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor,

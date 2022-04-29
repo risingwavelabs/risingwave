@@ -105,17 +105,15 @@ impl Rule for IndexDeltaJoinRule {
             None
         }
 
-        if let Some(index_scan_left) = match_indexes(&left_indices, input_left) {
-            if let Some(index_scan_right) = match_indexes(&right_indices, input_right) {
+        if let Some(left) = match_indexes(&left_indices, input_left) {
+            if let Some(right) = match_indexes(&right_indices, input_right) {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
+
                 Some(
-                    join.to_delta_join(
-                        input_left.logical().table_desc().table_id,
-                        input_right.logical().table_desc().table_id,
-                    )
-                    .clone_with_left_right(index_scan_left, index_scan_right)
-                    .into(),
+                    join.to_delta_join()
+                        .clone_with_left_right(left, right)
+                        .into(),
                 )
             } else {
                 Some(plan)
