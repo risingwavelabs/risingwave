@@ -31,9 +31,10 @@ use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
+use crate::keyspace::StripPrefixIterator;
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, ValueMeta};
-use crate::{Keyspace, StateStore};
+use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
@@ -371,7 +372,7 @@ impl<S: StateStore> CellBasedTable<S> {
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> StorageResult<CellBasedTableRowIter<S>> {
         CellBasedTableRowIter::new(
-            self.keyspace.clone(),
+            &self.keyspace,
             self.column_descs.clone(),
             epoch,
             self.stats.clone(),
@@ -400,15 +401,8 @@ fn gengrate_cell_id_from_pk(pk: &[u8]) -> StorageResult<&[u8]> {
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {
-    keyspace: Keyspace<S>,
-    /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, Bytes)>,
-    /// The idx into `buf` for the next item
-    next_idx: usize,
-    /// A bool to indicate whether there are more data to fetch from state store
-    done: bool,
-    /// An epoch representing the read snapshot
-    epoch: u64,
+    /// An iterator that returns raw bytes from storage.
+    iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
     /// Statistics
@@ -416,10 +410,8 @@ pub struct CellBasedTableRowIter<S: StateStore> {
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
-    const SCAN_LIMIT: usize = 1024;
-
     async fn new(
-        keyspace: Keyspace<S>,
+        keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
@@ -428,40 +420,14 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
+        let iter = keyspace.iter(epoch).await?;
+
         let iter = Self {
-            keyspace,
-            buf: vec![],
-            next_idx: 0,
-            done: false,
-            epoch,
+            iter,
             cell_based_row_deserializer,
             _stats,
         };
         Ok(iter)
-    }
-
-    async fn consume_more(&mut self) -> StorageResult<()> {
-        assert_eq!(self.next_idx, self.buf.len());
-
-        if self.buf.is_empty() {
-            self.buf = self
-                .keyspace
-                .scan(Some(Self::SCAN_LIMIT), self.epoch)
-                .await?;
-        } else {
-            let last_key = self.buf.last().unwrap().0.clone();
-            let buf = self
-                .keyspace
-                .scan_with_start_key(last_key.to_vec(), Some(Self::SCAN_LIMIT), self.epoch)
-                .await?;
-            assert!(!buf.is_empty());
-            assert_eq!(buf.first().as_ref().unwrap().0, last_key);
-            self.buf = buf[1..].to_vec();
-        }
-
-        self.next_idx = 0;
-
-        Ok(())
     }
 
     pub async fn collect_data_chunk(
@@ -511,47 +477,28 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
 #[async_trait::async_trait]
 impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     async fn next(&mut self) -> StorageResult<Option<Row>> {
-        if self.done {
-            return Ok(None);
-        }
-
         loop {
-            let (key, value) = match self.buf.get(self.next_idx) {
-                Some(kv) => kv,
+            match self.iter.next().await? {
                 None => {
-                    // Need to consume more from state store
-                    self.consume_more().await?;
-                    if let Some(item) = self.buf.first() {
-                        item
-                    } else {
-                        let pk_and_row = self.cell_based_row_deserializer.take();
-                        self.done = true;
-                        return Ok(pk_and_row.map(|(_pk, row)| row));
+                    let pk_and_row = self.cell_based_row_deserializer.take();
+                    return Ok(pk_and_row.map(|(_pk, row)| row));
+                }
+                Some((key, value)) => {
+                    tracing::trace!(
+                        target: "events::storage::CellBasedTable::scan",
+                        "CellBasedTable scanned key = {:?}, value = {:?}",
+                        key,
+                        value
+                    );
+                    let pk_and_row = self
+                        .cell_based_row_deserializer
+                        .deserialize(&key, &value)
+                        .map_err(err)?;
+                    match pk_and_row {
+                        Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                        None => {}
                     }
                 }
-            };
-            tracing::trace!(
-                target: "events::storage::CellBasedTable::scan",
-                "CellBasedTable scanned key = {:?}, value = {:?}",
-                bytes::Bytes::copy_from_slice(key),
-                value
-            );
-
-            // there is no need to deserialize pk in cell-based table
-            if key.len() < self.keyspace.key().len() + 4 {
-                return Err(StorageError::CellBasedTable(
-                    ErrorCode::InternalError("corrupted key".to_owned()).into(),
-                ));
-            }
-
-            let pk_and_row = self
-                .cell_based_row_deserializer
-                .deserialize(key, value)
-                .map_err(err)?;
-            self.next_idx += 1;
-            match pk_and_row {
-                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
-                None => {}
             }
         }
     }
