@@ -25,9 +25,9 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{ExecutorBuilder, PkIndices};
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{BoxedExecutor, Executor, HashAggExecutor};
+use crate::executor_v2::{BoxedExecutor, Executor, HashAggExecutor, PkIndices};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
@@ -39,7 +39,6 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
-    op_info: String,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -47,14 +46,13 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
     type Output = Result<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(HashAggExecutor::<K, S>::new_from_v1(
+        Ok(HashAggExecutor::<K, S>::new(
             args.input,
             args.agg_calls,
-            args.key_indices,
             args.keyspace,
             args.pk_indices,
             args.executor_id,
-            args.op_info,
+            args.key_indices,
         )?
         .boxed())
     }
@@ -100,7 +98,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             keyspace,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
-            op_info: params.op_info,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

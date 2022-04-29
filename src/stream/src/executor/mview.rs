@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::try_match_expand;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
@@ -48,13 +48,12 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let executor = MaterializeExecutor::new_from_v1(
+        let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
-            params.op_info,
         );
 
         Ok(executor.boxed())
@@ -72,35 +71,28 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
 
-        let keyspace = Keyspace::shared_executor_root(store, params.operator_id);
+        let keyspace = Keyspace::table_root(store, &TableId::from(arrange_node.table_id));
 
-        // Set materialize keys as arrange key + pk
         let keys = arrange_node
-            .arrange_key_indexes
+            .get_table_info()?
+            .arrange_key_orders
             .iter()
-            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
-            .chain(
-                node.pk_indices
-                    .iter()
-                    .map(|x| OrderPair::new(*x as usize, OrderType::Ascending)),
-            )
+            .map(OrderPair::from_prost)
             .collect();
 
-        // Simply generate column id 0..schema_len
-        let column_ids = node
-            .fields
+        let column_ids = arrange_node
+            .get_table_info()?
+            .column_descs
             .iter()
-            .enumerate()
-            .map(|(idx, _)| ColumnId::from(idx as i32))
+            .map(|x| ColumnId::from(x.column_id))
             .collect();
 
-        let executor = MaterializeExecutor::new_from_v1(
+        let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
-            params.op_info,
         );
 
         Ok(executor.boxed())

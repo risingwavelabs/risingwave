@@ -30,8 +30,7 @@ use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{Executor, StreamExecutorResult};
-use crate::executor::{pk_input_arrays, PkDataTypes, PkIndicesRef};
+use super::{pk_input_arrays, Executor, PkDataTypes, PkIndicesRef, StreamExecutorResult};
 use crate::executor_v2::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_hash_agg_state, AggCall, AggState,
 };

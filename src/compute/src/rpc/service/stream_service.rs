@@ -20,7 +20,7 @@ use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::{Barrier, Epoch};
+use risingwave_stream::executor_v2::{Barrier, Epoch};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 

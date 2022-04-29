@@ -26,9 +26,7 @@ use tonic::Streaming;
 use tracing_futures::Instrument;
 
 use super::error::StreamExecutorError;
-use super::{Executor, Message, PkIndicesRef};
-use crate::executor::PkIndices;
-use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
+use super::*;
 use crate::task::UpDownActorIds;
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
@@ -223,9 +221,8 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::executor::{Barrier, ExecutorV1, Mutation};
     use crate::executor_v2::merge::RemoteInput;
-    use crate::executor_v2::Executor;
+    use crate::executor_v2::{Barrier, Executor, Mutation};
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -270,21 +267,21 @@ mod tests {
             handles.push(handle);
         }
 
-        let mut merger = merger.boxed().v1();
+        let mut merger = merger.boxed().execute();
         for epoch in epochs {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {
-                assert_matches!(merger.next().await.unwrap(), Message::Chunk(chunk) => {
+                assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
                     assert_eq!(chunk.ops().len() as u64, epoch);
                 });
             }
             // expect a barrier
-            assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
+            assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
                 assert_eq!(barrier_epoch.curr, epoch);
             });
         }
         assert_matches!(
-            merger.next().await.unwrap(),
+            merger.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier {
                 mutation,
                 ..

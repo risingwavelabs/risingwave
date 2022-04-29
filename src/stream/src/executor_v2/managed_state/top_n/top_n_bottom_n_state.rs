@@ -27,9 +27,9 @@ use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::managed_state::top_n::deserialize_bytes_to_pk_and_row;
-use crate::executor::managed_state::top_n::variants::TOP_N_MIN;
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
+use super::variants::TOP_N_MIN;
+use super::PkAndRowIterator;
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
@@ -206,7 +206,16 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// The same as the one in `ManagedTopNState`.
     pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
-        let mut kv_pairs = self.scan_from_storage(None, epoch).await?;
+        let iter = self.keyspace.iter(epoch).await?;
+        let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
+            iter,
+            &mut self.ordered_row_deserializer,
+            &mut self.cell_based_row_deserializer,
+        );
+        let mut kv_pairs = vec![];
+        while let Some((pk, row)) = pk_and_row_iter.next().await? {
+            kv_pairs.push((pk, row));
+        }
         let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
         let mut insert_process =
             |cache: &mut BTreeMap<OrderedRow, Row>, part_kv_pairs: Drain<(OrderedRow, Row)>| {
@@ -253,34 +262,17 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         Ok(())
     }
 
-    async fn scan_from_storage(
-        &mut self,
-        number_rows: Option<usize>,
-        epoch: u64,
-    ) -> Result<Vec<(OrderedRow, Row)>> {
-        let iter = self.keyspace.iter(epoch).await?;
-        let pk_and_rows = deserialize_bytes_to_pk_and_row::<TOP_N_MIN, _>(
-            iter,
-            &mut self.ordered_row_deserializer,
-            &mut self.cell_based_row_deserializer,
-            number_rows,
-        )
-        .await;
-        self.cell_based_row_deserializer.reset();
-        pk_and_rows
-    }
-
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
     /// `flush`.
     pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
-        let mut pk_row_bytes = self.scan_from_storage(None, epoch).await?;
-        // cell-based storage format, so `self.schema.len()`
-        for (pk, row) in pk_row_bytes.drain(0..pk_row_bytes.len() / 2) {
+        let mut pk_and_row_iter = PkAndRowIterator::<_, TOP_N_MIN>::new(
+            self.keyspace.iter(epoch).await?,
+            &mut self.ordered_row_deserializer,
+            &mut self.cell_based_row_deserializer,
+        );
+        while let Some((pk, row)) = pk_and_row_iter.next().await? {
             self.bottom_n.insert(pk, row);
-        }
-        for (pk, row) in pk_row_bytes.drain(..) {
-            self.top_n.insert(pk, row);
         }
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
@@ -348,7 +340,6 @@ mod tests {
     use risingwave_storage::{Keyspace, StateStore};
 
     use super::*;
-    use crate::executor::managed_state::top_n::top_n_bottom_n_state::ManagedTopNBottomNState;
     use crate::row_nonnull;
 
     fn create_managed_top_n_bottom_n_state<S: StateStore>(

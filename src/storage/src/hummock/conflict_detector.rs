@@ -13,12 +13,13 @@
 // limitations under the License.
 
 //! This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
-
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
+use risingwave_common::config::StorageConfig;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
@@ -29,11 +30,21 @@ pub struct ConflictDetector {
     epoch_watermark: AtomicCell<HummockEpoch>,
 }
 
-impl ConflictDetector {
-    pub fn new() -> ConflictDetector {
-        ConflictDetector {
+impl Default for ConflictDetector {
+    fn default() -> Self {
+        Self {
             epoch_history: DashMap::new(),
             epoch_watermark: AtomicCell::new(HummockEpoch::MIN),
+        }
+    }
+}
+
+impl ConflictDetector {
+    pub fn new_from_config(options: Arc<StorageConfig>) -> Option<Arc<ConflictDetector>> {
+        if options.write_conflict_detection_enabled {
+            Some(Arc::new(ConflictDetector::default()))
+        } else {
+            None
         }
     }
 
@@ -107,7 +118,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_write_conflict_in_one_batch() {
-        let detector = ConflictDetector::new();
+        let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             (0..2)
                 .map(|_| {
@@ -126,7 +137,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_write_conflict_in_multi_batch() {
-        let detector = ConflictDetector::new();
+        let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("conflicted-key"),
@@ -149,7 +160,7 @@ mod test {
 
     #[test]
     fn test_valid_write_in_multi_batch() {
-        let detector = ConflictDetector::new();
+        let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -183,7 +194,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_write_to_archived_epoch() {
-        let detector = ConflictDetector::new();
+        let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -207,7 +218,7 @@ mod test {
 
     #[test]
     fn test_clear_key_after_epoch_archive() {
-        let detector = ConflictDetector::new();
+        let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -225,7 +236,7 @@ mod test {
     #[test]
     #[should_panic]
     fn test_write_below_epoch_watermark() {
-        let detector = ConflictDetector::new();
+        let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
