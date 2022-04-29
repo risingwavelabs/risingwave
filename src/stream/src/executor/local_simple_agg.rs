@@ -40,12 +40,11 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .map(build_agg_call_from_prost)
             .try_collect()?;
 
-        Ok(LocalSimpleAggExecutor::new_from_v1(
+        Ok(LocalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
             params.pk_indices,
             params.executor_id,
-            params.op_info,
         )?
         .boxed())
     }

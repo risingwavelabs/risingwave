@@ -19,9 +19,8 @@ use itertools::Itertools;
 use risingwave_common::for_all_variants;
 use tracing::event;
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{ExecutorInfo, MessageStream};
+use crate::executor_v2::{ExecutorInfo, Message, MessageStream};
 
 /// Streams wrapped by `schema_check` will check the passing stream chunk against the expected
 /// schema.

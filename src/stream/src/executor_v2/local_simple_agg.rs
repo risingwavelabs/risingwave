@@ -22,13 +22,11 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{BoxedMessageStream, Executor, ExecutorInfo, Message, StreamExecutorResult};
-use crate::executor::PkIndicesRef;
-use crate::executor_v2::aggregation::{
+use super::aggregation::{
     create_streaming_agg_state, generate_agg_schema, AggCall, StreamingAggStateImpl,
 };
-use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::PkIndices;
+use super::error::StreamExecutorError;
+use super::*;
 
 pub struct LocalSimpleAggExecutor {
     pub(super) input: Box<dyn Executor>,
@@ -178,7 +176,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::AggKind;
 
-    use crate::executor::Message;
+    use super::*;
     use crate::executor_v2::aggregation::{AggArgs, AggCall};
     use crate::executor_v2::test_utils::MockSource;
     use crate::executor_v2::{Executor, LocalSimpleAggExecutor};

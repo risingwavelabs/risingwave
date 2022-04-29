@@ -25,12 +25,11 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
-use crate::executor::Epoch;
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::lookup::cache::LookupCache;
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
-use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor_v2::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {

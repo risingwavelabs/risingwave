@@ -134,3 +134,16 @@ impl Executor for MockSource {
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
 }
+
+/// `row_nonnull` builds a `Row` with concrete values.
+/// TODO: add macro row!, which requires a new trait `ToScalarValue`.
+#[macro_export]
+macro_rules! row_nonnull {
+    [$( $value:expr ),*] => {
+        {
+            use risingwave_common::types::Scalar;
+            use risingwave_common::array::Row;
+            Row(vec![$(Some($value.to_scalar_value()), )*])
+        }
+    };
+}
