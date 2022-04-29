@@ -34,7 +34,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction::{CompactStatus, MAX_LEVEL};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
@@ -195,7 +195,7 @@ where
                         table_infos: vec![],
                     },
                     Level {
-                        level_idx: 1,
+                        level_idx: MAX_LEVEL as u32,
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: vec![],
                     },

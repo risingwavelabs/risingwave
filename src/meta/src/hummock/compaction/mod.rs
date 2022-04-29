@@ -13,7 +13,12 @@
 // limitations under the License.
 
 mod overlap_strategy;
+mod compaction_picker;
+mod level_selector;
 mod tier_compaction_picker;
+mod leveled_compaction_picker;
+
+pub use level_selector::MAX_LEVEL;
 
 use std::io::Cursor;
 
@@ -27,6 +32,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
@@ -37,11 +43,17 @@ use crate::storage::{MetaStore, Transaction};
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024;
+const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
+const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
+pub const MAX_LEVEL: usize = 6;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct CompactStatus {
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,
+    compaction_selector: Box<dyn LevelSelector>,
 }
 
 pub struct SearchResult {
@@ -50,12 +62,36 @@ pub struct SearchResult {
     split_ranges: Vec<KeyRange>,
 }
 
+
+pub struct CompactionConfig {
+    max_bytes_for_level_base: u64,
+    max_level: usize,
+    max_bytes_for_level_multiplier: u64,
+    max_compaction_bytes: u64,
+    level0_max_file_number: usize,
+    level0_trigger_number: usize,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,   // 1GB
+            max_bytes_for_level_multiplier: 10,
+            max_level: MAX_LEVEL,
+            max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
+            level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
+            level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
+        }
+    }
+}
+
 impl CompactStatus {
     pub fn new() -> CompactStatus {
         let vec_handler_having_l0 = vec![LevelHandler::new(0), LevelHandler::new(1)];
         CompactStatus {
             level_handlers: vec_handler_having_l0,
             next_compact_task_id: 1,
+            compaction_selector: Box::new(DynamicLevelSelector::default()),
         }
     }
 
@@ -136,11 +172,11 @@ impl CompactStatus {
 
     fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
         // only support compact L0 to L1 or L0 to L0
-        let picker = TierCompactionPicker::new(
+        self.compaction_selector.pick_compaction(
             self.next_compact_task_id,
-            Box::new(RangeOverlapStrategy::default()),
-        );
-        picker.pick_compaction(levels, &mut self.level_handlers)
+            &levels,
+            &mut self.level_handlers,
+        )
     }
 
     /// Declares a task is either finished or canceled.
