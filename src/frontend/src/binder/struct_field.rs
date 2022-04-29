@@ -139,7 +139,11 @@ impl Binder {
                     ExprType::Field,
                     vec![
                         expr,
-                        Literal::new(Some(field_index.to_scalar_value()), DataType::Int32).into(),
+                        Literal::new(
+                            Some((field_index as i32).to_scalar_value()),
+                            DataType::Int32,
+                        )
+                        .into(),
                     ],
                     field.data_type.clone(),
                 )
@@ -326,10 +330,9 @@ impl GetFieldDesc {
             Some(err) => Err(err.into()),
             None => match self.field {
                 Some(field) => Ok(field),
-                None => Err(ErrorCode::BindError(
-                    "Not find field_desc for struct item".to_string(),
-                )
-                .into()),
+                None => {
+                    Err(ErrorCode::BindError("Not find field for struct item".to_string()).into())
+                }
             },
         }
     }

@@ -62,7 +62,7 @@ impl Binder {
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (bool, Field)>,
+        columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
         alias: Option<TableAlias>,
     ) -> Result<()> {

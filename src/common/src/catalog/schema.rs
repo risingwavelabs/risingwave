@@ -48,12 +48,12 @@ impl Field {
         }
     }
 
-    /// Find `field` in `sub_field` by name.
-    pub fn sub_field(&self, name: &String) -> crate::error::Result<(Field, i32)> {
+    /// Returns field and field index.
+    pub fn sub_field(&self, name: &String) -> Result<(Field, usize)> {
         if let DataType::Struct { .. } = self.data_type {
             for (index, field) in self.sub_fields.iter().enumerate() {
                 if field.name == *name {
-                    return Ok((field.clone(), index as i32));
+                    return Ok((field.clone(), index));
                 }
             }
             Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
