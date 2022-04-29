@@ -16,10 +16,11 @@ use std::collections::BinaryHeap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
@@ -27,18 +28,20 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::executor2::{CreateSource, DefaultCreateSource};
+use crate::executor2::{
+    BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, CreateSource, DefaultCreateSource,
+    Executor2, ExecutorBuilder,
+};
 use crate::task::{BatchEnvironment, TaskId};
 
-pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
+pub type MergeSortExchangeExecutor2 = MergeSortExchangeExecutor2Impl<DefaultCreateSource>;
 
-/// `MergeSortExchangeExecutor` takes inputs from multiple sources and
+/// `MergeSortExchangeExecutor2` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
 ///
 /// The size of the output is determined both by `K_PROCESSING_WINDOW_SIZE`.
 /// TODO: Does not handle `visibility` for now.
-pub(super) struct MergeSortExchangeExecutorImpl<C> {
+pub struct MergeSortExchangeExecutor2Impl<C> {
     server_addr: HostAddr,
     env: BatchEnvironment,
     /// keeps one data chunk of each source if any
@@ -55,7 +58,7 @@ pub(super) struct MergeSortExchangeExecutorImpl<C> {
     identity: String,
 }
 
-impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
+impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
     /// We assume that the source would always send `Some(chunk)` with cardinality > 0
     /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
@@ -88,16 +91,25 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
     }
 }
 
-#[async_trait::async_trait]
-impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
+impl<CS: 'static + CreateSource> Executor2 for MergeSortExchangeExecutor2Impl<CS> {
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 
-    /// Everytime `execute` is called, it tries to produce a chunk of size
-    /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
-    /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+/// Everytime `execute` is called, it tries to produce a chunk of size
+/// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
+/// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
+impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
         // If this is the first time execution, we first get one chunk from each source
         // and put one row of each chunk into the heap
         if self.first_execution {
@@ -123,81 +135,67 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
 
         // If there is no rows in the heap,
         // we run out of input data chunks and emit `Done`.
-        if self.min_heap.is_empty() {
-            return Ok(None);
-        }
+        while !self.min_heap.is_empty() {
+            // It is possible that we cannot produce this much as
+            // we may run out of input data chunks from sources.
+            let mut want_to_produce = K_PROCESSING_WINDOW_SIZE;
 
-        // It is possible that we cannot produce this much as
-        // we may run out of input data chunks from sources.
-        let mut want_to_produce = K_PROCESSING_WINDOW_SIZE;
-
-        let mut builders = self
-            .schema()
-            .fields
-            .iter()
-            .map(|field| {
-                field
-                    .data_type
-                    .create_array_builder(K_PROCESSING_WINDOW_SIZE)
-            })
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
-        while want_to_produce > 0 && !self.min_heap.is_empty() {
-            let top_elem = self.min_heap.pop().unwrap();
-            let child_idx = top_elem.chunk_idx;
-            let cur_chunk = top_elem.chunk;
-            let row_idx = top_elem.elem_idx;
-            for (idx, builder) in builders.iter_mut().enumerate() {
-                let chunk_arr = cur_chunk.column_at(idx).array();
-                let chunk_arr = chunk_arr.as_ref();
-                let datum = chunk_arr.value_at(row_idx).to_owned_datum();
-                builder.append_datum(&datum)?;
-            }
-            want_to_produce -= 1;
-            // check whether we have another row from the same chunk being popped
-            let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
-            match possible_next_row_idx {
-                Some(next_row_idx) => {
-                    self.push_row_into_heap(child_idx, next_row_idx);
+            let mut builders = self
+                .schema()
+                .fields
+                .iter()
+                .map(|field| {
+                    field
+                        .data_type
+                        .create_array_builder(K_PROCESSING_WINDOW_SIZE)
+                })
+                .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+            while want_to_produce > 0 && !self.min_heap.is_empty() {
+                let top_elem = self.min_heap.pop().unwrap();
+                let child_idx = top_elem.chunk_idx;
+                let cur_chunk = top_elem.chunk;
+                let row_idx = top_elem.elem_idx;
+                for (idx, builder) in builders.iter_mut().enumerate() {
+                    let chunk_arr = cur_chunk.column_at(idx).array();
+                    let chunk_arr = chunk_arr.as_ref();
+                    let datum = chunk_arr.value_at(row_idx).to_owned_datum();
+                    builder.append_datum(&datum)?;
                 }
-                None => {
-                    self.get_source_chunk(child_idx).await?;
-                    if let Some(chunk) = &self.source_inputs[child_idx] {
-                        let next_row_idx = chunk.next_visible_row_idx(0);
-                        self.push_row_into_heap(child_idx, next_row_idx.unwrap());
+                want_to_produce -= 1;
+                // check whether we have another row from the same chunk being popped
+                let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
+                match possible_next_row_idx {
+                    Some(next_row_idx) => {
+                        self.push_row_into_heap(child_idx, next_row_idx);
+                    }
+                    None => {
+                        self.get_source_chunk(child_idx).await?;
+                        if let Some(chunk) = &self.source_inputs[child_idx] {
+                            let next_row_idx = chunk.next_visible_row_idx(0);
+                            self.push_row_into_heap(child_idx, next_row_idx.unwrap());
+                        }
                     }
                 }
             }
+
+            let columns = builders
+                .into_iter()
+                .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
+                .collect::<Result<Vec<_>>>()?;
+            let chunk = DataChunk::builder().columns(columns).build();
+            yield chunk
         }
-
-        let columns = builders
-            .into_iter()
-            .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
-            .collect::<Result<Vec<_>>>()?;
-        let chunk = DataChunk::builder().columns(columns).build();
-        Ok(Some(chunk))
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
     }
 }
 
-impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutorImpl<CS> {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl<CS: 'static + CreateSource> BoxedExecutor2Builder for MergeSortExchangeExecutor2Impl<CS> {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let sort_merge_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::MergeSortExchange
         )?;
 
-        let server_addr = source.env.server_address().clone();
+        let server_addr = source.global_batch_env().server_address().clone();
 
         let order_pairs = sort_merge_node
             .column_orders
@@ -216,23 +214,20 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             .collect::<Vec<Field>>();
 
         let num_sources = proto_sources.len();
-        Ok(Box::new(
-            Self {
-                server_addr,
-                env: source.env.clone(),
-                source_inputs: vec![None; num_sources],
-                order_pairs,
-                min_heap: BinaryHeap::new(),
-                proto_sources,
-                sources: vec![],
-                source_creator: PhantomData,
-                schema: Schema { fields },
-                first_execution: true,
-                task_id: source.task_id.clone(),
-                identity: source.plan_node().get_identity().clone(),
-            }
-            .fuse(),
-        ))
+        Ok(Box::new(Self {
+            server_addr,
+            env: source.global_batch_env().clone(),
+            source_inputs: vec![None; num_sources],
+            order_pairs,
+            min_heap: BinaryHeap::new(),
+            proto_sources,
+            sources: vec![],
+            source_creator: PhantomData,
+            schema: Schema { fields },
+            first_execution: true,
+            task_id: source.task_id.clone(),
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 
@@ -241,6 +236,7 @@ mod tests {
     use std::fmt::Debug;
     use std::sync::Arc;
 
+    use futures::StreamExt;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
@@ -293,7 +289,7 @@ mod tests {
             order_type: OrderType::Ascending,
         }]);
 
-        let mut executor = MergeSortExchangeExecutorImpl::<FakeCreateSource> {
+        let executor = Box::new(MergeSortExchangeExecutor2Impl::<FakeCreateSource> {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             env: BatchEnvironment::for_test(),
             source_inputs: vec![None; proto_sources.len()],
@@ -307,12 +303,14 @@ mod tests {
             },
             first_execution: true,
             task_id: TaskId::default(),
-            identity: "MergeSortExchangeExecutor".to_string(),
-        };
+            identity: "MergeSortExchangeExecutor2".to_string(),
+        });
 
-        let res = executor.next().await.unwrap();
+        let mut stream = executor.execute();
+        let res = stream.next().await;
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
+            let res = res.unwrap();
             assert_eq!(res.capacity(), 3 * num_sources);
             let col0 = res.column_at(0);
             assert_eq!(col0.array().as_int32().value_at(0), Some(1));
@@ -322,6 +320,7 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(4), Some(3));
             assert_eq!(col0.array().as_int32().value_at(5), Some(3));
         }
-        assert!(matches!(executor.next().await.unwrap(), None));
+        let res = stream.next().await;
+        assert_eq!(res, None);
     }
 }
