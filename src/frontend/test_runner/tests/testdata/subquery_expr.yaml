@@ -50,7 +50,7 @@
               LogicalScan { table: t, columns: [_row_id#0, x] }
 - sql: |
     select (select 1, 2);
-  binder_error: 'Bind error: subquery must return only one column'
+  binder_error: 'Bind error: Subquery must return only one column'
 - sql: |
     create table t(x int);
     select 1 where exists (select * from t);
@@ -132,3 +132,23 @@
 - sql: |
     select 1 + (select 2 from t);
   binder_error: 'Catalog error: table or source not found: t'
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y from t2);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y not in (select y from t2);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalJoin { type: LeftAnti, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalScan { table: t2, columns: [_row_id#0, x, y] }

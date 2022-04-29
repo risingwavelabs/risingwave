@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_expr::expr::AggKind;
@@ -96,15 +96,15 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
         let (exprs, column) = Self::bind_field(
-            InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
+            InputRef::new(binding.index, binding.field.data_type.clone()).into(),
             &idents,
-            binding.desc.clone(),
+            binding.field.clone(),
             true,
         )?;
         Ok((
             exprs,
             column
-                .field_descs
+                .sub_fields
                 .iter()
                 .map(|f| Some(f.name.clone()))
                 .collect_vec(),
@@ -117,9 +117,9 @@ impl Binder {
     pub fn bind_single_field_column(&mut self, expr: Expr, ids: &[Ident]) -> Result<ExprImpl> {
         let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
         let (exprs, _) = Self::bind_field(
-            InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
+            InputRef::new(binding.index, binding.field.data_type.clone()).into(),
             &idents,
-            binding.desc.clone(),
+            binding.field.clone(),
             false,
         )?;
         Ok(exprs[0].clone())
@@ -129,17 +129,21 @@ impl Binder {
     fn bind_field(
         expr: ExprImpl,
         idents: &[Ident],
-        desc: ColumnDesc,
+        field: Field,
         wildcard: bool,
-    ) -> Result<(Vec<ExprImpl>, ColumnDesc)> {
+    ) -> Result<(Vec<ExprImpl>, Field)> {
         match idents.get(0) {
             Some(ident) => {
-                let (field, field_index) = desc.field(&ident.value)?;
+                let (field, field_index) = field.sub_field(&ident.value)?;
                 let expr = FunctionCall::new_unchecked(
                     ExprType::Field,
                     vec![
                         expr,
-                        Literal::new(Some(field_index.to_scalar_value()), DataType::Int32).into(),
+                        Literal::new(
+                            Some((field_index as i32).to_scalar_value()),
+                            DataType::Int32,
+                        )
+                        .into(),
                     ],
                     field.data_type.clone(),
                 )
@@ -148,9 +152,9 @@ impl Binder {
             }
             None => {
                 if wildcard {
-                    Self::bind_wildcard_field(expr, desc)
+                    Self::bind_wildcard_field(expr, field)
                 } else {
-                    Ok((vec![expr], desc))
+                    Ok((vec![expr], field))
                 }
             }
         }
@@ -158,13 +162,11 @@ impl Binder {
 
     /// Will fail if it's an atomic value.
     /// Rewrite (expr:Struct).* to [Field(expr, 0), Field(expr, 1), ... Field(expr, n)].
-    fn bind_wildcard_field(
-        expr: ExprImpl,
-        desc: ColumnDesc,
-    ) -> Result<(Vec<ExprImpl>, ColumnDesc)> {
-        if let DataType::Struct { .. } = desc.data_type {
+    fn bind_wildcard_field(expr: ExprImpl, field: Field) -> Result<(Vec<ExprImpl>, Field)> {
+        if let DataType::Struct { .. } = field.data_type {
             Ok((
-                desc.field_descs
+                field
+                    .sub_fields
                     .iter()
                     .enumerate()
                     .map(|(i, f)| {
@@ -180,12 +182,12 @@ impl Binder {
                         .into()
                     })
                     .collect_vec(),
-                desc,
+                field,
             ))
         } else {
             Err(ErrorCode::BindError(format!(
                 "The field \"{}\" is not a nested column",
-                desc.name
+                field.name
             ))
             .into())
         }
@@ -222,7 +224,7 @@ impl Binder {
             Ok(Field::with_struct(
                 item.return_type(),
                 name,
-                column.field_descs.iter().map(|f| f.into()).collect_vec(),
+                column.sub_fields,
                 column.type_name,
             ))
         } else {
@@ -233,7 +235,7 @@ impl Binder {
 
 /// Collect `field_desc` from bindings and expression.
 struct GetFieldDesc {
-    field_desc: Option<ColumnDesc>,
+    field: Option<Field>,
     err: Option<ErrorCode>,
     column_bindings: Vec<ColumnBinding>,
 }
@@ -251,7 +253,7 @@ impl ExprVisitor for GetFieldDesc {
     }
 
     fn visit_input_ref(&mut self, expr: &InputRef) {
-        self.field_desc = Some(self.column_bindings[expr.index].desc.clone());
+        self.field = Some(self.column_bindings[expr.index].field.clone());
     }
 
     /// The `func_call` only have two kinds which are `Field{InputRef,Literal(i32)}` or
@@ -275,7 +277,7 @@ impl ExprVisitor for GetFieldDesc {
                 return;
             }
         }
-        let column = match &self.field_desc {
+        let column = match &self.field {
             None => {
                 return;
             }
@@ -284,15 +286,15 @@ impl ExprVisitor for GetFieldDesc {
         let expr = &func_call.inputs()[1];
         if let ExprImpl::Literal(literal) = expr {
             match literal.get_data() {
-                Some(ScalarImpl::Int32(i)) => match column.field_descs.get(*i as usize) {
+                Some(ScalarImpl::Int32(i)) => match column.sub_fields.get(*i as usize) {
                     Some(desc) => {
-                        self.field_desc = Some(desc.clone());
+                        self.field = Some(desc.clone());
                     }
                     None => {
                         self.err = Some(ErrorCode::BindError(format!(
                             "Index {} out of field_desc bound {}",
                             *i,
-                            column.field_descs.len()
+                            column.sub_fields.len()
                         )));
                     }
                 },
@@ -316,22 +318,21 @@ impl GetFieldDesc {
     /// Creates a `GetFieldDesc` with columns.
     fn new(columns: Vec<ColumnBinding>) -> Self {
         GetFieldDesc {
-            field_desc: None,
+            field: None,
             err: None,
             column_bindings: columns,
         }
     }
 
     /// Returns the `field_desc` by the `GetFieldDesc`.
-    fn collect(self) -> Result<ColumnDesc> {
+    fn collect(self) -> Result<Field> {
         match self.err {
             Some(err) => Err(err.into()),
-            None => match self.field_desc {
-                Some(desc) => Ok(desc),
-                None => Err(ErrorCode::BindError(
-                    "Not find field_desc for struct item".to_string(),
-                )
-                .into()),
+            None => match self.field {
+                Some(field) => Ok(field),
+                None => {
+                    Err(ErrorCode::BindError("Not find field for struct item".to_string()).into())
+                }
             },
         }
     }

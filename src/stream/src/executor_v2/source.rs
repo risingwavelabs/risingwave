@@ -32,9 +32,9 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use super::error::StreamExecutorError;
-use super::{BoxedExecutor, BoxedMessageStream, Executor};
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use super::monitor::StreamingMetrics;
+use super::*;
+use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
@@ -322,7 +322,6 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::executor::{Barrier, Epoch};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {

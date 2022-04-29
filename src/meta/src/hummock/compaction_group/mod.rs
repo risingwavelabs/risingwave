@@ -12,6 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod materialize;
+#[derive(Debug, Clone)]
+pub struct CompactionGroupId(u64);
 
-pub use materialize::*;
+impl CompactionGroupId {
+    pub fn new(cg_id: u64) -> CompactionGroupId {
+        Self(cg_id)
+    }
+}
+
+#[allow(dead_code)]
+struct CompactionGroup {
+    group_id: CompactionGroupId,
+    /// If `is_scheduled`, no need to notify scheduler again. Scheduler will reschedule it if
+    /// necessary, e.g. more compaction task available.
+    is_scheduled: bool,
+}

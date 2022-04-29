@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools as _;
-use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Query, TableAlias};
 
 use crate::binder::{Binder, BoundQuery, UNNAMED_SUBQUERY};
-use crate::catalog::column_catalog::ColumnCatalog;
 
 #[derive(Debug)]
 pub struct BoundSubquery {
@@ -37,18 +34,14 @@ impl Binder {
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
-        let columns = query
-            .body
-            .fields()
-            .iter()
-            .map(ColumnDesc::from_field_without_column_id)
-            .collect_vec();
 
         self.bind_context(
-            columns.iter().map(|f| ColumnCatalog {
-                column_desc: f.clone(),
-                is_hidden: false,
-            }),
+            query
+                .body
+                .schema()
+                .fields
+                .iter()
+                .map(|f| (false, f.clone())),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;

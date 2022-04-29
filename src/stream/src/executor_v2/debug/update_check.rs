@@ -19,9 +19,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{ExecutorInfo, MessageStream};
+use crate::executor_v2::{ExecutorInfo, Message, MessageStream};
 
 /// Streams wrapped by `update_check` will check whether the two rows of updates are next to each
 /// other.

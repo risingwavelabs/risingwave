@@ -24,9 +24,8 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{Barrier, Executor, MessageStream};
+use crate::executor_v2::{Barrier, Executor, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
@@ -91,7 +90,7 @@ pub enum ArrangeMessage {
     /// Arrangement sides' update in this epoch. There will be only one arrange batch message
     /// within epoch. Once the executor receives an arrange batch message, it can start doing
     /// joins.
-    ArrangeReady(Vec<StreamChunk>),
+    ArrangeReady(Vec<StreamChunk>, Barrier),
 
     /// There's a message from stream side.
     Stream(StreamChunk),
@@ -195,6 +194,7 @@ pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) 
 /// * `[Do`] lookup `b` in arrangement of epoch `[1`] (prev epoch)
 /// * `[Do`] update cache with epoch `[2`]
 /// * Barrier (prev = `[2`], current = `[3`])
+/// * `[Msg`] Arrangement (batch)
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
 pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,
@@ -205,6 +205,8 @@ pub async fn stream_lookup_arrange_prev_epoch(
     let mut stream_side_end = false;
 
     loop {
+        let mut arrange_barrier = None;
+
         while let Some(item) = input.next().await {
             match item? {
                 Either::Left(Message::Chunk(msg)) => {
@@ -220,11 +222,15 @@ pub async fn stream_lookup_arrange_prev_epoch(
                     yield ArrangeMessage::Barrier(barrier);
                     stream_side_end = true;
                 }
-                Either::Right(Message::Barrier(_)) => {
+                Either::Right(Message::Barrier(barrier)) => {
                     if stream_side_end {
-                        yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
+                        yield ArrangeMessage::ArrangeReady(
+                            std::mem::take(&mut arrange_buf),
+                            barrier,
+                        );
                         stream_side_end = false;
                     } else {
+                        arrange_barrier = Some(barrier);
                         break;
                     }
                 }
@@ -246,7 +252,10 @@ pub async fn stream_lookup_arrange_prev_epoch(
             }
         }
 
-        yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
+        yield ArrangeMessage::ArrangeReady(
+            std::mem::take(&mut arrange_buf),
+            arrange_barrier.take().unwrap(),
+        );
     }
 }
 
@@ -293,8 +302,8 @@ pub async fn stream_lookup_arrange_this_epoch(
                 Either::Left(Message::Barrier(barrier)) => {
                     break 'inner Status::StreamReady(barrier);
                 }
-                Either::Right(Message::Barrier(_)) => {
-                    yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
+                Either::Right(Message::Barrier(barrier)) => {
+                    yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf), barrier);
                     for msg in std::mem::take(&mut stream_buf) {
                         yield ArrangeMessage::Stream(msg);
                     }
@@ -331,8 +340,11 @@ pub async fn stream_lookup_arrange_this_epoch(
                     Either::Right(Message::Chunk(chunk)) => {
                         arrange_buf.push(chunk);
                     }
-                    Either::Right(Message::Barrier(_)) => {
-                        yield ArrangeMessage::ArrangeReady(std::mem::take(&mut arrange_buf));
+                    Either::Right(Message::Barrier(barrier)) => {
+                        yield ArrangeMessage::ArrangeReady(
+                            std::mem::take(&mut arrange_buf),
+                            barrier,
+                        );
                         for msg in std::mem::take(&mut stream_buf) {
                             yield ArrangeMessage::Stream(msg);
                         }
