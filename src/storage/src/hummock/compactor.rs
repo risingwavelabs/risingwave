@@ -86,7 +86,7 @@ impl Compactor {
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        buffers: Vec<SharedBufferBatch>,
+        buffers: &[SharedBufferBatch],
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Vec<Sstable>> {
         let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();

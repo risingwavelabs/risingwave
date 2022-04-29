@@ -25,9 +25,9 @@ impl Binder {
         kind: SubqueryKind,
     ) -> Result<ExprImpl> {
         let query = self.bind_query(query)?;
-        if kind == SubqueryKind::Scalar && query.data_types().len() != 1 {
+        if !matches!(kind, SubqueryKind::Existential) && query.data_types().len() != 1 {
             return Err(
-                ErrorCode::BindError("subquery must return only one column".to_string()).into(),
+                ErrorCode::BindError("Subquery must return only one column".to_string()).into(),
             );
         }
         Ok(Subquery::new(query, kind).into())
