@@ -36,10 +36,6 @@ include ../../streaming/tpch/q12.slt.part
 include ../../streaming/tpch/q14.slt.part
 include ../../streaming/tpch/q19.slt.part
 
-halt
-
-# TODO: drop MV is not supported yet for delta joins
-
 statement ok
 drop materialized view tpch_q1;
 

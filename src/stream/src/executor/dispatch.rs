@@ -23,6 +23,7 @@ use futures::{SinkExt, Stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
+use risingwave_common::error::internal_error;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -67,7 +68,10 @@ impl LocalOutput {
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         // local channel should never fail
-        self.ch.send(message).await.unwrap();
+        self.ch
+            .send(message)
+            .await
+            .map_err(|_| internal_error("failed to send"))?;
         Ok(())
     }
 
@@ -105,7 +109,10 @@ impl Output for RemoteOutput {
             _ => message,
         };
         // local channel should never fail
-        self.ch.send(message).await.unwrap();
+        self.ch
+            .send(message)
+            .await
+            .map_err(|_| internal_error("failed to send"))?;
         Ok(())
     }
 
