@@ -38,6 +38,7 @@ use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
+use crate::hummock::CompactionScheduler;
 use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, StoredCatalogManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
@@ -188,6 +189,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+    let compaction_scheduler = Arc::new(CompactionScheduler::new(
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+    ));
     let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
@@ -230,6 +235,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             compactor_manager,
             vacuum_trigger,
             notification_manager,
+            compaction_scheduler,
         )
         .await,
     );
