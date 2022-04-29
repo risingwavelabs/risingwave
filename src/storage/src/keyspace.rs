@@ -163,7 +163,7 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter<'_>> {
+    async fn iter_inner(&'_ self, epoch: u64) -> StorageResult<S::Iter> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         self.store.iter(range, epoch).await
     }

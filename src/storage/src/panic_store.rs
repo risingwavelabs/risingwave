@@ -27,7 +27,7 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 pub struct PanicStateStore;
 
 impl StateStore for PanicStateStore {
-    type Iter<'a> = PanicStateStoreIter;
+    type Iter = PanicStateStoreIter;
 
     define_state_store_associated_type!();
 
