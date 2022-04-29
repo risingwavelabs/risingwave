@@ -131,22 +131,22 @@ impl<S: StateStore> RowSeqScanExecutor2<S> {
     async fn do_execute(mut self: Box<Self>) {
         if !self.should_ignore() {
             self.iter = Some(self.table.iter(self.epoch).await?);
-        }
 
-        loop {
-            let timer = self.stats.row_seq_scan_next_duration.start_timer();
+            loop {
+                let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-            let iter = self.iter.as_mut().expect("executor not open");
-            let chunk = iter
-                .collect_data_chunk(&self.table, Some(self.chunk_size))
-                .await
-                .map_err(RwError::from)?;
-            timer.observe_duration();
+                let iter = self.iter.as_mut().expect("executor not open");
+                let chunk = iter
+                    .collect_data_chunk(&self.table, Some(self.chunk_size))
+                    .await
+                    .map_err(RwError::from)?;
+                timer.observe_duration();
 
-            if let Some(chunk) = chunk {
-                yield chunk
-            } else {
-                break;
+                if let Some(chunk) = chunk {
+                    yield chunk
+                } else {
+                    break;
+                }
             }
         }
     }
