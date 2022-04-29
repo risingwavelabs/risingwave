@@ -301,6 +301,7 @@ where
                     }
                 }
             }
+            min_interval.tick().await;
 
             state.update(self.env.meta_store()).await.unwrap();
         }

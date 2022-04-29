@@ -242,6 +242,17 @@ impl TierCompactionPicker {
                 {
                     break;
                 }
+                let mut overlap = false;
+                for prev in &select_level.table_infos[..idx] {
+                    if self.overlap_strategy.check_overlap(prev, other) {
+                        overlap = true;
+                        break;
+                    }
+                }
+                if overlap {
+                    break;
+                }
+
                 if !self.pick_target_level_overlap_files(
                     other,
                     target_level,
@@ -253,6 +264,11 @@ impl TierCompactionPicker {
                 select_compaction_bytes += other.file_size;
                 select_level_ssts.push(other.clone());
             }
+            target_level_ssts.tables.sort_by(|a, b| {
+                let r1 = KeyRange::from(a.key_range.as_ref().unwrap());
+                let r2 = KeyRange::from(b.key_range.as_ref().unwrap());
+                r1.cmp(&r2)
+            });
             return (select_level_ssts, target_level_ssts.tables);
         }
         (vec![], vec![])
