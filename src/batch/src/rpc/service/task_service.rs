@@ -44,12 +44,15 @@ impl TaskService for BatchServiceImpl {
     ) -> Result<Response<CreateTaskResponse>, Status> {
         let req = request.into_inner();
 
-        let res = self.mgr.fire_task(
-            req.get_task_id().expect("no task id found"),
-            req.get_plan().expect("no plan found").clone(),
-            req.epoch,
-            ComputeNodeContext::new(self.env.clone()),
-        );
+        let res = self
+            .mgr
+            .fire_task(
+                req.get_task_id().expect("no task id found"),
+                req.get_plan().expect("no plan found").clone(),
+                req.epoch,
+                ComputeNodeContext::new(self.env.clone()),
+            )
+            .await;
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
             Err(e) => {

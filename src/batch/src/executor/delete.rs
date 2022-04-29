@@ -111,8 +111,9 @@ impl DeleteExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for DeleteExecutor {
-    fn new_boxed_executor<C: BatchTaskContext>(
+    async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
     ) -> Result<BoxedExecutor> {
         let delete_node = try_match_expand!(
@@ -127,7 +128,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         Ok(Box::new(Self::new(
             table_id,

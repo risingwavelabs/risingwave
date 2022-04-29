@@ -1404,7 +1404,7 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
 
     let chunk = {
         let mut iter = table.iter(u64::MAX).await.unwrap();
-        iter.collect_data_chunk(&table, None)
+        iter.collect_data_chunk(table.schema(), None)
             .await
             .unwrap()
             .unwrap()

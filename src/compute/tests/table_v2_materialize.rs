@@ -202,11 +202,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     );
 
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.clone(),
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
     let mut stream = scan.execute();
@@ -261,11 +261,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.clone(),
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
 
@@ -329,11 +329,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.clone(),
+        table.schema().clone(),
+        table.iter(u64::MAX).await?,
         1024,
         true,
         "RowSeqScanExecutor2".to_string(),
-        u64::MAX,
         Arc::new(BatchMetrics::unused()),
     ));
 

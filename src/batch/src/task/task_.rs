@@ -217,7 +217,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result idependently.
-    pub fn async_execute(self: Arc<Self>) -> Result<()> {
+    pub async fn async_execute(self: Arc<Self>) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
@@ -230,7 +230,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             self.context.clone(),
             self.epoch,
         )
-        .build()?;
+        .build()
+        .await?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();

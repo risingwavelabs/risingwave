@@ -43,7 +43,7 @@ impl BatchManager {
         }
     }
 
-    pub fn fire_task(
+    pub async fn fire_task(
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
@@ -55,7 +55,7 @@ impl BatchManager {
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
 
-        task.clone().async_execute()?;
+        task.clone().async_execute().await?;
         if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task);
             Ok(())
@@ -246,8 +246,12 @@ mod tests {
         };
         manager
             .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .await
             .unwrap();
-        let err = manager.fire_task(&task_id, plan, 0, context).unwrap_err();
+        let err = manager
+            .fire_task(&task_id, plan, 0, context)
+            .await
+            .unwrap_err();
         assert!(err
             .to_string()
             .contains("can not create duplicate task with the same id"));
@@ -281,6 +285,7 @@ mod tests {
         };
         manager
             .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .await
             .unwrap();
         manager.abort_task(&task_id).unwrap();
         let task_id = TaskId::from(&task_id);
