@@ -18,7 +18,7 @@
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{Result, RwError};
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
@@ -31,10 +31,7 @@ use error::ValueEncodingError;
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
     if let Some(datum) = cell {
-        buf.put_u8(1);
         serialize_value(datum.as_scalar_ref_impl(), &mut buf)
-    } else {
-        buf.put_u8(0);
     }
     Ok(buf)
 }
@@ -53,18 +50,8 @@ pub fn serialize_cell_not_null(cell: &Datum) -> Result<Vec<u8>> {
 
 /// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
 pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
-    let null_tag = data.get_u8();
-    match null_tag {
-        0 => {
-            return Ok(None);
-        }
-        1 => {}
-        _ => {
-            return Err(RwError::from(ErrorCode::InternalError(format!(
-                "Invalid null tag: {}",
-                null_tag
-            ))));
-        }
+    if data.remaining() < 1 {
+        return Ok(None);
     }
     deserialize_value(ty, &mut data)
 }

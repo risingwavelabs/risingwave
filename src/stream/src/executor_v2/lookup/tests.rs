@@ -18,8 +18,9 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::types::{deserialize_datum_from, DataType};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -238,11 +239,11 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
 
     for (k, v) in store.scan::<_, Vec<u8>>(.., None, u64::MAX).await.unwrap() {
-        let mut deserializer = memcomparable::Deserializer::new(v);
+        // let mut deserializer = memcomparable::Deserializer::new(v);
         println!(
             "{:?} => {:?}",
             k,
-            deserialize_datum_from(&DataType::Int64, &mut deserializer).unwrap()
+            deserialize_cell(v, &DataType::Int64).unwrap() /* deserialize_datum_from(&DataType::Int64, &mut deserializer).unwrap() */
         );
     }
 
