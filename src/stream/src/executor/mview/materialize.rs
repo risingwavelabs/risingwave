@@ -76,7 +76,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
 
         let keys = arrange_node
             .get_table_info()?
-            .column_orders
+            .arrange_key_orders
             .iter()
             .map(OrderPair::from_prost)
             .collect();

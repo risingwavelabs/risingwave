@@ -167,8 +167,9 @@ message BatchPlanNode {
 }
 
 message ArrangementInfo {
-  // Column indexes and orders of primary key
-  repeated plan_common.ColumnOrder column_orders = 1;
+  // Order keys of the arrangement, including order by keys and pks from the materialize
+  // executor.
+  repeated plan_common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
   repeated plan_common.ColumnDesc column_descs = 2;
 }

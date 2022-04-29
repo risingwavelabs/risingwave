@@ -36,7 +36,7 @@ pub struct TableDesc {
 }
 
 impl TableDesc {
-    pub fn column_orders_prost(&self) -> Vec<ColumnOrder> {
+    pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
         // Set materialize key as arrange key + pk
         self.order_desc
             .iter()

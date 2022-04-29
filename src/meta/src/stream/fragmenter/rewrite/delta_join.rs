@@ -116,7 +116,7 @@ impl StreamFragmenter {
         table_id: u32,
     ) -> (ArrangementInfo, StreamNode) {
         // Set materialize keys as arrange key + pk
-        let column_orders = arrange_key_indexes
+        let arrange_key_orders = arrange_key_indexes
             .iter()
             .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
             .chain(
@@ -148,7 +148,7 @@ impl StreamFragmenter {
             .collect();
 
         let arrangement_info = ArrangementInfo {
-            column_orders,
+            arrange_key_orders,
             column_descs,
         };
 

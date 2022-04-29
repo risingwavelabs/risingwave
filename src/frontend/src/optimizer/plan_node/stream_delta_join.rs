@@ -138,7 +138,7 @@ impl ToStreamProst for StreamDeltaJoin {
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
-                column_orders: left_table_desc.column_orders_prost(),
+                arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
                 column_descs: left_table
                     .logical()
                     .column_descs()
@@ -147,7 +147,7 @@ impl ToStreamProst for StreamDeltaJoin {
                     .collect(),
             }),
             right_info: Some(ArrangementInfo {
-                column_orders: right_table_desc.column_orders_prost(),
+                arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
                 column_descs: right_table
                     .logical()
                     .column_descs()
