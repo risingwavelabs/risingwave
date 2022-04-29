@@ -19,7 +19,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -29,16 +29,11 @@ use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Build
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor2<S: StateStore> {
     table: CellBasedTable<S>,
-    /// An iterator to scan StateStore.
-    iter: Option<CellBasedTableRowIter<S>>,
     primary: bool,
-
     chunk_size: usize,
     schema: Schema,
     identity: String,
-
     epoch: u64,
-
     stats: Arc<BatchMetrics>,
 }
 
@@ -55,7 +50,6 @@ impl<S: StateStore> RowSeqScanExecutor2<S> {
 
         Self {
             table,
-            iter: None,
             primary,
             chunk_size,
             schema,
@@ -128,14 +122,14 @@ impl<S: StateStore> Executor2 for RowSeqScanExecutor2<S> {
 
 impl<S: StateStore> RowSeqScanExecutor2<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
+    async fn do_execute(self: Box<Self>) {
         if !self.should_ignore() {
-            self.iter = Some(self.table.iter(self.epoch).await?);
+            let mut iter = Some(self.table.iter(self.epoch).await.map_err(RwError::from)?);
 
             loop {
                 let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                let iter = self.iter.as_mut().expect("executor not open");
+                let iter = iter.as_mut().expect("executor not open");
                 let chunk = iter
                     .collect_data_chunk(&self.table, Some(self.chunk_size))
                     .await
