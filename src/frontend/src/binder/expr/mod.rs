@@ -16,8 +16,7 @@ use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
-    UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -83,7 +82,10 @@ impl Binder {
                 expr,
                 subquery,
                 negated,
-            } => self.bind_in_subquery(*expr, *subquery, negated),
+            } => {
+                let bound_expr = self.bind_expr(*expr)?;
+                self.bind_subquery_expr(*subquery, SubqueryKind::In(bound_expr, negated))
+            }
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
@@ -139,27 +141,6 @@ impl Binder {
         for elem in list {
             bound_expr_list.push(self.bind_expr(elem)?);
         }
-        let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
-        if negated {
-            Ok(
-                FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
-                    .into(),
-            )
-        } else {
-            Ok(in_expr.into())
-        }
-    }
-
-    pub(super) fn bind_in_subquery(
-        &mut self,
-        expr: Expr,
-        subquery: Query,
-        negated: bool,
-    ) -> Result<ExprImpl> {
-        let bound_expr_list = vec![
-            self.bind_expr(expr)?,
-            self.bind_subquery_expr(subquery, SubqueryKind::SetComparison)?,
-        ];
         let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
         if negated {
             Ok(

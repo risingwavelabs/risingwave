@@ -87,7 +87,7 @@ impl Planner {
         ))
     }
 
-    /// For `... AND (NOT) subquery AND ...` or `(NOT) IN subquery`, we can plan it as
+    /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
     /// `LeftSemi/LeftAnti` [`LogicalApply`] (correlated) or [`LogicalJoin`].
     ///
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
@@ -96,28 +96,26 @@ impl Planner {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
         }
-
         let (subquery_conjunctions, not_subquery_conjunctions, others) =
             Condition::with_expr(where_clause)
                 .group_by::<_, 3>(|expr| match expr {
-                    ExprImpl::Subquery(_) => 0,
-                    ExprImpl::FunctionCall(func_call) => match func_call.get_expr_type() {
-                        ExprType::In if matches!(func_call.inputs()[1], ExprImpl::Subquery(_)) => 0,
-                        ExprType::Not => {
-                            let expr = &func_call.inputs()[0];
-                            match expr {
-                                ExprImpl::Subquery(_) => 1,
-                                ExprImpl::FunctionCall(func)
-                                    if func.get_expr_type() == ExprType::In
-                                        && matches!(func.inputs()[1], ExprImpl::Subquery(_)) =>
-                                {
-                                    1
-                                }
-                                _ => 2,
+                    ExprImpl::Subquery(subquery) => match subquery.kind {
+                        SubqueryKind::Existential => 0,
+                        SubqueryKind::In(_, negated) => {
+                            if negated {
+                                1
+                            } else {
+                                0
                             }
                         }
                         _ => 2,
                     },
+                    ExprImpl::FunctionCall(func_call)
+                        if func_call.get_expr_type() == ExprType::Not
+                            && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
+                    {
+                        1
+                    }
                     _ => 2,
                 })
                 .into_iter()
@@ -130,9 +128,11 @@ impl Planner {
         }
 
         // NOT EXISTS and NOT IN in WHERE.
-        for expr in not_subquery_conjunctions {
-            let not = expr.into_function_call().unwrap();
-            let (_, expr) = not.decompose_as_unary();
+        for mut expr in not_subquery_conjunctions {
+            if let ExprImpl::FunctionCall(not_exists) = expr {
+                let (_, mut inputs, _) = not_exists.decompose();
+                expr = inputs.swap_remove(0);
+            }
             self.handle_exists_and_in(expr, true, &mut input)?;
         }
 
@@ -164,50 +164,28 @@ impl Planner {
         } else {
             JoinType::LeftSemi
         };
-        match expr {
-            ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::In => {
-                let (_, mut input_exprs, _) = func_call.decompose();
-                assert_eq!(input_exprs.len(), 2);
-
-                let subquery = input_exprs.pop().unwrap().into_subquery().unwrap();
-                let is_correlated = subquery.is_correlated();
-
-                let eq_cond = {
-                    let left_expr = input_exprs.pop().unwrap();
-                    let right_expr =
-                        InputRef::new(input.schema().fields().len(), subquery.return_type());
-                    FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?
-                };
-
-                let right_plan = self.plan_query(subquery.query)?.as_subplan();
-
-                *input = Self::create_apply_or_join(
-                    is_correlated,
-                    input.clone(),
-                    right_plan,
-                    eq_cond.into(),
-                    join_type,
-                );
+        let subquery = expr.into_subquery().map_err(|expr| {
+            ErrorCode::NotImplemented(format!("Not supported subquery: {:?}", expr), 1343.into())
+        })?;
+        let is_correlated = subquery.is_correlated();
+        let output_column_type = subquery.query.data_types()[0].clone();
+        let right_plan = self.plan_query(subquery.query)?.as_subplan();
+        let on = match subquery.kind {
+            SubqueryKind::Existential => ExprImpl::literal_bool(true),
+            SubqueryKind::In(left_expr, _) => {
+                let right_expr = InputRef::new(input.schema().fields().len(), output_column_type);
+                FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }
-            ExprImpl::Subquery(subquery) if subquery.kind == SubqueryKind::Existential => {
-                let is_correlated = subquery.is_correlated();
-                let right_plan = self.plan_query(subquery.query)?.as_subplan();
-                *input = Self::create_apply_or_join(
-                    is_correlated,
-                    input.clone(),
-                    right_plan,
-                    ExprImpl::literal_bool(true),
-                    join_type,
-                );
-            }
-            _ => {
+            kind => {
                 return Err(ErrorCode::NotImplemented(
-                    format!("Not supported subquery: {:?}", expr),
+                    format!("Not supported subquery kind: {:?}", kind),
                     1343.into(),
                 )
                 .into())
             }
-        }
+        };
+        *input =
+            Self::create_apply_or_join(is_correlated, input.clone(), right_plan, on, join_type);
         Ok(())
     }
 
@@ -256,7 +234,7 @@ impl Planner {
                 SubqueryKind::Existential => {
                     right = self.create_exists(right)?;
                 }
-                SubqueryKind::SetComparison => {
+                _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("{:?}", subquery.kind),
                         1343.into(),
