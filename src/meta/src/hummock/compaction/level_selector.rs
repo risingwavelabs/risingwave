@@ -50,7 +50,7 @@ impl DynamicLevelSelector {
     ) -> Self {
         DynamicLevelSelector {
             base_level: config.max_level,
-            level_max_bytes: vec![0u64; config.max_level as usize + 1];
+            level_max_bytes: vec![0u64; config.max_level as usize + 1],
             config,
         }
     }
@@ -60,16 +60,43 @@ impl DynamicLevelSelector {
         level: usize,
         task_id: u64,
     ) -> Box<dyn CompactionPicker> {
+        let overlap = Box::new(RangeOverlapStrategy::default());
         if level == 0 {
-            Box::new(TierCompactionPicker::new(task_id, self.config.clone(), Box::new(RangeOverlapStrategy::default())))
+            Box::new(TierCompactionPicker::new(task_id, self.config.clone(), overlap))
         } else {
-            Box::new(SizeOverlapPicker{})
+            Box::new(SizeOverlapPicker::new(task_id, level, self.config.clone(), overlap))
         }
     }
 
     fn get_priority_levels(&self, levels: &[Level], handlers: &mut [LevelHandler]) -> Vec<(u64, usize)> {
-        todo!();
-        vec![]
+        let mut scores = vec![];
+
+        // The bottommost level can not be input level.
+        for level in &levels[..self.config.max_level] {
+            let level_idx = level.level_idx as usize;
+            let mut total_size = 0;
+            let mut idle_file_count = 0;
+            for table  in level.table_infos {
+                if !handlers[level.level_idx as usize].is_pending_compact(&table.id) {
+                    total_size += table.file_size;
+                    idle_file_count += 1;
+                }
+            }
+            if total_size == 0 {
+                continue;
+            }
+            if level.level_idx == 0 {
+                let score = std::cmp::max(total_size * 100 / self.config.max_bytes_for_level_base ,
+                                          (idle_file_count  * 100 / self.config.level0_trigger_number as u64));
+                scores.push((score, 0));
+            } else {
+                scores.push((total_size * 100 / self.level_max_bytes[level_idx], level_idx));
+            }
+        }
+        scores.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+        });
+        scores
     }
 }
 
