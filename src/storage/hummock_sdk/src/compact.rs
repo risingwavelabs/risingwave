@@ -57,7 +57,7 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         "(-inf, +inf)".to_owned()
     } else {
         format!(
-            "[{:?}, {:?}]",
+            "[{}, {}]",
             hex::encode(key_range.left.as_slice()),
             hex::encode(key_range.right.as_slice())
         )
