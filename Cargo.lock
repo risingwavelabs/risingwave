@@ -3201,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3223,7 +3223,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3300,7 +3300,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "clap 3.1.12",
  "log 0.4.16",
@@ -3318,7 +3318,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap 3.1.12",
@@ -3338,7 +3338,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3399,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3451,7 +3451,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3508,7 +3508,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3523,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3650,7 +3650,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3736,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "futures",
@@ -3753,7 +3753,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3803,7 +3803,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "itertools",
  "log 0.4.16",
@@ -3829,7 +3829,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3891,7 +3891,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "assert_matches",
