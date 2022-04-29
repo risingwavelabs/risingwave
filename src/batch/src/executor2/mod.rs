@@ -16,6 +16,7 @@ pub mod executor_wrapper;
 
 mod delete;
 mod filter;
+mod generate_series;
 mod generic_exchange;
 mod hash_agg;
 mod insert;
@@ -31,6 +32,7 @@ mod values;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
+pub use generate_series::*;
 pub use generic_exchange::*;
 pub use hash_agg::*;
 pub use insert::*;
