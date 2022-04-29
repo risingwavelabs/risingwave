@@ -22,7 +22,6 @@ use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
-pub use row_seq_scan::*;
 use sort_agg::*;
 
 use self::fuse::FusedExecutor;
@@ -37,7 +36,7 @@ use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2,
-    ProjectExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    ProjectExecutor2, RowSeqScanExecutor2Builder, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -52,7 +51,6 @@ mod join;
 mod merge_sort_exchange;
 pub mod monitor;
 mod order_by;
-mod row_seq_scan;
 mod sort_agg;
 mod stream_scan;
 #[cfg(test)]
@@ -115,7 +113,7 @@ pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
     env: BatchEnvironment,
-    epoch: u64,
+    pub epoch: u64,
 }
 
 macro_rules! build_executor {
@@ -187,7 +185,7 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
@@ -217,7 +215,7 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build2(&self) -> Result<BoxedExecutor2> {
         let real_executor = build_executor2! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
