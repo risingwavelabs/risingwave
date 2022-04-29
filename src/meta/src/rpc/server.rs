@@ -137,7 +137,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             meta_store: env.meta_store_ref(),
-            has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(ui_path));
