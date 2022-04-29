@@ -196,7 +196,7 @@ impl TierCompactionPicker {
                 level_type: LevelType::Overlapping as i32,
                 table_infos: vec![],
             },
-            split_ranges: vec![],
+            split_ranges: vec![KeyRange::inf()],
         })
     }
 
