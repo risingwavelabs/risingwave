@@ -99,17 +99,7 @@ impl Planner {
         let (subquery_conjunctions, not_subquery_conjunctions, others) =
             Condition::with_expr(where_clause)
                 .group_by::<_, 3>(|expr| match expr {
-                    ExprImpl::Subquery(subquery) => match subquery.kind {
-                        SubqueryKind::Existential => 0,
-                        SubqueryKind::In(_, negated) => {
-                            if negated {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        _ => 2,
-                    },
+                    ExprImpl::Subquery(_) => 0,
                     ExprImpl::FunctionCall(func_call)
                         if func_call.get_expr_type() == ExprType::Not
                             && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
@@ -128,11 +118,9 @@ impl Planner {
         }
 
         // NOT EXISTS and NOT IN in WHERE.
-        for mut expr in not_subquery_conjunctions {
-            if let ExprImpl::FunctionCall(not_exists) = expr {
-                let (_, mut inputs, _) = not_exists.decompose();
-                expr = inputs.swap_remove(0);
-            }
+        for expr in not_subquery_conjunctions {
+            let not = expr.into_function_call().unwrap();
+            let (_, expr) = not.decompose_as_unary();
             self.handle_exists_and_in(expr, true, &mut input)?;
         }
 
@@ -164,15 +152,13 @@ impl Planner {
         } else {
             JoinType::LeftSemi
         };
-        let subquery = expr.into_subquery().map_err(|expr| {
-            ErrorCode::NotImplemented(format!("Not supported subquery: {:?}", expr), 1343.into())
-        })?;
+        let subquery = expr.into_subquery().unwrap();
         let is_correlated = subquery.is_correlated();
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.as_subplan();
         let on = match subquery.kind {
             SubqueryKind::Existential => ExprImpl::literal_bool(true),
-            SubqueryKind::In(left_expr, _) => {
+            SubqueryKind::In(left_expr) => {
                 let right_expr = InputRef::new(input.schema().fields().len(), output_column_type);
                 FunctionCall::new(ExprType::Equal, vec![left_expr, right_expr.into()])?.into()
             }

@@ -25,8 +25,8 @@ pub enum SubqueryKind {
     Scalar,
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,
-    /// `IN` | `NOT IN` subquery.
-    In(ExprImpl, bool),
+    /// `IN` subquery.
+    In(ExprImpl),
     /// Expression operator `SOME` subquery.
     Some(ExprImpl, ExprType),
     /// Expression operator `ALL` subquery.
