@@ -35,8 +35,8 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, OrderByExecutor2, ProjectExecutor2,
-    TopNExecutor2, TraceExecutor2, ValuesExecutor2, HashJoinExecutor2Builder
+    HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2,
+    OrderByExecutor2, ProjectExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
