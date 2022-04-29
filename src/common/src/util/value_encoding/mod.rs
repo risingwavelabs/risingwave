@@ -124,7 +124,7 @@ fn serialize_decimal(decimal: &Decimal, mut buf: impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 
-fn deserialize_value(ty: &DataType, mut data: Buf) -> Result<Datum> {
+fn deserialize_value(ty: &DataType, mut data: impl Buf) -> Result<Datum> {
     Ok(Some(match *ty {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
