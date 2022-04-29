@@ -38,8 +38,10 @@ use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
-use risingwave_stream::executor::{Barrier, ExecutorV1, Message, PkIndices, StreamingMetrics};
-use risingwave_stream::executor_v2::{Executor, MaterializeExecutor, SourceExecutor};
+use risingwave_stream::executor_v2::monitor::StreamingMetrics;
+use risingwave_stream::executor_v2::{
+    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+};
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
@@ -164,16 +166,15 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
-    let mut materialize = MaterializeExecutor::new_from_v1(
+    let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
-        "MaterializeExecutor".to_string(),
     )
     .boxed()
-    .v1();
+    .execute();
 
     // 1.
     // Test insertion
@@ -235,7 +236,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -244,7 +245,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Poll `Materialize`, should output the same insertion stream chunk
-    let message = materialize.next().await?;
+    let message = materialize.next().await.unwrap()?;
     let mut col_row_ids = vec![];
     match message {
         Message::Chunk(c) => {
@@ -266,7 +267,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -315,7 +316,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     });
 
     // Poll `Materialize`, should output the same deletion stream chunk
-    let message = materialize.next().await?;
+    let message = materialize.next().await.unwrap()?;
     match message {
         Message::Chunk(c) => {
             let col_data = c.columns()[0].array_ref().as_float64();
@@ -333,7 +334,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,

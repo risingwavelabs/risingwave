@@ -21,7 +21,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 use self::managed_state::ManagedBarrierState;
-use crate::executor::*;
+use crate::executor_v2::*;
 use crate::task::ActorId;
 
 mod managed_state;

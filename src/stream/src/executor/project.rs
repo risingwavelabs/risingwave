@@ -39,12 +39,11 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .map(build_from_prost)
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(ProjectExecutor::new_from_v1(
+        Ok(ProjectExecutor::new(
             params.input.remove(0),
             params.pk_indices,
             project_exprs,
             params.executor_id,
-            params.op_info,
         )
         .boxed())
     }

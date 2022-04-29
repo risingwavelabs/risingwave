@@ -23,8 +23,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::*;
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 

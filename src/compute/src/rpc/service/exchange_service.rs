@@ -25,7 +25,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
-use risingwave_stream::executor::Message;
+use risingwave_stream::executor_v2::Message;
 use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};

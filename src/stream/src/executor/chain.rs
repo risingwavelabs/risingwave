@@ -50,24 +50,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let schema = snapshot.schema().clone();
 
         if node.disable_rearrange {
-            let executor = ChainExecutor::new_from_v1(
-                snapshot,
-                mview,
-                notifier,
-                schema,
-                column_idxs,
-                params.op_info,
-            );
+            let executor = ChainExecutor::new(snapshot, mview, column_idxs, notifier, schema);
             Ok(executor.boxed())
         } else {
-            let executor = RearrangedChainExecutor::new_from_v1(
-                snapshot,
-                mview,
-                notifier,
-                schema,
-                column_idxs,
-                params.op_info,
-            );
+            let executor =
+                RearrangedChainExecutor::new(snapshot, mview, column_idxs, notifier, schema);
             Ok(executor.boxed())
         }
     }

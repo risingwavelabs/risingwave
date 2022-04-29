@@ -16,7 +16,7 @@ use std::hash::Hash;
 
 use risingwave_common::types::DataType;
 
-use super::Expr;
+use super::{Expr, ExprImpl, ExprType};
 use crate::binder::BoundQuery;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,8 +25,12 @@ pub enum SubqueryKind {
     Scalar,
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,
-    /// `IN` | `NOT IN` | `SOME` | `ALL` subquery. Returns a boolean.
-    SetComparison,
+    /// `IN` subquery.
+    In(ExprImpl),
+    /// Expression operator `SOME` subquery.
+    Some(ExprImpl, ExprType),
+    /// Expression operator `ALL` subquery.
+    All(ExprImpl, ExprType),
 }
 
 /// Subquery expression.
@@ -70,11 +74,10 @@ impl Expr for Subquery {
         match self.kind {
             SubqueryKind::Scalar => {
                 let types = self.query.data_types();
-                assert_eq!(types.len(), 1, "Scalar subquery with more than one column");
+                assert_eq!(types.len(), 1, "Subquery with more than one column");
                 types[0].clone()
             }
-            SubqueryKind::Existential => DataType::Boolean,
-            SubqueryKind::SetComparison => DataType::Boolean,
+            _ => DataType::Boolean,
         }
     }
 

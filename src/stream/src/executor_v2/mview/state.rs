@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::storage_value::{StorageValue, ValueMeta};
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
+use crate::executor_v2::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
 
 /// `ManagedMViewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.

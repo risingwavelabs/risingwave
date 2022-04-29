@@ -48,13 +48,12 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let executor = MaterializeExecutor::new_from_v1(
+        let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
-            params.op_info,
         );
 
         Ok(executor.boxed())
@@ -88,13 +87,12 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|x| ColumnId::from(x.column_id))
             .collect();
 
-        let executor = MaterializeExecutor::new_from_v1(
+        let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
-            params.op_info,
         );
 
         Ok(executor.boxed())

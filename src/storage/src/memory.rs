@@ -81,7 +81,7 @@ impl MemoryStateStore {
 }
 
 impl StateStore for MemoryStateStore {
-    type Iter<'a> = MemoryStateStoreIter;
+    type Iter = MemoryStateStoreIter;
 
     define_state_store_associated_type!();
 
@@ -154,9 +154,9 @@ impl StateStore for MemoryStateStore {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let mut inner = self.inner.lock().await;
-            let mut size: u64 = 0;
+            let mut size: usize = 0;
             for (key, value) in kv_pairs {
-                size += (key.len() + value.size()) as u64;
+                size += key.len() + value.size();
                 inner.insert((key, Reverse(epoch)), value.user_value);
             }
             Ok(size)
