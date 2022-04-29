@@ -11,7 +11,7 @@ use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 
-pub trait LevelSelector {
+pub trait LevelSelector: Sync + Send {
     fn select_level(
         &self,
         task_id: u64,
@@ -30,6 +30,8 @@ pub trait LevelSelector {
     }
 
     fn apply_compact_result(&mut self, levels: &[Level]);
+
+    fn name(&self) -> &'static str;
 }
 
 // TODO: Set these configurations by meta rpc
@@ -42,6 +44,12 @@ pub struct DynamicLevelSelector {
 struct SelectorContext {
     // score and level idx.
     level_scores: Vec<(u64, usize)>,
+}
+
+impl Default for DynamicLevelSelector {
+    fn default() -> Self {
+        DynamicLevelSelector::new(Arc::new(CompactionConfig::default()))
+    }
 }
 
 impl DynamicLevelSelector {
@@ -62,7 +70,7 @@ impl DynamicLevelSelector {
     ) -> Box<dyn CompactionPicker> {
         let overlap = Box::new(RangeOverlapStrategy::default());
         if level == 0 {
-            Box::new(TierCompactionPicker::new(task_id, self.config.clone(), overlap))
+            Box::new(TierCompactionPicker::new(task_id, self.base_level, self.config.clone(), overlap))
         } else {
             Box::new(SizeOverlapPicker::new(task_id, level, self.config.clone(), overlap))
         }
@@ -122,7 +130,7 @@ impl LevelSelector for DynamicLevelSelector {
             if score <= 100 {
                 return None;
             }
-            let picker = self.create_compaction_picker(level_idx);
+            let picker = self.create_compaction_picker(level_idx, task_id);
             if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
                 return Some(ret);
             }
@@ -205,5 +213,9 @@ impl LevelSelector for DynamicLevelSelector {
             self.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
             level_size = (level_size as f64 * level_multiplier) as u64;
         }
+    }
+
+    fn name(&self) -> &'static str {
+        "DynamicLevelSelector"
     }
 }

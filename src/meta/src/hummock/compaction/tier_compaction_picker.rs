@@ -33,6 +33,7 @@ const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 
 pub struct TierCompactionPicker {
     compact_task_id: u64,
+    target_level: usize,
     overlap_strategy: Box<dyn OverlapStrategy>,
     config: Arc<CompactionConfig>,
 }
@@ -51,8 +52,7 @@ impl CompactionPicker for TierCompactionPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
         let select_level = 0;
-        // TODO: After support dynamic-leveled-compaction, use base-level as target-level.
-        let target_level = 1;
+        let target_level = self.target_level;
 
         let next_task_id = self.compact_task_id;
         if levels[select_level].table_infos.is_empty() {
@@ -106,11 +106,12 @@ impl CompactionPicker for TierCompactionPicker {
 }
 
 impl TierCompactionPicker {
-    pub fn new(compact_task_id: u64, config: Arc<CompactionConfig>, overlap_strategy: Box<dyn OverlapStrategy>) -> TierCompactionPicker {
+    pub fn new(compact_task_id: u64, target_level: usize, config: Arc<CompactionConfig>, overlap_strategy: Box<dyn OverlapStrategy>) -> TierCompactionPicker {
         TierCompactionPicker {
             compact_task_id,
             config,
             overlap_strategy,
+            target_level,
         }
     }
 
@@ -150,7 +151,7 @@ impl TierCompactionPicker {
         level0: &Level,
         level0_handler: &mut LevelHandler,
     ) -> Option<SearchResult> {
-        if level0.table_infos.len() < self.level0_max_file_number {
+        if level0.table_infos.len() < self.config.level0_max_file_number {
             return None;
         }
 
