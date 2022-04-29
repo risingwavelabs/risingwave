@@ -36,7 +36,12 @@ impl Binder {
         let sub_query_id = self.next_subquery_id();
 
         self.bind_context(
-            query.body.fields().iter().map(|f| (false, f.clone())),
+            query
+                .body
+                .schema()
+                .fields
+                .iter()
+                .map(|f| (false, f.clone())),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;

@@ -41,39 +41,63 @@ fn deserialize_pk<const TOP_N_TYPE: usize>(
     Ok(pk)
 }
 
-// The function moves `pk_row_bytes_iter` as it is possible that we would take one extra cell from
-// it than the returned result. Allowing it to be reused after this function via borrowing may cause
-// confusion and bugs.
-async fn deserialize_bytes_to_pk_and_row<
-    const TOP_N_TYPE: usize,
-    I: StateStoreIter<Item = (Bytes, Bytes)>,
->(
-    mut pk_row_bytes_iter: I,
-    ordered_row_deserializer: &mut OrderedRowDeserializer,
-    cell_based_row_deserializer: &mut CellBasedRowDeserializer,
-    num_rows: Option<usize>,
-) -> Result<Vec<(OrderedRow, Row)>> {
-    let mut result = vec![];
-    while let Some((key, value)) = pk_row_bytes_iter.next().await? {
-        let pk_buf_and_row = cell_based_row_deserializer.deserialize(&key, &value)?;
-        match pk_buf_and_row {
-            Some((mut pk_buf, row)) => {
-                let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf, ordered_row_deserializer)?;
-                result.push((pk, row));
-                if let Some(num_rows) = num_rows && result.len() == num_rows {
-                    return Ok(result);
-                }
-            }
-            None => {}
+pub struct PkAndRowIterator<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, const TOP_N_TYPE: usize> {
+    iter: I,
+    ordered_row_deserializer: &'a mut OrderedRowDeserializer,
+    cell_based_row_deserializer: &'a mut CellBasedRowDeserializer,
+}
+
+impl<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, const TOP_N_TYPE: usize>
+    PkAndRowIterator<'a, I, TOP_N_TYPE>
+{
+    pub fn new(
+        iter: I,
+        ordered_row_deserializer: &'a mut OrderedRowDeserializer,
+        cell_based_row_deserializer: &'a mut CellBasedRowDeserializer,
+    ) -> Self {
+        Self {
+            iter,
+            ordered_row_deserializer,
+            cell_based_row_deserializer,
         }
     }
-    // Reaching here implies that all the key value pairs have been drained from
-    // `pk_row_bytes_iter`. Try to take out the final row.
-    // It is possible that `iter` is empty, so we may read nothing and there is no such final row.
-    let pk_buf_and_row = cell_based_row_deserializer.take();
-    if let Some(mut pk_buf_and_row) = pk_buf_and_row {
-        let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf_and_row.0, ordered_row_deserializer)?;
-        result.push((pk, pk_buf_and_row.1));
+
+    async fn deserialize_bytes_to_pk_and_row(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+        while let Some((key, value)) = self.iter.next().await? {
+            let pk_buf_and_row = self.cell_based_row_deserializer.deserialize(&key, &value)?;
+            match pk_buf_and_row {
+                Some((mut pk_buf, row)) => {
+                    let pk =
+                        deserialize_pk::<TOP_N_TYPE>(&mut pk_buf, self.ordered_row_deserializer)?;
+                    return Ok(Some((pk, row)));
+                }
+                None => {}
+            }
+        }
+        // Reaching here implies that all the key value pairs have been drained from `self.iter`.
+        // Try to take out the final row.
+        // It is possible that `self.iter` is empty, so we may read nothing and there is no such
+        // final row.
+        let pk_buf_and_row = self.cell_based_row_deserializer.take();
+        if let Some(mut pk_buf_and_row) = pk_buf_and_row {
+            let pk =
+                deserialize_pk::<TOP_N_TYPE>(&mut pk_buf_and_row.0, self.ordered_row_deserializer)?;
+            Ok(Some((pk, pk_buf_and_row.1)))
+        } else {
+            Ok(None)
+        }
     }
-    Ok(result)
+
+    pub async fn next(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+        let pk_and_row = self.deserialize_bytes_to_pk_and_row().await?;
+        Ok(pk_and_row)
+    }
+}
+
+impl<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, const TOP_N_TYPE: usize> Drop
+    for PkAndRowIterator<'a, I, TOP_N_TYPE>
+{
+    fn drop(&mut self) {
+        self.cell_based_row_deserializer.reset();
+    }
 }

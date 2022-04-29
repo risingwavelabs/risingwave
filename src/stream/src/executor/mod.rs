@@ -18,7 +18,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
-pub use barrier_align::*;
 pub use batch_query::*;
 pub use chain::*;
 pub use dispatch::*;
@@ -35,14 +34,13 @@ pub use top_n_appendonly::*;
 
 use crate::executor_v2::{
     BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
-    LookupExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
+    LookupExecutorBuilder, LookupUnionExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
 };
 use crate::task::{
     ActorId, DispatcherId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION,
 };
 
 mod actor;
-mod barrier_align;
 mod batch_query;
 mod chain;
 mod dispatch;
@@ -301,7 +299,7 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug, EnumAsInner, PartialEq)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -536,6 +534,7 @@ pub fn create_executor(
         Node::ArrangeNode => ArrangeExecutorBuilder,
         Node::LookupNode => LookupExecutorBuilder,
         Node::UnionNode => UnionExecutorBuilder,
+        Node::LookupUnionNode => LookupUnionExecutorBuilder,
     }
 }
 

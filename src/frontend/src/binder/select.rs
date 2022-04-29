@@ -34,25 +34,43 @@ pub struct BoundSelect {
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
-    pub schema: Schema,
+    schema: Schema,
 }
 
 impl BoundSelect {
-    /// The names returned by this [`BoundSelect`].
-    pub fn names(&self) -> Vec<String> {
-        self.aliases
+    pub fn create(
+        binder: &Binder,
+        distinct: bool,
+        select_items: Vec<ExprImpl>,
+        aliases: Vec<Option<String>>,
+        from: Option<Relation>,
+        where_clause: Option<ExprImpl>,
+        group_by: Vec<ExprImpl>,
+    ) -> Result<Self> {
+        // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
+        let fields = select_items
             .iter()
-            .cloned()
-            .map(|alias| alias.unwrap_or_else(|| UNNAMED_COLUMN.to_string()))
-            .collect()
+            .zip_eq(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                binder.expr_to_field(s, name)
+            })
+            .collect::<Result<Vec<Field>>>()?;
+
+        Ok(Self {
+            distinct,
+            select_items,
+            aliases,
+            from,
+            where_clause,
+            group_by,
+            schema: Schema { fields },
+        })
     }
 
-    /// The types returned by this [`BoundSelect`].
-    pub fn data_types(&self) -> Vec<DataType> {
-        self.select_items
-            .iter()
-            .map(|item| item.return_type())
-            .collect()
+    /// The schema returned by this [`BoundSelect`].
+    pub fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     pub fn is_correlated(&self) -> bool {
@@ -98,25 +116,15 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
-        let fields = select_items
-            .iter()
-            .zip_eq(aliases.iter())
-            .map(|(s, a)| {
-                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                self.expr_to_field(s, name)
-            })
-            .collect::<Result<Vec<Field>>>()?;
-
-        Ok(BoundSelect {
-            distinct: select.distinct,
+        BoundSelect::create(
+            self,
+            select.distinct,
             select_items,
             aliases,
             from,
-            where_clause: selection,
+            selection,
             group_by,
-            schema: Schema { fields },
-        })
+        )
     }
 
     pub fn bind_project(
