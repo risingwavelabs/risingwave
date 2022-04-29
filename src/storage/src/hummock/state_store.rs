@@ -17,8 +17,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{key_with_epoch, FullKey};
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -244,10 +243,8 @@ impl StateStore for HummockStorage {
                         let table_idx = level
                             .table_infos
                             .partition_point(|table| {
-                                let ord = VersionedComparator::compare_key(
-                                    &table.key_range.as_ref().unwrap().left,
-                                    &FullKey::from_user_key_slice(key, epoch).into_inner(),
-                                );
+                                let ord =
+                                    user_key(&table.key_range.as_ref().unwrap().left).cmp(key);
                                 ord == Ordering::Less || ord == Ordering::Equal
                             })
                             .saturating_sub(1); // considering the boundary of 0
