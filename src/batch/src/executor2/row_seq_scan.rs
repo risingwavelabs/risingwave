@@ -124,12 +124,11 @@ impl<S: StateStore> RowSeqScanExecutor2<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         if !self.should_ignore() {
-            let mut iter = Some(self.table.iter(self.epoch).await.map_err(RwError::from)?);
+            let mut iter = self.table.iter(self.epoch).await.map_err(RwError::from)?;
 
             loop {
                 let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                let iter = iter.as_mut().expect("executor not open");
                 let chunk = iter
                     .collect_data_chunk(&self.table, Some(self.chunk_size))
                     .await
