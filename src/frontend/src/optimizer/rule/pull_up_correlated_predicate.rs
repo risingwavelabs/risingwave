@@ -29,12 +29,12 @@ pub struct PullUpCorrelatedPredicate {}
 impl Rule for PullUpCorrelatedPredicate {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        if !matches!(apply.join_type(), JoinType::LeftOuter | JoinType::LeftSemi) {
+        let (apply_left, apply_right, apply_on, join_type) = apply.clone().decompose();
+        if !matches!(join_type, JoinType::LeftOuter | JoinType::LeftSemi) {
             return None;
         }
 
-        let right = apply.right();
-        let project = right.as_logical_project()?;
+        let project = apply_right.as_logical_project()?;
         let (mut proj_exprs, mut proj_expr_alias, _) = project.clone().decompose();
 
         let input = project.input();
@@ -42,7 +42,7 @@ impl Rule for PullUpCorrelatedPredicate {
 
         let mut rewriter = Rewriter {
             input_refs: vec![],
-            index: proj_exprs.len() + apply.left().schema().fields().len(),
+            index: proj_exprs.len() + apply_left.schema().fields().len(),
         };
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -78,10 +78,10 @@ impl Rule for PullUpCorrelatedPredicate {
         let project = LogicalProject::new(filter, proj_exprs, proj_expr_alias);
 
         // Merge these expressions with LogicalApply into LogicalJoin.
-        let on = Condition {
+        let on = apply_on.and(Condition {
             conjunctions: cor_exprs,
-        };
-        Some(LogicalJoin::new(apply.left(), project.into(), apply.join_type(), on).into())
+        });
+        Some(LogicalJoin::new(apply_left, project.into(), join_type, on).into())
     }
 }
 

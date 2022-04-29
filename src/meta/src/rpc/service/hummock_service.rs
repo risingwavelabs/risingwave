@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::error::{tonic_err, ErrorCode};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -202,9 +203,16 @@ where
         &self,
         request: Request<SubscribeCompactTasksRequest>,
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let rx = self
-            .compactor_manager
-            .add_compactor(request.into_inner().context_id);
+        let context_id = request.into_inner().context_id;
+        // check_context and add_compactor as a whole is not atomic, but compactor_manager will
+        // remove invalid compactor eventually.
+        if !self.hummock_manager.check_context(context_id).await {
+            return Err(tonic_err(ErrorCode::MetaError(format!(
+                "invalid hummock context {}",
+                context_id
+            ))));
+        }
+        let rx = self.compactor_manager.add_compactor(context_id);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
