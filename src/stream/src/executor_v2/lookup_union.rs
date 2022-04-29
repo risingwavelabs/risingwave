@@ -135,7 +135,11 @@ impl LookupUnionExecutor {
                     }
                 }
             }
-            yield Message::Barrier(this_barrier.take().unwrap());
+            if end {
+                break;
+            } else {
+                yield Message::Barrier(this_barrier.take().unwrap());
+            }
         }
     }
 }
