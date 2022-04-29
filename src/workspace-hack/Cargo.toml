@@ -55,7 +55,7 @@ tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util-3b31131e45eafb45 = { package = "tokio-util", version = "0.6", features = ["codec", "io"] }
 tokio-util-ca01ad9e24f5d932 = { package = "tokio-util", version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
-tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "httpdate", "map-response-body", "mime", "mime_guess", "percent-encoding", "tokio", "tokio-util", "tower", "util"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "httpdate", "mime", "mime_guess", "percent-encoding", "tokio", "tokio-util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
@@ -105,7 +105,7 @@ tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util-3b31131e45eafb45 = { package = "tokio-util", version = "0.6", features = ["codec", "io"] }
 tokio-util-ca01ad9e24f5d932 = { package = "tokio-util", version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
-tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "httpdate", "map-response-body", "mime", "mime_guess", "percent-encoding", "tokio", "tokio-util", "tower", "util"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "httpdate", "mime", "mime_guess", "percent-encoding", "tokio", "tokio-util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
