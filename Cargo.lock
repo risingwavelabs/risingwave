@@ -3568,6 +3568,7 @@ name = "risingwave_hummock_sdk"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "hex",
  "log 0.4.16",
  "prost",
  "risingwave_pb",
