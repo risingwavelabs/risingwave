@@ -18,7 +18,7 @@ use std::io::Write;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
-use crate::error::ErrorCode::{InternalError, IoError};
+use crate::error::ErrorCode::{self, InternalError, IoError};
 use crate::error::{Result, RwError};
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
@@ -97,6 +97,13 @@ impl NaiveDateWrapper {
         ))
     }
 
+    pub fn new_with_days_value_encoding(days: i32) -> Result<Self> {
+        Ok(NaiveDateWrapper::new(
+            NaiveDate::from_num_days_from_ce_opt(days)
+                .ok_or(ErrorCode::InvalidNaiveDateEncoding(days))?,
+        ))
+    }
+
     /// Converted to the number of days since 1970.1.1 for compatibility with existing Java
     /// frontend. TODO: Save days directly when using Rust frontend.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
@@ -116,6 +123,13 @@ impl NaiveTimeWrapper {
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or(memcomparable::Error::InvalidNaiveTimeEncoding(secs, nano))?,
+        ))
+    }
+
+    pub fn new_with_secs_nano_value_encoding(secs: u32, nano: u32) -> Result<Self> {
+        Ok(NaiveTimeWrapper::new(
+            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
+                .ok_or(ErrorCode::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -145,6 +159,13 @@ impl NaiveDateTimeWrapper {
             NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
                 memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs),
             )?
+        }))
+    }
+
+    pub fn new_with_secs_nsecs_value_encoding(secs: i64, nsecs: u32) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new({
+            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+                .ok_or(ErrorCode::InvalidNaiveDateTimeEncoding(secs, nsecs))?
         }))
     }
 

@@ -118,7 +118,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         for (raw_key, mut raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
             let value = deserialize_cell_not_null(&mut raw_value, &DataType::Varchar)?.unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(

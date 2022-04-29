@@ -125,6 +125,17 @@ pub enum ErrorCode {
     #[error("End of the stream")]
     Eof,
 
+    #[error("Invalid bool value encoding: {0}")]
+    InvalidBoolEncoding(u8),
+    #[error("Invalid UTF8 value encofing: {0}")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
+    #[error("Invalid NaiveDate value encoding: days: {0}")]
+    InvalidNaiveDateEncoding(i32),
+    #[error("invalid NaiveDateTime value encoding: secs: {0} nsecs: {1}")]
+    InvalidNaiveDateTimeEncoding(i64, u32),
+    #[error("invalid NaiveTime value encoding: secs: {0} nano: {1}")]
+    InvalidNaiveTimeEncoding(u32, u32),
+
     #[error("Unknown error: {0}")]
     UnknownError(String),
 }
@@ -275,6 +286,11 @@ impl ErrorCode {
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,
             ErrorCode::BindError(_) => 23,
+            ErrorCode::InvalidBoolEncoding(_) => 24,
+            ErrorCode::InvalidUtf8(_) => 25,
+            ErrorCode::InvalidNaiveDateEncoding(_) => 26,
+            ErrorCode::InvalidNaiveDateTimeEncoding(_, _) => 27,
+            ErrorCode::InvalidNaiveTimeEncoding(_, _) => 28,
             ErrorCode::UnknownError(_) => 101,
         }
     }

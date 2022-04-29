@@ -17,7 +17,6 @@
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
-use memcomparable;
 
 use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{
@@ -30,7 +29,7 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
     if let Some(datum) = cell {
         buf.put_u8(1);
-        serialize_datum(datum.as_scalar_ref_impl(), &mut buf)
+        serialize_value(datum.as_scalar_ref_impl(), &mut buf)
     } else {
         buf.put_u8(0);
     }
@@ -40,7 +39,7 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
 /// Serialize datum cannot be null into cell bytes.
 pub fn serialize_cell_not_null(cell: &Datum) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = vec![];
-    serialize_datum(
+    serialize_value(
         cell.as_ref()
             .expect("datum cannot be null")
             .as_scalar_ref_impl(),
@@ -64,15 +63,15 @@ pub fn deserialize_cell<B: Buf>(data: &mut B, ty: &DataType) -> Result<Datum> {
             ))));
         }
     }
-    Ok(deserialize_datum(ty, data)?)
+    deserialize_value(ty, data)
 }
 
 /// Deserialize cell bytes which cannot be null into datum.
 pub fn deserialize_cell_not_null<B: Buf>(data: &mut B, ty: &DataType) -> Result<Datum> {
-    Ok(deserialize_datum(ty, data)?)
+    deserialize_value(ty, data)
 }
 
-fn serialize_datum(value: ScalarRefImpl, buf: &mut Vec<u8>) {
+fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
     match value {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
@@ -96,32 +95,36 @@ fn serialize_datum(value: ScalarRefImpl, buf: &mut Vec<u8>) {
     }
 }
 
-fn serialize_str(bytes: &[u8], buf: &mut Vec<u8>) {
+fn serialize_str(bytes: &[u8], mut buf: impl BufMut) {
     buf.put_u32_le(bytes.len() as u32);
     buf.put_slice(bytes);
 }
 
-fn serialize_interval(interval: &IntervalUnit, buf: &mut Vec<u8>) {
+fn serialize_interval(interval: &IntervalUnit, mut buf: impl BufMut) {
     buf.put_i32_le(interval.get_months());
     buf.put_i32_le(interval.get_days());
     buf.put_i64_le(interval.get_ms());
 }
 
-fn serialize_naivedate(days: i32, buf: &mut Vec<u8>) {
+fn serialize_naivedate(days: i32, mut buf: impl BufMut) {
     buf.put_i32_le(days);
 }
 
-fn serialize_naivedatetime(secs: i64, nsecs: u32, buf: &mut Vec<u8>) {
+fn serialize_naivedatetime(secs: i64, nsecs: u32, mut buf: impl BufMut) {
     buf.put_i64_le(secs);
     buf.put_u32_le(nsecs);
 }
 
-fn serialize_naivetime(secs: u32, nano: u32, buf: &mut Vec<u8>) {
+fn serialize_naivetime(secs: u32, nano: u32, mut buf: impl BufMut) {
     buf.put_u32_le(secs);
     buf.put_u32_le(nano);
 }
 
-fn deserialize_datum<B: Buf>(ty: &DataType, data: &mut B) -> memcomparable::Result<Datum> {
+fn serialize_decimal(decimal: &Decimal, mut buf: impl BufMut) {
+    buf.put_slice(&decimal.unordered_serialize());
+}
+
+fn deserialize_value<B: Buf>(ty: &DataType, data: &mut B) -> Result<Datum> {
     Ok(Some(match *ty {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
@@ -142,90 +145,47 @@ fn deserialize_datum<B: Buf>(ty: &DataType, data: &mut B) -> memcomparable::Resu
     }))
 }
 
-fn deserialize_str<B: Buf>(data: &mut B) -> memcomparable::Result<String> {
+fn deserialize_str(mut data: impl Buf) -> Result<String> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    Ok(String::from_utf8(bytes)?)
+    Ok(String::from_utf8(bytes).map_err(ErrorCode::InvalidUtf8)?)
 }
 
-fn deserialize_bool<B: Buf>(data: &mut B) -> memcomparable::Result<bool> {
+fn deserialize_bool(mut data: impl Buf) -> Result<bool> {
     match data.get_u8() {
         1 => Ok(true),
         0 => Ok(false),
-        value => Err(memcomparable::Error::InvalidBoolEncoding(value)),
+        value => Err(RwError::from(ErrorCode::InvalidBoolEncoding(value))),
     }
 }
 
-fn deserialize_interval<B: Buf>(data: &mut B) -> memcomparable::Result<IntervalUnit> {
+fn deserialize_interval(mut data: impl Buf) -> Result<IntervalUnit> {
     let months = data.get_i32_le();
     let days = data.get_i32_le();
     let ms = data.get_i64_le();
     Ok(IntervalUnit::new(months, days, ms))
 }
 
-fn deserialize_naivetime<B: Buf>(data: &mut B) -> memcomparable::Result<NaiveTimeWrapper> {
+fn deserialize_naivetime(mut data: impl Buf) -> Result<NaiveTimeWrapper> {
     let secs = data.get_u32_le();
     let nano = data.get_u32_le();
-    NaiveTimeWrapper::new_with_secs_nano(secs, nano)
+    NaiveTimeWrapper::new_with_secs_nano_value_encoding(secs, nano)
 }
 
-fn deserialize_naivedatetime<B: Buf>(data: &mut B) -> memcomparable::Result<NaiveDateTimeWrapper> {
+fn deserialize_naivedatetime(mut data: impl Buf) -> Result<NaiveDateTimeWrapper> {
     let secs = data.get_i64_le();
     let nsecs = data.get_u32_le();
-    NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs)
+    NaiveDateTimeWrapper::new_with_secs_nsecs_value_encoding(secs, nsecs)
 }
 
-fn deserialize_naivedate<B: Buf>(data: &mut B) -> memcomparable::Result<NaiveDateWrapper> {
+fn deserialize_naivedate(mut data: impl Buf) -> Result<NaiveDateWrapper> {
     let days = data.get_i32_le();
-    NaiveDateWrapper::new_with_days(days)
+    NaiveDateWrapper::new_with_days_value_encoding(days)
 }
 
-fn serialize_decimal(decimal: &Decimal, byte_array: &mut Vec<u8>) {
-    let (mut mantissa, mut scale) = decimal.mantissa_scale_for_serialization();
-    if mantissa < 0 {
-        mantissa = -mantissa;
-        // We use the most significant bit of `scale` to denote whether decimal is negative or not.
-        scale += 1 << 7;
-    }
-    byte_array.push(scale);
-    while mantissa != 0 {
-        let byte = (mantissa % 100) as u8;
-        byte_array.push(byte);
-        mantissa /= 100;
-    }
-    // Add 100 marker for the end of decimal (cuz `byte` always can not be 100 in above loop).
-    byte_array.push(100);
-}
-
-fn read_decimal<B: Buf>(data: &mut B) -> memcomparable::Result<Vec<u8>> {
-    let flag = data.get_u8();
-    let mut byte_array = vec![flag];
-    loop {
-        let byte = data.get_u8();
-        if byte == 100 {
-            break;
-        }
-        byte_array.push(byte);
-    }
-    Ok(byte_array)
-}
-
-fn deserialize_decimal<B: Buf>(data: &mut B) -> memcomparable::Result<Decimal> {
-    let bytes = read_decimal(data)?;
-    let mut scale = bytes[0];
-    let neg = if (scale & 1 << 7) > 0 {
-        scale &= !(1 << 7);
-        true
-    } else {
-        false
-    };
-    let mut mantissa: i128 = 0;
-    for (exp, byte) in bytes.iter().skip(1).enumerate() {
-        mantissa += (*byte as i128) * 100i128.pow(exp as u32);
-    }
-    if neg {
-        mantissa = -mantissa;
-    }
-    Ok(Decimal::from_i128_with_scale(mantissa, scale as u32))
+fn deserialize_decimal(mut data: impl Buf) -> Result<Decimal> {
+    let mut bytes = [0; 16];
+    data.copy_to_slice(&mut bytes);
+    Ok(Decimal::unordered_deserialize(bytes))
 }
