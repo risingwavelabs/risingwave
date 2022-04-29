@@ -21,6 +21,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 
@@ -446,6 +447,9 @@ impl StreamGraphBuilder {
             Node::ChainNode(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
             _ => {
                 let mut new_stream_node = stream_node.clone();
+
+                // Table id rewrite done below.
+
                 if let Node::HashJoinNode(node) = new_stream_node.node.as_mut().unwrap() {
                     // The operator id must be assigned with table ids. Otherwise it is a logic
                     // error.
@@ -455,6 +459,18 @@ impl StreamGraphBuilder {
                     node.right_table_id = right_table_id;
                 }
 
+                if let Node::LookupNode(node) = new_stream_node.node.as_mut().unwrap() {
+                    if let Some(ArrangementTableId::TableId(table_id)) =
+                        &mut node.arrangement_table_id
+                    {
+                        *table_id += table_id_offset;
+                    }
+                }
+
+                if let Node::ArrangeNode(node) = new_stream_node.node.as_mut().unwrap() {
+                    node.table_id += table_id_offset;
+                }
+
                 if let Node::HashAggNode(node) = new_stream_node.node.as_mut().unwrap() {
                     assert_eq!(node.table_ids.len(), node.agg_calls.len());
                     // In-place update the table id. Convert from local to global.
@@ -462,6 +478,7 @@ impl StreamGraphBuilder {
                         *table_id += table_id_offset;
                     }
                 }
+
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
                         Node::ExchangeNode(_) => {

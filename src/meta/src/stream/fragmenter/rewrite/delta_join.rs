@@ -13,12 +13,16 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
 use risingwave_common::error::Result;
-use risingwave_pb::plan_common::Field;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField};
+use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
-    ArrangeNode, DeltaIndexJoinNode, DispatchStrategy, DispatcherType, ExchangeNode, LookupNode,
-    LookupUnionNode, StreamNode,
+    ArrangeNode, ArrangementInfo, DeltaIndexJoinNode, DispatchStrategy, DispatcherType,
+    ExchangeNode, LookupNode, LookupUnionNode, StreamNode,
 };
 
 use crate::stream::fragmenter::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
@@ -107,21 +111,62 @@ impl StreamFragmenter {
     fn build_arrange_for_delta_join(
         &self,
         state: &mut BuildFragmentGraphState,
-
         exchange_node: &StreamNode,
         arrange_key_indexes: Vec<i32>,
-    ) -> StreamNode {
-        StreamNode {
-            operator_id: state.gen_operator_id() as u64,
-            identity: "Arrange".into(),
-            fields: exchange_node.fields.clone(),
-            pk_indices: exchange_node.pk_indices.clone(),
-            node: Some(Node::ArrangeNode(ArrangeNode {
-                arrange_key_indexes,
-            })),
-            input: vec![exchange_node.clone()],
-            append_only: exchange_node.append_only,
-        }
+        table_id: u32,
+    ) -> (ArrangementInfo, StreamNode) {
+        // Set materialize keys as arrange key + pk
+        let arrange_key_orders = arrange_key_indexes
+            .iter()
+            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
+            .chain(
+                exchange_node
+                    .pk_indices
+                    .iter()
+                    .map(|x| OrderPair::new(*x as usize, OrderType::Ascending)),
+            )
+            .map(|x| ColumnOrder {
+                order_type: x.order_type.to_prost() as i32,
+                input_ref: Some(InputRefExpr {
+                    column_idx: x.column_idx as i32,
+                }),
+                return_type: None,
+            })
+            .collect();
+
+        // Simply generate column id 0..schema_len
+        let column_descs = exchange_node
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| {
+                let field = Field::from(field);
+                let mut desc = ColumnDesc::from_field_without_column_id(&field);
+                desc.column_id = ColumnId::new(idx as i32);
+                desc.to_protobuf()
+            })
+            .collect();
+
+        let arrangement_info = ArrangementInfo {
+            arrange_key_orders,
+            column_descs,
+        };
+
+        (
+            arrangement_info.clone(),
+            StreamNode {
+                operator_id: state.gen_operator_id() as u64,
+                identity: "Arrange".into(),
+                fields: exchange_node.fields.clone(),
+                pk_indices: exchange_node.pk_indices.clone(),
+                node: Some(Node::ArrangeNode(ArrangeNode {
+                    table_info: Some(arrangement_info),
+                    table_id,
+                })),
+                input: vec![exchange_node.clone()],
+                append_only: exchange_node.append_only,
+            },
+        )
     }
 
     fn dispatch_no_shuffle() -> DispatchStrategy {
@@ -135,7 +180,7 @@ impl StreamFragmenter {
         &self,
         state: &mut BuildFragmentGraphState,
         (exchange_node_arrangement, exchange_node_stream): (&StreamNode, &StreamNode),
-        (output_fields, output_pk_indices): (Vec<Field>, Vec<u32>),
+        (output_fields, output_pk_indices): (Vec<ProstField>, Vec<u32>),
         lookup_node: LookupNode,
     ) -> StreamNode {
         StreamNode {
@@ -159,6 +204,7 @@ impl StreamFragmenter {
         arrange_0_frag: StreamFragment,
         arrange_1_frag: StreamFragment,
         node: &StreamNode,
+        is_local_table_id: bool,
     ) -> Result<StreamNode> {
         let delta_join_node = match &node.node {
             Some(Node::DeltaIndexJoin(node)) => node,
@@ -183,14 +229,17 @@ impl StreamFragmenter {
                 stream_key: delta_join_node.right_key.clone(),
                 arrange_key: delta_join_node.left_key.clone(),
                 use_current_epoch: false,
-                // will be filled later in StreamFragment::seal
-                arrange_fragment_id: u32::MAX,
-                arrange_local_fragment_id: arrange_0_frag.fragment_id.as_local_id(),
-                arrange_operator_id: arrange_0_frag.node.unwrap().operator_id,
+                // will be updated later to a global id
+                arrangement_table_id: if is_local_table_id {
+                    Some(ArrangementTableId::TableId(delta_join_node.left_table_id))
+                } else {
+                    Some(ArrangementTableId::IndexId(delta_join_node.left_table_id))
+                },
                 column_mapping: (i1_length..i1_length + i0_length)
                     .chain(0..i1_length)
                     .map(|x| x as _)
                     .collect_vec(),
+                arrangement_table_info: delta_join_node.left_info.clone(),
             },
         );
 
@@ -202,11 +251,14 @@ impl StreamFragmenter {
                 stream_key: delta_join_node.left_key.clone(),
                 arrange_key: delta_join_node.right_key.clone(),
                 use_current_epoch: true,
-                // will be filled later in StreamFragment::seal
-                arrange_fragment_id: u32::MAX,
-                arrange_local_fragment_id: arrange_1_frag.fragment_id.as_local_id(),
-                arrange_operator_id: arrange_1_frag.node.unwrap().operator_id,
+                // will be updated later to a global id
+                arrangement_table_id: if is_local_table_id {
+                    Some(ArrangementTableId::TableId(delta_join_node.right_table_id))
+                } else {
+                    Some(ArrangementTableId::IndexId(delta_join_node.right_table_id))
+                },
                 column_mapping: (0..i0_length + i1_length).map(|x| x as _).collect_vec(),
+                arrangement_table_info: delta_join_node.right_info.clone(),
             },
         );
 
@@ -323,6 +375,7 @@ impl StreamFragmenter {
             arrange_0_frag,
             arrange_1_frag,
             &node,
+            false,
         )?;
 
         Ok(union)
@@ -368,15 +421,17 @@ impl StreamFragmenter {
         let (link_i0a0, input_0_frag, exchange_i0a0) =
             self.build_input_with_exchange(state, node.input.remove(0))?;
 
-        let arrange_0 = self.build_arrange_for_delta_join(
+        let (arrange_0_info, arrange_0) = self.build_arrange_for_delta_join(
             state,
             &exchange_i0a0,
             hash_join_node.left_key.clone(),
+            hash_join_node.left_table_id,
         );
-        let arrange_1 = self.build_arrange_for_delta_join(
+        let (arrange_1_info, arrange_1) = self.build_arrange_for_delta_join(
             state,
             &exchange_i1a1,
             hash_join_node.right_key.clone(),
+            hash_join_node.right_table_id,
         );
 
         let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
@@ -402,6 +457,8 @@ impl StreamFragmenter {
                 left_table_id: hash_join_node.left_table_id,
                 right_table_id: hash_join_node.right_table_id,
                 condition: hash_join_node.condition.clone(),
+                left_info: Some(arrange_0_info),
+                right_info: Some(arrange_1_info),
             })),
             ..node
         };
@@ -412,6 +469,7 @@ impl StreamFragmenter {
             arrange_0_frag,
             arrange_1_frag,
             &delta_join_node,
+            true,
         )?;
 
         Ok(union)
