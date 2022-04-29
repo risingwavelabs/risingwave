@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use tokio_stream::StreamExt;
 use tracing_futures::Instrument;
 
-use super::StreamConsumer;
+use crate::executor::StreamConsumer;
 use crate::task::{ActorId, SharedContext};
 
 /// `Actor` is the basic execution unit in the streaming framework.

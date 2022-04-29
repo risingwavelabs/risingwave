@@ -21,11 +21,13 @@ use risingwave_common::catalog::Schema;
 
 pub use super::executor::{Barrier, Message, Mutation, PkIndices, PkIndicesRef};
 
+mod actor;
 pub mod aggregation;
 mod barrier_align;
 mod batch_query;
 mod chain;
 mod debug;
+pub mod dispatch;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
@@ -36,7 +38,8 @@ mod lookup;
 mod lookup_union;
 mod managed_state;
 pub mod merge;
-pub(crate) mod mview;
+pub mod monitor;
+mod mview;
 mod project;
 mod rearranged_chain;
 pub mod receiver;
@@ -49,6 +52,7 @@ mod top_n_appendonly;
 mod top_n_executor;
 mod union;
 
+pub use actor::Actor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;

@@ -32,8 +32,8 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use super::error::StreamExecutorError;
+use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor};
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 

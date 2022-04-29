@@ -37,9 +37,11 @@ use tokio::task::JoinHandle;
 use super::{unique_executor_id, unique_operator_id, CollectResult, ComputeClientPool};
 use crate::executor::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
+use crate::executor_v2::dispatch::*;
 use crate::executor_v2::merge::RemoteInput;
+use crate::executor_v2::monitor::StreamingMetrics;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{BoxedExecutor, DebugExecutor, Executor, MergeExecutor};
+use crate::executor_v2::{Actor, BoxedExecutor, DebugExecutor, Executor, MergeExecutor};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,

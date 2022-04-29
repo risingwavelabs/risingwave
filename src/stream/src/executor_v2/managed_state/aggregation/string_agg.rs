@@ -277,7 +277,7 @@ mod tests {
 
     use super::super::ManagedTableState;
     use super::*;
-    use crate::executor::test_utils::create_in_memory_keyspace;
+    use crate::executor_v2::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(
         keyspace: &Keyspace<S>,

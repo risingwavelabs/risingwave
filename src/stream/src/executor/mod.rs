@@ -17,16 +17,13 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub use actor::Actor;
 pub use batch_query::*;
 pub use chain::*;
-pub use dispatch::*;
 pub use filter::*;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use local_simple_agg::*;
 pub use merge::*;
-pub use monitor::*;
 pub use mview::*;
 pub use project::*;
 pub use top_n::*;
@@ -40,25 +37,17 @@ use crate::task::{
     ActorId, DispatcherId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION,
 };
 
-mod actor;
 mod batch_query;
 mod chain;
-mod dispatch;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
 mod local_simple_agg;
 mod merge;
-pub mod monitor;
 mod mview;
 mod project;
 mod top_n;
 mod top_n_appendonly;
-
-#[cfg(test)]
-mod integration_tests;
-#[cfg(test)]
-pub(crate) mod test_utils;
 
 use enum_as_inner::EnumAsInner;
 use futures::Stream;

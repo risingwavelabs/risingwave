@@ -22,15 +22,15 @@ use futures::channel::mpsc::Sender;
 use futures::{SinkExt, Stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Op;
-use risingwave_common::error::internal_error;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
-use super::{Barrier, Message, Mutation, Result, StreamChunk, StreamConsumer};
-use crate::executor_v2::BoxedExecutor;
+use crate::executor::StreamConsumer;
+use crate::executor_v2::{Barrier, BoxedExecutor, Message, Mutation};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
