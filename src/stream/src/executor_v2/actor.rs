@@ -68,7 +68,7 @@ where
             let to_stop = barrier.is_to_stop_actor(self.id);
             if to_stop {
                 tracing::trace!(actor_id = self.id, "actor exit");
-                break;
+                return Ok(());
             }
 
             // Tracing related work
@@ -94,6 +94,8 @@ where
                 );
             }
         }
+
+        tracing::error!(actor_id = self.id, "actor exit without stop barrier");
 
         Ok(())
     }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
 const WORKER_ID_SHIFT_BITS: u8 = 12;
@@ -55,27 +55,39 @@ impl RowIdGenerator {
     }
 
     pub fn next(&mut self) -> RowId {
-        let current_duration = self.epoch.elapsed().unwrap().as_millis() as i64;
-        if current_duration < self.last_duration_ms {
+        let current_duration = self.epoch.elapsed().unwrap();
+        let current_duration_ms = current_duration.as_millis() as i64;
+        if current_duration_ms < self.last_duration_ms {
             tracing::warn!(
                 "Clock moved backwards: last_duration={}, current_duration={}",
                 self.last_duration_ms,
-                current_duration
+                current_duration_ms
             );
         }
 
-        if current_duration > self.last_duration_ms {
-            self.last_duration_ms = current_duration;
+        if current_duration_ms > self.last_duration_ms {
+            self.last_duration_ms = current_duration_ms;
             self.sequence = 0;
         }
-        assert!(self.sequence < SEQUENCE_UPPER_BOUND);
 
-        let row_id = self.last_duration_ms << TIMESTAMP_SHIFT_BITS
-            | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
-            | self.sequence as i64;
-        self.sequence += 1;
+        if self.sequence < SEQUENCE_UPPER_BOUND {
+            let row_id = self.last_duration_ms << TIMESTAMP_SHIFT_BITS
+                | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
+                | self.sequence as i64;
+            self.sequence += 1;
 
-        row_id
+            row_id
+        } else {
+            // If the sequence reaches the upper bound, spin loop here and wait for next
+            // millisecond. Here we do not consider time goes backwards, it can also be covered
+            // here.
+            tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
+            std::thread::sleep(
+                Duration::from_millis(current_duration.subsec_millis() as u64 + 1)
+                    - Duration::from_nanos(current_duration.subsec_nanos() as u64),
+            );
+            self.next()
+        }
     }
 }
 
@@ -87,7 +99,7 @@ mod tests {
     fn test_generator() {
         let mut generator = RowIdGenerator::new(0);
         let mut last_row_id = generator.next();
-        for _ in 0..1000 {
+        for _ in 0..100000 {
             let row_id = generator.next();
             assert!(row_id > last_row_id);
             last_row_id = row_id;

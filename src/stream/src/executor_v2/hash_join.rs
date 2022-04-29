@@ -31,9 +31,9 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
+use super::managed_state::join::*;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
-use crate::executor::managed_state::join::*;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -694,8 +694,8 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
-    use crate::executor::{Barrier, Epoch, Message};
     use crate::executor_v2::test_utils::{MessageSender, MockSource};
+    use crate::executor_v2::{Barrier, Epoch, Message};
 
     fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();

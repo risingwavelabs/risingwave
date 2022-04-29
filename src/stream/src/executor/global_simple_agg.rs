@@ -48,13 +48,12 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
-        Ok(SimpleAggExecutor::new_from_v1(
+        Ok(SimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
             keyspace,
             params.pk_indices,
             params.executor_id,
-            params.op_info,
             key_indices,
         )?
         .boxed())

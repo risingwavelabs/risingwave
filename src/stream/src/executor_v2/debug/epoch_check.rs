@@ -16,9 +16,8 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{ExecutorInfo, MessageStream};
+use crate::executor_v2::{ExecutorInfo, Message, MessageStream};
 
 /// Streams wrapped by `epoch_check` will check whether the first message received is a barrier, and
 /// the epoch in the barriers are monotonically increasing.

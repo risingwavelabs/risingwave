@@ -55,7 +55,7 @@ impl ExecutorBuilder for TopNExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
-        Ok(TopNExecutor::new_from_v1(
+        Ok(TopNExecutor::new(
             params.input.remove(0),
             order_types,
             (node.offset as usize, limit),
@@ -64,7 +64,6 @@ impl ExecutorBuilder for TopNExecutorBuilder {
             cache_size,
             total_count,
             params.executor_id,
-            params.op_info,
             key_indices,
         )?
         .boxed())
