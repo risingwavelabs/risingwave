@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -40,7 +39,6 @@ pub struct DashboardService<S: MetaStore> {
 
     // TODO: replace with catalog manager.
     pub meta_store: Arc<S>,
-    pub has_test_data: Arc<AtomicBool>,
 }
 
 pub type Service<S> = Arc<DashboardService<S>>;
@@ -80,8 +78,6 @@ mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<WorkerNode>>> {
-        srv.add_test_data().await.map_err(err)?;
-
         use risingwave_pb::common::WorkerType;
         let result = srv
             .cluster_manager
@@ -197,29 +193,6 @@ where
             .serve(app.into_make_service())
             .await
             .map_err(|err| ErrorCode::MetaError(err.to_string()))?;
-        Ok(())
-    }
-
-    pub async fn add_test_data(self: &Arc<Self>) -> Result<()> {
-        use std::sync::atomic::Ordering;
-        if self.has_test_data.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        self.has_test_data.store(true, Ordering::SeqCst);
-
-        // TODO: remove adding test data
-        use risingwave_pb::common::{HostAddress, WorkerType};
-
-        // TODO: remove adding frontend register when frontend implement register.
-        let host = HostAddress {
-            host: "127.0.0.1".to_string(),
-            port: 4567,
-        };
-        self.cluster_manager
-            .add_worker_node(host.clone(), WorkerType::Frontend)
-            .await?;
-        self.cluster_manager.activate_worker_node(host).await?;
-
         Ok(())
     }
 }
