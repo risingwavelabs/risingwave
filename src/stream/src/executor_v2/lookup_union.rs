@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, Message, PkIndicesRef};
+use super::{Barrier, BoxedExecutor, Executor, Message, PkIndicesRef};
 use crate::executor::{ExecutorBuilder, PkIndices};
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -90,7 +90,7 @@ impl LookupUnionExecutor {
         let mut rxs = vec![];
         for idx in self.order {
             let mut stream = inputs[idx].take().unwrap().execute();
-            let (mut tx, rx) = mpsc::channel(1); // set buffer size to control back pressure
+            let (mut tx, rx) = mpsc::channel(1024); // set buffer size to control back pressure
             rxs.push(rx);
             futures.push(
                 // construct a future that drives input stream until it is exhausted.
@@ -108,7 +108,7 @@ impl LookupUnionExecutor {
         let mut end = false;
         while !end {
             end = true; // no message on this turn?
-            let mut this_barrier = None;
+            let mut this_barrier: Option<Barrier> = None;
             for rx in &mut rxs {
                 loop {
                     let msg = match select(rx.next(), &mut drive_inputs).await {
@@ -120,15 +120,22 @@ impl LookupUnionExecutor {
                     match msg {
                         msg @ Message::Chunk(_) => yield msg,
                         Message::Barrier(barrier) => {
-                            this_barrier.get_or_insert(barrier);
+                            if let Some(this_barrier) = &this_barrier {
+                                if this_barrier != &barrier {
+                                    return Err(StreamExecutorError::align_barrier(
+                                        this_barrier.clone(),
+                                        barrier,
+                                    ));
+                                }
+                            } else {
+                                this_barrier = Some(barrier);
+                            }
                             break; // move to the next input
                         }
                     }
                 }
             }
-            if let Some(barrier) = this_barrier {
-                yield Message::Barrier(barrier);
-            }
+            yield Message::Barrier(this_barrier.take().unwrap());
         }
     }
 }
