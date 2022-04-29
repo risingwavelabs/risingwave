@@ -49,7 +49,7 @@ pub fn serialize_cell_not_null(cell: &Datum) -> Result<Vec<u8>> {
 }
 
 /// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
-pub fn deserialize_cell<B: Buf>(data: &mut B, ty: &DataType) -> Result<Datum> {
+pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     let null_tag = data.get_u8();
     match null_tag {
         0 => {
@@ -63,12 +63,12 @@ pub fn deserialize_cell<B: Buf>(data: &mut B, ty: &DataType) -> Result<Datum> {
             ))));
         }
     }
-    deserialize_value(ty, data)
+    deserialize_value(ty, &mut data)
 }
 
 /// Deserialize cell bytes which cannot be null into datum.
-pub fn deserialize_cell_not_null<B: Buf>(data: &mut B, ty: &DataType) -> Result<Datum> {
-    deserialize_value(ty, data)
+pub fn deserialize_cell_not_null(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
+    deserialize_value(ty, &mut data)
 }
 
 fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
@@ -124,7 +124,7 @@ fn serialize_decimal(decimal: &Decimal, mut buf: impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 
-fn deserialize_value<B: Buf>(ty: &DataType, data: &mut B) -> Result<Datum> {
+fn deserialize_value(ty: &DataType, mut data: Buf) -> Result<Datum> {
     Ok(Some(match *ty {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
