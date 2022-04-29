@@ -99,7 +99,7 @@ impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
                 RowSeqScanExecutor2Builder::DEFAULT_CHUNK_SIZE,
                 source.task_id.task_id == 0,
                 source.plan_node().get_identity().clone(),
-                source.epoch,
+                source.epoch(),
                 batch_stats,
             )))
         })

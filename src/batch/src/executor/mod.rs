@@ -34,12 +34,12 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2,
-    TopNExecutor2, TraceExecutor2, ValuesExecutor2, HashJoinExecutor2Builder, RowSeqScanExecutor2Builder, SortAggExecutor2
+    HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2,
+    ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2, TopNExecutor2, TraceExecutor2,
+    ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
-mod order_by;
 mod create_source;
 mod create_table;
 mod drop_stream;
@@ -49,6 +49,7 @@ mod fuse;
 mod generate_series;
 mod join;
 mod merge_sort_exchange;
+mod order_by;
 mod stream_scan;
 #[cfg(test)]
 pub mod test_utils;
@@ -245,6 +246,10 @@ impl<'a> ExecutorBuilder<'a> {
 
     pub fn global_batch_env(&self) -> &BatchEnvironment {
         &self.env
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 }
 
