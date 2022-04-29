@@ -212,14 +212,10 @@ impl TierCompactionPicker {
             if select_level_handler.is_pending_compact(&select_table.id) {
                 continue;
             }
-            let mut overlap = false;
-            for other in &select_level.table_infos[..idx] {
-                if self.overlap_strategy.check_overlap(&select_table, other) {
-                    overlap = true;
-                    break;
-                }
-            }
-            if overlap {
+            if select_level.table_infos[..idx]
+                .iter()
+                .any(|table| self.overlap_strategy.check_overlap(table, &select_table))
+            {
                 continue;
             }
 
@@ -242,17 +238,12 @@ impl TierCompactionPicker {
                 {
                     break;
                 }
-                let mut overlap = false;
-                for prev in &select_level.table_infos[..idx] {
-                    if self.overlap_strategy.check_overlap(prev, other) {
-                        overlap = true;
-                        break;
-                    }
-                }
-                if overlap {
+                if select_level.table_infos[..idx]
+                    .iter()
+                    .any(|table| self.overlap_strategy.check_overlap(table, other))
+                {
                     break;
                 }
-
                 if !self.pick_target_level_overlap_files(
                     other,
                     target_level,
@@ -308,7 +299,10 @@ mod tests {
             Level {
                 level_idx: 0,
                 level_type: LevelType::Overlapping as i32,
-                table_infos: vec![generate_table(4, 1, 101, 300, 2)],
+                table_infos: vec![
+                    generate_table(5, 1, 201, 300, 2),
+                    generate_table(4, 1, 112, 200, 2),
+                ],
             },
             Level {
                 level_idx: 1,
@@ -325,7 +319,7 @@ mod tests {
         let ret = picker
             .pick_compaction(levels.clone(), &mut levels_handler)
             .unwrap();
-        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 2);
         assert_eq!(ret.target_level.table_infos[0].id, 2);
         assert_eq!(ret.target_level.table_infos[1].id, 1);
@@ -333,26 +327,26 @@ mod tests {
         // no conflict with the last job
         levels[0]
             .table_infos
-            .push(generate_table(5, 1, 301, 333, 4));
+            .push(generate_table(6, 1, 301, 333, 4));
         levels[0]
             .table_infos
-            .push(generate_table(6, 1, 100, 200, 2));
+            .push(generate_table(7, 1, 100, 200, 2));
         // pick table 5 and 0. but skip table 6 because [0_key_test_000100, 1_key_test_000333] will
         // be conflict with the previous job.
         let ret = picker
             .pick_compaction(levels.clone(), &mut levels_handler)
             .unwrap();
-        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[0].get_pending_file_count(), 3);
         assert_eq!(levels_handler[1].get_pending_file_count(), 3);
         assert_eq!(ret.target_level.table_infos[0].id, 0);
-        assert_eq!(ret.select_level.table_infos[0].id, 5);
+        assert_eq!(ret.select_level.table_infos[0].id, 6);
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
         let mut picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
         levels[0]
             .table_infos
-            .push(generate_table(7, 1, 222, 233, 3));
+            .push(generate_table(8, 1, 222, 233, 3));
         let ret = picker.pick_compaction(levels.clone(), &mut levels_handler);
         assert!(ret.is_none());
 
@@ -361,13 +355,13 @@ mod tests {
         picker.level0_max_file_number = 2;
         levels[0]
             .table_infos
-            .push(generate_table(8, 1, 100, 200, 3));
+            .push(generate_table(9, 1, 100, 200, 3));
         let ret = picker
             .pick_compaction(levels.clone(), &mut levels_handler)
             .unwrap();
-        assert_eq!(ret.select_level.table_infos[0].id, 6);
-        assert_eq!(ret.select_level.table_infos[1].id, 7);
-        assert_eq!(ret.select_level.table_infos[2].id, 8);
+        assert_eq!(ret.select_level.table_infos[0].id, 7);
+        assert_eq!(ret.select_level.table_infos[1].id, 8);
+        assert_eq!(ret.select_level.table_infos[2].id, 9);
         assert!(ret.target_level.table_infos.is_empty());
     }
 }
