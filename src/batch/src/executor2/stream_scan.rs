@@ -12,41 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 
-use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
-use crate::executor::Executor;
-
+use crate::executor2::{
+    BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2, ExecutorBuilder,
+};
 // TODO: Remove this when Java frontend is completely removed.
-pub(super) struct StreamScanExecutor {}
+pub struct StreamScanExecutor2 {}
 
-impl BoxedExecutorBuilder for StreamScanExecutor {
-    fn new_boxed_executor(_: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for StreamScanExecutor2 {
+    fn new_boxed_executor2(_: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         unreachable!()
     }
 }
-
-#[async_trait::async_trait]
-impl Executor for StreamScanExecutor {
-    async fn open(&mut self) -> Result<()> {
-        unreachable!()
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        unreachable!()
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        unreachable!()
-    }
-
+impl Executor2 for StreamScanExecutor2 {
     fn schema(&self) -> &Schema {
         unreachable!()
     }
 
     fn identity(&self) -> &str {
+        unreachable!()
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        unreachable!()
+    }
+}
+
+impl StreamScanExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        let _ = self;
         unreachable!()
     }
 }
