@@ -434,10 +434,6 @@ impl CompactStatus {
         new_version.levels[compact_task.target_level as usize]
             .table_infos
             .extend(compact_task.sorted_output_ssts.clone());
-        // TODO: the KeyRange conversion is not ideal.
-        new_version.levels[compact_task.target_level as usize]
-            .table_infos
-            .sort_by_key(|t| KeyRange::from(t.key_range.as_ref().unwrap()));
         new_version
     }
 }
@@ -487,8 +483,6 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_hummock_sdk::key::key_with_epoch;
-
     use super::*;
 
     #[tokio::test]
@@ -503,99 +497,5 @@ mod tests {
         assert_eq!(origin, de);
 
         Ok(())
-    }
-
-    #[test]
-    fn test_apply_compact_result() {
-        let old_version = HummockVersion {
-            levels: vec![
-                Level {
-                    level_type: LevelType::Overlapping as i32,
-                    table_infos: vec![
-                        SstableInfo {
-                            id: 1,
-                            key_range: Some(
-                                KeyRange::new(
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("000"), 1)),
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("003"), 1)),
-                                )
-                                .into(),
-                            ),
-                        },
-                        SstableInfo {
-                            id: 2,
-                            key_range: Some(
-                                KeyRange::new(
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("002"), 1)),
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("004"), 1)),
-                                )
-                                .into(),
-                            ),
-                        },
-                    ],
-                },
-                Level {
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: vec![
-                        SstableInfo {
-                            id: 3,
-                            key_range: Some(
-                                KeyRange::new(
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("000"), 1)),
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("003"), 1)),
-                                )
-                                .into(),
-                            ),
-                        },
-                        SstableInfo {
-                            id: 4,
-                            key_range: Some(
-                                KeyRange::new(
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("019"), 1)),
-                                    Bytes::copy_from_slice(&key_with_epoch(Vec::from("029"), 1)),
-                                )
-                                .into(),
-                            ),
-                        },
-                    ],
-                },
-            ],
-            ..Default::default()
-        };
-        let compact_task = CompactTask {
-            input_ssts: vec![LevelEntry {
-                level_idx: 0,
-                level: Some(Level {
-                    level_type: LevelType::Overlapping as i32,
-                    table_infos: vec![old_version.levels[0].table_infos[0].clone()],
-                }),
-            }],
-            sorted_output_ssts: vec![SstableInfo {
-                id: 5,
-                key_range: Some(
-                    KeyRange::new(
-                        Bytes::copy_from_slice(&key_with_epoch(Vec::from("005"), 1)),
-                        Bytes::copy_from_slice(&key_with_epoch(Vec::from("010"), 1)),
-                    )
-                    .into(),
-                ),
-            }],
-            target_level: 1,
-            ..Default::default()
-        };
-        let new_version = CompactStatus::apply_compact_result(&compact_task, old_version.clone());
-        let expected = old_version.levels[0]
-            .table_infos
-            .iter()
-            .skip(1)
-            .take(1)
-            .cloned()
-            .collect_vec();
-        assert_eq!(new_version.levels[0].table_infos.len(), 1);
-        assert_eq!(new_version.levels[0].table_infos, expected);
-        let mut expected = old_version.levels[1].table_infos.clone();
-        expected.insert(1, compact_task.sorted_output_ssts[0].clone());
-        assert_eq!(new_version.levels[1].table_infos.len(), 3);
-        assert_eq!(new_version.levels[1].table_infos, expected);
     }
 }
