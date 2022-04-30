@@ -166,7 +166,7 @@ impl<S: StateStore> SourceStateHandler<S> {
 
 #[cfg(test)]
 mod tests {
-    
+
     use itertools::Itertools;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -330,9 +330,7 @@ mod tests {
             state_pair.into_iter().for_each(|s| {
                 assert_eq!(
                     state.offset,
-                    TestSourceState::restore_from_bytes(&s.1)
-                        .unwrap()
-                        .offset
+                    TestSourceState::restore_from_bytes(&s.1).unwrap().offset
                 );
                 assert_eq!(
                     state.partition,
