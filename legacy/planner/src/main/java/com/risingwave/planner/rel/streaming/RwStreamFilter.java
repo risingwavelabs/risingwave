@@ -29,7 +29,7 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     FilterNode filterNode =
         FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
     return StreamNode.newBuilder()
-        .setFilterNode(filterNode)
+        .setFilter(filterNode)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }

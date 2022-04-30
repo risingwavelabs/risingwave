@@ -28,7 +28,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
@@ -703,12 +703,18 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
-        if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
+        if let NodeBody::Chain(_) = stream_node.node_body.as_ref().unwrap() {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
             let merge = try_match_expand!(
-                stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
-                Node::MergeNode,
+                stream_node
+                    .input
+                    .get(0)
+                    .unwrap()
+                    .node_body
+                    .as_ref()
+                    .unwrap(),
+                NodeBody::Merge,
                 "first input of chain node should be merge node"
             )?;
             for upstream_actor_id in &merge.upstream_actor_id {

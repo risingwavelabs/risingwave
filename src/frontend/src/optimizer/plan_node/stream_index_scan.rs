@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
@@ -124,11 +124,11 @@ impl StreamIndexScan {
             input: vec![
                 // The merge node should be empty
                 ProstStreamPlan {
-                    node: Some(ProstStreamNode::MergeNode(Default::default())),
+                    node_body: Some(ProstStreamNode::Merge(Default::default())),
                     ..Default::default()
                 },
                 ProstStreamPlan {
-                    node: Some(ProstStreamNode::BatchPlanNode(batch_plan_node)),
+                    node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
                     operator_id: if auto_fields {
                         self.batch_plan_id.0 as u64
                     } else {
@@ -141,7 +141,7 @@ impl StreamIndexScan {
                     append_only: true,
                 },
             ],
-            node: Some(ProstStreamNode::ChainNode(ChainNode {
+            node_body: Some(ProstStreamNode::Chain(ChainNode {
                 disable_rearrange: true,
                 table_ref_id: Some(TableRefId {
                     table_id: self.logical.table_desc().table_id.table_id as i32,

@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
@@ -99,7 +99,7 @@ impl ToStreamProst for StreamTopN {
             .iter()
             .map(|f| f.direct.to_protobuf() as i32)
             .collect();
-        ProstStreamNode::TopNNode(TopNNode {
+        ProstStreamNode::TopN(TopNNode {
             order_types,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,

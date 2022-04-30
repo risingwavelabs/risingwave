@@ -78,7 +78,7 @@ public class RwStreamSort extends Sort implements RisingWaveStreamingRel {
     }
 
     return StreamNode.newBuilder()
-        .setTopNNode(topnBuilder)
+        .setTopN(topnBuilder)
         .addAllPkIndices(primaryKeyIndices)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
