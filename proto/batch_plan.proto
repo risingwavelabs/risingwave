@@ -166,7 +166,7 @@ message ExchangeNode {
 }
 
 message MergeSortExchangeNode {
-  ExchangeNode exchange_node = 1;
+  ExchangeNode exchange = 1;
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
