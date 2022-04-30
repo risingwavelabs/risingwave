@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Build executor from protobuf.
+
 mod batch_query;
 mod chain;
 mod filter;
@@ -30,11 +32,12 @@ mod top_n;
 mod top_n_appendonly;
 mod union;
 
+// import for submodules
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::{Keyspace, StateStore};
 
 use self::batch_query::*;
@@ -58,26 +61,26 @@ use crate::executor_v2::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 trait ExecutorBuilder {
-    /// Create an executor.
+    /// Create a [`BoxedExecutor`] from [`StreamNode`].
     fn new_boxed_executor(
-        executor_params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        params: ExecutorParams,
+        node: &StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor>;
 }
 
 macro_rules! build_executor {
-    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
+    ($source:expr, $node:expr, $store:expr, $stream:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source,$node,$store,$stream)
+                    <$data_type>::new_boxed_executor($source, $node, $store, $stream)
                 },
             )*
             _ => Err(RwError::from(
                 ErrorCode::InternalError(format!(
-                    "unsupported node:{:?}",
+                    "unsupported node: {:?}",
                     $node.get_node_body().unwrap()
                 )),
             )),
@@ -85,14 +88,15 @@ macro_rules! build_executor {
     }
 }
 
+/// Create an executor from protobuf [`StreamNode`].
 pub fn create_executor(
-    executor_params: ExecutorParams,
+    params: ExecutorParams,
     stream: &mut LocalStreamManagerCore,
-    node: &stream_plan::StreamNode,
+    node: &StreamNode,
     store: impl StateStore,
 ) -> Result<BoxedExecutor> {
     build_executor! {
-        executor_params,
+        params,
         node,
         store,
         stream,

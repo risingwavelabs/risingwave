@@ -12,22 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_expr::expr::build_from_prost;
+
 use super::*;
-use crate::executor_v2::LookupUnionExecutor;
+use crate::executor_v2::ProjectExecutor;
 
-pub struct LookupUnionExecutorBuilder;
+pub struct ProjectExecutorBuilder;
 
-impl ExecutorBuilder for LookupUnionExecutorBuilder {
+impl ExecutorBuilder for ProjectExecutorBuilder {
     fn new_boxed_executor(
-        params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        mut params: ExecutorParams,
+        node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<BoxedExecutor> {
-        let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;
-        Ok(
-            LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())
-                .boxed(),
+    ) -> Result<BoxedExecutor> {
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;
+        let project_exprs = node
+            .get_select_list()
+            .iter()
+            .map(build_from_prost)
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(ProjectExecutor::new(
+            params.input.remove(0),
+            params.pk_indices,
+            project_exprs,
+            params.executor_id,
         )
+        .boxed())
     }
 }

@@ -25,7 +25,7 @@ pub struct SourceExecutorBuilder;
 impl ExecutorBuilder for SourceExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {

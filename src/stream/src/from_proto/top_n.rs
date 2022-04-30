@@ -12,48 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Streaming Aggregators
-
-use risingwave_common::catalog::TableId;
+use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
-use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::SimpleAggExecutor;
-use crate::task::build_agg_call_from_prost;
+use crate::executor_v2::TopNExecutor;
 
-pub struct SimpleAggExecutorBuilder;
+pub struct TopNExecutorBuilder;
 
-impl ExecutorBuilder for SimpleAggExecutorBuilder {
+impl ExecutorBuilder for TopNExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
-        let agg_calls: Vec<AggCall> = node
-            .get_agg_calls()
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
+        let order_pairs: Vec<_> = node
+            .get_column_orders()
             .iter()
-            .map(build_agg_call_from_prost)
-            .try_collect()?;
-        // Build vector of keyspace via table ids.
-        // One keyspace for one agg call.
-        let keyspace = node
-            .get_table_ids()
-            .iter()
-            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .map(OrderPair::from_prost)
             .collect();
+        let limit = if node.limit == 0 {
+            None
+        } else {
+            Some(node.limit as usize)
+        };
+        let cache_size = Some(1024);
+        let total_count = (0, 0, 0);
+        let keyspace = Keyspace::executor_root(store, params.executor_id);
         let key_indices = node
             .get_distribution_keys()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
-        Ok(SimpleAggExecutor::new(
+        Ok(TopNExecutor::new(
             params.input.remove(0),
-            agg_calls,
-            keyspace,
+            order_pairs,
+            (node.offset as usize, limit),
             params.pk_indices,
+            keyspace,
+            cache_size,
+            total_count,
             params.executor_id,
             key_indices,
         )?

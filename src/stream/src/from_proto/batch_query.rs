@@ -31,7 +31,7 @@ pub struct BatchQueryExecutorBuilder;
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {

@@ -24,10 +24,10 @@ pub struct HopWindowExecutorBuilder;
 impl ExecutorBuilder for HopWindowExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<BoxedExecutor> {
+    ) -> Result<BoxedExecutor> {
         let ExecutorParams {
             input,
             pk_indices,

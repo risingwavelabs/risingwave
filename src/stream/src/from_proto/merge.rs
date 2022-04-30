@@ -19,7 +19,7 @@ pub struct MergeExecutorBuilder;
 impl ExecutorBuilder for MergeExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {

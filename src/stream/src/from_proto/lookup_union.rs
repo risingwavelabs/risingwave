@@ -13,18 +13,21 @@
 // limitations under the License.
 
 use super::*;
-use crate::executor_v2::UnionExecutor;
+use crate::executor_v2::LookupUnionExecutor;
 
-pub struct UnionExecutorBuilder;
+pub struct LookupUnionExecutorBuilder;
 
-impl ExecutorBuilder for UnionExecutorBuilder {
+impl ExecutorBuilder for LookupUnionExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<BoxedExecutor> {
-        try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;
-        Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
+    ) -> Result<BoxedExecutor> {
+        let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;
+        Ok(
+            LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())
+                .boxed(),
+        )
     }
 }
