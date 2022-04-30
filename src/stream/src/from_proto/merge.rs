@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::{Field, Schema};
+
 use super::*;
+use crate::executor_v2::receiver::ReceiverExecutor;
+use crate::executor_v2::MergeExecutor;
 
 pub struct MergeExecutorBuilder;
 
@@ -24,6 +28,15 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Merge)?;
-        stream.create_merge_node(params, node)
+        let upstreams = node.get_upstream_actor_id();
+        let fields = node.fields.iter().map(Field::from).collect();
+        let schema = Schema::new(fields);
+        let mut rxs = stream.get_receive_message(params.actor_id, upstreams)?;
+
+        if upstreams.len() == 1 {
+            Ok(ReceiverExecutor::new(schema, params.pk_indices, rxs.remove(0)).boxed())
+        } else {
+            Ok(MergeExecutor::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
+        }
     }
 }

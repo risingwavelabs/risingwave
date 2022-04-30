@@ -19,7 +19,6 @@ use std::sync::Arc;
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -35,7 +34,6 @@ use super::{unique_executor_id, unique_operator_id, CollectResult, ComputeClient
 use crate::executor_v2::dispatch::*;
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::monitor::StreamingMetrics;
-use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::*;
 use crate::from_proto::create_executor;
 use crate::task::{
@@ -511,23 +509,6 @@ impl LocalStreamManagerCore {
             DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
         } else {
             executor
-        }
-    }
-
-    pub fn create_merge_node(
-        &mut self,
-        params: ExecutorParams,
-        node: &stream_plan::MergeNode,
-    ) -> Result<BoxedExecutor> {
-        let upstreams = node.get_upstream_actor_id();
-        let fields = node.fields.iter().map(Field::from).collect();
-        let schema = Schema::new(fields);
-        let mut rxs = self.get_receive_message(params.actor_id, upstreams)?;
-
-        if upstreams.len() == 1 {
-            Ok(ReceiverExecutor::new(schema, params.pk_indices, rxs.remove(0)).boxed())
-        } else {
-            Ok(MergeExecutor::new(schema, params.pk_indices, params.actor_id, rxs).boxed())
         }
     }
 
