@@ -246,18 +246,12 @@ mod tests {
     #[test]
     fn test_state_encode() -> Result<()> {
         let offset = 100_i64;
-        // default little-endian byte order
-        let offset_bytes = offset.to_le_bytes();
         let partition = String::from("p0");
         let state_instance = TestSourceState::new(partition.clone(), offset);
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
         let encode_value = state_instance.to_json_bytes()?;
-        assert_eq!(
-            encode_value,
-            Bytes::copy_from_slice(offset_bytes.clone().as_ref())
-        );
         let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);
