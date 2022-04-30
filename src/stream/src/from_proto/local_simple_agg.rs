@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::TryFrom;
+
+use risingwave_common::types::DataType;
+use risingwave_expr::expr::AggKind;
+
 use super::*;
-use crate::executor_v2::aggregation::AggCall;
+use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::LocalSimpleAggExecutor;
-use crate::task::build_agg_call_from_prost;
 
 pub struct LocalSimpleAggExecutorBuilder;
 
@@ -41,4 +45,25 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         )?
         .boxed())
     }
+}
+
+pub fn build_agg_call_from_prost(agg_call_proto: &risingwave_pb::expr::AggCall) -> Result<AggCall> {
+    let args = match &agg_call_proto.get_args()[..] {
+        [] => AggArgs::None,
+        [arg] => AggArgs::Unary(
+            DataType::from(arg.get_type()?),
+            arg.get_input()?.column_idx as usize,
+        ),
+        _ => {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "multiple aggregation args".to_string(),
+                None.into(),
+            )))
+        }
+    };
+    Ok(AggCall {
+        kind: AggKind::try_from(agg_call_proto.get_type()?)?,
+        args,
+        return_type: DataType::from(agg_call_proto.get_return_type()?),
+    })
 }

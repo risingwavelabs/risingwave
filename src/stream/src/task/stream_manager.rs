@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -23,19 +22,16 @@ use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
-use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::compress::decompress_data;
-use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::{expr, stream_plan, stream_service};
+use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult, ComputeClientPool};
-use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::dispatch::*;
 use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::monitor::StreamingMetrics;
@@ -305,30 +301,6 @@ impl LocalStreamManager {
     pub fn state_store(&self) -> StateStoreImpl {
         self.core.lock().state_store.clone()
     }
-}
-
-pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> {
-    let args = {
-        let args = &agg_call_proto.get_args()[..];
-        match args {
-            [] => AggArgs::None,
-            [arg] => AggArgs::Unary(
-                DataType::from(arg.get_type()?),
-                arg.get_input()?.column_idx as usize,
-            ),
-            _ => {
-                return Err(RwError::from(ErrorCode::NotImplemented(
-                    "multiple aggregation args".to_string(),
-                    None.into(),
-                )))
-            }
-        }
-    };
-    Ok(AggCall {
-        kind: AggKind::try_from(agg_call_proto.get_type()?)?,
-        args,
-        return_type: DataType::from(agg_call_proto.get_return_type()?),
-    })
 }
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {

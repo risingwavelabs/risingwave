@@ -22,7 +22,6 @@ use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use super::*;
 use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::{HashAggExecutor, PkIndices};
-use crate::task::build_agg_call_from_prost;
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
