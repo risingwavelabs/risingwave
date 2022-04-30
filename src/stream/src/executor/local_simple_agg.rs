@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
@@ -33,7 +33,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::LocalSimpleAggNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LocalSimpleAgg)?;
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()

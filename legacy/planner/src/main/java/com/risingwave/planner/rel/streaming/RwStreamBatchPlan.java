@@ -133,7 +133,7 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
     builder.addAllColumnDescs(generateColumnDesc());
     BatchPlanNode batchPlanNode = builder.build();
     return StreamNode.newBuilder()
-        .setBatchPlanNode(batchPlanNode)
+        .setBatchPlan(batchPlanNode)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }

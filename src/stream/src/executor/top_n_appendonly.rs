@@ -17,7 +17,7 @@ use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
@@ -33,7 +33,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::AppendOnlyTopN)?;
         let order_types: Vec<_> = node
             .get_order_types()
             .iter()

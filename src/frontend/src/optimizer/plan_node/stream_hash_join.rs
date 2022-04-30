@@ -16,7 +16,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
@@ -152,8 +152,8 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl ToStreamProst for StreamHashJoin {
-    fn to_stream_prost_body(&self) -> Node {
-        Node::HashJoinNode(HashJoinNode {
+    fn to_stream_prost_body(&self) -> NodeBody {
+        NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: self
                 .eq_join_predicate

@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -63,7 +63,7 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 
 impl ToStreamProst for StreamHopWindow {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        ProstStreamNode::HopWindowNode(HopWindowNode {
+        ProstStreamNode::HopWindow(HopWindowNode {
             time_col: Some(self.logical.time_col.to_proto()),
             window_slide: Some(self.logical.window_slide.into()),
             window_size: Some(self.logical.window_size.into()),
