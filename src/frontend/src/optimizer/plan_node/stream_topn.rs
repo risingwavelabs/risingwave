@@ -19,7 +19,7 @@ use risingwave_pb::plan_common::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::Distribution;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -37,20 +37,14 @@ impl StreamTopN {
             _ => panic!(),
         };
 
-        let (pk_indices, extended_order) =
-            Self::derive_pk_and_order(logical.input().pk_indices(), logical.topn_order());
-        let logical = LogicalTopN::new(
-            logical.input(),
-            logical.limit(),
-            logical.offset(),
-            extended_order,
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            logical.input().pk_indices().to_vec(),
+            dist,
+            false,
         );
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamTopN { base, logical }
-    }
-
-    fn derive_pk_and_order(input_pk: &[usize], order: &Order) -> (Vec<usize>, Order) {
-        (input_pk.to_vec(), order.clone())
     }
 }
 
