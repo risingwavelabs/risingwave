@@ -20,16 +20,12 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
-use crate::hummock::compaction::compaction_picker::CompactionPicker;
-use crate::hummock::compaction::CompactionConfig;
 
 use super::SearchResult;
+use crate::hummock::compaction::compaction_picker::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
-
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
-const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 
 pub struct TierCompactionPicker {
     compact_task_id: u64,
@@ -106,7 +102,12 @@ impl CompactionPicker for TierCompactionPicker {
 }
 
 impl TierCompactionPicker {
-    pub fn new(compact_task_id: u64, target_level: usize, config: Arc<CompactionConfig>, overlap_strategy: Box<dyn OverlapStrategy>) -> TierCompactionPicker {
+    pub fn new(
+        compact_task_id: u64,
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Box<dyn OverlapStrategy>,
+    ) -> TierCompactionPicker {
         TierCompactionPicker {
             compact_task_id,
             config,
@@ -293,7 +294,11 @@ mod tests {
 
     #[test]
     fn test_compact_l0_to_l1() {
-        let picker = TierCompactionPicker::new(0, Arc::new(CompactionConfig::default()), Box::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(
+            0,
+            Arc::new(CompactionConfig::default()),
+            Box::new(RangeOverlapStrategy::default()),
+        );
         let mut levels = vec![
             Level {
                 level_idx: 0,
@@ -342,7 +347,11 @@ mod tests {
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
-        let mut picker = TierCompactionPicker::new(1, Arc::new(CompactionConfig::default()), Box::new(RangeOverlapStrategy::default()));
+        let mut picker = TierCompactionPicker::new(
+            1,
+            Arc::new(CompactionConfig::default()),
+            Box::new(RangeOverlapStrategy::default()),
+        );
         levels[0]
             .table_infos
             .push(generate_table(8, 1, 222, 233, 3));

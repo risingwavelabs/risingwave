@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod overlap_strategy;
 mod compaction_picker;
 mod level_selector;
+mod overlap_strategy;
 mod tier_compaction_picker;
-mod leveled_compaction_picker;
 
-pub use level_selector::MAX_LEVEL;
-
+use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use prost::Message;
@@ -31,9 +30,7 @@ use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
 };
 
-use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
-use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
@@ -49,11 +46,38 @@ const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
 const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 pub const MAX_LEVEL: usize = 6;
 
-#[derive(Clone, PartialEq, Debug)]
 pub struct CompactStatus {
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,
     compaction_selector: Box<dyn LevelSelector>,
+}
+
+impl Debug for CompactStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactStatus")
+            .field("level_handlers", &self.level_handlers)
+            .field("next_compact_task_id", &self.next_compact_task_id)
+            .field("compaction_selector", &self.compaction_selector.name())
+            .finish()
+    }
+}
+
+impl PartialEq for CompactStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.level_handlers.eq(&other.level_handlers)
+            && self.next_compact_task_id == other.next_compact_task_id
+            && self.compaction_selector.name() == other.compaction_selector.name()
+    }
+}
+
+impl Clone for CompactStatus {
+    fn clone(&self) -> Self {
+        Self {
+            level_handlers: self.level_handlers.clone(),
+            compaction_selector: Box::new(DynamicLevelSelector::default()),
+            next_compact_task_id: self.next_compact_task_id,
+        }
+    }
 }
 
 pub struct SearchResult {
@@ -61,7 +85,6 @@ pub struct SearchResult {
     target_level: Level,
     split_ranges: Vec<KeyRange>,
 }
-
 
 pub struct CompactionConfig {
     max_bytes_for_level_base: u64,
@@ -75,7 +98,7 @@ pub struct CompactionConfig {
 impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
-            max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,   // 1GB
+            max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE, // 1GB
             max_bytes_for_level_multiplier: 10,
             max_level: MAX_LEVEL,
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
@@ -171,7 +194,6 @@ impl CompactStatus {
     }
 
     fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
-        // only support compact L0 to L1 or L0 to L0
         self.compaction_selector.pick_compaction(
             self.next_compact_task_id,
             &levels,
@@ -273,6 +295,7 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
         CompactStatus {
             level_handlers: status.level_handlers.iter().map_into().collect(),
             next_compact_task_id: status.next_compact_task_id,
+            compaction_selector: Box::new(DynamicLevelSelector::default()),
         }
     }
 }

@@ -1,26 +1,23 @@
-use std::collections::HashMap;
-use std::intrinsics::roundf64;
 use std::sync::Arc;
-use itertools::Itertools;
+
 use risingwave_pb::hummock::Level;
 
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, SizeOverlapPicker};
-use crate::hummock::compaction::{CompactionConfig, SearchResult};
 use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
+use crate::hummock::compaction::{CompactionConfig, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
-
 
 pub trait LevelSelector: Sync + Send {
     fn select_level(
-        &self,
+        &mut self,
         task_id: u64,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Box<dyn CompactionPicker>;
 
     fn pick_compaction(
-        &self,
+        &mut self,
         task_id: u64,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
@@ -28,8 +25,6 @@ pub trait LevelSelector: Sync + Send {
         let picker = self.select_level(task_id, levels, level_handlers);
         picker.pick_compaction(levels, level_handlers)
     }
-
-    fn apply_compact_result(&mut self, levels: &[Level]);
 
     fn name(&self) -> &'static str;
 }
@@ -41,11 +36,6 @@ pub struct DynamicLevelSelector {
     base_level: usize,
 }
 
-struct SelectorContext {
-    // score and level idx.
-    level_scores: Vec<(u64, usize)>,
-}
-
 impl Default for DynamicLevelSelector {
     fn default() -> Self {
         DynamicLevelSelector::new(Arc::new(CompactionConfig::default()))
@@ -53,9 +43,7 @@ impl Default for DynamicLevelSelector {
 }
 
 impl DynamicLevelSelector {
-    pub fn new(
-        config: Arc<CompactionConfig>,
-    ) -> Self {
+    pub fn new(config: Arc<CompactionConfig>) -> Self {
         DynamicLevelSelector {
             base_level: config.max_level,
             level_max_bytes: vec![0u64; config.max_level as usize + 1],
@@ -63,87 +51,32 @@ impl DynamicLevelSelector {
         }
     }
 
-    fn create_compaction_picker(
-        &self,
-        level: usize,
-        task_id: u64,
-    ) -> Box<dyn CompactionPicker> {
+    fn create_compaction_picker(&self, level: usize, task_id: u64) -> Box<dyn CompactionPicker> {
         let overlap = Box::new(RangeOverlapStrategy::default());
         if level == 0 {
-            Box::new(TierCompactionPicker::new(task_id, self.base_level, self.config.clone(), overlap))
+            Box::new(TierCompactionPicker::new(
+                task_id,
+                self.base_level,
+                self.config.clone(),
+                overlap,
+            ))
         } else {
-            Box::new(SizeOverlapPicker::new(task_id, level, self.config.clone(), overlap))
+            Box::new(SizeOverlapPicker::new(
+                task_id,
+                level,
+                self.config.clone(),
+                overlap,
+            ))
         }
     }
 
-    fn get_priority_levels(&self, levels: &[Level], handlers: &mut [LevelHandler]) -> Vec<(u64, usize)> {
-        let mut scores = vec![];
-
-        // The bottommost level can not be input level.
-        for level in &levels[..self.config.max_level] {
-            let level_idx = level.level_idx as usize;
-            let mut total_size = 0;
-            let mut idle_file_count = 0;
-            for table  in level.table_infos {
-                if !handlers[level.level_idx as usize].is_pending_compact(&table.id) {
-                    total_size += table.file_size;
-                    idle_file_count += 1;
-                }
-            }
-            if total_size == 0 {
-                continue;
-            }
-            if level.level_idx == 0 {
-                let score = std::cmp::max(total_size * 100 / self.config.max_bytes_for_level_base ,
-                                          (idle_file_count  * 100 / self.config.level0_trigger_number as u64));
-                scores.push((score, 0));
-            } else {
-                scores.push((total_size * 100 / self.level_max_bytes[level_idx], level_idx));
-            }
-        }
-        scores.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-        });
-        scores
-    }
-}
-
-impl LevelSelector for DynamicLevelSelector {
-    fn select_level(
-        &self,
-        task_id: u64,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Box<dyn CompactionPicker> {
-        let level_scores = self.get_priority_levels(levels, level_handlers);
-        self.create_compaction_picker(level_scores[0].1, task_id)
-    }
-
-    fn pick_compaction(
-        &self,
-        task_id: u64,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult> {
-        let level_scores = self.get_priority_levels(levels, level_handlers);
-        for (score, level_idx) in level_scores {
-            if score <= 100 {
-                return None;
-            }
-            let picker = self.create_compaction_picker(level_idx, task_id);
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
-                return Some(ret);
-            }
-        }
-        None
-    }
-
-
-    fn apply_compact_result(&mut self, levels: &[Level]) {
+    // TODO: calculate this scores in apply compact result.
+    fn calculate_level_base_score(&mut self, levels: &[Level]) {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
 
-        for level  in levels.iter() {
+        let mut l0_size = 0;
+        for level in levels.iter() {
             let mut total_file_size = 0;
             for table in &level.table_infos {
                 total_file_size += table.file_size;
@@ -153,18 +86,19 @@ impl LevelSelector for DynamicLevelSelector {
                     first_non_empty_level = level.level_idx as usize;
                 }
                 max_level_size = std::cmp::max(max_level_size, total_file_size);
+            } else {
+                l0_size = max_level_size;
             }
         }
 
-        self.level_max_bytes.resize(self.config.max_level as usize + 1, u64::MAX);
+        self.level_max_bytes
+            .resize(self.config.max_level as usize + 1, u64::MAX);
 
         if max_level_size == 0 {
             // Use the bottommost level.
             self.base_level = self.config.max_level;
             return;
         }
-
-        let l0_size = scores[0].0;
 
         let base_bytes_max = std::cmp::max(self.config.max_bytes_for_level_base, l0_size);
         let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
@@ -191,21 +125,24 @@ impl LevelSelector for DynamicLevelSelector {
 
         let mut level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
 
-        if l0_size > base_level_size && levels[0].table_infos.len() > self.config.level0_max_file_number {
+        if l0_size > base_level_size
+            && levels[0].table_infos.len() > self.config.level0_max_file_number
+        {
             // We adjust the base level according to actual L0 size, and adjust
-            // the level multiplier accordingly, when the number of L0 files reaches twice the level0_max_file_number.
-            // We don't do this otherwise to keep the LSM-tree structure stable
-            // unless the L0 compation is backlogged.
+            // the level multiplier accordingly, when the number of L0 files reaches twice the
+            // level0_max_file_number. We don't do this otherwise to keep the LSM-tree
+            // structure stable unless the L0 compation is backlogged.
             base_level_size = l0_size;
-            if base_level == self.config.max_level {
+            if self.base_level == self.config.max_level {
                 // There is only two level (L0 and L1).
                 level_multiplier = 1.0;
-            } else {
-                unsafe {
-                    level_multiplier =
-                        roundf64(std::intrinsics::powf64(max_level_size as f64 / (base_level_size as f64), 1.0 / (self.config.max_level - base_level) as f64));
-                }
             }
+            // } else {
+            //     unsafe {
+            //             level_multiplier =
+            //             roundf64(std::intrinsics::powf64(max_level_size as f64 / (base_level_size
+            // as f64), 1.0 / (self.config.max_level - base_level) as f64));     }
+            // }
         }
 
         let mut level_size = base_level_size;
@@ -213,6 +150,77 @@ impl LevelSelector for DynamicLevelSelector {
             self.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
             level_size = (level_size as f64 * level_multiplier) as u64;
         }
+    }
+
+    fn get_priority_levels(
+        &self,
+        levels: &[Level],
+        handlers: &mut [LevelHandler],
+    ) -> Vec<(u64, usize)> {
+        let mut scores = vec![];
+
+        // The bottommost level can not be input level.
+        for level in &levels[..self.config.max_level] {
+            let level_idx = level.level_idx as usize;
+            let mut total_size = 0;
+            let mut idle_file_count = 0;
+            for table in &level.table_infos {
+                if !handlers[level_idx].is_pending_compact(&table.id) {
+                    total_size += table.file_size;
+                    idle_file_count += 1;
+                }
+            }
+            if total_size == 0 {
+                continue;
+            }
+            if level_idx == 0 {
+                let score = std::cmp::max(
+                    total_size * 100 / self.config.max_bytes_for_level_base,
+                    idle_file_count * 100 / self.config.level0_trigger_number as u64,
+                );
+                scores.push((score, 0));
+            } else {
+                scores.push((
+                    total_size * 100 / self.level_max_bytes[level_idx],
+                    level_idx,
+                ));
+            }
+        }
+        scores.sort_by(|a, b| a.0.cmp(&b.0));
+        scores
+    }
+}
+
+impl LevelSelector for DynamicLevelSelector {
+    fn select_level(
+        &mut self,
+        task_id: u64,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+    ) -> Box<dyn CompactionPicker> {
+        self.calculate_level_base_score(levels);
+        let level_scores = self.get_priority_levels(levels, level_handlers);
+        self.create_compaction_picker(level_scores[0].1, task_id)
+    }
+
+    fn pick_compaction(
+        &mut self,
+        task_id: u64,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<SearchResult> {
+        self.calculate_level_base_score(levels);
+        let level_scores = self.get_priority_levels(levels, level_handlers);
+        for (score, level_idx) in level_scores {
+            if score <= 100 {
+                return None;
+            }
+            let picker = self.create_compaction_picker(level_idx, task_id);
+            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
+                return Some(ret);
+            }
+        }
+        None
     }
 
     fn name(&self) -> &'static str {

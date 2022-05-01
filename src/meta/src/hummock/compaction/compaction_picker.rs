@@ -1,7 +1,8 @@
 use std::sync::Arc;
-use risingwave_pb::hummock::Level;
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 
+use risingwave_pb::hummock::Level;
+
+use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{CompactionConfig, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
 
@@ -21,20 +22,27 @@ pub struct SizeOverlapPicker {
 }
 
 impl SizeOverlapPicker {
-    pub fn new(compact_task_id: u64, level: usize,
-               config: Arc<CompactionConfig>, overlap_strategy: Box<dyn OverlapStrategy>) -> SizeOverlapPicker {
+    pub fn new(
+        compact_task_id: u64,
+        level: usize,
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Box<dyn OverlapStrategy>,
+    ) -> SizeOverlapPicker {
         SizeOverlapPicker {
             compact_task_id,
             config,
             overlap_strategy,
-            level
+            level,
         }
     }
 }
 
 impl CompactionPicker for SizeOverlapPicker {
-    fn pick_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> Option<SearchResult> {
-        todo!();
+    fn pick_compaction(
+        &self,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<SearchResult> {
         None
     }
 }
