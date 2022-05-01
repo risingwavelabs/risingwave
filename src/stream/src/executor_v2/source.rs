@@ -24,7 +24,8 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::SplitImpl;
+use risingwave_connector::state::SourceStateHandler;
+use risingwave_connector::{ConnectorState, SplitImpl};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_source::*;
@@ -39,7 +40,7 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
-pub struct SourceExecutor {
+pub struct SourceExecutor<S: StateStore> {
     source_id: TableId,
     source_desc: SourceDesc,
 
@@ -60,6 +61,10 @@ pub struct SourceExecutor {
     stream_source_splits: Vec<SplitImpl>,
 
     source_identify: String,
+
+    state_store: SourceStateHandler<S>,
+    // store latest split to offset mapping
+    state_cache: Option<Vec<ConnectorState>>,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -125,12 +130,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     }
 }
 
-impl SourceExecutor {
+impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<S: StateStore>(
+    pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
-        _keyspace: Keyspace<S>,
+        keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -152,6 +157,8 @@ impl SourceExecutor {
             metrics: streaming_metrics,
             stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
+            state_store: SourceStateHandler::new(keyspace),
+            state_cache: None,
         })
     }
 
@@ -232,7 +239,7 @@ impl SourceReader {
     }
 }
 
-impl SourceExecutor {
+impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
@@ -280,7 +287,7 @@ impl SourceExecutor {
     }
 }
 
-impl Executor for SourceExecutor {
+impl<S: StateStore> Executor for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
@@ -298,7 +305,7 @@ impl Executor for SourceExecutor {
     }
 }
 
-impl Debug for SourceExecutor {
+impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SourceExecutor")
             .field("source_id", &self.source_id)

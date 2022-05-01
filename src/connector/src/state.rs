@@ -24,6 +24,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::SplitMetaData;
 
+use risingwave_common::error::RwError;
+use risingwave_common::error::ErrorCode::InternalError;
+
+use crate::{ConnectorStateV2, SplitImpl, ConnectorState};
+
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
 pub trait SourceState: Debug + Clone {
@@ -161,6 +166,18 @@ impl<S: StateStore> SourceStateHandler<S> {
             }
             Err(e) => Err(anyhow!(e)),
         }
+    }
+
+    pub async fn try_recover_from_state_store(&self, stream_source_splits: &[SplitImpl], epoch: u64) -> Result<ConnectorStateV2> {
+        if stream_source_splits.len() == 0 {
+            return Ok(ConnectorStateV2::None);
+        }
+        let state = self.restore_states(stream_source_splits[0].id()).await..map_err(|e| RwError::from(InternalError(e.to_string())))?
+        .iter().filter(|(e, _)| e == &epoch).map(|(_, s)| {
+            ConnectorState::restore_from_bytes(s)
+                .map_err(|e| RwError::from(InternalError(e.to_string())))
+        }).collect::<Result<Vec<ConnectorState>>>()?;
+        Ok()
     }
 }
 
