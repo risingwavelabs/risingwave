@@ -204,7 +204,7 @@ impl<CS: 'static + CreateSource> BoxedExecutor2Builder for MergeSortExchangeExec
             .collect();
         let order_pairs = Arc::new(order_pairs);
 
-        let exchange_node = sort_merge_node.get_exchange_node()?;
+        let exchange_node = sort_merge_node.get_exchange()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
         ensure!(!exchange_node.get_sources().is_empty());
         let fields = exchange_node

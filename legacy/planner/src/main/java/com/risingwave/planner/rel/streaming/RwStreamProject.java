@@ -43,7 +43,7 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
 
     return StreamNode.newBuilder()
-        .setProjectNode(projectNodeBuilder.build())
+        .setProject(projectNodeBuilder.build())
         .addAllPkIndices(primaryKeyIndices)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();

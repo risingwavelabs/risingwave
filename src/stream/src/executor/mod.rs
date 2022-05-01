@@ -26,7 +26,7 @@ mod top_n_appendonly;
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use self::batch_query::*;
@@ -58,7 +58,7 @@ pub trait ExecutorBuilder {
 
 macro_rules! build_executor {
     ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
-        match $node.get_node().unwrap() {
+        match $node.get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
                     <$data_type>::new_boxed_executor($source,$node,$store,$stream)
@@ -67,7 +67,7 @@ macro_rules! build_executor {
             _ => Err(RwError::from(
                 ErrorCode::InternalError(format!(
                     "unsupported node:{:?}",
-                    $node.get_node().unwrap()
+                    $node.get_node_body().unwrap()
                 )),
             )),
         }
@@ -85,23 +85,23 @@ pub fn create_executor(
         node,
         store,
         stream,
-        Node::SourceNode => SourceExecutorBuilder,
-        Node::ProjectNode => ProjectExecutorBuilder,
-        Node::TopNNode => TopNExecutorBuilder,
-        Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
-        Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
-        Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
-        Node::HashAggNode => HashAggExecutorBuilder,
-        Node::HashJoinNode => HashJoinExecutorBuilder,
-        Node::HopWindowNode => HopWindowExecutorBuilder,
-        Node::ChainNode => ChainExecutorBuilder,
-        Node::BatchPlanNode => BatchQueryExecutorBuilder,
-        Node::MergeNode => MergeExecutorBuilder,
-        Node::MaterializeNode => MaterializeExecutorBuilder,
-        Node::FilterNode => FilterExecutorBuilder,
-        Node::ArrangeNode => ArrangeExecutorBuilder,
-        Node::LookupNode => LookupExecutorBuilder,
-        Node::UnionNode => UnionExecutorBuilder,
-        Node::LookupUnionNode => LookupUnionExecutorBuilder,
+        NodeBody::Source => SourceExecutorBuilder,
+        NodeBody::Project => ProjectExecutorBuilder,
+        NodeBody::TopN => TopNExecutorBuilder,
+        NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
+        NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
+        NodeBody::GlobalSimpleAgg => SimpleAggExecutorBuilder,
+        NodeBody::HashAgg => HashAggExecutorBuilder,
+        NodeBody::HashJoin => HashJoinExecutorBuilder,
+        NodeBody::HopWindow => HopWindowExecutorBuilder,
+        NodeBody::Chain => ChainExecutorBuilder,
+        NodeBody::BatchPlan => BatchQueryExecutorBuilder,
+        NodeBody::Merge => MergeExecutorBuilder,
+        NodeBody::Materialize => MaterializeExecutorBuilder,
+        NodeBody::Filter => FilterExecutorBuilder,
+        NodeBody::Arrange => ArrangeExecutorBuilder,
+        NodeBody::Lookup => LookupExecutorBuilder,
+        NodeBody::Union => UnionExecutorBuilder,
+        NodeBody::LookupUnion => LookupUnionExecutorBuilder,
     }
 }

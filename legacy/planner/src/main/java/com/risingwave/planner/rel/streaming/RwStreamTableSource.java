@@ -73,7 +73,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
     return StreamNode.newBuilder()
-        .setSourceNode(tableSourceNodeBuilder.build())
+        .setSource(tableSourceNodeBuilder.build())
         .addAllPkIndices(primaryKeyIndices)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
