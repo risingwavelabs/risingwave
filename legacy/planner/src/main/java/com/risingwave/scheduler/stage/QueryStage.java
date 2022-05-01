@@ -142,7 +142,7 @@ public class QueryStage {
       if (planNodeType.equals(PlanNode.NodeBodyCase.MERGE_SORT_EXCHANGE)) {
         MergeSortExchangeNode mergeSortExchangeNode = node.getMergeSortExchange();
         var mergeSortBuilder = mergeSortExchangeNode.toBuilder();
-        mergeSortBuilder.setExchangeNode(exchangeNode);
+        mergeSortBuilder.setExchange(exchangeNode);
         builder.setMergeSortExchange(mergeSortBuilder.build());
       } else {
         builder.setExchange(exchangeNode);

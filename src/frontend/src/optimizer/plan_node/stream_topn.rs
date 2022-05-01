@@ -14,10 +14,12 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan_common::ColumnOrder;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
+use crate::optimizer::property::Distribution;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -35,33 +37,14 @@ impl StreamTopN {
             _ => panic!(),
         };
 
-        // TODO: This is ported from the legacy Java code. Refactor to use input's PK as TopN's PK
-        let (pk_indices, extended_order) =
-            Self::derive_pk_and_order(logical.input().pk_indices(), logical.topn_order());
-        let logical = LogicalTopN::new(
-            logical.input(),
-            logical.limit(),
-            logical.offset(),
-            extended_order,
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            logical.input().pk_indices().to_vec(),
+            dist,
+            false,
         );
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamTopN { base, logical }
-    }
-
-    fn derive_pk_and_order(input_pk: &[usize], order: &Order) -> (Vec<usize>, Order) {
-        let mut output_pk = vec![];
-        let mut extended_order = vec![];
-        for field_order in &order.field_order {
-            output_pk.push(field_order.index);
-            extended_order.push(field_order.clone());
-        }
-        for col_index in input_pk {
-            if !output_pk.contains(col_index) {
-                output_pk.push(*col_index);
-                extended_order.push(FieldOrder::ascending(*col_index));
-            }
-        }
-        (output_pk, Order::new(extended_order))
     }
 }
 
@@ -92,15 +75,21 @@ impl_plan_tree_node_for_unary! { StreamTopN }
 impl ToStreamProst for StreamTopN {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let order_types = self
+        let column_orders = self
             .logical
             .topn_order()
             .field_order
             .iter()
-            .map(|f| f.direct.to_protobuf() as i32)
+            .map(|f| ColumnOrder {
+                order_type: f.direct.to_protobuf() as i32,
+                input_ref: Some(InputRefExpr {
+                    column_idx: f.index as i32,
+                }),
+                return_type: Some(self.input().schema()[f.index].data_type().to_protobuf()),
+            })
             .collect();
-        ProstStreamNode::TopNNode(TopNNode {
-            order_types,
+        ProstStreamNode::TopN(TopNNode {
+            column_orders,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
             distribution_keys: vec![], // TODO: seems unnecessary

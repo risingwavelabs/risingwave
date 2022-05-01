@@ -16,12 +16,12 @@ use std::sync::Arc;
 
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
-use risingwave_batch::executor::{
-    CreateTableExecutor, Executor as BatchExecutor, RowSeqScanExecutor,
-};
+use risingwave_batch::executor::{CreateTableExecutor, Executor as BatchExecutor};
 use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
-use risingwave_batch::executor2::{DeleteExecutor2, Executor2, InsertExecutor2};
+use risingwave_batch::executor2::monitor::BatchMetrics;
+use risingwave_batch::executor2::{
+    DeleteExecutor2, Executor2, InsertExecutor2, RowSeqScanExecutor2,
+};
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
@@ -218,17 +218,18 @@ async fn test_table_v2_materialize() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqExecutor".to_string(),
+        "RowSeqExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    assert!(scan.next().await?.is_none());
+    ));
+    let mut stream = scan.execute();
+    let result = stream.next().await;
 
+    assert!(result.is_none());
     // Send a barrier to start materialized view
     let curr_epoch = 1919;
     barrier_tx
@@ -276,17 +277,19 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    let col_data = c.columns()[0].array_ref().as_float64();
+    ));
+
+    let mut stream = scan.execute();
+    let result = stream.next().await.unwrap().unwrap();
+
+    let col_data = result.columns()[0].array_ref().as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -343,17 +346,18 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to see the deletion now!
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    let col_data = c.columns()[0].array_ref().as_float64();
+    ));
+
+    let mut stream = scan.execute();
+    let result = stream.next().await.unwrap().unwrap();
+    let col_data = result.columns()[0].array_ref().as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 

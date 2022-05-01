@@ -15,14 +15,13 @@
 use drop_stream::*;
 use drop_table::*;
 use merge_sort_exchange::*;
-use order_by::*;
+use order_by::OrderByExecutor;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
-pub use row_seq_scan::*;
 
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
@@ -33,8 +32,8 @@ use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
-    LimitExecutor2, ProjectExecutor2, SortAggExecutor2, SortMergeJoinExecutor2,
-    StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    LimitExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2,
+    SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -46,9 +45,7 @@ pub mod executor2_wrapper;
 mod fuse;
 mod join;
 mod merge_sort_exchange;
-pub mod monitor;
 mod order_by;
-mod row_seq_scan;
 #[cfg(test)]
 pub mod test_utils;
 mod trace;
@@ -181,7 +178,7 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
@@ -211,7 +208,7 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build2(&self) -> Result<BoxedExecutor2> {
         let real_executor = build_executor2! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
@@ -244,6 +241,10 @@ impl<'a> ExecutorBuilder<'a> {
 
     pub fn global_batch_env(&self) -> &BatchEnvironment {
         &self.env
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 }
 

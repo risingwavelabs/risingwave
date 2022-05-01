@@ -364,7 +364,7 @@ impl StageRunner {
                             // TODO: Generate meaningful identify
                             identity: Uuid::new_v4().to_string(),
                             node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                                exchange_node: Some(ExchangeNode {
+                                exchange: Some(ExchangeNode {
                                     sources: exchange_sources,
                                     input_schema: execution_plan_node.schema.clone(),
                                 }),

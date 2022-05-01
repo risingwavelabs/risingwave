@@ -14,7 +14,7 @@
 
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use super::Result;
@@ -31,7 +31,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Merge)?;
         stream.create_merge_node(params, node)
     }
 }

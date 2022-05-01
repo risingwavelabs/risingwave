@@ -175,7 +175,7 @@ public class RwStreamMaterialize extends SingleRel implements RisingWaveStreamin
     // Build and return.
     MaterializeNode materializedViewNode = materializedViewNodeBuilder.build();
     return StreamNode.newBuilder()
-        .setMaterializeNode(materializedViewNode)
+        .setMaterialize(materializedViewNode)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }

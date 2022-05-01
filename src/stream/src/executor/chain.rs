@@ -15,7 +15,7 @@
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
@@ -31,7 +31,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;
         let snapshot = params.input.remove(1);
         let mview = params.input.remove(0);
 

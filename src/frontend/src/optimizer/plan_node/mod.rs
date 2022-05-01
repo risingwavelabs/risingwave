@@ -190,7 +190,7 @@ impl dyn PlanNode {
             } else {
                 "".into()
             },
-            node,
+            node_body: node,
             operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
             pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
