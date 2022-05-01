@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp;
 
 use bytes::Bytes;
@@ -90,6 +91,12 @@ impl PartialOrd for KeyRange {
 
 impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
     fn from(kr: KeyRange) -> Self {
+        kr.borrow().into()
+    }
+}
+
+impl From<&KeyRange> for risingwave_pb::hummock::KeyRange {
+    fn from(kr: &KeyRange) -> Self {
         risingwave_pb::hummock::KeyRange {
             left: kr.left.to_vec(),
             right: kr.right.to_vec(),

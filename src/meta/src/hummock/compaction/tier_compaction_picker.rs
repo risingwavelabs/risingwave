@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashSet;
 
 use bytes::Bytes;
@@ -117,7 +118,7 @@ impl TierCompactionPicker {
 
     fn pick_target_level_overlap_files(
         &self,
-        select_table: &SstableInfo,
+        select_level_key_range: &KeyRange,
         level: &Level,
         level_handlers: &LevelHandler,
         input_ssts: &mut TargetFilesInfo,
@@ -128,7 +129,10 @@ impl TierCompactionPicker {
         let mut new_add_tables = vec![];
         // pick up files in L1 which are overlap with L0 to target level input.
         for table in &level.table_infos {
-            if !self.overlap_strategy.check_overlap(select_table, table) {
+            if !self.check_key_range_overlap(
+                &select_level_key_range.borrow().into(),
+                table.key_range.as_ref().unwrap(),
+            ) {
                 continue;
             }
             if level_handlers.is_pending_compact(&table.id) {
@@ -144,6 +148,25 @@ impl TierCompactionPicker {
             input_ssts.tables.push(table);
         }
         true
+    }
+
+    fn check_key_range_overlap(
+        &self,
+        left: &risingwave_pb::hummock::KeyRange,
+        right: &risingwave_pb::hummock::KeyRange,
+    ) -> bool {
+        // TODO: `SstableInfo` is to meet OverlapStrategy's signature. Refactor it.
+        // TODO #2259: remove `KeyRange` conversion
+        self.overlap_strategy.check_overlap(
+            &SstableInfo {
+                key_range: Some(left.clone()),
+                ..Default::default()
+            },
+            &SstableInfo {
+                key_range: Some(right.clone()),
+                ..Default::default()
+            },
+        )
     }
 
     fn pick_intra_l0_compaction(
@@ -206,21 +229,47 @@ impl TierCompactionPicker {
         select_level_handler: &LevelHandler,
         target_level_handler: &LevelHandler,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
+        let mut compacting_key_range: Option<KeyRange> = None;
+        for table_info in select_level
+            .table_infos
+            .iter()
+            .filter(|t| select_level_handler.is_pending_compact(&t.id))
+        {
+            let kr = table_info.key_range.as_ref().unwrap().into();
+            match compacting_key_range.borrow_mut() {
+                None => {
+                    compacting_key_range = Some(kr);
+                }
+                Some(ref mut key_range) => {
+                    key_range.full_key_extend(&kr);
+                }
+            }
+        }
         for idx in 0..select_level.table_infos.len() {
             let select_table = select_level.table_infos[idx].clone();
             if select_level_handler.is_pending_compact(&select_table.id) {
                 continue;
             }
-            if select_level.table_infos[..idx]
-                .iter()
-                .any(|table| self.overlap_strategy.check_overlap(table, &select_table))
-            {
+            let mut selecting_key_range: KeyRange = select_table.key_range.as_ref().unwrap().into();
+            if select_level.table_infos[..idx].iter().any(|table| {
+                self.check_key_range_overlap(
+                    table.key_range.as_ref().unwrap(),
+                    &selecting_key_range.borrow().into(),
+                )
+            }) {
                 continue;
             }
-
+            if let Some(ref compacting_key_range) = compacting_key_range {
+                if self.check_key_range_overlap(
+                    &compacting_key_range.borrow().into(),
+                    &selecting_key_range.borrow().into(),
+                ) {
+                    continue;
+                }
+            }
             let mut target_level_ssts = TargetFilesInfo::default();
             if !self.pick_target_level_overlap_files(
-                &select_table,
+                &selecting_key_range,
                 target_level,
                 target_level_handler,
                 &mut target_level_ssts,
@@ -237,18 +286,30 @@ impl TierCompactionPicker {
                 {
                     break;
                 }
-                if select_level.table_infos[..idx]
-                    .iter()
-                    .any(|table| self.overlap_strategy.check_overlap(table, other))
-                {
+                selecting_key_range.full_key_extend(&other.key_range.as_ref().unwrap().into());
+                if select_level.table_infos[..idx].iter().any(|table| {
+                    self.check_key_range_overlap(
+                        table.key_range.as_ref().unwrap(),
+                        &selecting_key_range.borrow().into(),
+                    )
+                }) {
                     break;
                 }
+                if let Some(ref compacting_key_range) = compacting_key_range {
+                    if self.check_key_range_overlap(
+                        &compacting_key_range.borrow().into(),
+                        &selecting_key_range.borrow().into(),
+                    ) {
+                        break;
+                    }
+                }
                 if !self.pick_target_level_overlap_files(
-                    other,
+                    &selecting_key_range,
                     target_level,
                     target_level_handler,
                     &mut target_level_ssts,
                 ) {
+                    // select_key_range is now stale.
                     break;
                 }
                 select_compaction_bytes += other.file_size;
