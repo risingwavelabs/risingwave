@@ -81,7 +81,7 @@ message HashAggNode {
 }
 
 message TopNNode {
-  repeated plan_common.OrderType order_types = 1;
+  repeated plan_common.ColumnOrder column_orders = 1;
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
