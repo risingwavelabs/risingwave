@@ -23,7 +23,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::ColumnOrder;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -250,7 +250,7 @@ impl ToStreamProst for StreamMaterialize {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::MaterializeNode(MaterializeNode {
+        ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_ref_id: None,

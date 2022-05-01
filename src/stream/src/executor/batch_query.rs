@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
@@ -40,7 +40,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
         let table_id = TableId::from(&node.table_ref_id);
         let column_descs = node
             .column_descs
