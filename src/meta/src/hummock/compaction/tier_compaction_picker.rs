@@ -30,7 +30,7 @@ use crate::hummock::level_handler::LevelHandler;
 pub struct TierCompactionPicker {
     compact_task_id: u64,
     target_level: usize,
-    overlap_strategy: Box<dyn OverlapStrategy>,
+    overlap_strategy: Arc<dyn OverlapStrategy>,
     config: Arc<CompactionConfig>,
 }
 
@@ -106,13 +106,13 @@ impl TierCompactionPicker {
         compact_task_id: u64,
         target_level: usize,
         config: Arc<CompactionConfig>,
-        overlap_strategy: Box<dyn OverlapStrategy>,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> TierCompactionPicker {
         TierCompactionPicker {
             compact_task_id,
-            config,
-            overlap_strategy,
             target_level,
+            overlap_strategy,
+            config,
         }
     }
 
@@ -296,8 +296,9 @@ mod tests {
     fn test_compact_l0_to_l1() {
         let picker = TierCompactionPicker::new(
             0,
+            1,
             Arc::new(CompactionConfig::default()),
-            Box::new(RangeOverlapStrategy::default()),
+            Arc::new(RangeOverlapStrategy::default()),
         );
         let mut levels = vec![
             Level {
@@ -347,10 +348,11 @@ mod tests {
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
-        let mut picker = TierCompactionPicker::new(
+        let picker = TierCompactionPicker::new(
+            1,
             1,
             Arc::new(CompactionConfig::default()),
-            Box::new(RangeOverlapStrategy::default()),
+            Arc::new(RangeOverlapStrategy::default()),
         );
         levels[0]
             .table_infos
@@ -359,8 +361,17 @@ mod tests {
         assert!(ret.is_none());
 
         // compact L0 to L0
-        picker.level0_trigger_number = 2;
-        picker.level0_max_file_number = 2;
+        let config = CompactionConfig {
+            level0_max_file_number: 2,
+            level0_trigger_number: 2,
+            ..Default::default()
+        };
+        let picker = TierCompactionPicker::new(
+            1,
+            1,
+            Arc::new(config),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         levels[0]
             .table_infos
             .push(generate_table(9, 1, 100, 200, 3));

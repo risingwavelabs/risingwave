@@ -19,7 +19,6 @@ mod tier_compaction_picker;
 
 use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use prost::Message;
