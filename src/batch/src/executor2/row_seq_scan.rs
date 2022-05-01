@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,32 +17,27 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
-use super::monitor::BatchMetrics;
-use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::executor::{Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::monitor::BatchMetrics;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
 /// Executor that scans data from row table
-pub struct RowSeqScanExecutor<S: StateStore> {
+pub struct RowSeqScanExecutor2<S: StateStore> {
     table: CellBasedTable<S>,
-    /// An iterator to scan StateStore.
-    iter: Option<CellBasedTableRowIter<S>>,
     primary: bool,
-
     chunk_size: usize,
     schema: Schema,
     identity: String,
-
     epoch: u64,
-
     stats: Arc<BatchMetrics>,
 }
 
-impl<S: StateStore> RowSeqScanExecutor<S> {
+impl<S: StateStore> RowSeqScanExecutor2<S> {
     pub fn new(
         table: CellBasedTable<S>,
         chunk_size: usize,
@@ -54,7 +50,6 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
         Self {
             table,
-            iter: None,
             primary,
             chunk_size,
             schema,
@@ -72,15 +67,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     }
 }
 
-pub struct RowSeqScanExecutorBuilder {}
+pub struct RowSeqScanExecutor2Builder {}
 
-impl RowSeqScanExecutorBuilder {
+impl RowSeqScanExecutor2Builder {
     // TODO: decide the chunk size for row seq scan
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 }
 
-impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let seq_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::RowSeqScan
@@ -99,58 +94,53 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let storage_stats = state_store.stats();
             let batch_stats = source.global_batch_env().stats();
             let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-            Ok(Box::new(
-                RowSeqScanExecutor::new(
-                    table,
-                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                    source.task_id.task_id == 0,
-                    source.plan_node().get_identity().clone(),
-                    source.epoch,
-                    batch_stats,
-                )
-                .fuse(),
-            ))
+            Ok(Box::new(RowSeqScanExecutor2::new(
+                table,
+                RowSeqScanExecutor2Builder::DEFAULT_CHUNK_SIZE,
+                source.task_id.task_id == 0,
+                source.plan_node().get_identity().clone(),
+                source.epoch(),
+                batch_stats,
+            )))
         })
     }
 }
 
-#[async_trait::async_trait]
-impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
-    async fn open(&mut self) -> Result<()> {
-        if self.should_ignore() {
-            info!("non-primary row seq scan, ignored");
-            return Ok(());
-        }
-
-        self.iter = Some(self.table.iter(self.epoch).await?);
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        let timer = self.stats.row_seq_scan_next_duration.start_timer();
-        if self.should_ignore() {
-            return Ok(None);
-        }
-
-        let iter = self.iter.as_mut().expect("executor not open");
-        let chunk = iter
-            .collect_data_chunk(&self.table, Some(self.chunk_size))
-            .await?;
-        timer.observe_duration();
-
-        Ok(chunk)
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        info!("Table scan closed.");
-        Ok(())
-    }
-
+impl<S: StateStore> Executor2 for RowSeqScanExecutor2<S> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 
     fn identity(&self) -> &str {
         &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl<S: StateStore> RowSeqScanExecutor2<S> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        if !self.should_ignore() {
+            let mut iter = self.table.iter(self.epoch).await.map_err(RwError::from)?;
+
+            loop {
+                let timer = self.stats.row_seq_scan_next_duration.start_timer();
+
+                let chunk = iter
+                    .collect_data_chunk(&self.table, Some(self.chunk_size))
+                    .await
+                    .map_err(RwError::from)?;
+                timer.observe_duration();
+
+                if let Some(chunk) = chunk {
+                    yield chunk
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }

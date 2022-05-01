@@ -65,7 +65,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             identity: format!("HopWindowExecutor {:X}", executor_id),
             pk_indices,
         };
-        let Some(stream_node::Node::HopWindowNode(node)) = &node.node else {
+        let Some(stream_node::NodeBody::HopWindow(node)) = &node.node_body else {
             unreachable!();
         };
         let time_col = node.get_time_col()?.column_idx as usize;

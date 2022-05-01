@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{ExecutorBuilder, Result};
@@ -32,7 +32,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
         let table_id = TableId::from(&node.table_ref_id);
         let keys = node
@@ -69,7 +69,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let arrange_node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
+        let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
 
         let keyspace = Keyspace::table_root(store, &TableId::from(arrange_node.table_id));
 
