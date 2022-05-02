@@ -31,7 +31,7 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
+    ActorGraphBuilder, FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef,
 };
 
 #[derive(Clone)]
@@ -427,7 +427,7 @@ where
             hash_mapping,
             ..Default::default()
         };
-        let graph = StreamFragmenter::generate_graph(
+        let graph = ActorGraphBuilder::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,

@@ -23,7 +23,7 @@ use crate::cluster::ClusterManagerRef;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};
+use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -89,7 +89,7 @@ where
             ..Default::default()
         };
 
-        let graph = crate::stream::StreamFragmenter::generate_graph(
+        let graph = crate::stream::ActorGraphBuilder::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,

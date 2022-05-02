@@ -56,7 +56,7 @@ use risingwave_pb::meta::{
     FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
     SubscribeRequest, SubscribeResponse,
 };
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
@@ -155,11 +155,11 @@ impl MetaClient {
     pub async fn create_materialized_view(
         &self,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
-            stream_node: Some(plan),
+            fragment_graph: Some(graph),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -188,11 +188,11 @@ impl MetaClient {
         &self,
         source: ProstSource,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<(TableId, u32, CatalogVersion)> {
         let request = CreateMaterializedSourceRequest {
             materialized_view: Some(table),
-            stream_node: Some(plan),
+            fragment_graph: Some(graph),
             source: Some(source),
         };
         let resp = self.inner.create_materialized_source(request).await?;

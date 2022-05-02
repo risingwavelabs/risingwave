@@ -673,15 +673,15 @@ impl BuildActorGraphState {
     }
 }
 
-/// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
-pub struct StreamFragmenter {
+/// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
+pub struct ActorGraphBuilder {
     /// degree of parallelism
     parallel_degree: u32,
     // TODO: remove this when we deprecate Java frontend.
     is_legacy_frontend: bool,
 }
 
-impl StreamFragmenter {
+impl ActorGraphBuilder {
     pub async fn generate_graph<S>(
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
