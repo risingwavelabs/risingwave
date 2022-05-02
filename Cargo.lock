@@ -4680,6 +4680,7 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util 0.7.1",
+ "tower",
  "tower-layer",
  "tower-service",
 ]

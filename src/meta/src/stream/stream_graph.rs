@@ -20,10 +20,16 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
+use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, MergeNode, StreamActor,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+};
 
 use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
 use crate::cluster::WorkerId;

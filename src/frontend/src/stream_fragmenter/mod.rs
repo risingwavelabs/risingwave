@@ -14,6 +14,7 @@
 
 mod graph;
 use graph::*;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
 use std::collections::HashSet;
@@ -23,7 +24,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_NodeBody::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
@@ -94,10 +94,10 @@ impl StreamFragmenter {
         let mut inputs = vec![];
 
         for child_node in stream_node.input {
-            let input = match child_node.get_node()? {
+            let input = match child_node.get_node_body()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                NodeBody::HashAggNode(_) | NodeBody::HashJoinNode(_) | ::DeltaIndexJoin(_) => {
+                NodeBody::HashAgg(_) | NodeBody::HashJoin(_) | NodeBody::DeltaIndexJoin(_) => {
                     // We didn't make `fields` available on Java frontend yet, so we check if schema
                     // is available (by `child_node.fields.is_empty()`) before deciding to do the
                     // rewrite.
@@ -113,7 +113,7 @@ impl StreamFragmenter {
                         StreamNode {
                             pk_indices: child_node.pk_indices.clone(),
                             fields: child_node.fields.clone(),
-                            node: Some(NodeBody::ExchangeNode(Exchange {
+                            node_body: Some(NodeBody::Exchange(ExchangeNode {
                                 strategy: Some(strategy.clone()),
                             })),
                             operator_id: state.gen_operator_id() as u64,
@@ -174,7 +174,7 @@ impl StreamFragmenter {
         mut stream_node: StreamNode,
     ) -> Result<StreamNode> {
         // Update current fragment based on the node we're visiting.
-        match stream_node.get_node()? {
+        match stream_node.get_node_body()? {
             NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
 
             NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Sink,
@@ -198,7 +198,7 @@ impl StreamFragmenter {
 
         // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
         // with only equal conditions
-        if let NodeBody::HashJoin(hash_join_node) = stream_node.node.as_mut().unwrap() {
+        if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_mut().unwrap() {
             // Allocate local table id. It will be rewrite to global table id after get table id
             // offset from id generator.
             hash_join_node.left_table_id = state.gen_table_id();
@@ -216,7 +216,8 @@ impl StreamFragmenter {
             }
         }
 
-        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node.as_mut().unwrap() {
+        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
+        {
             if delta_index_join.get_join_type()? == JoinType::Inner
                 && delta_index_join.condition.is_none()
             {
@@ -227,7 +228,7 @@ impl StreamFragmenter {
         }
 
         // Rewrite hash agg. One agg call -> one table id.
-        if let NodeBody::HashAgg(hash_agg_node) = stream_node.node.as_mut().unwrap() {
+        if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_mut().unwrap() {
             for _ in &hash_agg_node.agg_calls {
                 hash_agg_node.table_ids.push(state.gen_table_id());
             }
@@ -238,7 +239,7 @@ impl StreamFragmenter {
         let inputs = inputs
             .into_iter()
             .map(|mut child_node| -> Result<StreamNode> {
-                match child_node.get_node()? {
+                match child_node.get_node_body()? {
                     NodeBody::Exchange(_) if child_node.input.is_empty() => {
                         // When exchange node is generated when doing rewrites, it could be having
                         // zero input. In this case, we won't recursively

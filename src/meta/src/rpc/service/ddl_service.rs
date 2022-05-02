@@ -23,7 +23,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
@@ -266,7 +266,7 @@ where
             let mut dependent_relations = Default::default();
             for fragment in fragment_graph.fragments.values() {
                 resolve_dependent_relations(
-                    &fragment.node.as_ref().unwrap(),
+                    fragment.node.as_ref().unwrap(),
                     &mut dependent_relations,
                 )
                 .map_err(tonic_err)?;
