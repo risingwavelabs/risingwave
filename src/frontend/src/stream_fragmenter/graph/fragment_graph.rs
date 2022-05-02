@@ -135,9 +135,4 @@ impl StreamFragmentGraph {
             (upstream_id, downstream_id, edge)
         );
     }
-
-    /// Number of fragments
-    pub fn fragment_len(&self) -> usize {
-        self.fragments.len()
-    }
 }

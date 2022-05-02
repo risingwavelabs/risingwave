@@ -93,7 +93,6 @@ where
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
-            true,
             req.get_fragment_graph().map_err(tonic_err)?,
             &mut ctx,
         )

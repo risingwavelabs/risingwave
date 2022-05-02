@@ -275,7 +275,6 @@ async fn test_fragmenter() -> Result<()> {
         env.id_gen_manager_ref(),
         fragment_manager,
         parallel_degree,
-        false,
         &graph,
         &mut ctx,
     )

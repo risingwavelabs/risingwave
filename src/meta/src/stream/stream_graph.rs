@@ -677,8 +677,6 @@ impl BuildActorGraphState {
 pub struct ActorGraphBuilder {
     /// degree of parallelism
     parallel_degree: u32,
-    // TODO: remove this when we deprecate Java frontend.
-    is_legacy_frontend: bool,
 }
 
 impl ActorGraphBuilder {
@@ -686,19 +684,15 @@ impl ActorGraphBuilder {
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         parallel_degree: u32,
-        is_legacy_frontend: bool,
         fragment_graph: &StreamFragmentGraphProto,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
-        Self {
-            parallel_degree,
-            is_legacy_frontend,
-        }
-        .generate_graph_inner(id_gen_manager, fragment_manager, fragment_graph, ctx)
-        .await
+        Self { parallel_degree }
+            .generate_graph_inner(id_gen_manager, fragment_manager, fragment_graph, ctx)
+            .await
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
@@ -997,10 +991,5 @@ impl StreamFragmentGraph {
             static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
         }
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
-    }
-
-    /// Number of fragments
-    pub fn fragment_len(&self) -> usize {
-        self.fragments.len()
     }
 }
