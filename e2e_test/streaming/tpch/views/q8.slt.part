@@ -1,4 +1,4 @@
-tatement ok
+statement ok
 create materialized view tpch_q8 as
 select
   o_year,
