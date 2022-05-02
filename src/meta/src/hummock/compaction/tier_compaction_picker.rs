@@ -301,6 +301,7 @@ impl TierCompactionPicker {
                         &compacting_key_range.borrow().into(),
                         &selecting_key_range.borrow().into(),
                     ) {
+                        // selecting_key_range is now stale.
                         break;
                     }
                 }
@@ -310,7 +311,7 @@ impl TierCompactionPicker {
                     target_level_handler,
                     &mut target_level_ssts,
                 ) {
-                    // select_key_range is now stale.
+                    // selecting_key_range is now stale.
                     break;
                 }
                 select_compaction_bytes += other.file_size;
@@ -329,6 +330,7 @@ impl TierCompactionPicker {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_pb::hummock::KeyRange as RawKeyRange;
 
     use super::*;
@@ -356,6 +358,7 @@ mod tests {
     #[test]
     fn test_compact_l0_to_l1() {
         let picker = TierCompactionPicker::new(0, Box::new(RangeOverlapStrategy::default()));
+
         let mut levels = vec![
             Level {
                 level_idx: 0,
@@ -402,7 +405,7 @@ mod tests {
         assert_eq!(ret.target_level.table_infos[0].id, 0);
         assert_eq!(ret.select_level.table_infos[0].id, 6);
 
-        // the first idle table in L0 is table 6 and its confict with the last job so we can not
+        // the first idle table in L0 is table 6 and its conflict with the last job so we can not
         // pick table 7.
         let mut picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
         levels[0]
@@ -424,5 +427,166 @@ mod tests {
         assert_eq!(ret.select_level.table_infos[1].id, 8);
         assert_eq!(ret.select_level.table_infos[2].id, 9);
         assert!(ret.target_level.table_infos.is_empty());
+    }
+
+    #[test]
+    fn test_selecting_key_range_overlap() {
+        // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
+        let picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 200, 2),
+                    generate_table(2, 1, 400, 500, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(3, 1, 0, 50, 1),
+                    generate_table(4, 1, 150, 200, 1),
+                    generate_table(5, 1, 250, 300, 1),
+                    generate_table(6, 1, 1000, 200, 1),
+                ],
+            },
+        ];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let ret = picker.pick_compaction(levels, &mut levels_handler).unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 2);
+        assert_eq!(
+            ret.select_level
+                .table_infos
+                .iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            ret.target_level
+                .table_infos
+                .iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            vec![4, 5]
+        );
+    }
+
+    #[test]
+    fn test_compacting_key_range_overlap_l0() {
+        // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
+        // compacting_key_range.
+        let picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 200, 2),
+                    generate_table(2, 1, 450, 500, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![],
+            },
+        ];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let _ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 0);
+
+        levels[0]
+            .table_infos
+            .push(generate_table(3, 1, 250, 300, 3));
+        assert!(picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .is_none());
+    }
+
+    #[test]
+    fn test_compacting_key_range_overlap_l1() {
+        // When picking L0->L1, L0's selecting_key_range should not be overlapped with any L1 files
+        // under compaction.
+        let picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![generate_table(1, 1, 200, 250, 2)],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![generate_table(2, 1, 150, 300, 2)],
+            },
+        ];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let _ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 1);
+
+        levels[0]
+            .table_infos
+            .push(generate_table(3, 1, 100, 110, 3));
+        levels[0]
+            .table_infos
+            .push(generate_table(4, 1, 400, 500, 3));
+        // Will be intra L0
+        let ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert!(ret.target_level.table_infos.is_empty());
+        assert_eq!(
+            ret.select_level
+                .table_infos
+                .iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            vec![3]
+        );
+    }
+
+    #[test]
+    fn test_compacting_key_range_overlap_intra_l0() {
+        // When picking L0->L0, L0's selecting_key_range should not be overlapped with L0's
+        // compacting_key_range.
+        let picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 160, 2),
+                    generate_table(2, 1, 190, 250, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![generate_table(3, 1, 200, 300, 2)],
+            },
+        ];
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let _ret = picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .unwrap();
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 1);
+
+        levels[0]
+            .table_infos
+            .push(generate_table(4, 1, 170, 180, 3));
+        assert!(picker
+            .pick_compaction(levels.clone(), &mut levels_handler)
+            .is_none());
     }
 }
