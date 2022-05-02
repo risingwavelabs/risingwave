@@ -135,7 +135,7 @@
         partsupp,
         part,
         supplier,
-     /* TODO: join reorder to avoid cross join */
+     /* TODO(#1866): join reorder to avoid cross join */
      /* partsupp, */
         nation,
         region
@@ -651,7 +651,7 @@
           lineitem,
           part,
           supplier,
-       /* TODO: join reorder to avoid cross join */
+       /* TODO(#1866): join reorder to avoid cross join */
        /* lineitem, */
           orders,
           customer,
@@ -785,7 +785,7 @@
           lineitem,
           part,
           supplier,
-       /* TODO: join reorder to avoid cross join */
+       /* TODO(#1866): join reorder to avoid cross join */
        /* lineitem, */
           partsupp,
           orders,

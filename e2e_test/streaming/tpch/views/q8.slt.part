@@ -1,5 +1,4 @@
-# TODO: Swap `lineitem` table with `supplier` to test join reorder (#1866).
-statement ok
+tatement ok
 create materialized view tpch_q8 as
 select
   o_year,
@@ -15,8 +14,8 @@ from
       n2.n_name as nation
     from
       part,
-      lineitem,
       supplier,
+      lineitem,
       orders,
       customer,
       nation n1,
