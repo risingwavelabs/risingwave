@@ -126,20 +126,20 @@ impl TierCompactionPicker {
         if level.table_infos.is_empty() {
             return true;
         }
-        let mut new_add_tables = vec![];
         // pick up files in L1 which are overlap with L0 to target level input.
-        for table in &level.table_infos {
-            if !self.overlap_strategy.check_overlap(select_table, table) {
-                continue;
-            }
-            if level_handlers.is_pending_compact(&table.id) {
-                return false;
-            }
-            if !input_ssts.table_ids.contains(&table.id) {
-                new_add_tables.push(table.clone());
-            }
+        let new_add_tables = self
+            .overlap_strategy
+            .check_multiple_overlap(select_table, &level.table_infos);
+        if new_add_tables
+            .iter()
+            .any(|table| level_handlers.is_pending_compact(&table.id))
+        {
+            return false;
         }
         for table in new_add_tables {
+            if input_ssts.table_ids.contains(&table.id) {
+                continue;
+            }
             input_ssts.table_ids.insert(table.id);
             input_ssts.compaction_bytes += table.file_size;
             input_ssts.tables.push(table);

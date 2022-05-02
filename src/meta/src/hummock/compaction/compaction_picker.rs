@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_pb::hummock::Level;
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionConfig, SearchResult};
+use crate::hummock::compaction::SearchResult;
 use crate::hummock::level_handler::LevelHandler;
 
 pub trait CompactionPicker {
@@ -62,12 +62,10 @@ impl CompactionPicker for SizeOverlapPicker {
             }
             let mut total_file_size = 0;
             let mut pending_campct = false;
-            for other in &levels[target_level].table_infos {
-                // TODO: add index method for overlap strategy to construct a dynamic index tree to
-                // speed up
-                if !self.overlap_strategy.check_overlap(table, other) {
-                    continue;
-                }
+            let overlap_files = self
+                .overlap_strategy
+                .check_multiple_overlap(table, &levels[target_level].table_infos);
+            for other in overlap_files {
                 if level_handlers[target_level].is_pending_compact(&other.id) {
                     pending_campct = true;
                     break;
@@ -84,15 +82,9 @@ impl CompactionPicker for SizeOverlapPicker {
         }
         scores.sort_by_key(|x| x.0);
         let (_, table) = scores.pop().unwrap();
-        let mut target_input_ssts = vec![];
-        for other in &levels[target_level].table_infos {
-            // TODO: add index method for overlap strategy to construct a dynamic index tree to
-            // speed up
-            if !self.overlap_strategy.check_overlap(&table, other) {
-                continue;
-            }
-            target_input_ssts.push(other.clone());
-        }
+        let target_input_ssts = self
+            .overlap_strategy
+            .check_multiple_overlap(&table, &levels[target_level].table_infos);
         let select_input_ssts = vec![table];
         level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         level_handlers[self.level].add_pending_task(self.compact_task_id, &select_input_ssts);
