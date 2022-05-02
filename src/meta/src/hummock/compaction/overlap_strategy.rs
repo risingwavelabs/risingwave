@@ -29,20 +29,11 @@ pub trait OverlapStrategy: Send + Sync {
         tables: &[SstableInfo],
         others: &[SstableInfo],
     ) -> Vec<SstableInfo> {
-        let mut target = vec![];
-        for other in others {
-            let mut overlap = false;
-            for table in tables {
-                if self.check_overlap(table, other) {
-                    overlap = true;
-                    break;
-                }
-            }
-            if overlap {
-                target.push(other.clone());
-            }
+        let mut info = self.create_overlap_info();
+        for table in tables {
+            info.update(table);
         }
-        target
+        info.check_multiple_overlap(others)
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo>;
@@ -63,7 +54,25 @@ impl OverlapInfo for RangeOverlapInfo {
 
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
         match self.target_range.as_ref() {
-            Some(range) => check_tables_overlap(range, others),
+            Some(key_range) => {
+                let mut tables = vec![];
+                let overlap_begin = others.partition_point(|table_status| {
+                    user_key(&table_status.key_range.as_ref().unwrap().right)
+                        < user_key(&key_range.left)
+                });
+                if overlap_begin >= others.len() {
+                    return vec![];
+                }
+                for table in &others[overlap_begin..] {
+                    if user_key(&table.key_range.as_ref().unwrap().left)
+                        > user_key(&key_range.right)
+                    {
+                        break;
+                    }
+                    tables.push(table.clone());
+                }
+                tables
+            }
             None => vec![],
         }
     }
@@ -87,21 +96,6 @@ impl OverlapStrategy for RangeOverlapStrategy {
         check_table_overlap(&key_range, b)
     }
 
-    fn check_multiple_overlap(
-        &self,
-        select_tables: &[SstableInfo],
-        others: &[SstableInfo],
-    ) -> Vec<SstableInfo> {
-        if select_tables.is_empty() {
-            return vec![];
-        }
-        let mut key_range = KeyRange::from(select_tables[0].key_range.as_ref().unwrap());
-        for table in &select_tables[1..] {
-            key_range.full_key_extend(&KeyRange::from(table.key_range.as_ref().unwrap()));
-        }
-        check_tables_overlap(&key_range, others)
-    }
-
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
         Box::new(RangeOverlapInfo::default())
     }
@@ -110,21 +104,4 @@ impl OverlapStrategy for RangeOverlapStrategy {
 fn check_table_overlap(key_range: &KeyRange, table: &SstableInfo) -> bool {
     let other = KeyRange::from(table.key_range.as_ref().unwrap());
     key_range.full_key_overlap(&other)
-}
-
-fn check_tables_overlap(key_range: &KeyRange, others: &[SstableInfo]) -> Vec<SstableInfo> {
-    let mut tables = vec![];
-    let overlap_begin = others.partition_point(|table_status| {
-        user_key(&table_status.key_range.as_ref().unwrap().right) < user_key(&key_range.left)
-    });
-    if overlap_begin >= others.len() {
-        return vec![];
-    }
-    for table in &others[overlap_begin..] {
-        if user_key(&table.key_range.as_ref().unwrap().left) > user_key(&key_range.right) {
-            break;
-        }
-        tables.push(table.clone());
-    }
-    tables
 }

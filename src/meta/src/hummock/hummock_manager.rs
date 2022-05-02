@@ -35,7 +35,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::{CompactStatus, MAX_LEVEL};
+use crate::hummock::compaction::{CompactStatus, CompactionConfig};
 use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
@@ -65,6 +65,7 @@ pub struct HummockManager<S: MetaStore> {
 
     /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<UnboundedSender<CompactionGroupId>>>,
+    config: Arc<CompactionConfig>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -155,6 +156,8 @@ where
             metrics,
             cluster_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
+            // TODO: load it from etcd or configuration file.
+            config: Arc::new(CompactionConfig::default()),
         };
 
         instance.load_meta_store_state().await?;
@@ -168,9 +171,10 @@ where
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
+        let config = self.config.clone();
         compaction_guard.compact_status = CompactStatus::get(self.env.meta_store())
             .await?
-            .unwrap_or_else(CompactStatus::new);
+            .unwrap_or_else(|| CompactStatus::new(config));
 
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())
@@ -192,24 +196,24 @@ where
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
-            let init_version = HummockVersion {
+            let mut init_version = HummockVersion {
                 id: versioning_guard.current_version_id.id(),
-                levels: vec![
-                    Level {
-                        level_idx: 0,
-                        level_type: LevelType::Overlapping as i32,
-                        table_infos: vec![],
-                    },
-                    Level {
-                        level_idx: MAX_LEVEL as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: vec![],
-                    },
-                ],
+                levels: vec![Level {
+                    level_idx: 0,
+                    level_type: LevelType::Overlapping as i32,
+                    table_infos: vec![],
+                }],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
+            for l in 0..self.config.max_level {
+                init_version.levels.push(Level {
+                    level_idx: (l + 1) as u32,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: vec![],
+                });
+            }
             init_version.insert(self.env.meta_store()).await?;
             versioning_guard
                 .hummock_versions
