@@ -63,6 +63,14 @@
       BatchFilter { predicate: $0 AND $1 }
         BatchScan { table: t, columns: [v1, v2] }
 - sql: |
+    /* constant folding for IsTrue, IsFalse, IsNull*/
+    create table t(a Boolean);
+    select * from t where (IsTrue(IsNull(NULL))) AND IsFalse(False) AND a;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [a] }
+      LogicalFilter { predicate: $1 }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
+- sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
   batch_plan: |

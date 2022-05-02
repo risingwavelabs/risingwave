@@ -101,12 +101,20 @@ impl ExprRewriter for BooleanConstantFolding {
         };
         if contains_bool_constant {
             match func_type {
-                Type::Not => {
+                // unary functions
+                Type::Not | Type::IsFalse => {
                     let constant_value = inputs.pop().unwrap();
                     if let Some(v) = try_get_bool_constant(&constant_value) {
                         return ExprImpl::literal_bool(!v);
                     }
                 }
+                Type::IsTrue => {
+                    let constant_value = inputs.pop().unwrap();
+                    if let Some(v) = try_get_bool_constant(&constant_value) {
+                        return ExprImpl::literal_bool(v);
+                    }
+                }
+                // binary functions
                 Type::And => {
                     let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
                     return boolean_constant_fold_and(constant_lhs, rhs);
@@ -116,6 +124,11 @@ impl ExprRewriter for BooleanConstantFolding {
                     return boolean_constant_fold_or(constant_lhs, rhs);
                 }
                 _ => {}
+            }
+        } else if func_type == Type::IsNull {
+            let input = inputs.pop().unwrap();
+            if input.is_null() {
+                return ExprImpl::literal_bool(true);
             }
         }
         FunctionCall::new_unchecked(func_type, inputs, ret).into()

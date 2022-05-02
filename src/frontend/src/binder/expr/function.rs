@@ -60,6 +60,9 @@ impl Binder {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
                 }
+                "isnull" => ExprType::IsNull,
+                "isfalse" => ExprType::IsFalse,
+                "istrue" => ExprType::IsTrue,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
