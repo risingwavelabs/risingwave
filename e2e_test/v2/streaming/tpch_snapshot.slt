@@ -19,6 +19,7 @@ include ../../streaming/tpch/views/q7.slt.part
 include ../../streaming/tpch/views/q8.join_reorder.workaround.slt.part
 include ../../streaming/tpch/views/q9.join_reorder.workaround.slt.part
 include ../../streaming/tpch/views/q10.slt.part
+# include ../../streaming/tpch/views/q11.slt.part # having clause(#2166)
 include ../../streaming/tpch/views/q12.slt.part
 include ../../streaming/tpch/views/q13.slt.part
 include ../../streaming/tpch/views/q14.slt.part
