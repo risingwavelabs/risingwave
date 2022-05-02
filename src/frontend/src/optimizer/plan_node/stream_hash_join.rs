@@ -16,11 +16,10 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
-use crate::catalog::TableId;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::Distribution;
@@ -112,17 +111,8 @@ impl StreamHashJoin {
     }
 
     /// Convert this hash join to a delta join plan
-    pub fn to_delta_join(
-        &self,
-        left_table_id: TableId,
-        right_table_id: TableId,
-    ) -> StreamDeltaJoin {
-        StreamDeltaJoin::new(
-            self.logical.clone(),
-            self.eq_join_predicate.clone(),
-            left_table_id,
-            right_table_id,
-        )
+    pub fn to_delta_join(&self) -> StreamDeltaJoin {
+        StreamDeltaJoin::new(self.logical.clone(), self.eq_join_predicate.clone())
     }
 }
 
@@ -162,8 +152,8 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl ToStreamProst for StreamHashJoin {
-    fn to_stream_prost_body(&self) -> Node {
-        Node::HashJoinNode(HashJoinNode {
+    fn to_stream_prost_body(&self) -> NodeBody {
+        NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: self
                 .eq_join_predicate

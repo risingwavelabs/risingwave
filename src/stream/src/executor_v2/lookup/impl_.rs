@@ -29,7 +29,7 @@ use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::lookup::cache::LookupCache;
 use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor_v2::lookup::LookupExecutor;
-use crate::executor_v2::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor_v2::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -275,9 +275,13 @@ impl<S: StateStore> LookupExecutor<S> {
                     self.process_barrier(barrier.clone())
                         .await
                         .map_err(StreamExecutorError::eval_error)?;
-                    yield Message::Barrier(barrier)
+                    if self.arrangement.use_current_epoch {
+                        // When lookup this epoch, stream side barrier always come after arrangement
+                        // ready, so we can forward barrier now.
+                        yield Message::Barrier(barrier);
+                    }
                 }
-                ArrangeMessage::ArrangeReady(arrangement_chunks) => {
+                ArrangeMessage::ArrangeReady(arrangement_chunks, barrier) => {
                     // The arrangement is ready, and we will receive a bunch of stream messages for
                     // the next poll.
 
@@ -292,6 +296,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         // If we are using previous epoch, arrange barrier should always come after
                         // stream barrier. So we flush now.
                         self.lookup_cache.flush();
+
+                        // When look prev epoch, arrange ready will always come after stream
+                        // barrier. So we yield barrier now.
+                        yield Message::Barrier(barrier);
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
@@ -321,6 +329,8 @@ impl<S: StateStore> LookupExecutor<S> {
                             .await
                             .map_err(StreamExecutorError::eval_error)?
                         {
+                            tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
+
                             if let Some(chunk) = builder
                                 .append_row_with_limit(*op, &row, &matched_row)
                                 .map_err(StreamExecutorError::eval_error)?
@@ -341,7 +351,33 @@ impl<S: StateStore> LookupExecutor<S> {
 
     /// Store the barrier.
     async fn process_barrier(&mut self, barrier: Barrier) -> Result<()> {
-        self.last_barrier = Some(barrier);
+        if self.last_barrier.is_none() {
+            assert_ne!(barrier.epoch.prev, 0, "lookup requires prev epoch != 0");
+
+            // This is the first barrier, and we need to take special care of it.
+            //
+            // **Case 1: Lookup after Chain**
+            //
+            // In this case, we have the full state already on shared storage, so we must set prev
+            // epoch = 0, and only one lookup path will work. Otherwise, the result might be
+            // duplicated.
+            //
+            // **Case 2: Lookup after Arrange**
+            //
+            // The lookup is created by delta join plan without index, and prev epoch can't have any
+            // data. Therefore, it is also okay to simply set prev epoch to 0.
+
+            self.last_barrier = Some(Barrier {
+                epoch: Epoch {
+                    prev: 0,
+                    curr: barrier.epoch.curr,
+                },
+                ..barrier
+            });
+            return Ok(());
+        } else {
+            self.last_barrier = Some(barrier)
+        }
         Ok(())
     }
 
@@ -351,6 +387,11 @@ impl<S: StateStore> LookupExecutor<S> {
         stream_row: &RowRef<'_>,
         lookup_epoch: u64,
     ) -> Result<Vec<Row>> {
+        // fast-path for empty look-ups.
+        if lookup_epoch == 0 {
+            return Ok(vec![]);
+        }
+
         // stream_row is the row from stream side, we need to transform into the correct order of
         // the arrangement side.
         let lookup_row = stream_row.row_by_indices(&self.key_indices_mapping);
@@ -360,13 +401,14 @@ impl<S: StateStore> LookupExecutor<S> {
 
         // Serialize join key to a state store key.
         let key_prefix = {
-            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", lookup_row);
             let mut key_prefix = vec![];
             self.arrangement
                 .serializer
                 .serialize_datums(lookup_row.0.iter(), &mut key_prefix);
             key_prefix
         };
+
+        tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}, {:?}", lookup_row, bytes::Bytes::copy_from_slice(&key_prefix));
 
         let arrange_keyspace = self.arrangement.keyspace.append(key_prefix);
         let all_cells = arrange_keyspace
@@ -376,6 +418,7 @@ impl<S: StateStore> LookupExecutor<S> {
         let mut all_rows = vec![];
 
         for (pk_with_cell_id, cell) in all_cells {
+            tracing::trace!(target: "events::stream::lookup::scan", "{:?} => {:?}", pk_with_cell_id, cell);
             if let Some((_, row)) = self
                 .arrangement
                 .deserializer
@@ -388,6 +431,8 @@ impl<S: StateStore> LookupExecutor<S> {
         if let Some((_, last_row)) = self.arrangement.deserializer.take() {
             all_rows.push(last_row);
         }
+
+        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
 
         self.lookup_cache
             .batch_update(lookup_row, all_rows.iter().cloned());

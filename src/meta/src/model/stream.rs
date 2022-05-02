@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::cluster::{ParallelUnitId, WorkerId};
@@ -142,7 +142,7 @@ impl TableFragments {
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {
-        if let Some(Node::ChainNode(_)) = stream_node.node {
+        if let Some(NodeBody::Chain(_)) = stream_node.node_body {
             return true;
         }
 
@@ -156,7 +156,7 @@ impl TableFragments {
     }
 
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
-        if let Some(Node::SourceNode(s)) = stream_node.node.as_ref() {
+        if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
                 return Some(s.table_ref_id.as_ref().unwrap().table_id as SourceId);
             }
@@ -187,7 +187,7 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
-        if let Some(Node::ChainNode(chain)) = stream_node.node.as_ref() {
+        if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
             table_ids.insert(TableId::from(&chain.table_ref_id));
         }
 

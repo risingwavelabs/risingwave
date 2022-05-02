@@ -15,7 +15,7 @@
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
@@ -31,7 +31,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;
         let snapshot = params.input.remove(1);
         let mview = params.input.remove(0);
 
@@ -50,24 +50,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let schema = snapshot.schema().clone();
 
         if node.disable_rearrange {
-            let executor = ChainExecutor::new_from_v1(
-                snapshot,
-                mview,
-                notifier,
-                schema,
-                column_idxs,
-                params.op_info,
-            );
+            let executor = ChainExecutor::new(snapshot, mview, column_idxs, notifier, schema);
             Ok(executor.boxed())
         } else {
-            let executor = RearrangedChainExecutor::new_from_v1(
-                snapshot,
-                mview,
-                notifier,
-                schema,
-                column_idxs,
-                params.op_info,
-            );
+            let executor =
+                RearrangedChainExecutor::new(snapshot, mview, column_idxs, notifier, schema);
             Ok(executor.boxed())
         }
     }

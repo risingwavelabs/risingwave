@@ -24,7 +24,7 @@ use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     ActorMapping, DispatcherType, ParallelUnitMapping, StreamNode, StreamSourceState,
 };
@@ -132,7 +132,7 @@ where
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
             ) -> Result<()> {
-                let Some(Node::ChainNode(ref mut chain)) = stream_node.node else {
+                let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                         // If node is not chain node, recursively deal with input nodes
                         for input in &mut stream_node.input {
                             self.resolve_chain_node_inner(input, actor_id)?;
@@ -179,13 +179,14 @@ where
 
                 // deal with merge and batch query node, setting upstream infos.
                 let merge_stream_node = &mut stream_node.input[0];
-                if let Some(Node::MergeNode(ref mut merge)) = merge_stream_node.node {
+                if let Some(NodeBody::Merge(ref mut merge)) = merge_stream_node.node_body {
                     merge.upstream_actor_id.push(*upstream_actor_id);
                 } else {
                     unreachable!("chain's input[0] should always be merge");
                 }
                 let batch_stream_node = &mut stream_node.input[1];
-                if let Some(Node::BatchPlanNode(ref mut batch_query)) = batch_stream_node.node {
+                if let Some(NodeBody::BatchPlan(ref mut batch_query)) = batch_stream_node.node_body
+                {
                     let (original_indices, data) = compress_data(self.hash_mapping);
                     batch_query.hash_mapping = Some(ParallelUnitMapping {
                         original_indices,
@@ -404,7 +405,7 @@ where
                     node = node.input.first_mut().unwrap();
                 }
 
-                if let Some(Node::SourceNode(s)) = node.node.as_mut() {
+                if let Some(NodeBody::Source(s)) = node.node_body.as_mut() {
                     log::debug!(
                         "patching source node #{} with splits {:?}",
                         actor_id,
@@ -855,8 +856,8 @@ mod tests {
                 actor_id: i,
                 // A dummy node to avoid panic.
                 nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node: Some(
-                        risingwave_pb::stream_plan::stream_node::Node::MaterializeNode(
+                    node_body: Some(
+                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
                             risingwave_pb::stream_plan::MaterializeNode {
                                 table_ref_id: Some(table_ref_id.clone()),
                                 ..Default::default()

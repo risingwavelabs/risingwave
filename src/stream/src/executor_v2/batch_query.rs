@@ -46,18 +46,18 @@ impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    pub const DEFAULT_BATCH_SIZE: usize = 100;
+    const DEFAULT_BATCH_SIZE: usize = 100;
 
     pub fn new(
         table: CellBasedTable<S>,
-        batch_size: usize,
+        batch_size: Option<usize>,
         info: ExecutorInfo,
         key_indices: Vec<usize>,
         hash_filter: Bitmap,
     ) -> Self {
         Self {
             table,
-            batch_size,
+            batch_size: batch_size.unwrap_or(Self::DEFAULT_BATCH_SIZE),
             info,
             key_indices,
             hash_filter,
@@ -168,7 +168,7 @@ mod test {
         };
         let executor = Box::new(BatchQueryExecutor::new(
             table,
-            test_batch_size,
+            Some(test_batch_size),
             info,
             vec![],
             hash_filter,

@@ -28,7 +28,7 @@ use risingwave_pb::plan_common::{
     ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
 };
 use risingwave_pb::stream_plan::source_node::SourceType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode, ProjectNode,
     SimpleAggNode, SourceNode, StreamNode,
@@ -121,7 +121,7 @@ fn make_stream_node() -> StreamNode {
     let table_ref_id = make_table_ref_id(1);
     // table source node
     let source_node = StreamNode {
-        node: Some(Node::SourceNode(SourceNode {
+        node_body: Some(NodeBody::Source(SourceNode {
             table_ref_id: Some(table_ref_id),
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
@@ -133,7 +133,7 @@ fn make_stream_node() -> StreamNode {
 
     // exchange node
     let exchange_node = StreamNode {
-        node: Some(Node::ExchangeNode(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
@@ -156,7 +156,7 @@ fn make_stream_node() -> StreamNode {
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let filter_node = StreamNode {
-        node: Some(Node::FilterNode(FilterNode {
+        node_body: Some(NodeBody::Filter(FilterNode {
             search_condition: Some(ExprNode {
                 expr_type: GreaterThan as i32,
                 return_type: Some(DataType {
@@ -176,7 +176,7 @@ fn make_stream_node() -> StreamNode {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
+        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
         })),
@@ -190,7 +190,7 @@ fn make_stream_node() -> StreamNode {
 
     // exchange node
     let exchange_node_1 = StreamNode {
-        node: Some(Node::ExchangeNode(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
@@ -206,7 +206,7 @@ fn make_stream_node() -> StreamNode {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
+        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
         })),
@@ -223,7 +223,7 @@ fn make_stream_node() -> StreamNode {
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let project_node = StreamNode {
-        node: Some(Node::ProjectNode(ProjectNode {
+        node_body: Some(NodeBody::Project(ProjectNode {
             select_list: vec![
                 ExprNode {
                     rex_node: Some(RexNode::FuncCall(function_call_1)),
@@ -249,7 +249,7 @@ fn make_stream_node() -> StreamNode {
     StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
-        node: Some(Node::MaterializeNode(MaterializeNode {
+        node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_ref_id: Some(make_table_ref_id(1)),
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],
@@ -318,8 +318,8 @@ async fn test_fragmenter() -> Result<()> {
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
-        match node.get_node().unwrap() {
-            Node::MergeNode(merge_node) => {
+        match node.get_node_body().unwrap() {
+            NodeBody::Merge(merge_node) => {
                 assert_eq!(
                     expected_upstream
                         .get(&actor.get_actor_id())
@@ -332,7 +332,7 @@ async fn test_fragmenter() -> Result<()> {
                         .collect::<HashSet<_>>(),
                 );
             }
-            Node::SourceNode(_) => {
+            NodeBody::Source(_) => {
                 // check nothing.
             }
             _ => {

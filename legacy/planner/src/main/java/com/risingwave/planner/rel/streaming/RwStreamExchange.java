@@ -50,7 +50,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     var mergeNode = mergerBuilder.build();
 
     return StreamNode.newBuilder()
-        .setMergeNode(mergeNode)
+        .setMerge(mergeNode)
         .addAllPkIndices(primaryKeyIndices)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
@@ -75,7 +75,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     exchangeBuilder.setStrategy(dispatcherBuilder);
 
     return StreamNode.newBuilder()
-        .setExchangeNode(exchangeBuilder)
+        .setExchange(exchangeBuilder)
         .addAllPkIndices(primaryKeyIndices)
         .addAllFields(this.getFields())
         .build();

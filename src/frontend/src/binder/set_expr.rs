@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::SetExpr;
 
 use crate::binder::{Binder, BoundSelect, BoundValues};
@@ -28,32 +27,12 @@ pub enum BoundSetExpr {
 }
 
 impl BoundSetExpr {
-    /// The names returned by this [`BoundSetExpr`].
-    pub fn names(&self) -> Vec<String> {
-        match self {
-            BoundSetExpr::Select(s) => s.names(),
-            BoundSetExpr::Values(v) => v.schema.fields().iter().map(|f| f.name.clone()).collect(),
-        }
-    }
+    /// The schema returned by this [`BoundSetExpr`].
 
-    /// The fields returned by this [`BoundSetExpr`].
-    pub fn fields(&self) -> Vec<Field> {
+    pub fn schema(&self) -> &Schema {
         match self {
-            BoundSetExpr::Select(s) => s.schema.fields.clone(),
-            BoundSetExpr::Values(v) => v.schema.fields.clone(),
-        }
-    }
-
-    /// The types returned by this [`BoundSetExpr`].
-    pub fn data_types(&self) -> Vec<DataType> {
-        match self {
-            BoundSetExpr::Select(s) => s.data_types(),
-            BoundSetExpr::Values(v) => v
-                .schema
-                .fields()
-                .iter()
-                .map(|f| f.data_type.clone())
-                .collect(),
+            BoundSetExpr::Select(s) => s.schema(),
+            BoundSetExpr::Values(v) => v.schema(),
         }
     }
 

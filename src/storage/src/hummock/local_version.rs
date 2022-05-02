@@ -26,13 +26,13 @@ use super::shared_buffer::SharedBuffer;
 pub type UncommittedSsts = BTreeMap<HummockEpoch, Vec<SstableInfo>>;
 
 #[derive(Debug, Clone)]
-pub struct LocalVerion {
+pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
     uncommitted_ssts: UncommittedSsts,
     pinned_version: Arc<PinnedVersion>,
 }
 
-impl LocalVerion {
+impl LocalVersion {
     pub fn new(
         version: HummockVersion,
         unpin_worker_tx: UnboundedSender<HummockVersionId>,
@@ -52,6 +52,12 @@ impl LocalVerion {
         self.shared_buffer.get(&epoch)
     }
 
+    pub fn iter_shared_buffer(
+        &self,
+    ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)> {
+        self.shared_buffer.iter()
+    }
+
     pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
         self.shared_buffer
             .entry(epoch)
@@ -63,17 +69,13 @@ impl LocalVerion {
         self.uncommitted_ssts.entry(epoch).or_default().extend(ssts);
     }
 
-    pub fn set_pinned_version(
-        &mut self,
-        new_pinned_version: HummockVersion,
-    ) -> BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>> {
+    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
-        let mut buffer_to_release = BTreeMap::new();
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
             self.uncommitted_ssts = self
                 .uncommitted_ssts
                 .split_off(&(new_pinned_version.max_committed_epoch + 1));
-            buffer_to_release = self
+            let mut buffer_to_release = self
                 .shared_buffer
                 .split_off(&(new_pinned_version.max_committed_epoch + 1));
             // buffer_to_release = older part, self.shared_buffer = new part
@@ -85,8 +87,6 @@ impl LocalVerion {
             version: new_pinned_version,
             unpin_worker_tx: self.pinned_version.unpin_worker_tx.clone(),
         });
-
-        buffer_to_release
     }
 
     pub fn read_version(&self, read_epoch: HummockEpoch) -> ReadVersion {

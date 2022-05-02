@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
@@ -49,7 +49,7 @@ risingwave_rpc_client = { path = "../rpc_client" }
 # ], optional = true }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
-spin = "0.5.2"
+spin = "0.9"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
@@ -76,7 +76,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 # rocksdb-local = ["rocksdb"]

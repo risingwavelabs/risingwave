@@ -14,10 +14,9 @@
 
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
@@ -33,14 +32,12 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
-        let order_types: Vec<_> = node
-            .get_order_types()
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::AppendOnlyTopN)?;
+        let order_pairs: Vec<_> = node
+            .get_column_orders()
             .iter()
-            .map(|v| ProstOrderType::from_i32(*v).unwrap())
-            .map(|v| OrderType::from_prost(&v))
+            .map(OrderPair::from_prost)
             .collect();
-        assert_eq!(order_types.len(), params.pk_indices.len());
         let limit = if node.limit == 0 {
             None
         } else {
@@ -55,16 +52,15 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
-        Ok(AppendOnlyTopNExecutor::new_from_v1(
+        Ok(AppendOnlyTopNExecutor::new(
             params.input.remove(0),
-            order_types,
+            order_pairs,
             (node.offset as usize, limit),
             params.pk_indices,
             keyspace,
             cache_size,
             total_count,
             params.executor_id,
-            params.op_info,
             key_indices,
         )?
         .boxed())

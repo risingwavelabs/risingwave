@@ -26,15 +26,15 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use super::error::StreamExecutorError;
-use super::{BoxedExecutor, BoxedMessageStream, Executor};
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use super::monitor::StreamingMetrics;
+use super::*;
+use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
@@ -71,7 +71,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
@@ -322,7 +322,6 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::executor::{Barrier, Epoch};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {

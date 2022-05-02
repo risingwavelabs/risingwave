@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
@@ -55,9 +55,9 @@ tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.7"
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.2", features = ["add-extension", "cors", "fs"] }
+tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 tracing = { version = "0.1" }
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
