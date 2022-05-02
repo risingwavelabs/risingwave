@@ -293,11 +293,10 @@
     order by
       revenue desc,
       o_orderdate
-    /* TODO: support order + limit */
-    /* LIMIT 10; */
+    limit 10;
   batch_plan: |
-    BatchExchange { order: [$1 DESC, $2 ASC], dist: Single }
-      BatchSort { order: [$1 DESC, $2 ASC] }
+    BatchTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
+      BatchExchange { order: [], dist: Single }
         BatchProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
           BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
             BatchProject { exprs: [$3, $1, $2, ($4 * (1:Int32 - $5))], expr_alias: [ ,  ,  ,  ] }
@@ -319,25 +318,27 @@
                         BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
     StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [l_orderkey, o_orderdate, o_shippriority], order_descs: [revenue, o_orderdate, l_orderkey, o_shippriority] }
-      StreamProject { exprs: [$0, $4, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
-        StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
-          StreamProject { exprs: [$5, $1, $2, ($6 * (1:Int32 - $7)), $3, $4, $8], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
-            StreamExchange { dist: HashShard([5, 1, 2]) }
-              StreamHashJoin { type: Inner, predicate: $0 = $5 }
-                StreamProject { exprs: [$2, $4, $5, $1, $6], expr_alias: [ ,  ,  ,  ,  ] }
-                  StreamExchange { dist: HashShard([2]) }
-                    StreamHashJoin { type: Inner, predicate: $0 = $3 }
-                      StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
-                            StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
-                      StreamExchange { dist: HashShard([1]) }
-                        StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
-                          StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id#0], pk_indices: [4] }
-                StreamProject { exprs: [$0, $1, $2, $4], expr_alias: [ ,  ,  ,  ] }
-                  StreamExchange { dist: HashShard([0]) }
-                    StreamFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
-                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
+      StreamTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [$0, $4, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
+            StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
+              StreamProject { exprs: [$5, $1, $2, ($6 * (1:Int32 - $7)), $3, $4, $8], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
+                StreamExchange { dist: HashShard([5, 1, 2]) }
+                  StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                    StreamProject { exprs: [$2, $4, $5, $1, $6], expr_alias: [ ,  ,  ,  ,  ] }
+                      StreamExchange { dist: HashShard([2]) }
+                        StreamHashJoin { type: Inner, predicate: $0 = $3 }
+                          StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
+                            StreamExchange { dist: HashShard([0]) }
+                              StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
+                                StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
+                          StreamExchange { dist: HashShard([1]) }
+                            StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
+                              StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id#0], pk_indices: [4] }
+                    StreamProject { exprs: [$0, $1, $2, $4], expr_alias: [ ,  ,  ,  ] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
+                          StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
 - id: tpch_q4
   before:
     - create_tables
