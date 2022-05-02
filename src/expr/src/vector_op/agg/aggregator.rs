@@ -46,12 +46,15 @@ pub trait Aggregator: Send + 'static {
     /// to `builder` immediately along the way. After this call, the internal state is about
     /// the last group which may continue in the next chunk. It can be obtained with `output` when
     /// there are no more upstream data.
+    ///
+    /// Return value is an offset to the input chunk. Because we need to limit the size of output
+    /// chunk of sort aggregation, and process the chunk at next time.
     fn update_and_output_with_sorted_groups(
         &mut self,
         input: &DataChunk,
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
-    ) -> Result<()>;
+    ) -> Result<usize>;
 }
 
 pub type BoxedAggState = Box<dyn Aggregator>;

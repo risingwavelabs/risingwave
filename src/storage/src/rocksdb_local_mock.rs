@@ -35,7 +35,7 @@ impl RocksDBStateStore {
 }
 
 impl StateStore for RocksDBStateStore {
-    type Iter<'a> = RocksDBStateStoreIter;
+    type Iter = RocksDBStateStoreIter;
 
     define_state_store_associated_type!();
 
