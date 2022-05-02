@@ -64,7 +64,7 @@ impl CompactionPicker for SizeOverlapPicker {
             let mut pending_campct = false;
             let overlap_files = self
                 .overlap_strategy
-                .check_multiple_overlap(table, &levels[target_level].table_infos);
+                .check_multiple_overlap(&[table.clone()], &levels[target_level].table_infos);
             for other in overlap_files {
                 if level_handlers[target_level].is_pending_compact(&other.id) {
                     pending_campct = true;
@@ -82,10 +82,10 @@ impl CompactionPicker for SizeOverlapPicker {
         }
         scores.sort_by_key(|x| x.0);
         let (_, table) = scores.pop().unwrap();
+        let select_input_ssts = vec![table];
         let target_input_ssts = self
             .overlap_strategy
-            .check_multiple_overlap(&table, &levels[target_level].table_infos);
-        let select_input_ssts = vec![table];
+            .check_multiple_overlap(&select_input_ssts, &levels[target_level].table_infos);
         level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         level_handlers[self.level].add_pending_task(self.compact_task_id, &select_input_ssts);
         Some(SearchResult {
