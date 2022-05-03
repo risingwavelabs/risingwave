@@ -15,14 +15,13 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
-use crate::hummock::key::Epoch;
-use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
@@ -40,11 +39,9 @@ async fn test_basic() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let local_version_manager = Arc::new(LocalVersionManager::new());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        local_version_manager,
         meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
@@ -189,18 +186,20 @@ async fn test_state_store_sync() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let local_version_manager = Arc::new(LocalVersionManager::new());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        local_version_manager,
         meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
 
-    let mut epoch: Epoch = 1;
+    let mut epoch: HummockEpoch = hummock_storage
+        .local_version_manager
+        .get_pinned_version()
+        .max_committed_epoch()
+        + 1;
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -215,8 +214,10 @@ async fn test_state_store_sync() {
     // check sync state store metrics
     // Note: epoch(8B) and ValueMeta(2B) will be appended to each kv pair
     assert_eq!(
-        (16 + (8 + VALUE_META_SIZE) * 2) as u64,
-        hummock_storage.shared_buffer_manager().size() as u64
+        (16 + (8 + VALUE_META_SIZE) * 2) as usize,
+        hummock_storage
+            .local_version_manager()
+            .get_shared_buffer_size()
     );
 
     // ingest 24B batch
@@ -267,7 +268,6 @@ async fn test_reload_storage() {
     let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
     let hummock_options = Arc::new(default_config_for_test());
-    let local_version_manager = Arc::new(LocalVersionManager::new());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -278,7 +278,6 @@ async fn test_reload_storage() {
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store.clone(),
-        local_version_manager.clone(),
         hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
@@ -315,7 +314,6 @@ async fn test_reload_storage() {
     let hummock_storage = HummockStorage::with_default_stats(
         Arc::new(default_config_for_test()),
         sstable_store,
-        local_version_manager,
         hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
     )

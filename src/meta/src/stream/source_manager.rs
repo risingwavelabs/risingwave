@@ -37,7 +37,6 @@ use crate::storage::MetaStore;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
-#[allow(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
@@ -150,6 +149,7 @@ where
         Ok(all_stream_clients)
     }
 
+    /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
         let futures = self
             .all_stream_clients()

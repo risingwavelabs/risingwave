@@ -19,14 +19,20 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
-use crate::binder::expr::align_types;
 use crate::binder::Binder;
-use crate::expr::ExprImpl;
+use crate::expr::{align_types, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,
+}
+
+impl BoundValues {
+    /// The schema returned of this [`BoundValues`].
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl Binder {

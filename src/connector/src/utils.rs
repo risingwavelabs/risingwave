@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+const UPSTREAM_SOURCE_KEY: &str = "connector";
+
 #[derive(Clone, Debug)]
 pub struct Properties(pub HashMap<String, String>);
 
@@ -50,6 +52,10 @@ impl Properties {
     /// It's an alternative of `get` but returns kinesis-specifc error hints.
     pub fn get_kinesis(&self, key: &str) -> Result<String> {
         self.get_inner(key, " when using Kinesis source")
+    }
+
+    pub fn get_connector_type(&self) -> Result<String> {
+        self.get_inner(UPSTREAM_SOURCE_KEY, "when get connector type")
     }
 }
 
@@ -88,6 +94,10 @@ impl AnyhowProperties {
     /// It's an alternative of `get` but returns kafka-specifc error hints.
     pub fn get_kafka(&self, key: &str) -> anyhow::Result<String> {
         self.get_inner(key, " when using Kafka source")
+    }
+
+    pub fn get_connector_type(&self) -> anyhow::Result<String> {
+        self.get_inner(UPSTREAM_SOURCE_KEY, "when get connector type")
     }
 }
 

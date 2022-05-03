@@ -19,8 +19,12 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
+      checkpoint-interval: 100
     - use: compute-node
     - use: frontend
+
+    # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
+    # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
@@ -49,41 +53,59 @@ risedev:
     - use: meta-node
     - use: compute-node
       user-managed: true
-    - use: frontend-legacy
+    - use: frontend
 
-  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
   dev-frontend:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+      user-managed: true
+
+  dev-meta:
+    - use: meta-node
+      user-managed: true
+    - use: compute-node
+    - use: frontend
+
+  # TODO: Remove all legacy configs after java removed.
+  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
+  dev-frontend-legacy:
     - use: meta-node
     - use: compute-node
     - use: frontend-legacy
       user-managed: true
 
   # `dev-meta-node` have the same settings as default except the the meta node will be started by user.
-  dev-meta-node:
+  dev-meta-node-legacy:
     - use: meta-node
       user-managed: true
     - use: compute-node
     - use: frontend-legacy
 
-  dev-frontend-v2:
-    - use: minio
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
-      user-managed: true
-  
   full:
     - use: minio
     - use: etcd
     - use: meta-node
     - use: compute-node
     - use: frontend
+    - use: compactor
     - use: prometheus
     - use: grafana
     - use: zookeeper
       persist-data: true
     - use: kafka
       persist-data: true
+
+  ##########################################
+  ### Configuration used for ./risedev p ###
+  ##########################################
+
+  playground:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
 
   #################################
   ### Configurations used on CI ###
@@ -97,6 +119,7 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
+    - use: compactor
 
   ci-3cn-1fe:
     - use: minio
@@ -114,6 +137,7 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend
+    - use: compactor
 
   ci-3node:
     - use: minio
@@ -131,6 +155,7 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend-legacy
+    - use: compactor
 
   ci-1node:
     - use: minio
@@ -140,6 +165,7 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend-legacy
+    - use: compactor
 
   ci-kafka:
     - use: minio
@@ -149,6 +175,7 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
+    - use: compactor
     - use: zookeeper
       persist-data: true
     - use: kafka
@@ -237,6 +264,9 @@ template:
     # Sanity check: should use shared storage if there're multiple compute nodes
     provide-compute-node: "compute-node*"
 
+    # Sanity check: should start at lease one compactor if using shared object store
+    provide-compactor: "compactor*"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
@@ -296,6 +326,9 @@ template:
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
 
+    # Compactors used by this Prometheus instance
+    provide-compactor: "compactor*"
+
   frontend-legacy:
     # Listen address of frontend-legacy
     address: "127.0.0.1"
@@ -323,6 +356,34 @@ template:
     id: frontend-${port}
 
     # Meta-nodes used by this frontend instance
+    provide-meta-node: "meta-node*"
+
+    # If `user-managed` is true, this service will be started by user with the above config
+    user-managed: false
+
+  compactor:
+    # Compactor listen address
+    address: "127.0.0.1"
+
+    # Compactor listen port
+    port: 6660
+
+    # Prometheus exporter listen address
+    exporter-address: "127.0.0.1"
+
+    # Prometheus exporter listen port
+    exporter-port: 1260
+
+    # Id of this instance
+    id: compactor-${port}
+
+    # Minio instances used by this compute node
+    provide-minio: "minio*"
+
+    # AWS s3 bucket used by this compute node
+    provide-aws-s3: "aws-s3*"
+
+    # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
     # If `user-managed` is true, this service will be started by user with the above config

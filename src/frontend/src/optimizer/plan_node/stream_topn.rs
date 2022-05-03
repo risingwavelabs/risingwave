@@ -14,7 +14,9 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan_common::ColumnOrder;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::Distribution;
@@ -34,10 +36,11 @@ impl StreamTopN {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
+
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
+            logical.input().pk_indices().to_vec(),
             dist,
             false,
         );
@@ -72,15 +75,21 @@ impl_plan_tree_node_for_unary! { StreamTopN }
 impl ToStreamProst for StreamTopN {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let order_types = self
+        let column_orders = self
             .logical
             .topn_order()
             .field_order
             .iter()
-            .map(|f| f.direct.to_protobuf() as i32)
+            .map(|f| ColumnOrder {
+                order_type: f.direct.to_protobuf() as i32,
+                input_ref: Some(InputRefExpr {
+                    column_idx: f.index as i32,
+                }),
+                return_type: Some(self.input().schema()[f.index].data_type().to_protobuf()),
+            })
             .collect();
-        ProstStreamNode::TopNNode(TopNNode {
-            order_types,
+        ProstStreamNode::TopN(TopNNode {
+            column_orders,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
             distribution_keys: vec![], // TODO: seems unnecessary

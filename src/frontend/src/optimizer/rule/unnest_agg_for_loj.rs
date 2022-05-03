@@ -14,7 +14,7 @@
 
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
@@ -66,7 +66,7 @@ impl Rule for UnnestAggForLOJ {
 
         // To pull LogicalAgg up on top of LogicalApply, we need to convert scalar agg to group agg
         // using pks of Apply.left as its group keys and convert count(*) to count(pk).
-        let (mut agg_calls, agg_call_alias, mut group_keys, _) = agg.clone().decompose();
+        let (mut agg_calls, mut group_keys, _) = agg.clone().decompose();
         // TODO: currently only scalar agg is supported in correlated subquery.
         if !group_keys.is_empty() {
             return None;
@@ -91,7 +91,7 @@ impl Rule for UnnestAggForLOJ {
                 input_ref.shift_with_offset(apply_left_len as isize);
             });
         });
-        let agg = LogicalAgg::new(agg_calls, agg_call_alias, group_keys, new_apply.into());
+        let agg = LogicalAgg::new(agg_calls, group_keys, new_apply.into());
 
         // Columns of old Apply's left child should be in the left.
         let mut exprs: Vec<ExprImpl> = apply

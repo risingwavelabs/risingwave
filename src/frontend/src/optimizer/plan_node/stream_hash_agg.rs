@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -94,7 +94,7 @@ impl ToStreamProst for StreamHashAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::HashAggNode(HashAggNode {
+        ProstStreamNode::HashAgg(HashAggNode {
             distribution_keys: self
                 .distribution_keys()
                 .iter()
@@ -105,6 +105,7 @@ impl ToStreamProst for StreamHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect_vec(),
+            table_ids: vec![],
         })
     }
 }

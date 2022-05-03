@@ -115,3 +115,24 @@ impl ObjectStoreImpl {
         }
     }
 }
+
+pub async fn parse_object_store(hummock: &str) -> ObjectStoreImpl {
+    match hummock {
+        s3 if s3.starts_with("hummock+s3://") => ObjectStoreImpl::S3(
+            S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
+        ),
+        minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
+            S3ObjectStore::with_minio(minio.strip_prefix("hummock+").unwrap()).await,
+        ),
+        memory if memory.starts_with("hummock+memory") => {
+            tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
+            ObjectStoreImpl::Mem(InMemObjectStore::new())
+        }
+        other => {
+            unimplemented!(
+                "{} Hummock only supports s3, minio and memory for now.",
+                other
+            )
+        }
+    }
+}

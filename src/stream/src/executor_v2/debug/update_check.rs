@@ -19,9 +19,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 
-use crate::executor::Message;
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{ExecutorInfo, MessageStream};
+use crate::executor_v2::{ExecutorInfo, Message, MessageStream};
 
 /// Streams wrapped by `update_check` will check whether the two rows of updates are next to each
 /// other.
@@ -57,11 +56,9 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::once;
-
     use futures::{pin_mut, StreamExt};
-    use risingwave_common::array::{I64Array, StreamChunk};
-    use risingwave_common::column_nonnull;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
 
     use super::*;
     use crate::executor_v2::test_utils::MockSource;
@@ -70,19 +67,14 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_not_next_to_each_other() {
-        let chunk = StreamChunk::new(
-            vec![
-                Op::UpdateDelete,
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-                Op::UpdateInsert,
-            ],
-            vec![column_nonnull! { I64Array, [114, 514, 1919, 810] }],
-            None,
-        );
-
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_chunks(once(chunk));
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "     I
+            U-  114 
+            U-  514
+            U+ 1919 
+            U+  810",
+        ));
 
         let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -93,14 +85,11 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_first_one_update_insert() {
-        let chunk = StreamChunk::new(
-            vec![Op::UpdateInsert],
-            vec![column_nonnull! { I64Array, [114] }],
-            None,
-        );
-
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_chunks(once(chunk));
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "     I
+            U+  114",
+        ));
 
         let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -111,14 +100,13 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_last_one_update_delete() {
-        let chunk = StreamChunk::new(
-            vec![Op::UpdateDelete, Op::UpdateInsert, Op::UpdateDelete],
-            vec![column_nonnull! { I64Array, [114, 514, 1919810] }],
-            None,
-        );
-
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_chunks(once(chunk));
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "        I
+            U-     114 
+            U+     514
+            U- 1919810",
+        ));
 
         let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
@@ -128,10 +116,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_chunk() {
-        let chunk = StreamChunk::default();
-
-        let mut source = MockSource::new(Default::default(), vec![]);
-        source.push_chunks(once(chunk));
+        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        tx.push_chunk(StreamChunk::default());
 
         let checked = update_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);

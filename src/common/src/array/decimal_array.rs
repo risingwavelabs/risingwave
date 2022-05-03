@@ -55,6 +55,14 @@ impl Array for DecimalArray {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Decimal> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.data[idx])
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.data.len()
     }
@@ -131,7 +139,7 @@ pub struct DecimalArrayBuilder {
 impl ArrayBuilder for DecimalArrayBuilder {
     type ArrayType = DecimalArray;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),

@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::storage_value::{StorageValue, ValueMeta};
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
+use crate::executor_v2::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
 
 /// `ManagedMViewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
@@ -91,7 +91,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             // We compute vnode on arrange keys in materialized view since materialized views are
             // grouped by arrange keys.
             let vnode = arrange_keys.hash_row(&hash_builder).to_vnode();
-            let value_meta = ValueMeta::new_with_vnode(vnode);
+            let value_meta = ValueMeta::with_vnode(vnode);
 
             for (key, value) in bytes {
                 match value {

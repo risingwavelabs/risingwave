@@ -23,8 +23,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{Executor, ExecutorInfo, StreamExecutorResult};
-use crate::executor::{pk_input_array_refs, PkIndicesRef};
+use super::*;
 use crate::executor_v2::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_agg_state, AggCall, AggState,
 };
@@ -55,7 +54,7 @@ pub struct SimpleAggExecutor<S: StateStore> {
     input_schema: Schema,
 
     /// The executor operates on this keyspace.
-    keyspace: Keyspace<S>,
+    keyspace: Vec<Keyspace<S>>,
 
     /// Aggregation states of the current operator.
     /// This is an `Option` and the initial state is built when `Executor::next` is called, since
@@ -92,7 +91,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        keyspace: Keyspace<S>,
+        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -121,7 +120,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         input_pk_indices: &[usize],
         input_schema: &Schema,
         states: &mut Option<AggState<S>>,
-        keyspace: &Keyspace<S>,
+        keyspace: &[Keyspace<S>],
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
@@ -174,9 +173,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn flush_data(
         schema: &Schema,
         states: &mut Option<AggState<S>>,
-        keyspace: &Keyspace<S>,
+        keyspace: &[Keyspace<S>],
         epoch: u64,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
+        // The state store of each keyspace is the same so just need the first.
+        let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
@@ -186,7 +187,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             _ => return Ok(None), // Nothing to flush.
         };
 
-        let mut write_batch = keyspace.state_store().start_write_batch();
+        let mut write_batch = store.start_write_batch();
         for state in &mut states.managed_states {
             state
                 .flush(&mut write_batch)
@@ -279,43 +280,21 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use global_simple_agg::*;
-    use risingwave_common::array::{I64Array, Op, Row};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
 
     use crate::executor_v2::aggregation::AggArgs;
     use crate::executor_v2::test_utils::*;
     use crate::executor_v2::*;
-    use crate::*;
 
     #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {
-        test_local_simple_aggregation(create_in_memory_keyspace()).await
+        test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
     }
 
-    async fn test_local_simple_aggregation(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { I64Array, [200, 14, 300] },
-                // primary key column
-                column_nonnull! { I64Array, [1001, 1002, 1003] },
-            ],
-            None,
-        );
-        let chunk2 = StreamChunk::new(
-            vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4, 104] },
-                column_nonnull! { I64Array, [200, 14, 300, 500] },
-                // primary key column
-                column_nonnull! { I64Array, [1001, 1002, 1003, 1004] },
-            ],
-            Some((vec![true, false, true, true]).try_into().unwrap()),
-        );
+    async fn test_local_simple_aggregation(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -324,13 +303,23 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-
-        let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_barrier(1, false);
-        source.push_chunks([chunk1].into_iter());
-        source.push_barrier(2, false);
-        source.push_chunks([chunk2].into_iter());
-        source.push_barrier(3, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I    I
+            + 100 200 1001
+            +  10  14 1002
+            +   4 300 1003",
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I    I
+            - 100 200 1001
+            -  10  14 1002 D
+            -   4 300 1003
+            + 104 500 1004",
+        ));
+        tx.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
@@ -366,45 +355,26 @@ mod tests {
         simple_agg.next().await.unwrap().unwrap();
         // Consume stream chunk
         let msg = simple_agg.next().await.unwrap().unwrap();
-        if let Message::Chunk(chunk) = msg {
-            let (data_chunk, ops) = chunk.into_parts();
-            let rows = ops
-                .into_iter()
-                .zip_eq(data_chunk.rows().map(Row::from))
-                .collect_vec();
-            let expected_rows = [(Op::Insert, row_nonnull![3_i64, 114_i64, 514_i64, 4_i64])];
-
-            assert_eq!(rows, expected_rows);
-        } else {
-            unreachable!("unexpected message {:?}", msg);
-        }
-
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I   I   I  I
+                + 3 114 514  4"
+            )
+        );
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
             Message::Barrier { .. }
         );
 
         let msg = simple_agg.next().await.unwrap().unwrap();
-        if let Message::Chunk(chunk) = msg {
-            let (data_chunk, ops) = chunk.into_parts();
-            let rows = ops
-                .into_iter()
-                .zip_eq(data_chunk.rows().map(Row::from))
-                .collect_vec();
-            let expected_rows = [
-                (
-                    Op::UpdateDelete,
-                    row_nonnull![3_i64, 114_i64, 514_i64, 4_i64],
-                ),
-                (
-                    Op::UpdateInsert,
-                    row_nonnull![2_i64, 114_i64, 514_i64, 10_i64],
-                ),
-            ];
-
-            assert_eq!(rows, expected_rows);
-        } else {
-            unreachable!("unexpected message {:?}", msg);
-        }
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I   I   I  I
+                U- 3 114 514  4
+                U+ 2 114 514 10"
+            )
+        );
     }
 }

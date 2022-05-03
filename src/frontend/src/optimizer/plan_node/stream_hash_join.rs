@@ -15,17 +15,17 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::plan::JoinType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
-/// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
+/// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
 #[derive(Debug, Clone)]
@@ -37,7 +37,9 @@ pub struct StreamHashJoin {
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 
-    /// Whether to use delta join for this join node.
+    /// Whether to force use delta join for this join node. If this is true, then indexes will
+    /// be create automatically when building the executors on meta service. For testing purpose
+    /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 }
 
@@ -81,12 +83,17 @@ impl StreamHashJoin {
         }
     }
 
+    /// Get join type
+    pub fn join_type(&self) -> JoinType {
+        self.logical.join_type()
+    }
+
     /// Get a reference to the batch hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }
 
-    fn derive_dist(
+    pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
         predicate: &EqJoinPredicate,
@@ -101,6 +108,11 @@ impl StreamHashJoin {
             }
             (_, _) => panic!(),
         }
+    }
+
+    /// Convert this hash join to a delta join plan
+    pub fn to_delta_join(&self) -> StreamDeltaJoin {
+        StreamDeltaJoin::new(self.logical.clone(), self.eq_join_predicate.clone())
     }
 }
 
@@ -140,8 +152,8 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl ToStreamProst for StreamHashJoin {
-    fn to_stream_prost_body(&self) -> Node {
-        Node::HashJoinNode(HashJoinNode {
+    fn to_stream_prost_body(&self) -> NodeBody {
+        NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: self
                 .eq_join_predicate

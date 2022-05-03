@@ -128,7 +128,7 @@ impl DataType {
             DataType::Struct { .. } => {
                 todo!()
             }
-            DataType::List { datatype } => ListArrayBuilder::new_with_meta(
+            DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
                     datatype: datatype.to_owned(),
@@ -177,10 +177,10 @@ impl DataType {
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
             DataType::Decimal => DataSize::Fixed(16),
             DataType::Varchar => DataSize::Variable,
-            DataType::Date => DataSize::Fixed(size_of::<i32>()),
-            DataType::Time => DataSize::Fixed(size_of::<i64>()),
-            DataType::Timestamp => DataSize::Fixed(size_of::<i64>()),
-            DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
+            DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
+            DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
+            DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+            DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
             DataType::Interval => DataSize::Variable,
             DataType::Struct { .. } => DataSize::Variable,
             DataType::List { .. } => DataSize::Variable,
@@ -651,16 +651,16 @@ impl ScalarImpl {
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
                 let (secs, nano) = de.deserialize_naivetime()?;
-                NaiveTimeWrapper::new_with_secs_nano(secs, nano)?
+                NaiveTimeWrapper::with_secs_nano(secs, nano)?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
                 let (secs, nsecs) = de.deserialize_naivedatetime()?;
-                NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs)?
+                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
             Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = de.deserialize_naivedate()?;
-                NaiveDateWrapper::new_with_days(days)?
+                NaiveDateWrapper::with_days(days)?
             }),
             _ => {
                 panic!("Type is unable to be deserialized.")

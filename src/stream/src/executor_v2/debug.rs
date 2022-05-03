@@ -17,10 +17,10 @@ use std::sync::Arc;
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
 
+use super::monitor::StreamingMetrics;
 use super::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, MessageStream, PkIndicesRef,
 };
-use crate::executor::StreamingMetrics;
 use crate::task::ActorId;
 
 mod epoch_check;

@@ -12,155 +12,133 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_pb::hummock::level_handler::KeyRangeTaskId;
+use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_pb::hummock::level_handler::SstTask;
 use risingwave_pb::hummock::SstableInfo;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SSTableStat {
+pub struct SSTableInfo {
     pub key_range: KeyRange,
     pub table_id: u64,
-    pub compact_task: Option<u64>,
+    pub file_size: u64,
 }
 
-impl From<&SstableInfo> for SSTableStat {
-    fn from(info: &SstableInfo) -> Self {
-        SSTableStat {
-            key_range: info.key_range.as_ref().unwrap().into(),
-            table_id: info.id,
-            compact_task: None,
+impl From<&SstableInfo> for SSTableInfo {
+    fn from(sst: &SstableInfo) -> Self {
+        Self {
+            key_range: sst.key_range.as_ref().unwrap().into(),
+            table_id: sst.id,
+            file_size: sst.file_size,
         }
     }
 }
 
-impl From<&SSTableStat> for risingwave_pb::hummock::SstableStat {
-    fn from(stat: &SSTableStat) -> Self {
-        risingwave_pb::hummock::SstableStat {
-            key_range: Some(stat.key_range.clone().into()),
-            table_id: stat.table_id,
-            compact_task: stat
-                .compact_task
-                .map(|it| risingwave_pb::hummock::sstable_stat::CompactTaskId { id: it }),
+impl From<SSTableInfo> for SstableInfo {
+    fn from(info: SSTableInfo) -> Self {
+        SstableInfo {
+            key_range: Some(info.key_range.into()),
+            id: info.table_id,
+            file_size: info.file_size,
         }
     }
 }
 
-impl From<&risingwave_pb::hummock::SstableStat> for SSTableStat {
-    fn from(stat: &risingwave_pb::hummock::SstableStat) -> Self {
-        SSTableStat {
-            key_range: stat.key_range.as_ref().unwrap().into(),
-            table_id: stat.table_id,
-            compact_task: stat.compact_task.as_ref().map(|it| it.id),
-        }
+impl From<&SSTableInfo> for SstableInfo {
+    fn from(info: &SSTableInfo) -> Self {
+        SstableInfo::from(info.clone())
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum LevelHandler {
-    /// * `Vec<SSTableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
-    ///   Leveling
-    /// * `Vec<(KeyRange, u64, u64)>` - key ranges (and corresponding compaction task id, #SSTs) to
-    ///   be merged to bottom level in order
-    Nonoverlapping(Vec<SSTableStat>, Vec<(KeyRange, u64, u64)>),
-    Overlapping(Vec<SSTableStat>, Vec<(KeyRange, u64, u64)>),
+pub struct LevelHandler {
+    level: u32,
+    total_bytes: u64,
+    level_max_bytes: u64,
+    compacting_files: HashMap<HummockSSTableId, u64>,
+    pending_tasks: Vec<(u64, Vec<HummockSSTableId>)>,
 }
 
 impl LevelHandler {
-    fn clear_compacting_range(&mut self, clear_task_id: u64) {
-        match self {
-            LevelHandler::Overlapping(_, compacting_key_ranges)
-            | LevelHandler::Nonoverlapping(_, compacting_key_ranges) => {
-                compacting_key_ranges.retain(|(_, task_id, _)| *task_id != clear_task_id);
-            }
+    pub fn new(level: u32) -> Self {
+        Self {
+            level,
+            total_bytes: 0,
+            level_max_bytes: 0,
+            compacting_files: HashMap::default(),
+            pending_tasks: vec![],
         }
     }
 
-    pub fn unassign_task(&mut self, unassign_task_id: u64) -> bool {
-        self.clear_compacting_range(unassign_task_id);
-        let mut changed = false;
-        match self {
-            LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
-                for SSTableStat { compact_task, .. } in l_n {
-                    if *compact_task == Some(unassign_task_id) {
-                        *compact_task = None;
-                        changed = true;
-                    }
+    pub fn get_level(&self) -> u32 {
+        self.level
+    }
+
+    pub fn remove_task(&mut self, target_task_id: u64) {
+        for (task_id, ssts) in &self.pending_tasks {
+            if *task_id == target_task_id {
+                for sst in ssts {
+                    self.compacting_files.remove(sst);
                 }
             }
         }
-        changed
+        self.pending_tasks
+            .retain(|(task_id, _)| *task_id != target_task_id);
     }
 
-    pub fn pop_task_input(&mut self, finished_task_id: u64) -> Vec<u64> {
-        self.clear_compacting_range(finished_task_id);
+    pub fn is_pending_compact(&self, sst_id: &HummockSSTableId) -> bool {
+        self.compacting_files.contains_key(sst_id)
+    }
 
-        let mut deleted_table_ids = vec![];
-        let deleted_table_ids_ref = &mut deleted_table_ids;
-        match self {
-            LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
-                l_n.retain(
-                    |SSTableStat {
-                         table_id,
-                         compact_task,
-                         ..
-                     }| {
-                        if *compact_task != Some(finished_task_id) {
-                            true
-                        } else {
-                            deleted_table_ids_ref.push(*table_id);
-                            false
-                        }
-                    },
-                );
-            }
+    pub fn add_pending_task(&mut self, task_id: u64, ssts: &[SstableInfo]) {
+        let mut table_ids = vec![];
+        for sst in ssts {
+            self.compacting_files.insert(sst.id, task_id);
+            table_ids.push(sst.id);
         }
-        deleted_table_ids
+        self.pending_tasks.push((task_id, table_ids));
+    }
+
+    pub fn get_pending_file_count(&self) -> usize {
+        self.compacting_files.len()
     }
 }
 
 impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
     fn from(lh: &LevelHandler) -> Self {
-        let level_type = match lh {
-            LevelHandler::Nonoverlapping(_, _) => risingwave_pb::hummock::LevelType::Nonoverlapping,
-            LevelHandler::Overlapping(_, _) => risingwave_pb::hummock::LevelType::Overlapping,
-        };
-        match lh {
-            LevelHandler::Nonoverlapping(ssts, key_ranges)
-            | LevelHandler::Overlapping(ssts, key_ranges) => risingwave_pb::hummock::LevelHandler {
-                level_type: level_type as i32,
-                ssts: ssts
-                    .iter()
-                    .map_into::<risingwave_pb::hummock::SstableStat>()
-                    .collect_vec(),
-                key_ranges: key_ranges
-                    .iter()
-                    .map(|it| KeyRangeTaskId {
-                        key_range: Some(it.0.clone().into()),
-                        task_id: it.1,
-                        ssts: it.2,
-                    })
-                    .collect(),
-            },
+        risingwave_pb::hummock::LevelHandler {
+            level: lh.level,
+            tasks: lh
+                .pending_tasks
+                .iter()
+                .map(|(task_id, ssts)| SstTask {
+                    task_id: *task_id,
+                    ssts: ssts.clone(),
+                })
+                .collect_vec(),
         }
     }
 }
 
 impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
     fn from(lh: &risingwave_pb::hummock::LevelHandler) -> Self {
-        let ssts = lh.ssts.iter().map_into::<SSTableStat>().collect();
-        let key_ranges = lh
-            .key_ranges
-            .iter()
-            .map(|it| (it.key_range.as_ref().unwrap().into(), it.task_id, it.ssts))
-            .collect_vec();
-        match lh.level_type() {
-            risingwave_pb::hummock::LevelType::Nonoverlapping => {
-                LevelHandler::Nonoverlapping(ssts, key_ranges)
+        let mut pending_tasks = vec![];
+        let mut compacting_files = HashMap::new();
+        for task in &lh.tasks {
+            pending_tasks.push((task.task_id, task.ssts.clone()));
+            for s in &task.ssts {
+                compacting_files.insert(*s, task.task_id);
             }
-            risingwave_pb::hummock::LevelType::Overlapping => {
-                LevelHandler::Overlapping(ssts, key_ranges)
-            }
+        }
+        Self {
+            pending_tasks,
+            compacting_files,
+            level: lh.level,
+            total_bytes: 0,
+            level_max_bytes: 0,
         }
     }
 }

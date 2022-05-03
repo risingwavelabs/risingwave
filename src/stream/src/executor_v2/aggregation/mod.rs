@@ -18,6 +18,7 @@ pub use agg_call::*;
 pub use agg_state::*;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
@@ -35,11 +36,10 @@ use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::PkDataTypes;
 use crate::executor_v2::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::Executor;
+use crate::executor_v2::managed_state::aggregation::ManagedStateImpl;
+use crate::executor_v2::{Executor, PkDataTypes};
 
 mod agg_call;
 mod agg_state;
@@ -333,7 +333,7 @@ pub fn generate_agg_schema(
 pub async fn generate_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
-    keyspace: &Keyspace<S>,
+    keyspace: &[Keyspace<S>],
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
@@ -344,15 +344,15 @@ pub async fn generate_agg_state<S: StateStore>(
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
     let mut row_count = None;
 
-    for (idx, agg_call) in agg_calls.iter().enumerate() {
+    for ((idx, agg_call), keyspace) in agg_calls.iter().enumerate().zip_eq(keyspace) {
         // TODO: in pure in-memory engine, we should not do this serialization.
 
-        // The prefix of the state is `agg_call_idx / [group_key]`
+        // The prefix of the state is `table_id/[group_key]`
         let keyspace = if let Some(key) = key {
             let bytes = key.serialize().unwrap();
-            keyspace.append_u16(idx as u16).append(bytes)
+            keyspace.append(bytes)
         } else {
-            keyspace.append_u16(idx as u16)
+            keyspace.clone()
         };
 
         let mut managed_state = ManagedStateImpl::create_managed_state(

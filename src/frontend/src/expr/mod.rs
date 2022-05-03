@@ -43,7 +43,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
-pub use type_inference::{cast_ok, infer_type, least_restrictive, CastContext};
+pub use type_inference::{align_types, cast_ok, infer_type, least_restrictive, CastContext};
 pub use utils::*;
 
 /// the trait of bound exprssions
@@ -155,16 +155,20 @@ impl ExprImpl {
     pub fn has_correlated_input_ref(&self) -> bool {
         struct Has {
             has: bool,
+            depth: usize,
         }
 
         impl ExprVisitor for Has {
-            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
-                self.has = true;
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.depth() >= self.depth {
+                    self.has = true;
+                }
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) {
                 use crate::binder::BoundSetExpr;
 
+                self.depth += 1;
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => select
                         .select_items
@@ -174,10 +178,14 @@ impl ExprImpl {
                         .for_each(|expr| self.visit_expr(expr)),
                     BoundSetExpr::Values(_) => {}
                 }
+                self.depth -= 1;
             }
         }
 
-        let mut visitor = Has { has: false };
+        let mut visitor = Has {
+            has: false,
+            depth: 1,
+        };
         visitor.visit_expr(self);
         visitor.has
     }

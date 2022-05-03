@@ -8,9 +8,11 @@ on:
   push:
     branches:
       - "forks/*"
-      - staging
-      - trying
 
 concurrency:
   group: environment-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read # This is required for actions/checkout

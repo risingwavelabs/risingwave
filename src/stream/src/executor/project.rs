@@ -16,7 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
@@ -32,19 +32,18 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::ProjectNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;
         let project_exprs = node
             .get_select_list()
             .iter()
             .map(build_from_prost)
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(ProjectExecutor::new_from_v1(
+        Ok(ProjectExecutor::new(
             params.input.remove(0),
             params.pk_indices,
             project_exprs,
             params.executor_id,
-            params.op_info,
         )
         .boxed())
     }

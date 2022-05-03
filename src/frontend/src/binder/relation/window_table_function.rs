@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
@@ -111,17 +112,27 @@ impl Binder {
 
         let columns = columns
             .iter()
-            .map(|c| {
-                (
-                    c.column_desc.name.clone(),
-                    c.column_desc.data_type.clone(),
-                    c.is_hidden,
-                )
-            })
+            .map(|c| (c.is_hidden, (&c.column_desc).into()))
             .chain(
                 [
-                    ("window_start".to_string(), DataType::Timestamp, false),
-                    ("window_end".to_string(), DataType::Timestamp, false),
+                    (
+                        false,
+                        Field {
+                            data_type: DataType::Timestamp,
+                            name: "window_start".to_string(),
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                    ),
+                    (
+                        false,
+                        Field {
+                            data_type: DataType::Timestamp,
+                            name: "window_end".to_string(),
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                    ),
                 ]
                 .into_iter(),
             );

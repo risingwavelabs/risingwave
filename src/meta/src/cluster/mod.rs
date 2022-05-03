@@ -21,8 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{internal_error, Result};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
@@ -32,7 +31,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashDispatchManager, HashDispatchManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
+    HashMappingManager, HashMappingManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -69,7 +68,7 @@ pub struct ClusterManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     max_heartbeat_interval: Duration,
-    dispatch_manager: HashDispatchManagerRef<S>,
+    hash_mapping_manager: HashMappingManagerRef<S>,
 
     core: RwLock<ClusterManagerCore>,
 }
@@ -82,12 +81,11 @@ where
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
         let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
-        let dispatch_manager =
-            Arc::new(HashDispatchManager::new(&compute_nodes, meta_store).await?);
+        let dispatch_manager = Arc::new(HashMappingManager::new(&compute_nodes, meta_store).await?);
 
         Ok(Self {
             env,
-            dispatch_manager,
+            hash_mapping_manager: dispatch_manager,
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
@@ -99,6 +97,10 @@ where
         self.core.read().await
     }
 
+    /// A worker node will immediately register itself to meta when it bootstraps.
+    /// The meta will assign it with a unique ID and set its state as `Starting`.
+    /// When the worker node is fully ready to serve, it will request meta again
+    /// (via `activate_worker_node`) to set its state to `Running`.
     pub async fn add_worker_node(
         &self,
         host_address: HostAddress,
@@ -134,8 +136,8 @@ where
 
                 // Alter consistent hash mapping.
                 if r#type == WorkerType::ComputeNode {
-                    self.dispatch_manager
-                        .add_worker_mapping(&worker_node)
+                    self.hash_mapping_manager
+                        .add_worker_node(&worker_node)
                         .await?;
                 }
 
@@ -152,94 +154,64 @@ where
         }
     }
 
-    pub async fn deactivate_worker_node(&self, host_address: HostAddress) -> Result<()> {
-        let mut core = self.core.write().await;
-        match core.get_worker_by_host(host_address.clone()) {
-            Some(mut worker) => {
-                if worker.worker_node.state == State::Starting as i32 {
-                    return Ok(());
-                }
-                worker.worker_node.state = State::Starting as i32;
-                worker.insert(self.env.meta_store()).await?;
-
-                core.update_worker_node(worker);
-                Ok(())
-            }
-            None => Err(RwError::from(InternalError(
-                "Worker node does not exist!".to_string(),
-            ))),
-        }
-    }
-
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
-        match core.get_worker_by_host(host_address.clone()) {
-            Some(mut worker) => {
-                if worker.worker_node.state == State::Running as i32 {
-                    return Ok(());
-                }
-                worker.worker_node.state = State::Running as i32;
-                worker.insert(self.env.meta_store()).await?;
-
-                core.update_worker_node(worker.clone());
-
-                // Notify frontends of new compute node.
-                if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
-                    self.env
-                        .notification_manager()
-                        .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
-                        .await;
-                }
-
-                Ok(())
-            }
-            None => Err(RwError::from(InternalError(
-                "Worker node does not exist!".to_string(),
-            ))),
+        let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
+        if worker.worker_node.state == State::Running as i32 {
+            return Ok(());
         }
+        worker.worker_node.state = State::Running as i32;
+        worker.insert(self.env.meta_store()).await?;
+
+        core.update_worker_node(worker.clone());
+
+        // Notify frontends of new compute node.
+        if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
+                .await;
+        }
+
+        Ok(())
     }
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
-        match core.get_worker_by_host(host_address.clone()) {
-            Some(worker) => {
-                let worker_type = worker.worker_type();
-                let worker_node = worker.to_protobuf();
-                // Alter consistent hash mapping.
-                if worker_type == WorkerType::ComputeNode {
-                    self.dispatch_manager
-                        .delete_worker_mapping(&worker.worker_node)
-                        .await?;
-                }
-
-                // Persist deletion.
-                Worker::delete(self.env.meta_store(), &host_address).await?;
-
-                // Update core.
-                core.delete_worker_node(worker);
-
-                // Notify frontends to delete compute node.
-                if worker_type == WorkerType::ComputeNode {
-                    self.env
-                        .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()))
-                        .await;
-                }
-
-                // Notify local subscribers.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
-                    .await;
-
-                Ok(())
-            }
-            None => Err(RwError::from(InternalError(
-                "Worker node does not exist!".to_string(),
-            ))),
+        let worker = core.get_worker_by_host_checked(host_address.clone())?;
+        let worker_type = worker.worker_type();
+        let worker_node = worker.to_protobuf();
+        // Alter consistent hash mapping.
+        if worker_type == WorkerType::ComputeNode {
+            self.hash_mapping_manager
+                .delete_worker_node(&worker.worker_node)
+                .await?;
         }
+
+        // Persist deletion.
+        Worker::delete(self.env.meta_store(), &host_address).await?;
+
+        // Update core.
+        core.delete_worker_node(worker);
+
+        // Notify frontends to delete compute node.
+        if worker_type == WorkerType::ComputeNode {
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()))
+                .await;
+        }
+
+        // Notify local subscribers.
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+            .await;
+
+        Ok(())
     }
 
+    /// Invoked when it receives a heartbeat from a worker node.
     pub async fn heartbeat(&self, worker_id: WorkerId) -> Result<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
@@ -302,7 +274,8 @@ where
                             cluster_manager
                                 .env
                                 .notification_manager()
-                                .delete_sender(WorkerKey(key.clone()));
+                                .delete_sender(WorkerKey(key.clone()))
+                                .await;
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
                                 worker.worker_id(),
@@ -360,7 +333,7 @@ where
     }
 
     pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-        self.dispatch_manager.get_worker_mapping().await
+        self.hash_mapping_manager.get_default_mapping().await
     }
 
     async fn generate_cn_parallel_units(
@@ -434,6 +407,12 @@ impl ClusterManagerCore {
             single_parallel_units,
             hash_parallel_units,
         })
+    }
+
+    /// If no worker exists, return an error.
+    fn get_worker_by_host_checked(&self, host_address: HostAddress) -> Result<Worker> {
+        self.get_worker_by_host(host_address)
+            .ok_or_else(|| internal_error("Worker node does not exist!"))
     }
 
     fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
@@ -591,7 +570,10 @@ mod tests {
         }
         assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
 
-        let mapping = cluster_manager.dispatch_manager.get_worker_mapping().await;
+        let mapping = cluster_manager
+            .hash_mapping_manager
+            .get_default_mapping()
+            .await;
         let unique_parallel_units = HashSet::<ParallelUnitId>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),

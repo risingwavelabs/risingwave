@@ -17,12 +17,12 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::mview::ManagedMViewState;
 use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
 };
@@ -31,7 +31,7 @@ use crate::executor_v2::{
 pub struct MaterializeExecutor<S: StateStore> {
     input: BoxedExecutor,
 
-    local_state: ManagedMViewState<S>,
+    state_table: StateTable<S>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -50,9 +50,20 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
+        let column_descs = column_ids
+            .into_iter()
+            .zip_eq(schema.fields.iter().cloned())
+            .map(|(column_id, field)| ColumnDesc {
+                data_type: field.data_type,
+                column_id,
+                name: field.name,
+                field_descs: vec![],
+                type_name: "".to_string(),
+            })
+            .collect_vec();
         Self {
             input,
-            local_state: ManagedMViewState::new(keyspace, column_ids, arrange_order_types),
+            state_table: StateTable::new(keyspace, column_descs, arrange_order_types),
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
                 schema,
@@ -97,10 +108,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                         match op {
                             Insert | UpdateInsert => {
-                                self.local_state.put(arrange_row, row);
+                                self.state_table.insert(arrange_row, row)?;
                             }
                             Delete | UpdateDelete => {
-                                self.local_state.delete(arrange_row);
+                                self.state_table.delete(arrange_row, row)?;
                             }
                         }
                     }
@@ -109,8 +120,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 }
                 Message::Barrier(b) => {
                     // FIXME(ZBW): use a better error type
-                    self.local_state
-                        .flush(b.epoch.prev)
+                    self.state_table
+                        .commit_with_value_meta(b.epoch.prev)
                         .await
                         .map_err(StreamExecutorError::executor_v1)?;
                     Message::Barrier(b)
@@ -151,9 +162,9 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 mod tests {
 
     use futures::stream::StreamExt;
-    use risingwave_common::array::{I32Array, Op, Row};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
@@ -176,21 +187,16 @@ mod tests {
         let column_ids = vec![0.into(), 1.into()];
 
         // Prepare source chunks.
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I32Array, [1, 2, 3] },
-                column_nonnull! { I32Array, [4, 5, 6] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4
+            + 2 5
+            + 3 6",
         );
-        let chunk2 = StreamChunk::new(
-            vec![Op::Insert, Op::Delete],
-            vec![
-                column_nonnull! { I32Array, [7, 3] },
-                column_nonnull! { I32Array, [8, 6] },
-            ],
-            None,
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 7 8
+            - 3 6",
         );
 
         // Prepare stream executors.
@@ -207,7 +213,10 @@ mod tests {
 
         let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
         let order_types = vec![OrderType::Ascending];
-        let column_descs = vec![ColumnDesc::unnamed(column_ids[1], DataType::Int32)];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
         let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
@@ -227,7 +236,7 @@ mod tests {
                     .get_row(&Row(vec![Some(3_i32.into())]), u64::MAX)
                     .await
                     .unwrap();
-                assert_eq!(row, Some(Row(vec![Some(6_i32.into())])));
+                assert_eq!(row, Some(Row(vec![Some(3_i32.into()), Some(6_i32.into())])));
             }
             _ => unreachable!(),
         }
@@ -239,7 +248,7 @@ mod tests {
                     .get_row(&Row(vec![Some(7_i32.into())]), u64::MAX)
                     .await
                     .unwrap();
-                assert_eq!(row, Some(Row(vec![Some(8_i32.into())])));
+                assert_eq!(row, Some(Row(vec![Some(7_i32.into()), Some(8_i32.into())])));
             }
             _ => unreachable!(),
         }

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use risingwave_batch::executor::monitor::BatchMetrics;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,9 @@ use risingwave_batch::executor::monitor::BatchMetrics;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
+use futures::StreamExt;
+use risingwave_batch::executor2::monitor::BatchMetrics;
+use risingwave_batch::executor2::{Executor2, RowSeqScanExecutor2};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::Result;
@@ -23,8 +24,9 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
-use risingwave_stream::executor_v2::ManagedMViewState;
+// use risingwave_stream::executor_v2::ManagedMViewState;
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {
@@ -37,55 +39,63 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
-
-    let mut state =
-        ManagedMViewState::new(keyspace.clone(), column_ids, vec![OrderType::Ascending]);
+    let _column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
 
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
         ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
+    let mut state = StateTable::new(
+        keyspace.clone(),
+        column_descs.clone(),
+        vec![OrderType::Ascending],
+    );
     let table = CellBasedTable::new_adhoc(
         keyspace,
         column_descs,
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let mut executor = RowSeqScanExecutor::new(
+    let executor = Box::new(RowSeqScanExecutor2::new(
         table,
         1,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
+    ));
 
     let epoch: u64 = 0;
-    state.put(
-        Row(vec![Some(1_i32.into())]),
-        Row(vec![
-            Some(1_i32.into()),
-            Some(4_i32.into()),
-            Some(7_i64.into()),
-        ]),
-    );
-    state.put(
-        Row(vec![Some(2_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(5_i32.into()),
-            Some(8_i64.into()),
-        ]),
-    );
-    state.flush(epoch).await.unwrap();
+    state
+        .insert(
+            Row(vec![Some(1_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(4_i32.into()),
+                Some(7_i64.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(2_i32.into())]),
+            Row(vec![
+                Some(2_i32.into()),
+                Some(5_i32.into()),
+                Some(8_i64.into()),
+            ]),
+        )
+        .unwrap();
+    state.commit(epoch).await.unwrap();
 
-    executor.open().await.unwrap();
-    assert_eq!(executor.schema().fields().len(), 2);
+    assert_eq!(executor.schema().fields().len(), 3);
 
-    let res_chunk = executor.next().await?.unwrap();
-    assert_eq!(res_chunk.dimension(), 2);
+    let mut stream = executor.execute();
+    let res_chunk = stream.next().await.unwrap().unwrap();
+
+    assert_eq!(res_chunk.dimension(), 3);
     assert_eq!(
         res_chunk
             .column_at(0)
@@ -105,8 +115,8 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![Some(4)]
     );
 
-    let res_chunk2 = executor.next().await?.unwrap();
-    assert_eq!(res_chunk2.dimension(), 2);
+    let res_chunk2 = stream.next().await.unwrap().unwrap();
+    assert_eq!(res_chunk2.dimension(), 3);
     assert_eq!(
         res_chunk2
             .column_at(0)
@@ -125,6 +135,5 @@ async fn test_row_seq_scan() -> Result<()> {
             .collect::<Vec<_>>(),
         vec![Some(5)]
     );
-    executor.close().await.unwrap();
     Ok(())
 }

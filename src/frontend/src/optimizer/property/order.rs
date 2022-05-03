@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
+use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;

@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
-use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
-use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
+use super::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
+use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
+use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -35,7 +38,7 @@ impl<S: StateStore> TopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
-        pk_order_types: Vec<OrderType>,
+        order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
@@ -52,7 +55,7 @@ impl<S: StateStore> TopNExecutor<S> {
             inner: InnerTopNExecutor::new(
                 info,
                 schema,
-                pk_order_types,
+                order_pairs,
                 offset_and_limit,
                 pk_indices,
                 keyspace,
@@ -71,8 +74,6 @@ pub struct InnerTopNExecutor<S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
-    /// The ordering
-    pk_order_types: Vec<OrderType>,
     /// `LIMIT XXX`. `None` means no limit.
     limit: Option<usize>,
     /// `OFFSET XXX`. `0` means no offset.
@@ -80,6 +81,12 @@ pub struct InnerTopNExecutor<S: StateStore> {
 
     /// The primary key indices of the `TopNExecutor`
     pk_indices: PkIndices,
+
+    /// The internal key indices of the `TopNExecutor`
+    internal_key_indices: PkIndices,
+
+    /// The order of internal keys of the `TopNExecutor`
+    internal_key_order_types: Vec<OrderType>,
 
     /// We are interested in which element is in the range of [offset, offset+limit). But we
     /// still need to record elements in the other two ranges.
@@ -96,12 +103,42 @@ pub struct InnerTopNExecutor<S: StateStore> {
     key_indices: Vec<usize>,
 }
 
+pub fn generate_internal_key(
+    order_pairs: &[OrderPair],
+    pk_indices: PkIndicesRef,
+    schema: &Schema,
+) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
+    let mut exists_key_index = HashSet::new();
+    let mut internal_key_indices = vec![];
+    let mut internal_order_types = vec![];
+    for order_pair in order_pairs {
+        exists_key_index.insert(order_pair.column_idx);
+        internal_key_indices.push(order_pair.column_idx);
+        internal_order_types.push(order_pair.order_type);
+    }
+    for pk_index in pk_indices {
+        if !internal_key_indices.contains(pk_index) {
+            internal_key_indices.push(*pk_index);
+            internal_order_types.push(OrderType::Ascending);
+        }
+    }
+    let internal_data_types = internal_key_indices
+        .iter()
+        .map(|idx| schema.fields()[*idx].data_type())
+        .collect();
+    (
+        internal_key_indices,
+        internal_data_types,
+        internal_order_types,
+    )
+}
+
 impl<S: StateStore> InnerTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
         schema: Schema,
-        pk_order_types: Vec<OrderType>,
+        order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
@@ -110,17 +147,17 @@ impl<S: StateStore> InnerTopNExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|idx| schema.fields[*idx].data_type())
-            .collect::<Vec<_>>();
+        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
+            generate_internal_key(&order_pairs, &pk_indices, &schema);
+
+        let ordered_row_deserializer =
+            OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
+
         let row_data_types = schema
             .fields
             .iter()
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
-        let ordered_row_deserializer =
-            OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
         let table_column_descs = row_data_types
             .iter()
             .enumerate()
@@ -163,13 +200,14 @@ impl<S: StateStore> InnerTopNExecutor<S> {
                 identity: format!("TopNExecutor {:X}", executor_id),
             },
             schema,
-            pk_order_types,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_lowest_state,
             managed_middle_state,
             managed_highest_state,
             pk_indices,
+            internal_key_indices,
+            internal_key_order_types,
             first_execution: true,
             key_indices,
         })
@@ -237,8 +275,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
         let mut new_rows = vec![];
 
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.row_by_indices(&self.pk_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
+            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
 
             match op {
@@ -439,10 +477,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, I64Array, Op};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -451,44 +487,36 @@ mod tests {
     use crate::executor_v2::{Barrier, Message};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert; 6],
-            vec![
-                column_nonnull! { I64Array, [1, 2, 3, 10, 9, 8] },
-                column_nonnull! { I64Array, [0, 1, 2, 3, 4, 5] },
-            ],
-            None,
+        let chunk1 = StreamChunk::from_pretty(
+            "  I I
+            +  1 0
+            +  2 1
+            +  3 2
+            + 10 3
+            +  9 4
+            +  8 5",
         );
-        let chunk2 = StreamChunk::new(
-            vec![
-                Op::Insert,
-                Op::Delete,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ],
-            vec![
-                column_nonnull! { I64Array, [7, 3, 1, 5, 2, 11] },
-                column_nonnull! { I64Array, [6, 2, 0, 7, 1, 8] },
-            ],
-            None,
+        let chunk2 = StreamChunk::from_pretty(
+            "  I I
+            +  7 6
+            -  3 2
+            -  1 0
+            +  5 7
+            -  2 1
+            + 11 8",
         );
-        let chunk3 = StreamChunk::new(
-            vec![Op::Insert; 4],
-            vec![
-                column_nonnull! { I64Array, [6, 12, 13, 14] },
-                column_nonnull! { I64Array, [9, 10, 11, 12] },
-            ],
-            None,
+        let chunk3 = StreamChunk::from_pretty(
+            "  I  I
+            +  6  9
+            + 12 10
+            + 13 11
+            + 14 12",
         );
-        let chunk4 = StreamChunk::new(
-            vec![Op::Delete; 3],
-            vec![
-                column_nonnull! { I64Array, [5, 6, 11]},
-                column_nonnull! { I64Array, [7, 9, 8]},
-            ],
-            None,
+        let chunk4 = StreamChunk::from_pretty(
+            "  I  I
+            -  5  7
+            -  6  9
+            - 11  8",
         );
         vec![chunk1, chunk2, chunk3, chunk4]
     }
@@ -502,8 +530,11 @@ mod tests {
         }
     }
 
-    fn create_order_types() -> Vec<OrderType> {
-        vec![OrderType::Ascending, OrderType::Ascending]
+    fn create_order_pairs() -> Vec<OrderPair> {
+        vec![
+            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::Ascending),
+        ]
     }
 
     fn create_source() -> Box<MockSource> {
@@ -528,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_top_n_executor_with_offset() {
-        let order_types = create_order_types();
+        let order_types = create_order_pairs();
         let source = create_source();
         let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
@@ -550,20 +581,15 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(10), Some(9), Some(8)];
-            let expected_ops = vec![Op::Insert, Op::Insert, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                + 10 3
+                +  9 4
+                +  8 5"
+            )
+        );
         // Now (1, 2, 3) -> (8, 9, 10)
         // Barrier
         assert_matches!(
@@ -571,23 +597,19 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(7), Some(7), Some(8), Some(8), Some(8), Some(11)];
-            let expected_ops = vec![
-                Op::Insert,
-                Op::Delete,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.column_at(0).array_ref().as_int64().iter().collect_vec(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  7 6
+                -  7 6
+                -  8 5
+                +  8 5
+                -  8 5
+                + 11 8"
+            )
+        );
+
         // (5, 7, 8) -> (9, 10, 11)
         // barrier
         assert_matches!(
@@ -596,20 +618,16 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8), Some(12), Some(13), Some(14)];
-            let expected_ops = vec![Op::Insert; 4];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I  I
+                +  8  5
+                + 12 10
+                + 13 11
+                + 14 12"
+            )
+        );
         // (5, 6, 7) -> (8, 9, 10, 11, 12, 13, 14)
         // barrier
         assert_matches!(
@@ -618,20 +636,15 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8), Some(9), Some(11)];
-            let expected_ops = vec![Op::Delete, Op::Delete, Op::Delete];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  8 5
+                -  9 4
+                - 11 8"
+            )
+        );
         // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(
@@ -642,7 +655,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_top_n_executor_with_limit() {
-        let order_types = create_order_types();
+        let order_types = create_order_pairs();
         let source = create_source();
         let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
@@ -664,38 +677,20 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![
-                Some(1),
-                Some(2),
-                Some(3),
-                Some(10),
-                Some(10),
-                Some(9),
-                Some(9),
-                Some(8),
-            ];
-            let expected_ops = vec![
-                Op::Insert,
-                Op::Insert,
-                Op::Insert,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  1 0
+                +  2 1
+                +  3 2
+                + 10 3
+                - 10 3
+                +  9 4
+                -  9 4
+                +  8 5"
+            )
+        );
         // now () -> (1, 2, 3, 8) -> (9, 10)
 
         // barrier
@@ -704,42 +699,23 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![
-                Some(8),
-                Some(7),
-                Some(3),
-                Some(8),
-                Some(1),
-                Some(9),
-                Some(9),
-                Some(5),
-                Some(2),
-                Some(9),
-            ];
-            let expected_ops = vec![
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  8 5
+                +  7 6
+                -  3 2
+                +  8 5
+                -  1 0
+                +  9 4
+                -  9 4
+                +  5 7
+                -  2 1
+                +  9 4"
+            )
+        );
+
         // () -> (5, 7, 8, 9) -> (10, 11)
         // barrier
         assert_matches!(
@@ -748,20 +724,14 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(9), Some(6)];
-            let expected_ops = vec![Op::Delete, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  9 4
+                +  6 9"
+            )
+        );
         // () -> (5, 6, 7, 8) -> (9, 10, 11, 12, 13, 14)
         // barrier
         assert_matches!(
@@ -770,20 +740,16 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(5), Some(9), Some(6), Some(10)];
-            let expected_ops = vec![Op::Delete, Op::Insert, Op::Delete, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  5 7
+                +  9 4
+                -  6 9
+                + 10 3"
+            )
+        );
         // () -> (7, 8, 9, 10) -> (13, 14)
         // barrier
         assert_matches!(
@@ -794,7 +760,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_top_n_executor_with_offset_and_limit() {
-        let order_types = create_order_types();
+        let order_types = create_order_pairs();
         let source = create_source();
         let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
@@ -816,20 +782,15 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(10), Some(9), Some(8)];
-            let expected_ops = vec![Op::Insert, Op::Insert, Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                + 10 3
+                +  9 4
+                +  8 5"
+            )
+        );
         // now (1, 2, 3) -> (8, 9, 10, _) -> ()
 
         // barrier
@@ -838,27 +799,18 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(7), Some(7), Some(8), Some(8), Some(8), Some(11)];
-            let expected_ops = vec![
-                Op::Insert,
-                Op::Delete,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  7 6
+                -  7 6
+                -  8 5
+                +  8 5
+                -  8 5
+                + 11 8"
+            )
+        );
         // (5, 7, 8) -> (9, 10, 11, _) -> ()
         // barrier
         assert_matches!(
@@ -867,20 +819,13 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8)];
-            let expected_ops = vec![Op::Insert];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                +  8 5"
+            )
+        );
         // (5, 6, 7) -> (8, 9, 10, 11) -> (12, 13, 14)
         // barrier
         assert_matches!(
@@ -889,27 +834,19 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_matches!(res, Message::Chunk(_));
-        if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(8), Some(12), Some(9), Some(13), Some(11), Some(14)];
-            let expected_ops = vec![
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-                Op::Delete,
-                Op::Insert,
-            ];
-            assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                expected_values
-            );
-            assert_eq!(res.ops(), expected_ops);
-        }
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I  I
+                -  8  5 
+                + 12 10
+                -  9  4 
+                + 13 11
+                - 11  8 
+                + 14 12"
+            )
+        );
+
         // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(

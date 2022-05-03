@@ -17,16 +17,17 @@
 use std::marker::PhantomData;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{ExecutorBuilder, PkIndices};
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{BoxedExecutor, Executor, HashAggExecutor};
+use crate::executor_v2::{BoxedExecutor, Executor, HashAggExecutor, PkIndices};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
@@ -35,10 +36,9 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
-    keyspace: Keyspace<S>,
+    keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
-    op_info: String,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -46,14 +46,13 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
     type Output = Result<BoxedExecutor>;
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(HashAggExecutor::<K, S>::new_from_v1(
+        Ok(HashAggExecutor::<K, S>::new(
             args.input,
             args.agg_calls,
-            args.key_indices,
             args.keyspace,
             args.pk_indices,
             args.executor_id,
-            args.op_info,
+            args.key_indices,
         )?
         .boxed())
     }
@@ -68,7 +67,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
         let key_indices = node
             .get_distribution_keys()
             .iter()
@@ -79,7 +78,13 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
+        // Build vector of keyspace via table ids.
+        // One keyspace for one agg call.
+        let keyspace = node
+            .get_table_ids()
+            .iter()
+            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .collect();
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()
@@ -93,7 +98,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             keyspace,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
-            op_info: params.op_info,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

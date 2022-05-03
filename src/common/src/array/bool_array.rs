@@ -47,7 +47,16 @@ impl Array for BoolArray {
 
     fn value_at(&self, idx: usize) -> Option<bool> {
         if !self.is_null(idx) {
-            Some(self.data.is_set(idx).unwrap())
+            // Safety: the above `is_null` check ensures that the index is valid.
+            unsafe { Some(self.data.is_set_unchecked(idx)) }
+        } else {
+            None
+        }
+    }
+
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<bool> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.data.is_set_unchecked(idx))
         } else {
             None
         }
@@ -116,7 +125,7 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),

@@ -14,8 +14,8 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::TopNNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::TopNNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order};
@@ -79,6 +79,7 @@ impl ToBatchProst for BatchTopN {
         let column_orders = self.logical.topn_order().to_protobuf(&self.base.schema);
         NodeBody::TopN(TopNNode {
             limit: self.logical.limit() as u32,
+            offset: self.logical.offset() as u32,
             column_orders,
         })
     }

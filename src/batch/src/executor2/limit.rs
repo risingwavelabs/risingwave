@@ -20,7 +20,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
@@ -131,7 +131,7 @@ mod tests {
     use std::sync::Arc;
     use std::vec;
 
-    use futures::{pin_mut, StreamExt};
+    use futures_async_stream::for_await;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
@@ -166,7 +166,7 @@ mod tests {
 
         let data_chunk = DataChunk::builder().columns([col].to_vec()).build();
 
-        DataChunk::rechunk(&[Arc::new(data_chunk)], chunk_size)
+        DataChunk::rechunk(&[data_chunk], chunk_size)
             .unwrap()
             .into_iter()
             .for_each(|x| mock_executor.add(x));
@@ -180,9 +180,10 @@ mod tests {
         assert_eq!(fields[0].data_type, DataType::Int32);
         let mut results = vec![];
         let stream = limit_executor.execute();
-        pin_mut!(stream);
-        while let Some(Ok(chunk)) = stream.next().await {
-            results.push(Arc::new(chunk));
+        #[for_await]
+        for chunk in stream {
+            let chunk = chunk.unwrap();
+            results.push(chunk);
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();
@@ -296,7 +297,7 @@ mod tests {
 
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
 
-        DataChunk::rechunk(&[Arc::new(data_chunk)], chunk_size)
+        DataChunk::rechunk(&[data_chunk], chunk_size)
             .unwrap()
             .into_iter()
             .for_each(|x| {
@@ -314,9 +315,9 @@ mod tests {
 
         let mut results = vec![];
         let stream = limit_executor.execute();
-        pin_mut!(stream);
-        while let Some(Ok(chunk)) = stream.next().await {
-            results.push(Arc::new(chunk.compact().unwrap()));
+        #[for_await]
+        for chunk in stream {
+            results.push(chunk.unwrap().compact().unwrap());
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();

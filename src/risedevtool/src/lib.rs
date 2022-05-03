@@ -20,6 +20,10 @@ mod config;
 pub use config::*;
 mod config_gen;
 pub use config_gen::*;
+mod preflight_check;
+pub use preflight_check::*;
+pub mod service_config;
+pub use service_config::*;
 
 mod task;
 pub mod util;

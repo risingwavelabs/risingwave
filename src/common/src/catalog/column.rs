@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::plan::{
+use risingwave_pb::plan_common::{
     ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
     OrderedColumnDesc as ProstOrderedColumnDesc,
 };
 
 use crate::catalog::Field;
+use crate::error::ErrorCode;
 use crate::types::DataType;
 use crate::util::sort_util::OrderType;
 
@@ -103,13 +104,36 @@ impl ColumnDesc {
         }
     }
 
-    /// Get all column descs under `field_descs`.
-    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+    /// Flatten a nested column to a list of columns (including itself).
+    /// If the type is atomic, it returns simply itself.
+    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
+    /// and returns every tree node.
+    pub fn flatten(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
-        for desc in &self.field_descs {
-            descs.append(&mut desc.get_column_descs());
-        }
+        descs.extend(self.field_descs.iter().flat_map(|d| {
+            let mut desc = d.clone();
+            desc.name = self.name.clone() + "." + &desc.name;
+            desc.flatten()
+        }));
         descs
+    }
+
+    /// Find `column_desc` in `field_descs` by name.
+    pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
+        if let DataType::Struct { .. } = self.data_type {
+            for (index, col) in self.field_descs.iter().enumerate() {
+                if col.name == *name {
+                    return Ok((col.clone(), index as i32));
+                }
+            }
+            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
+        } else {
+            Err(ErrorCode::ItemNotFound(format!(
+                "Cannot get field from non nested column: {}",
+                self.name
+            ))
+            .into())
+        }
     }
 
     #[cfg(test)]
@@ -236,7 +260,7 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
+    use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
     use crate::catalog::ColumnDesc;
     use crate::types::DataType;

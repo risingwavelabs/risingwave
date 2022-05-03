@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools as _;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Query, TableAlias};
 
@@ -35,12 +34,14 @@ impl Binder {
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
+
         self.bind_context(
             query
-                .names()
-                .into_iter()
-                .zip_eq(query.data_types().into_iter())
-                .map(|(x, y)| (x, y, false)),
+                .body
+                .schema()
+                .fields
+                .iter()
+                .map(|f| (false, f.clone())),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;

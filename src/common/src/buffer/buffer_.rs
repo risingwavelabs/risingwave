@@ -62,7 +62,7 @@ impl Clone for Buffer {
 
 impl Buffer {
     /// New a block of memory with content init to 0 (All bits set to 0).
-    pub fn new_with_default(size: usize) -> Result<Buffer> {
+    pub fn with_default(size: usize) -> Result<Buffer> {
         alloc_aligned(size).map(|ptr| {
             // Fill init value.
             unsafe { std::slice::from_raw_parts_mut(ptr.as_ptr(), size).fill(0) }
@@ -71,7 +71,7 @@ impl Buffer {
     }
 
     pub fn from_slice<T: NativeType, S: AsRef<[T]>>(data: S) -> Result<Buffer> {
-        let buffer = Buffer::new_with_default(data.as_ref().len() * size_of::<T>())?;
+        let buffer = Buffer::with_default(data.as_ref().len() * size_of::<T>())?;
         unsafe {
             let dest_slice =
                 from_raw_parts_mut::<T>(transmute(buffer.ptr.as_ptr()), data.as_ref().len());
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_buffer_new() {
-        let buf = Buffer::new_with_default(1).unwrap();
+        let buf = Buffer::with_default(1).unwrap();
         assert_eq!(buf.len(), 1);
     }
 

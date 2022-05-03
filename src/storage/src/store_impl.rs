@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
@@ -20,11 +21,11 @@ use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::compactor::Compactor;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
-use crate::object::{InMemObjectStore, ObjectStoreImpl, S3ObjectStore};
+use crate::object::{parse_object_store, ObjectStoreImpl};
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
 use crate::StateStore;
@@ -92,29 +93,9 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
-                let object_store = Arc::new(match hummock {
-                    s3 if s3.starts_with("hummock+s3://") => ObjectStoreImpl::S3(
-                        S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string())
-                            .await,
-                    ),
-                    minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
-                        S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
-                            .await,
-                    ),
-                    memory if memory.starts_with("hummock+memory") => {
-                        tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
-                        ObjectStoreImpl::Mem(InMemObjectStore::new())
-                    }
-                    other => {
-                        unimplemented!(
-                            "{} Hummock only supports s3, minio and memory for now.",
-                            other
-                        )
-                    }
-                });
-
+                let object_store = Arc::new(parse_object_store(hummock).await);
                 let sstable_store = Arc::new(SstableStore::new(
-                    object_store,
+                    object_store.clone(),
                     config.data_directory.to_string(),
                     state_store_stats.clone(),
                     config.block_cache_capacity,
@@ -123,11 +104,20 @@ impl StateStoreImpl {
                 let inner = HummockStorage::new(
                     config.clone(),
                     sstable_store.clone(),
-                    Arc::new(LocalVersionManager::new()),
-                    hummock_meta_client,
+                    hummock_meta_client.clone(),
                     state_store_stats.clone(),
                 )
                 .await?;
+                if let ObjectStoreImpl::Mem(ref in_mem_object_store) = object_store.deref() {
+                    tracing::info!("start a compactor for in-memory object store");
+                    let (_, shutdown_sender) = Compactor::start_compactor(
+                        config.clone(),
+                        hummock_meta_client,
+                        sstable_store,
+                        state_store_stats.clone(),
+                    );
+                    in_mem_object_store.set_compactor_shutdown_sender(shutdown_sender);
+                }
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
 

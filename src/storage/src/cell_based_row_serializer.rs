@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::util::ordered::serialize_pk_and_row;
+use risingwave_common::util::ordered::{
+    serialize_pk_and_column_id, serialize_pk_and_row, SENTINEL_CELL_ID,
+};
 
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
@@ -31,12 +34,36 @@ impl CellBasedRowSerializer {
         Self {}
     }
 
+    /// Serialize key and value.
     pub fn serialize(
         &mut self,
         pk: &[u8],
-        row: Option<Row>,
+        row: Row,
         column_ids: &[ColumnId],
-    ) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
-        serialize_pk_and_row(pk, &row, column_ids)
+    ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
+        let res = serialize_pk_and_row(pk, &Some(row), column_ids)?
+            .into_iter()
+            .map(|(pk, value)| (pk, value.unwrap()))
+            .collect_vec();
+        Ok(res)
+    }
+
+    /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
+    /// column id appended).
+    pub fn serialize_cell_key(
+        &mut self,
+        pk: &[u8],
+        row: &Row,
+        column_ids: &[ColumnId],
+    ) -> Result<Vec<KeyBytes>> {
+        let mut results = Vec::with_capacity(column_ids.len());
+        for (index, col_id) in column_ids.iter().enumerate() {
+            if row[index].is_none() {
+                continue;
+            }
+            results.push(serialize_pk_and_column_id(pk, col_id)?);
+        }
+        results.push(serialize_pk_and_column_id(pk, &SENTINEL_CELL_ID)?);
+        Ok(results)
     }
 }

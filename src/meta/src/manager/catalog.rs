@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table::Info as TableInfo;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::plan_common::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
 use super::NotificationManagerRef;

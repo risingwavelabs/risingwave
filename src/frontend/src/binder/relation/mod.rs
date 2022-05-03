@@ -15,9 +15,8 @@
 use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
+use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
@@ -63,7 +62,7 @@ impl Binder {
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (String, DataType, bool)>,
+        columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
         alias: Option<TableAlias>,
     ) -> Result<()> {
@@ -79,17 +78,20 @@ impl Binder {
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type, is_hidden))| {
+            .for_each(|(index, (is_hidden, mut field))| {
                 let name = match is_hidden {
-                    true => name,
-                    false => alias_iter.next().map(|t| t.value).unwrap_or(name),
+                    true => field.name.to_string(),
+                    false => alias_iter
+                        .next()
+                        .map(|t| t.value)
+                        .unwrap_or_else(|| field.name.to_string()),
                 };
+                field.name = name.clone();
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    name.clone(),
                     begin + index,
-                    data_type,
                     is_hidden,
+                    field,
                 ));
                 self.context
                     .indexs_of

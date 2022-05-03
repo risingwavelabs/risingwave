@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::{zip_eq, Itertools as _};
+use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
+    UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{least_restrictive, Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 use risingwave_common::array::ListValue;
 use crate::expr::Literal;
@@ -69,6 +70,9 @@ impl Binder {
             ))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
+            Expr::FieldIdentifier(field_expr, idents) => {
+                Ok(self.bind_single_field_column(*field_expr, &idents)?)
+            }
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::Array(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_array(exprs)?))),
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
@@ -80,6 +84,11 @@ impl Binder {
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => self.bind_in_subquery(*expr, *subquery, negated),
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
@@ -135,8 +144,7 @@ impl Binder {
         for elem in list {
             bound_expr_list.push(self.bind_expr(elem)?);
         }
-        align_types(bound_expr_list.iter_mut())?;
-        let in_expr = FunctionCall::new_unchecked(ExprType::In, bound_expr_list, DataType::Boolean);
+        let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
         if negated {
             Ok(
                 FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
@@ -144,6 +152,24 @@ impl Binder {
             )
         } else {
             Ok(in_expr.into())
+        }
+    }
+
+    pub(super) fn bind_in_subquery(
+        &mut self,
+        expr: Expr,
+        subquery: Query,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let bound_expr = self.bind_expr(expr)?;
+        let bound_subquery = self.bind_subquery_expr(subquery, SubqueryKind::In(bound_expr))?;
+        if negated {
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![bound_subquery], DataType::Boolean)
+                    .into(),
+            )
+        } else {
+            Ok(bound_subquery)
         }
     }
 
@@ -243,13 +269,11 @@ impl Binder {
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
         let mut inputs = Vec::new();
-        let mut results_expr: Vec<ExprImpl> = results
+        let results_expr: Vec<ExprImpl> = results
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .collect::<Result<_>>()?;
-        let mut else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
-
-        let return_type = align_types(results_expr.iter_mut().chain(else_result_expr.iter_mut()))?;
+        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
 
         for (condition, result) in zip_eq(conditions, results_expr) {
             let condition = match operand {
@@ -266,11 +290,7 @@ impl Binder {
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
-        Ok(FunctionCall::new_unchecked(
-            ExprType::Case,
-            inputs,
-            return_type,
-        ))
+        FunctionCall::new(ExprType::Case, inputs)
     }
 
     pub(super) fn bind_is_operator(
@@ -337,30 +357,4 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
     };
     Ok(data_type)
-}
-
-/// Find the `least_restrictive` type over a list of `exprs`, and add implicit cast when necessary.
-/// Used by `VALUES`, `CASE`, `UNION`, etc. See [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
-pub fn align_types<'a>(exprs: impl Iterator<Item = &'a mut ExprImpl>) -> Result<DataType> {
-    use std::mem::swap;
-
-    let exprs = exprs.collect_vec();
-    // Essentially a filter_map followed by a try_reduce, which is unstable.
-    let mut ret_type = None;
-    for e in &exprs {
-        if e.is_null() {
-            continue;
-        }
-        ret_type = match ret_type {
-            None => Some(e.return_type()),
-            Some(t) => Some(least_restrictive(t, e.return_type())?),
-        };
-    }
-    let ret_type = ret_type.unwrap_or(DataType::Varchar);
-    for e in exprs {
-        let mut dummy = ExprImpl::literal_bool(false);
-        swap(&mut dummy, e);
-        *e = dummy.cast_implicit(ret_type.clone())?;
-    }
-    Ok(ret_type)
 }

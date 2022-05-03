@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 
-use futures_async_stream::try_stream;
+use assert_matches::assert_matches;
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 
-use super::BoxedExecutor;
 use crate::executor::Executor;
-use crate::executor2::{BoxedDataChunkStream, Executor2};
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, Executor2};
 
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,
@@ -110,25 +109,28 @@ impl MockExecutor {
 ///
 /// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema`
 /// method of `executor` is ready, an order-ignored version will be added.
-pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedExecutor) {
+pub async fn diff_executor_output(actual: BoxedExecutor2, expect: BoxedExecutor2) {
     let mut expect_cardinality = 0;
     let mut actual_cardinality = 0;
     let mut expects = vec![];
     let mut actuals = vec![];
-    expect.open().await.unwrap();
-    actual.open().await.unwrap();
-    while let Some(chunk) = expect.next().await.unwrap() {
-        let chunk = DataChunk::compact(chunk).unwrap();
+
+    #[for_await]
+    for chunk in expect.execute() {
+        assert_matches!(chunk, Ok(_));
+        let chunk = chunk.unwrap().compact().unwrap();
         expect_cardinality += chunk.cardinality();
-        expects.push(Arc::new(chunk));
+        expects.push(chunk);
     }
-    while let Some(chunk) = actual.next().await.unwrap() {
-        let chunk = DataChunk::compact(chunk).unwrap();
+
+    #[for_await]
+    for chunk in actual.execute() {
+        assert_matches!(chunk, Ok(_));
+        let chunk = chunk.unwrap().compact().unwrap();
         actual_cardinality += chunk.cardinality();
-        actuals.push(Arc::new(chunk));
+        actuals.push(chunk);
     }
-    expect.close().await.unwrap();
-    actual.close().await.unwrap();
+
     assert_eq!(actual_cardinality, expect_cardinality);
     if actual_cardinality == 0 {
         return;

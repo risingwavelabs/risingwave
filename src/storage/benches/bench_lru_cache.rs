@@ -16,7 +16,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -24,7 +24,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
+use risingwave_storage::hummock::{HummockError, HummockResult, LookupResult, LruCache};
 use tokio::runtime::{Builder, Runtime};
 
 pub struct Block {
@@ -46,15 +46,19 @@ pub trait CacheBase: Sync + Send {
 
 pub struct MokaCache {
     inner: Cache<Bytes, Arc<Block>>,
+    fake_io_latency: Duration,
 }
 
 impl MokaCache {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         let cache: Cache<Bytes, Arc<Block>> = Cache::builder()
             .initial_capacity(capacity / 16)
             .max_capacity(capacity as u64)
             .build();
-        Self { inner: cache }
+        Self {
+            inner: cache,
+            fake_io_latency,
+        }
     }
 }
 
@@ -62,9 +66,10 @@ impl MokaCache {
 impl CacheBase for MokaCache {
     async fn try_get_with(&self, sst_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let k = make_key(sst_id, block_idx);
+        let latency = self.fake_io_latency;
         self.inner
             .try_get_with(k, async move {
-                match get_fake_block(sst_id, block_idx).await {
+                match get_fake_block(sst_id, block_idx, latency).await {
                     Ok(ret) => Ok(Arc::new(ret)),
                     Err(e) => Err(e),
                 }
@@ -76,12 +81,14 @@ impl CacheBase for MokaCache {
 
 pub struct LruCacheImpl {
     inner: Arc<LruCache<(u64, u64), Arc<Block>>>,
+    fake_io_latency: Duration,
 }
 
 impl LruCacheImpl {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
             inner: Arc::new(LruCache::new(3, capacity, 1024)),
+            fake_io_latency,
         }
     }
 }
@@ -94,13 +101,22 @@ impl CacheBase for LruCacheImpl {
         sst_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
         let h = hasher.finish();
-        if let Some(entry) = self.inner.lookup(h, &key) {
-            let block = entry.value().clone();
-            return Ok(block);
+        match self.inner.lookup_for_request(h, key) {
+            LookupResult::Cached(entry) => {
+                let block = entry.value().clone();
+                Ok(block)
+            }
+            LookupResult::WaitPendingRequest(recv) => {
+                let entry = recv.await.map_err(HummockError::other)?;
+                Ok(entry.value().clone())
+            }
+            LookupResult::Miss => {
+                let block =
+                    Arc::new(get_fake_block(sst_id, block_idx, self.fake_io_latency).await?);
+                self.inner.insert(key, h, 1, block.clone());
+                Ok(block)
+            }
         }
-        let block = Arc::new(get_fake_block(sst_id, block_idx).await?);
-        self.inner.insert(key, h, 1, block.clone());
-        Ok(block)
     }
 }
 
@@ -108,16 +124,16 @@ lazy_static::lazy_static! {
     static ref IO_COUNT: AtomicUsize = AtomicUsize::new(0);
 }
 
-async fn get_fake_block(sst: u64, offset: u64) -> HummockResult<Block> {
-    // use std::time::Duration;
-    // let stream_retry_interval = Duration::from_millis(10);
-    // let mut min_interval = tokio::time::interval(stream_retry_interval);
-    // IO_COUNT.fetch_add(1, Ordering::Relaxed);
-    // min_interval.tick().await;
+async fn get_fake_block(sst: u64, offset: u64, io_latency: Duration) -> HummockResult<Block> {
+    if !io_latency.is_zero() {
+        let mut min_interval = tokio::time::interval(io_latency);
+        IO_COUNT.fetch_add(1, Ordering::Relaxed);
+        min_interval.tick().await;
+    }
     Ok(Block { sst, offset })
 }
 
-fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
+fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion, key_count: u64) {
     IO_COUNT.store(0, Ordering::Relaxed);
     let pool = Builder::new_multi_thread()
         .enable_time()
@@ -132,21 +148,24 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
             let seed = 10244021u64 + i;
             let mut rng = SmallRng::seed_from_u64(seed);
             let t = Instant::now();
-            for _ in 0..10000 {
-                let sst_id = rng.next_u64() % 4096;
-                let block_offset = rng.next_u64() % 2048;
+            for _ in 0..key_count {
+                let sst_id = rng.next_u64() % 8;
+                let block_offset = rng.next_u64() % key_count;
                 let block = cache.try_get_with(sst_id, block_offset).await.unwrap();
                 assert_eq!(block.offset, block_offset);
                 assert_eq!(block.sst, sst_id);
             }
-            println!("100000 keys cost: {:?}", t.elapsed());
+            t.elapsed()
         });
         handles.push(handle);
     }
     current.block_on(async move {
+        let mut output = format!("{} keys cost time: [", key_count);
         for h in handles {
-            h.await.unwrap();
+            let t = h.await.unwrap();
+            output.push_str(&format!("{:?}, ", t));
         }
+        println!("{}", output);
     });
     println!("io count: {}", IO_COUNT.load(Ordering::Relaxed));
 
@@ -156,9 +175,9 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
             let f = async move {
                 let seed = 10244021u64;
                 let mut rng = SmallRng::seed_from_u64(seed);
-                for _ in 0..1000 {
-                    let sst_id = rng.next_u64() % 4096;
-                    let block_offset = rng.next_u64() % 4096 * 4096;
+                for _ in 0..(key_count / 100) {
+                    let sst_id = rng.next_u64() % 1024;
+                    let block_offset = rng.next_u64() % 1024;
                     let block = cache.try_get_with(sst_id, block_offset).await.unwrap();
                     assert_eq!(block.offset, block_offset);
                     assert_eq!(block.sst, sst_id);
@@ -170,10 +189,20 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
 }
 
 fn bench_block_cache(c: &mut Criterion) {
-    let block_cache = Arc::new(MokaCache::new(2048));
-    bench_cache(block_cache, c);
-    let block_cache = Arc::new(LruCacheImpl::new(2048));
-    bench_cache(block_cache, c);
+    let block_cache = Arc::new(MokaCache::new(2048, Duration::from_millis(0)));
+    bench_cache(block_cache, c, 10000);
+    let block_cache = Arc::new(LruCacheImpl::new(2048, Duration::from_millis(0)));
+    bench_cache(block_cache, c, 10000);
+
+    let block_cache = Arc::new(MokaCache::new(2048, Duration::from_millis(1)));
+    bench_cache(block_cache, c, 1000);
+    let block_cache = Arc::new(LruCacheImpl::new(2048, Duration::from_millis(1)));
+    bench_cache(block_cache, c, 1000);
+
+    let block_cache = Arc::new(MokaCache::new(256, Duration::from_millis(10)));
+    bench_cache(block_cache, c, 200);
+    let block_cache = Arc::new(LruCacheImpl::new(256, Duration::from_millis(10)));
+    bench_cache(block_cache, c, 200);
 }
 
 criterion_group!(benches, bench_block_cache);

@@ -66,7 +66,7 @@ impl StreamEnvironment {
 
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            source_manager: Arc::new(MemSourceManager::new()),
+            source_manager: Arc::new(MemSourceManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
