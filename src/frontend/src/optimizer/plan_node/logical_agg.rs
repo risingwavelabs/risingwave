@@ -259,7 +259,7 @@ impl ExprRewriter for ExprHandler {
         if subquery.is_correlated() {
             self.error = Some(ErrorCode::NotImplemented(
                 "correlated subquery in HAVING or SELECT with agg".into(),
-                1.into(),
+                2275.into(),
             ));
         }
         subquery.into()
