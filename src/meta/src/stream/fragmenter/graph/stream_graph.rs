@@ -21,7 +21,8 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 
 use crate::cluster::WorkerId;
@@ -439,14 +440,17 @@ impl StreamGraphBuilder {
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
     ) -> Result<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
-        match stream_node.get_node()? {
-            Node::ExchangeNode(_) => {
+        match stream_node.get_node_body()? {
+            NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
             }
-            Node::ChainNode(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
+            NodeBody::Chain(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                if let Node::HashJoinNode(node) = new_stream_node.node.as_mut().unwrap() {
+
+                // Table id rewrite done below.
+
+                if let NodeBody::HashJoin(node) = new_stream_node.node_body.as_mut().unwrap() {
                     // The operator id must be assigned with table ids. Otherwise it is a logic
                     // error.
                     let left_table_id = node.left_table_id + table_id_offset;
@@ -455,21 +459,45 @@ impl StreamGraphBuilder {
                     node.right_table_id = right_table_id;
                 }
 
-                if let Node::HashAggNode(node) = new_stream_node.node.as_mut().unwrap() {
+                if let NodeBody::Lookup(node) = new_stream_node.node_body.as_mut().unwrap() {
+                    if let Some(ArrangementTableId::TableId(table_id)) =
+                        &mut node.arrangement_table_id
+                    {
+                        *table_id += table_id_offset;
+                    }
+                }
+
+                if let NodeBody::Arrange(node) = new_stream_node.node_body.as_mut().unwrap() {
+                    node.table_id += table_id_offset;
+                }
+
+                if let NodeBody::HashAgg(node) = new_stream_node.node_body.as_mut().unwrap() {
                     assert_eq!(node.table_ids.len(), node.agg_calls.len());
                     // In-place update the table id. Convert from local to global.
                     for table_id in &mut node.table_ids {
                         *table_id += table_id_offset;
                     }
                 }
+
+                match new_stream_node.node_body.as_mut().unwrap() {
+                    NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        // In-place update the table id. Convert from local to global.
+                        for table_id in &mut node.table_ids {
+                            *table_id += table_id_offset;
+                        }
+                    }
+                    _ => {}
+                }
+
                 for (idx, input) in stream_node.input.iter().enumerate() {
-                    match input.get_node()? {
-                        Node::ExchangeNode(_) => {
+                    match input.get_node_body()? {
+                        NodeBody::Exchange(_) => {
                             assert!(!input.get_fields().is_empty());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
                                 pk_indices: input.pk_indices.clone(),
-                                node: Some(Node::MergeNode(MergeNode {
+                                node_body: Some(NodeBody::Merge(MergeNode {
                                     upstream_actor_id: upstream_actor_id
                                         .remove(&input.get_operator_id())
                                         .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
@@ -481,7 +509,7 @@ impl StreamGraphBuilder {
                                 append_only: input.append_only,
                             };
                         }
-                        Node::ChainNode(_) => {
+                        NodeBody::Chain(_) => {
                             new_stream_node.input[idx] =
                                 self.resolve_chain_node(ctx, input, actor_id)?;
                         }
@@ -504,7 +532,7 @@ impl StreamGraphBuilder {
         stream_node: &StreamNode,
         actor_id: LocalActorId,
     ) -> Result<StreamNode> {
-        let Node::ChainNode(chain_node) = stream_node.get_node().unwrap()  else {
+        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap()  else {
             unreachable!()
         };
         let input = stream_node.get_input();
@@ -543,15 +571,15 @@ impl StreamGraphBuilder {
         }
 
         let merge_node = &input[0];
-        assert_matches!(merge_node.node, Some(Node::MergeNode(_)));
+        assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
         let batch_plan_node = &input[1];
-        assert_matches!(batch_plan_node.node, Some(Node::BatchPlanNode(_)));
+        assert_matches!(batch_plan_node.node_body, Some(NodeBody::BatchPlan(_)));
 
         let chain_input = vec![
             StreamNode {
                 input: vec![],
                 pk_indices: stream_node.pk_indices.clone(),
-                node: Some(Node::MergeNode(MergeNode {
+                node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: if ctx.is_legacy_frontend {
                         Vec::from_iter(upstream_actor_ids.into_iter())
                     } else {
@@ -570,7 +598,7 @@ impl StreamGraphBuilder {
         Ok(StreamNode {
             input: chain_input,
             pk_indices: stream_node.pk_indices.clone(),
-            node: Some(Node::ChainNode(chain_node.clone())),
+            node_body: Some(NodeBody::Chain(chain_node.clone())),
             operator_id: stream_node.operator_id,
             identity: "ChainExecutor".to_string(),
             fields: chain_node.upstream_fields.clone(),

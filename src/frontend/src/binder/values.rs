@@ -28,6 +28,13 @@ pub struct BoundValues {
     pub schema: Schema,
 }
 
+impl BoundValues {
+    /// The schema returned of this [`BoundValues`].
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+}
+
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.

@@ -31,10 +31,12 @@ use risingwave_pb::hummock::{
     SstableInfo, UncommittedEpoch,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
@@ -60,6 +62,9 @@ pub struct HummockManager<S: MetaStore> {
     versioning: RwLock<Versioning>,
 
     metrics: Arc<MetaMetrics>,
+
+    /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
+    compaction_scheduler: parking_lot::RwLock<Option<UnboundedSender<CompactionGroupId>>>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -144,11 +149,12 @@ where
                 sstable_id_infos: Default::default(),
             }),
             compaction: Mutex::new(Compaction {
-                compact_status: CompactStatus::new(),
+                compact_status: CompactStatus::default(),
                 compact_task_assignment: Default::default(),
             }),
             metrics,
             cluster_manager,
+            compaction_scheduler: parking_lot::RwLock::new(None),
         };
 
         instance.load_meta_store_state().await?;
@@ -190,10 +196,12 @@ where
                 id: versioning_guard.current_version_id.id(),
                 levels: vec![
                     Level {
+                        level_idx: 0,
                         level_type: LevelType::Overlapping as i32,
                         table_infos: vec![],
                     },
                     Level {
+                        level_idx: 1,
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: vec![],
                     },
@@ -645,16 +653,9 @@ where
                 },
             );
             for level in &compact_task.input_ssts {
-                version_stale_sstables.id.extend(
-                    level
-                        .level
-                        .as_ref()
-                        .unwrap()
-                        .table_infos
-                        .iter()
-                        .map(|sst| sst.id)
-                        .collect_vec(),
-                );
+                version_stale_sstables
+                    .id
+                    .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
             }
             let mut new_version = CompactStatus::apply_compact_result(&compact_task, old_version);
             current_version_id.increase();
@@ -750,21 +751,18 @@ where
 
             // Commit tables by moving them into level0
             let version_first_level = new_hummock_version.levels.first_mut().unwrap();
-            match version_first_level.get_level_type()? {
-                LevelType::Overlapping => {
-                    uncommitted_epoch
-                        .tables
-                        .iter()
-                        .for_each(|t| version_first_level.table_infos.push(t.clone()));
-                }
-                LevelType::Nonoverlapping => {
-                    return Err(ErrorCode::NotImplemented(
-                        "unsupported LevelType::Nonoverlapping".to_string(),
-                        None.into(),
-                    )
-                    .into())
-                }
-            };
+            if version_first_level.level_idx == 0 {
+                uncommitted_epoch
+                    .tables
+                    .iter()
+                    .for_each(|t| version_first_level.table_infos.push(t.clone()));
+            } else {
+                return Err(ErrorCode::NotImplemented(
+                    "unsupported LevelType::Nonoverlapping".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
             // Remove the epoch from uncommitted_epochs
             new_hummock_version.uncommitted_epochs.swap_remove(idx);
         }
@@ -1119,12 +1117,7 @@ where
 
         let mut invalid_context_ids = vec![];
         for active_context_id in &active_context_ids {
-            if self
-                .cluster_manager
-                .get_worker_by_id(*active_context_id)
-                .await
-                .is_none()
-            {
+            if !self.check_context(*active_context_id).await {
                 invalid_context_ids.push(*active_context_id);
             }
         }
@@ -1132,6 +1125,14 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    /// Checks whether `context_id` is valid.
+    pub async fn check_context(&self, context_id: HummockContextId) -> bool {
+        self.cluster_manager
+            .get_worker_by_id(context_id)
+            .await
+            .is_some()
     }
 
     /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
@@ -1181,5 +1182,9 @@ where
             .get(&versioning_guard.current_version_id.id())
             .unwrap()
             .clone()
+    }
+
+    pub fn set_compaction_scheduler(&self, sender: UnboundedSender<CompactionGroupId>) {
+        *self.compaction_scheduler.write() = Some(sender);
     }
 }

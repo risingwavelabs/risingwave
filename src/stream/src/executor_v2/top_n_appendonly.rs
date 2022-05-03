@@ -17,15 +17,16 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::top_n::variants::TOP_N_MAX;
-use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::managed_state::top_n::variants::TOP_N_MAX;
+use super::managed_state::top_n::ManagedTopNState;
+use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
+use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor_v2::top_n::generate_internal_key;
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -38,7 +39,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
-        pk_order_types: Vec<OrderType>,
+        order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
@@ -55,7 +56,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
                 schema,
-                pk_order_types,
+                order_pairs,
                 offset_and_limit,
                 pk_indices,
                 keyspace,
@@ -74,14 +75,21 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
-    /// The ordering
-    pk_order_types: Vec<OrderType>,
     /// `LIMIT XXX`. `None` means no limit.
     limit: Option<usize>,
+
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
+
     /// The primary key indices of the `AppendOnlyTopNExecutor`
     pk_indices: PkIndices,
+
+    /// The internal key indices of the `TopNExecutor`
+    internal_key_indices: PkIndices,
+
+    /// The order of internal keys of the `TopNExecutor`
+    internal_key_order_types: Vec<OrderType>,
+
     /// We are only interested in which element is in the range of `[offset, offset+limit)`(right
     /// open interval) but not the rank of such element
     ///
@@ -89,6 +97,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     /// another set stores the elements in the range of `[offset, offset+limit)`.
     managed_lower_state: ManagedTopNState<S, TOP_N_MAX>,
     managed_higher_state: ManagedTopNState<S, TOP_N_MAX>,
+
     /// Marks whether this is first-time execution. If yes, we need to fill in the cache from
     /// storage.
     first_execution: bool,
@@ -103,7 +112,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
     pub fn new(
         input_info: ExecutorInfo,
         schema: Schema,
-        pk_order_types: Vec<OrderType>,
+        order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
@@ -112,10 +121,9 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|idx| schema.fields[*idx].data_type())
-            .collect::<Vec<_>>();
+        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
+            generate_internal_key(&order_pairs, &pk_indices, &schema);
+
         let row_data_types = schema
             .fields
             .iter()
@@ -124,7 +132,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         let lower_sub_keyspace = keyspace.append_u8(b'l');
         let higher_sub_keyspace = keyspace.append_u8(b'h');
         let ordered_row_deserializer =
-            OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
+            OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
         let table_column_descs = row_data_types
             .iter()
             .enumerate()
@@ -140,7 +148,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
             },
             schema,
-            pk_order_types,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_lower_state: ManagedTopNState::<S, TOP_N_MAX>::new(
@@ -160,6 +167,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 cell_based_row_deserializer,
             ),
             pk_indices,
+            internal_key_indices,
+            internal_key_order_types,
             first_execution: true,
             key_indices,
         })
@@ -203,8 +212,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         for (op, row_ref) in chunk.rows() {
             assert_eq!(op, Op::Insert);
 
-            let pk_row = row_ref.row_by_indices(&self.pk_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
+            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
 
             if self.managed_lower_state.total_count() < self.offset {
@@ -305,12 +314,11 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
-    use crate::executor::{Barrier, Epoch, Message, PkIndices};
     use crate::executor_v2::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor_v2::Executor;
+    use crate::executor_v2::{Barrier, Epoch, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -348,8 +356,11 @@ mod tests {
         }
     }
 
-    fn create_order_types() -> Vec<OrderType> {
-        vec![OrderType::Ascending, OrderType::Ascending]
+    fn create_order_pairs() -> Vec<OrderPair> {
+        vec![
+            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::Ascending),
+        ]
     }
 
     fn create_source() -> Box<MockSource> {
@@ -380,14 +391,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_offset() {
-        let order_types = create_order_types();
+        let order_pairs = create_order_pairs();
         let source = create_source();
 
         let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
-                order_types,
+                order_pairs,
                 (3, None),
                 vec![0, 1],
                 keyspace,
@@ -454,14 +465,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_limit() {
-        let order_types = create_order_types();
+        let order_pairs = create_order_pairs();
         let source = create_source();
 
         let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
-                order_types,
+                order_pairs,
                 (0, Some(5)),
                 vec![0, 1],
                 keyspace,
@@ -534,14 +545,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_offset_and_limit() {
-        let order_types = create_order_types();
+        let order_pairs = create_order_pairs();
         let source = create_source();
 
         let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
-                order_types,
+                order_pairs,
                 (3, Some(4)),
                 vec![0, 1],
                 keyspace,

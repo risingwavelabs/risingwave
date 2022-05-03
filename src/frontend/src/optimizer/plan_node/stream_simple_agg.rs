@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -73,7 +73,7 @@ impl ToStreamProst for StreamSimpleAgg {
         use risingwave_pb::stream_plan::*;
 
         // TODO: local or global simple agg?
-        ProstStreamNode::GlobalSimpleAggNode(SimpleAggNode {
+        ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -86,6 +86,7 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
+            table_ids: vec![],
         })
     }
 }

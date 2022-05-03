@@ -23,8 +23,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{Executor, ExecutorInfo, StreamExecutorResult};
-use crate::executor::{pk_input_array_refs, PkIndicesRef};
+use super::*;
 use crate::executor_v2::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_agg_state, AggCall, AggState,
 };
@@ -55,7 +54,7 @@ pub struct SimpleAggExecutor<S: StateStore> {
     input_schema: Schema,
 
     /// The executor operates on this keyspace.
-    keyspace: Keyspace<S>,
+    keyspace: Vec<Keyspace<S>>,
 
     /// Aggregation states of the current operator.
     /// This is an `Option` and the initial state is built when `Executor::next` is called, since
@@ -92,7 +91,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        keyspace: Keyspace<S>,
+        keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -121,7 +120,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         input_pk_indices: &[usize],
         input_schema: &Schema,
         states: &mut Option<AggState<S>>,
-        keyspace: &Keyspace<S>,
+        keyspace: &[Keyspace<S>],
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
@@ -174,9 +173,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn flush_data(
         schema: &Schema,
         states: &mut Option<AggState<S>>,
-        keyspace: &Keyspace<S>,
+        keyspace: &[Keyspace<S>],
         epoch: u64,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
+        // The state store of each keyspace is the same so just need the first.
+        let store = keyspace[0].state_store();
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
@@ -186,7 +187,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             _ => return Ok(None), // Nothing to flush.
         };
 
-        let mut write_batch = keyspace.state_store().start_write_batch();
+        let mut write_batch = store.start_write_batch();
         for state in &mut states.managed_states {
             state
                 .flush(&mut write_batch)
@@ -290,10 +291,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {
-        test_local_simple_aggregation(create_in_memory_keyspace()).await
+        test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
     }
 
-    async fn test_local_simple_aggregation(keyspace: Keyspace<impl StateStore>) {
+    async fn test_local_simple_aggregation(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),

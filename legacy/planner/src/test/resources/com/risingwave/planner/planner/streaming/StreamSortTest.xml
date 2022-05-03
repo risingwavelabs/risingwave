@@ -15,7 +15,7 @@ RwStreamMaterialize(name=[t_select_all_order_v1], collation=[[0]])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[0, 3]
+[3]
 ]]>
         </Resource>
     </TestCase>
@@ -35,7 +35,7 @@ RwStreamMaterialize(name=[t_select_all_order_v2_v1], collation=[[1, 0 DESC]])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[1, 0, 3]
+[3]
 ]]>
         </Resource>
     </TestCase>
@@ -55,7 +55,7 @@ RwStreamMaterialize(name=[t_select_v1_order_v2], collation=[[1 DESC]])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[1, 2]
+[2]
 ]]>
         </Resource>
     </TestCase>
@@ -78,7 +78,7 @@ RwStreamMaterialize(name=[t_order_after_aggregation], collation=[[1 DESC]])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[1, 0, 2]
+[0, 2]
 ]]>
         </Resource>
     </TestCase>
@@ -100,7 +100,7 @@ RwStreamMaterialize(name=[t_order_limit], collation=[[0]])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[0, 3]
+[3]
 ]]>
         </Resource>
     </TestCase>

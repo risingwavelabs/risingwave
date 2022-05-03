@@ -66,16 +66,16 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
 ///
 /// | op | rowid | join |  epoch  |
 /// | -- | ----- | ---- | ------- |
-/// | b  |       |      | 0 -> 1  |
-/// | +  | 2331  | 4    | 1       |
-/// | +  | 2332  | 5    | 1       |
-/// | +  | 2333  | 6    | 1       |
-/// | +  | 2334  | 6    | 1       |
 /// | b  |       |      | 1 -> 2  |
-/// | +  | 2335  | 6    | 2       |
-/// | +  | 2337  | 8    | 2       |
-/// | -  | 2333  | 6    | 2       |
+/// | +  | 2331  | 4    | 2       |
+/// | +  | 2332  | 5    | 2       |
+/// | +  | 2333  | 6    | 2       |
+/// | +  | 2334  | 6    | 2       |
 /// | b  |       |      | 2 -> 3  |
+/// | +  | 2335  | 6    | 3       |
+/// | +  | 2337  | 8    | 3       |
+/// | -  | 2333  | 6    | 3       |
+/// | b  |       |      | 3 -> 4  |
 async fn create_arrangement(
     table_id: TableId,
     memory_state_store: MemoryStateStore,
@@ -113,11 +113,11 @@ async fn create_arrangement(
         schema,
         vec![0],
         vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
-            Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(2)),
-            Message::Chunk(chunk2),
+            Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(4)),
         ],
     );
 
@@ -138,11 +138,11 @@ async fn create_arrangement(
 ///
 /// | op | join | rowid |  epoch  |
 /// | -- | ----- | ---- | ------- |
-/// | b  |       |      | 0 -> 1  |
-/// | +  | 6     | 1    | 1       |
 /// | b  |       |      | 1 -> 2  |
-/// | -  | 6     | 1    | 2       |
+/// | +  | 6     | 1    | 2       |
 /// | b  |       |      | 2 -> 3  |
+/// | -  | 6     | 1    | 3       |
+/// | b  |       |      | 3 -> 4  |
 async fn create_source() -> Box<dyn Executor + Send> {
     let columns = vec![
         ColumnDesc {
@@ -183,11 +183,11 @@ async fn create_source() -> Box<dyn Executor + Send> {
         schema,
         PkIndices::new(),
         vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
-            Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(2)),
-            Message::Chunk(chunk2),
+            Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(4)),
         ],
     );
 

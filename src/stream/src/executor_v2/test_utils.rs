@@ -14,7 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use tokio::sync::mpsc;
@@ -133,4 +133,30 @@ impl Executor for MockSource {
 
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+}
+
+/// `row_nonnull` builds a `Row` with concrete values.
+/// TODO: add macro row!, which requires a new trait `ToScalarValue`.
+#[macro_export]
+macro_rules! row_nonnull {
+    [$( $value:expr ),*] => {
+        {
+            use risingwave_common::types::Scalar;
+            use risingwave_common::array::Row;
+            Row(vec![$(Some($value.to_scalar_value()), )*])
+        }
+    };
+}
+
+/// Create a vector of memory keyspace with len `num_ks`.
+pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateStore>> {
+    let mut returned_vec = vec![];
+    let mem_state = MemoryStateStore::new();
+    for idx in 0..num_ks {
+        returned_vec.push(Keyspace::table_root(
+            mem_state.clone(),
+            &TableId::new(idx as u32),
+        ));
+    }
+    returned_vec
 }

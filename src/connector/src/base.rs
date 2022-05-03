@@ -33,7 +33,6 @@ use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
 use crate::utils::AnyhowProperties;
 use crate::{kafka, kinesis, pulsar, Properties};
 
-const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
 const PULSAR_SOURCE: &str = "pulsar";
@@ -93,7 +92,7 @@ impl SplitReaderImpl {
     }
 
     pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
-        let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
+        let upstream_type = config.get_connector_type()?;
         let connector = match upstream_type.as_str() {
             KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
             KINESIS_SOURCE => Self::Kinesis(KinesisSplitReader::new(config, state).await?),
@@ -186,7 +185,7 @@ impl SplitEnumeratorImpl {
     }
 
     pub fn create(properties: &AnyhowProperties) -> Result<SplitEnumeratorImpl> {
-        let source_type = properties.get(UPSTREAM_SOURCE_KEY)?;
+        let source_type = properties.get_connector_type()?;
         match source_type.as_str() {
             KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
             PULSAR_SOURCE => {

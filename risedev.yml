@@ -67,7 +67,6 @@ risedev:
     - use: compute-node
     - use: frontend
 
-
   # TODO: Remove all legacy configs after java removed.
   # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
   dev-frontend-legacy:

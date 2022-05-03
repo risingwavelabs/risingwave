@@ -36,11 +36,10 @@ use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::PkDataTypes;
 use crate::executor_v2::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::Executor;
+use crate::executor_v2::managed_state::aggregation::ManagedStateImpl;
+use crate::executor_v2::{Executor, PkDataTypes};
 
 mod agg_call;
 mod agg_state;
@@ -334,64 +333,6 @@ pub fn generate_agg_schema(
 pub async fn generate_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
-    keyspace: &Keyspace<S>,
-    pk_data_types: PkDataTypes,
-    epoch: u64,
-    key_hash_code: Option<HashCode>,
-) -> StreamExecutorResult<AggState<S>> {
-    let mut managed_states = vec![];
-
-    // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
-    const_assert_eq!(ROW_COUNT_COLUMN, 0);
-    let mut row_count = None;
-
-    for (idx, agg_call) in agg_calls.iter().enumerate() {
-        // TODO: in pure in-memory engine, we should not do this serialization.
-
-        // The prefix of the state is `agg_call_idx / [group_key]`
-        let keyspace = if let Some(key) = key {
-            let bytes = key.serialize().unwrap();
-            keyspace.append_u16(idx as u16).append(bytes)
-        } else {
-            keyspace.append_u16(idx as u16)
-        };
-
-        let mut managed_state = ManagedStateImpl::create_managed_state(
-            agg_call.clone(),
-            keyspace,
-            row_count,
-            pk_data_types.clone(),
-            idx == ROW_COUNT_COLUMN,
-            key_hash_code.clone(),
-        )
-        .await
-        .map_err(StreamExecutorError::agg_state_error)?;
-
-        if idx == ROW_COUNT_COLUMN {
-            // For the rowcount state, we should record the rowcount.
-            let output = managed_state
-                .get_output(epoch)
-                .await
-                .map_err(StreamExecutorError::agg_state_error)?;
-            row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
-        }
-
-        managed_states.push(managed_state);
-    }
-
-    Ok(AggState {
-        managed_states,
-        prev_states: None,
-    })
-}
-
-/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor_v2::HashAggExecutor`], the
-/// group key should be provided.
-/// FIXME: It's a fork of [`generate_hash_agg_state`]. Should merge this two when simple agg is
-/// using table ids.
-pub async fn generate_hash_agg_state<S: StateStore>(
-    key: Option<&Row>,
-    agg_calls: &[AggCall],
     keyspace: &[Keyspace<S>],
     pk_data_types: PkDataTypes,
     epoch: u64,
@@ -406,7 +347,7 @@ pub async fn generate_hash_agg_state<S: StateStore>(
     for ((idx, agg_call), keyspace) in agg_calls.iter().enumerate().zip_eq(keyspace) {
         // TODO: in pure in-memory engine, we should not do this serialization.
 
-        // The prefix of the state is `table_id / [group_key]`
+        // The prefix of the state is `table_id/[group_key]`
         let keyspace = if let Some(key) = key {
             let bytes = key.serialize().unwrap();
             keyspace.append(bytes)

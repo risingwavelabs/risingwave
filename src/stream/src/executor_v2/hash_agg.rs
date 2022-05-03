@@ -30,10 +30,9 @@ use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{Executor, StreamExecutorResult};
-use crate::executor::{pk_input_arrays, PkDataTypes, PkIndicesRef};
+use super::{pk_input_arrays, Executor, PkDataTypes, PkIndicesRef, StreamExecutorResult};
 use crate::executor_v2::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_hash_agg_state, AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggState,
 };
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -246,7 +245,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     match states {
                         Some(s) => s.unwrap(),
                         None => Box::new(
-                            generate_hash_agg_state(
+                            generate_agg_state(
                                 Some(
                                     &key.clone()
                                         .deserialize(key_data_types.iter())
@@ -435,12 +434,11 @@ mod tests {
     use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
-    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
     use crate::executor_v2::aggregation::{AggArgs, AggCall};
@@ -513,19 +511,6 @@ mod tests {
     #[tokio::test]
     async fn test_local_hash_aggregation_max_in_memory() {
         test_local_hash_aggregation_max(create_in_memory_keyspace_agg(2)).await
-    }
-
-    /// Create a vector of memory keyspace with len `num_ks`.
-    fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateStore>> {
-        let mut returned_vec = vec![];
-        let mem_state = MemoryStateStore::new();
-        for idx in 0..num_ks {
-            returned_vec.push(Keyspace::table_root(
-                mem_state.clone(),
-                &TableId::new(idx as u32),
-            ));
-        }
-        returned_vec
     }
 
     async fn test_local_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {

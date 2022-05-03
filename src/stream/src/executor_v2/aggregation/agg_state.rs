@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
+use crate::executor_v2::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor_v2::LocalSimpleAggExecutor`],
 /// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor_v2::HashAggExecutor`].
