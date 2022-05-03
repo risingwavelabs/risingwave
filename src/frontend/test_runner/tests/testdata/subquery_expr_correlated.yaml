@@ -261,3 +261,82 @@
             LogicalProject { exprs: [$2], expr_alias: [y] }
               LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
                 LogicalScan { table: t3, columns: [_row_id#0, x, y] }
+- sql: |
+    /* correlated agg column in SELECT */
+    create table t (v1 int, v2 int);
+    select min(v1), (select max(v2)) from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [ ,  ] }
+      LogicalApply { type: LeftOuter, on: always }
+        LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+          LogicalProject { exprs: [$1], expr_alias: [ ] }
+            LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalProject { exprs: [$0], expr_alias: [ ] }
+          LogicalAgg { group_keys: [], agg_calls: [max($0)] }
+            LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 1 }], expr_alias: [ ] }
+              LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* correlated group column in SELECT */
+    create table t (v1 int, v2 int);
+    select min(v1), (select v2) from t group by v2;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2], expr_alias: [ ,  ] }
+      LogicalApply { type: LeftOuter, on: always }
+        LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+          LogicalProject { exprs: [$2, $1], expr_alias: [ ,  ] }
+            LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 1 }], expr_alias: [v2] }
+          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* correlated non-group column in SELECT */
+    create table t (v1 int, v2 int);
+    select min(v1), (select v2) from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [ ,  ] }
+      LogicalApply { type: LeftOuter, on: always }
+        LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+          LogicalProject { exprs: [$1], expr_alias: [ ] }
+            LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 1 }], expr_alias: [v2] }
+          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* correlated agg column in HAVING */
+    create table t (v1 int, v2 int);
+    select 1 from t having min(v1) > (select max(v2));
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalFilter { predicate: ($0 > $1) }
+        LogicalApply { type: LeftOuter, on: always }
+          LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+            LogicalProject { exprs: [$1], expr_alias: [ ] }
+              LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalProject { exprs: [$0], expr_alias: [ ] }
+            LogicalAgg { group_keys: [], agg_calls: [max($0)] }
+              LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 1 }], expr_alias: [ ] }
+                LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* correlated group column in HAVING */
+    create table t (v1 int, v2 int);
+    select 1 from t group by v2 having min(v1) > (select v2);
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalFilter { predicate: ($1 > $2) }
+        LogicalApply { type: LeftOuter, on: always }
+          LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+            LogicalProject { exprs: [$2, $1], expr_alias: [ ,  ] }
+              LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 1 }], expr_alias: [v2] }
+            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* correlated non-group column in HAVING */
+    create table t (v1 int, v2 int);
+    select 1 from t having min(v1) > (select v2);
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalFilter { predicate: ($0 > $1) }
+        LogicalApply { type: LeftOuter, on: always }
+          LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+            LogicalProject { exprs: [$1], expr_alias: [ ] }
+              LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+          LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 1 }], expr_alias: [v2] }
+            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
