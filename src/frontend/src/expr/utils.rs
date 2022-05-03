@@ -80,7 +80,7 @@ impl ExprRewriter for BooleanConstantFolding {
     /// This rewriter will panic if the length of the inputs is not `2`.
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
         let (func_type, inputs, ret) = func_call.decompose();
-        let mut inputs: Vec<_> = inputs
+        let inputs: Vec<_> = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
@@ -99,37 +99,54 @@ impl ExprRewriter for BooleanConstantFolding {
                 (rhs, lhs)
             }
         };
-        if contains_bool_constant {
-            match func_type {
-                // unary functions
-                Type::Not | Type::IsFalse => {
-                    let constant_value = inputs.pop().unwrap();
-                    if let Some(v) = try_get_bool_constant(&constant_value) {
-                        return ExprImpl::literal_bool(!v);
-                    }
+        match func_type {
+            // unary functions
+            Type::Not | Type::IsFalse => {
+                let constant_value = inputs.first().unwrap();
+                if let Some(v) = try_get_bool_constant(constant_value) {
+                    return ExprImpl::literal_bool(!v);
                 }
-                Type::IsTrue => {
-                    let constant_value = inputs.pop().unwrap();
-                    if let Some(v) = try_get_bool_constant(&constant_value) {
-                        return ExprImpl::literal_bool(v);
-                    }
-                }
-                // binary functions
-                Type::And => {
-                    let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
-                    return boolean_constant_fold_and(constant_lhs, rhs);
-                }
-                Type::Or => {
-                    let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
-                    return boolean_constant_fold_or(constant_lhs, rhs);
-                }
-                _ => {}
             }
-        } else if func_type == Type::IsNull {
-            let input = inputs.pop().unwrap();
-            if input.is_null() {
-                return ExprImpl::literal_bool(true);
+            Type::IsTrue => {
+                let constant_value =inputs.first().unwrap();
+                if let Some(v) = try_get_bool_constant(constant_value) {
+                    return ExprImpl::literal_bool(v);
+                }
             }
+            Type::IsNull => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(true);
+                }
+            }
+            Type::IsNotTrue => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(true);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(!v);
+                }
+            }
+            Type::IsNotFalse => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(true);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(v);
+                }
+            }
+            // binary functions
+            Type::And if contains_bool_constant => {
+                let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
+                return boolean_constant_fold_and(constant_lhs, rhs);
+            }
+            Type::Or if contains_bool_constant => {
+                let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
+                return boolean_constant_fold_or(constant_lhs, rhs);
+            }
+            _ => {}
         }
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
