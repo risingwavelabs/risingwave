@@ -133,6 +133,14 @@ impl ExprHandler {
             error: None,
         })
     }
+
+    fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
+        let rewritten_expr = self.rewrite_expr(expr);
+        if let Some(error) = self.error.take() {
+            return Err(error.into());
+        }
+        Ok(rewritten_expr)
+    }
 }
 
 impl ExprRewriter for ExprHandler {
@@ -324,21 +332,19 @@ impl LogicalAgg {
     pub fn create(
         select_exprs: Vec<ExprImpl>,
         group_exprs: Vec<ExprImpl>,
+        having: Option<ExprImpl>,
         input: PlanRef,
-    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
+    ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
         let group_keys = (0..group_exprs.len()).collect();
         let mut expr_handler = ExprHandler::new(group_exprs)?;
 
         let rewritten_select_exprs = select_exprs
             .into_iter()
-            .map(|expr| {
-                let rewritten_expr = expr_handler.rewrite_expr(expr);
-                if let Some(error) = expr_handler.error.take() {
-                    return Err(error.into());
-                }
-                Ok(rewritten_expr)
-            })
+            .map(|expr| expr_handler.rewrite_with_error(expr))
             .collect::<Result<_>>()?;
+        let rewritten_having = having
+            .map(|expr| expr_handler.rewrite_with_error(expr))
+            .transpose()?;
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
         let expr_alias = vec![None; expr_handler.project.len()];
@@ -347,7 +353,7 @@ impl LogicalAgg {
         // This LogicalAgg focuses on calculating the aggregates and grouping.
         let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
 
-        Ok((logical_agg.into(), rewritten_select_exprs))
+        Ok((logical_agg.into(), rewritten_select_exprs, rewritten_having))
     }
 
     /// Get a reference to the logical agg's agg calls.
@@ -569,8 +575,8 @@ mod tests {
         let gen_internal_value = |select_exprs: Vec<ExprImpl>,
                                   group_exprs|
          -> (Vec<ExprImpl>, Vec<PlanAggCall>, Vec<usize>) {
-            let (plan, exprs) =
-                LogicalAgg::create(select_exprs, group_exprs, input.clone()).unwrap();
+            let (plan, exprs, _) =
+                LogicalAgg::create(select_exprs, group_exprs, None, input.clone()).unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
             let agg_calls = logical_agg.agg_calls().to_vec();
