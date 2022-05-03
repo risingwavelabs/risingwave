@@ -38,6 +38,7 @@ impl Planner {
             group_by,
             mut having,
             aliases,
+            distinct,
             ..
         }: BoundSelect,
     ) -> Result<PlanRef> {
@@ -65,7 +66,14 @@ impl Planner {
         if select_items.iter().any(|e| e.has_subquery()) {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
-        Ok(LogicalProject::create(root, select_items, aliases))
+        root = LogicalProject::create(root, select_items, aliases);
+
+        if distinct {
+            let group_keys = (0..root.schema().fields().len()).collect();
+            root = LogicalAgg::new(vec![], group_keys, root).into();
+        }
+
+        Ok(root)
     }
 
     /// Helper to create a dummy node as child of [`LogicalProject`].
