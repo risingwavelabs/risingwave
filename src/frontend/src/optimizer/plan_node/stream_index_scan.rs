@@ -142,6 +142,7 @@ impl StreamIndexScan {
                 },
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
+                same_worker_node: true,
                 disable_rearrange: true,
                 table_ref_id: Some(TableRefId {
                     table_id: self.logical.table_desc().table_id.table_id as i32,
