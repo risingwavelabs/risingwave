@@ -64,7 +64,7 @@ pub enum DataType {
     Timestampz,
     Interval,
     Struct { fields: Arc<[DataType]> },
-    List { datatype: Box<DataType> },
+    List { datatype: Box<Option<DataType>> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -102,7 +102,7 @@ impl From<&ProstDataType> for DataType {
                 fields: Arc::new([]),
             },
             TypeName::List => DataType::List {
-                datatype: Box::new(DataType::Varchar),
+                datatype: Box::new(None),
             },
         }
     }
