@@ -322,13 +322,14 @@ impl LogicalAgg {
         Schema { fields }
     }
 
-    /// `create` will analyze the select exprs and group exprs, and construct a plan like
+    /// `create` will analyze select exprs, group exprs and having, and construct a plan like
     ///
     /// ```text
     /// LogicalAgg -> LogicalProject -> input
     /// ```
     ///
-    /// It also returns the rewritten select exprs that reference into the aggregated results.
+    /// It also returns the rewritten select exprs and having that reference into the aggregated
+    /// results.
     pub fn create(
         select_exprs: Vec<ExprImpl>,
         group_exprs: Vec<ExprImpl>,
