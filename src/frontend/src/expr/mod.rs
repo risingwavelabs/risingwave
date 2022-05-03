@@ -182,7 +182,10 @@ impl ExprImpl {
             }
         }
 
-        let mut visitor = Has { has: false, depth: 1 };
+        let mut visitor = Has {
+            has: false,
+            depth: 1,
+        };
         visitor.visit_expr(self);
         visitor.has
     }
