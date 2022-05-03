@@ -34,9 +34,12 @@ pub async fn handle_create_database(
         if reader.get_database_by_name(&database_name).is_ok() {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
-                Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
+                Ok(PgResponse::empty_result_with_notice(
+                    StatementType::CREATE_DATABASE,
+                    format!("database {} exists, skipping", database_name),
+                ))
             } else {
-                return Err(CatalogError::Duplicated("database", database_name).into());
+                Err(CatalogError::Duplicated("database", database_name).into())
             };
         }
     }

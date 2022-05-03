@@ -37,7 +37,10 @@ pub async fn handle_drop_database(
             Err(err) => {
                 // If `if_exist` is true, not return error.
                 return if if_exist {
-                    Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
+                    return Ok(PgResponse::empty_result_with_notice(
+                        StatementType::DROP_DATABASE,
+                        format!("database {} does not exist, skipping", database_name),
+                    ));
                 } else {
                     Err(err)
                 };
