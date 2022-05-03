@@ -44,7 +44,9 @@ impl Binder {
             };
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
-                return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
+                return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
+                    kind, inputs, f.distinct,
+                )?)));
             }
             let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
