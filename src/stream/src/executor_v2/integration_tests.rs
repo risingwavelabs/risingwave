@@ -27,7 +27,7 @@ use super::*;
 use crate::executor_v2::aggregation::{AggArgs, AggCall};
 use crate::executor_v2::dispatch::*;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::test_utils::create_in_memory_keyspace;
+use crate::executor_v2::test_utils::create_in_memory_keyspace_agg;
 use crate::executor_v2::{
     Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor, SimpleAggExecutor,
 };
@@ -127,7 +127,7 @@ async fn test_merger_sum_aggr() {
                 return_type: DataType::Int64,
             },
         ],
-        create_in_memory_keyspace(),
+        create_in_memory_keyspace_agg(2),
         vec![],
         2,
         vec![],
