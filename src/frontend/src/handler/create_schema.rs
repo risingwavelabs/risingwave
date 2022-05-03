@@ -23,7 +23,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_create_schema(
     context: OptimizerContext,
     schema_name: ObjectName,
-    is_not_exist: bool,
+    if_not_exist: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let (database_name, schema_name) =
@@ -37,7 +37,7 @@ pub async fn handle_create_schema(
             .is_ok()
         {
             // If `if_not_exist` is true, not return error.
-            return if is_not_exist {
+            return if if_not_exist {
                 Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
             } else {
                 return Err(CatalogError::Duplicated("schema", schema_name).into());

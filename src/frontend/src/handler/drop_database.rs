@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::{AstOption, DropMode, ObjectName};
 
 use crate::binder::Binder;
@@ -52,7 +52,11 @@ pub async fn handle_drop_database(
             }
             database.id()
         } else {
-            todo!();
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported drop mode: {}", mode),
+                TrackingIssue::none(),
+            )
+            .into());
         }
     };
 

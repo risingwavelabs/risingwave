@@ -23,7 +23,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_create_database(
     context: OptimizerContext,
     database_name: ObjectName,
-    is_not_exist: bool,
+    if_not_exist: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let database_name = Binder::resolve_database_name(database_name)?;
@@ -33,7 +33,7 @@ pub async fn handle_create_database(
         let reader = catalog_reader.read_guard();
         if reader.get_database_by_name(&database_name).is_ok() {
             // If `if_not_exist` is true, not return error.
-            return if is_not_exist {
+            return if if_not_exist {
                 Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
             } else {
                 return Err(CatalogError::Duplicated("database", database_name).into());
