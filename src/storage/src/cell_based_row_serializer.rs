@@ -16,7 +16,9 @@ use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::util::ordered::{SENTINEL_CELL_ID, serialize_column_id, serialize_pk_and_row};
+use risingwave_common::util::ordered::{
+    serialize_pk_and_column_id, serialize_pk_and_row, SENTINEL_CELL_ID,
+};
 
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
@@ -46,7 +48,8 @@ impl CellBasedRowSerializer {
         Ok(res)
     }
 
-    /// Different from [`serialize`], only serialize key into cell key (With column id appended).
+    /// Different from [`CellBasedRowSerializer::serialize`], only serialize key into cell key (With
+    /// column id appended).
     pub fn serialize_cell_key(
         &mut self,
         pk: &[u8],
@@ -58,9 +61,9 @@ impl CellBasedRowSerializer {
             if row[index].is_none() {
                 continue;
             }
-            results.push([pk, serialize_column_id(col_id)?.as_slice()].concat());
+            results.push(serialize_pk_and_column_id(pk, col_id)?);
         }
-        results.push([pk, serialize_column_id(&SENTINEL_CELL_ID)?.as_slice()].concat());
+        results.push(serialize_pk_and_column_id(pk, &SENTINEL_CELL_ID)?);
         Ok(results)
     }
 }
