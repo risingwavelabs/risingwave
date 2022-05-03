@@ -102,7 +102,7 @@ impl From<&ProstDataType> for DataType {
                 fields: Arc::new([]),
             },
             TypeName::List => DataType::List {
-                datatype: Box::new(DataType::Int32),
+                datatype: Box::new(DataType::Varchar),
             },
         }
     }

@@ -41,7 +41,6 @@ impl Binder {
         source: Query,
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
-
         let expected_types = table_source
             .columns
             .iter()

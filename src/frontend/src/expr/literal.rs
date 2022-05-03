@@ -36,9 +36,13 @@ impl std::fmt::Debug for Literal {
                 // Add single quotation marks for string and interval literals
                 Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
                 Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
+                Some(ScalarImpl::List(v)) => write!(f, "{}", v),
                 Some(v) => write!(f, "{}", v),
             }?;
-            write!(f, ":{:?}", self.data_type)
+            write!(f, ":{:?}", match &self.data_type {
+                DataType::List { datatype } => datatype,
+                other => other
+            })
         }
     }
 }

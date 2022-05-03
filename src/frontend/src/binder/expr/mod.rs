@@ -306,17 +306,29 @@ impl Binder {
         self.bind_expr(expr)?
             .cast_explicit(bind_data_type(&data_type)?)
     }
-    
+
     pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<Literal> {
-        // Take first item from vector to extract the datatype
-        let _extract_type = self.bind_expr(exprs[0].to_owned())?;
+        
+        let ty = match self.bind_expr(exprs.first().unwrap().clone())? {
+            ExprImpl::Literal(l) => l.return_type(),
+            _ => unreachable!()
+        };
+        let values = exprs
+            .into_iter()
+            .map(|e|{
+                if let ExprImpl::Literal(l) = self.bind_expr(e).ok()? {
+                        l.get_data().clone()
+                    } else {
+                        None
+                    }
+            }).collect();
+
         Ok(Literal::new(
             Some(ScalarImpl::List(ListValue::new(
-                vec![None],
+                values
             ))),
             DataType::List {
-                // Currently hardcoded Int32 datatype
-                datatype: Box::new(DataType::Int32),
+                datatype: Box::new(ty),
             },
         ))
     }
