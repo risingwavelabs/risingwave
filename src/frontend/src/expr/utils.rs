@@ -101,15 +101,27 @@ impl ExprRewriter for BooleanConstantFolding {
         };
         match func_type {
             // unary functions
-            Type::Not | Type::IsFalse => {
-                let constant_value = inputs.first().unwrap();
-                if let Some(v) = try_get_bool_constant(constant_value) {
+            Type::Not => {
+                let input = inputs.first().unwrap();
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(!v);
+                }
+            }
+            Type::IsFalse => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(false);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
                     return ExprImpl::literal_bool(!v);
                 }
             }
             Type::IsTrue => {
-                let constant_value = inputs.first().unwrap();
-                if let Some(v) = try_get_bool_constant(constant_value) {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(false);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
                     return ExprImpl::literal_bool(v);
                 }
             }
