@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_pb::hummock::Level;
 
-use crate::hummock::compaction::compaction_picker::{CompactionPicker, SizeOverlapPicker};
+use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::compaction::{CompactionConfig, SearchResult};
@@ -46,6 +46,11 @@ pub trait LevelSelector: Sync + Send {
 #[derive(Default)]
 pub struct SelectContext {
     level_max_bytes: Vec<u64>,
+
+    // All data will be placed in the last level. When the cluster is empty, the files in L0 will
+    // be compact to `max_level`, and the `max_level` would be `base_level`. When the total
+    // size of the files in  `base_level` reaches its capacity, we will place data in a higher
+    // level, which equals to `base_level -= 1;`.
     base_level: usize,
     score_levels: Vec<(u64, usize)>,
 }
@@ -87,7 +92,7 @@ impl DynamicLevelSelector {
                 self.overlap_strategy.clone(),
             ))
         } else {
-            Box::new(SizeOverlapPicker::new(
+            Box::new(MinOverlappingPicker::new(
                 task_id,
                 level,
                 self.overlap_strategy.clone(),
@@ -134,7 +139,7 @@ impl DynamicLevelSelector {
             cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
 
-        let mut base_level_size = if cur_level_size <= base_bytes_min {
+        let base_level_size = if cur_level_size <= base_bytes_min {
             // Case 1. If we make target size of last level to be max_level_size,
             // target size of the first non-empty level would be smaller than
             // base_bytes_min. We set it be base_bytes_min.
@@ -149,26 +154,7 @@ impl DynamicLevelSelector {
             std::cmp::min(base_bytes_max, cur_level_size)
         };
 
-        let mut level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
-
-        if l0_size > base_level_size
-            && levels[0].table_infos.len() > self.config.level0_max_file_number
-        {
-            // We adjust the base level according to actual L0 size, and adjust
-            // the level multiplier accordingly, when the number of L0 files reaches twice the
-            // level0_max_file_number. We don't do this otherwise to keep the LSM-tree
-            // structure stable unless the L0 compation is backlogged.
-            base_level_size = l0_size;
-            if ctx.base_level == self.config.max_level {
-                // There is only two level (L0 and L1).
-                level_multiplier = 1.0;
-            } else {
-                let size_multiplier = max_level_size as f64 / (base_level_size as f64);
-                level_multiplier =
-                    size_multiplier.powf(1.0 / (self.config.max_level - ctx.base_level) as f64);
-            }
-        }
-
+        let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
         for i in ctx.base_level..=self.config.max_level {
             ctx.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
@@ -199,9 +185,19 @@ impl DynamicLevelSelector {
                 continue;
             }
             if level_idx == 0 {
+                // The files in L0 may produce quickly because of the frequently epoch. So, if we
+                // set level0_trigger_number too small, the manager will always
+                // compact the files in L0 and it would make the whole tree more unbalanced. So we
+                // set level0_trigger_number a large number to make compaction
+                // manager can trigger compaction jobs of other level but we add a base score
+                // `idle_file_count + 100` so that the manager can trigger L0
+                // compaction when the other levels are all balanced.
+                let score = idle_file_count * 100 / self.config.level0_trigger_number as u64
+                    + idle_file_count
+                    + 100;
                 let score = std::cmp::max(
                     total_size * 100 / self.config.max_bytes_for_level_base,
-                    idle_file_count * 100 / self.config.level0_trigger_number as u64,
+                    score,
                 );
                 ctx.score_levels.push((score, 0));
             } else {

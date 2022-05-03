@@ -28,19 +28,19 @@ pub trait CompactionPicker {
     ) -> Option<SearchResult>;
 }
 
-pub struct SizeOverlapPicker {
+pub struct MinOverlappingPicker {
     compact_task_id: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     level: usize,
 }
 
-impl SizeOverlapPicker {
+impl MinOverlappingPicker {
     pub fn new(
         compact_task_id: u64,
         level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> SizeOverlapPicker {
-        SizeOverlapPicker {
+    ) -> MinOverlappingPicker {
+        MinOverlappingPicker {
             compact_task_id,
             overlap_strategy,
             level,
@@ -48,7 +48,7 @@ impl SizeOverlapPicker {
     }
 }
 
-impl CompactionPicker for SizeOverlapPicker {
+impl CompactionPicker for MinOverlappingPicker {
     fn pick_compaction(
         &self,
         levels: &[Level],
@@ -75,7 +75,7 @@ impl CompactionPicker for SizeOverlapPicker {
             if pending_campct {
                 continue;
             }
-            scores.push((total_file_size, table.clone()));
+            scores.push((total_file_size * 100 / (table.file_size + 1), table.clone()));
         }
         if scores.is_empty() {
             return None;

@@ -277,7 +277,7 @@ impl TierCompactionPicker {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use itertools::Itertools;
     use risingwave_pb::hummock::KeyRange as RawKeyRange;
 
@@ -285,7 +285,7 @@ mod tests {
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
-    fn generate_table(
+    pub fn generate_table(
         id: u64,
         table_prefix: u64,
         left: usize,

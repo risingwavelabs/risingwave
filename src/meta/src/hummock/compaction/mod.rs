@@ -43,8 +43,11 @@ use crate::storage::{MetaStore, Transaction};
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024;
-const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
-const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 2;
+const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 32;
+
+// decrease this configure when the generation of checkpoint barrier is not frequent.
+const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 16;
+
 const MAX_LEVEL: usize = 6;
 
 pub struct CompactStatus {
