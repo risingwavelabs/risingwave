@@ -317,14 +317,15 @@ impl LogicalAgg {
     /// `create` will analyze the select exprs and group exprs, and construct a plan like
     ///
     /// ```text
-    /// LogicalProject -> LogicalAgg -> LogicalProject -> input
+    /// LogicalAgg -> LogicalProject -> input
     /// ```
+    ///
+    /// It also returns the rewritten select exprs that reference into the aggregated results.
     pub fn create(
         select_exprs: Vec<ExprImpl>,
-        select_alias: Vec<Option<String>>,
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
-    ) -> Result<PlanRef> {
+    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
         let group_keys = (0..group_exprs.len()).collect();
         let mut expr_handler = ExprHandler::new(group_exprs)?;
 
@@ -346,13 +347,7 @@ impl LogicalAgg {
         // This LogicalAgg focuses on calculating the aggregates and grouping.
         let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
 
-        // This LogicalProject focus on transforming the aggregates and grouping columns to
-        // InputRef.
-        Ok(LogicalProject::create(
-            logical_agg.into(),
-            rewritten_select_exprs,
-            select_alias,
-        ))
+        Ok((logical_agg.into(), rewritten_select_exprs))
     }
 
     /// Get a reference to the logical agg's agg calls.
@@ -574,18 +569,14 @@ mod tests {
         let gen_internal_value = |select_exprs: Vec<ExprImpl>,
                                   group_exprs|
          -> (Vec<ExprImpl>, Vec<PlanAggCall>, Vec<usize>) {
-            let select_alias = vec![None; select_exprs.len()];
-            let plan =
-                LogicalAgg::create(select_exprs, select_alias, group_exprs, input.clone()).unwrap();
-            let logical_project = plan.as_logical_project().unwrap();
-            let exprs = logical_project.exprs();
+            let (plan, exprs) =
+                LogicalAgg::create(select_exprs, group_exprs, input.clone()).unwrap();
 
-            let plan = logical_project.input();
             let logical_agg = plan.as_logical_agg().unwrap();
             let agg_calls = logical_agg.agg_calls().to_vec();
             let group_keys = logical_agg.group_keys().to_vec();
 
-            (exprs.clone(), agg_calls, group_keys)
+            (exprs, agg_calls, group_keys)
         };
 
         // Test case: select v1 from test group by v1;
