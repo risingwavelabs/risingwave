@@ -108,7 +108,7 @@ impl ExprRewriter for BooleanConstantFolding {
                 }
             }
             Type::IsTrue => {
-                let constant_value =inputs.first().unwrap();
+                let constant_value = inputs.first().unwrap();
                 if let Some(v) = try_get_bool_constant(constant_value) {
                     return ExprImpl::literal_bool(v);
                 }
@@ -135,6 +135,12 @@ impl ExprRewriter for BooleanConstantFolding {
                 }
                 if let Some(v) = try_get_bool_constant(input) {
                     return ExprImpl::literal_bool(v);
+                }
+            }
+            Type::IsNotNull => {
+                let input = inputs.first().unwrap();
+                if try_get_bool_constant(input).is_some() {
+                    return ExprImpl::literal_bool(true);
                 }
             }
             // binary functions
