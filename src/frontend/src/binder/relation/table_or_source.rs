@@ -102,7 +102,13 @@ impl Binder {
             }
         };
 
-        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
+        self.bind_context(
+            columns
+                .iter()
+                .map(|c| (c.is_hidden, (&c.column_desc).into())),
+            table_name.to_string(),
+            alias,
+        )?;
         Ok(ret)
     }
 
@@ -136,7 +142,13 @@ impl Binder {
 
         let columns = table_catalog.columns.clone();
 
-        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
+        self.bind_context(
+            columns
+                .iter()
+                .map(|c| (c.is_hidden, (&c.column_desc).into())),
+            table_name.to_string(),
+            alias,
+        )?;
 
         Ok(BoundBaseTable {
             name: table_name.to_string(),

@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{ExecutorBuilder, Result};
@@ -32,7 +32,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
         let table_id = TableId::from(&node.table_ref_id);
         let keys = node
@@ -48,13 +48,12 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let executor = MaterializeExecutor::new_from_v1(
+        let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
-            params.op_info,
         );
 
         Ok(executor.boxed())
@@ -70,7 +69,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let arrange_node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
+        let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
 
         let keyspace = Keyspace::table_root(store, &TableId::from(arrange_node.table_id));
 
@@ -88,13 +87,12 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|x| ColumnId::from(x.column_id))
             .collect();
 
-        let executor = MaterializeExecutor::new_from_v1(
+        let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
             keys,
             column_ids,
             params.executor_id,
-            params.op_info,
         );
 
         Ok(executor.boxed())

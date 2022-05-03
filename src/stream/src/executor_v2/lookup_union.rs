@@ -21,12 +21,12 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedExecutor, Executor, Message, PkIndicesRef};
-use crate::executor::{ExecutorBuilder, PkIndices};
+use super::*;
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -153,7 +153,7 @@ impl ExecutorBuilder for LookupUnionExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
-        let lookup_union = try_match_expand!(node.get_node().unwrap(), Node::LookupUnionNode)?;
+        let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;
         Ok(
             LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())
                 .boxed(),
@@ -170,7 +170,6 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::executor::Barrier;
     use crate::executor_v2::test_utils::MockSource;
 
     #[tokio::test]

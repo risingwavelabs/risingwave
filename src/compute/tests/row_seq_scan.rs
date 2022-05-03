@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use risingwave_batch::executor::monitor::BatchMetrics;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,9 @@ use risingwave_batch::executor::monitor::BatchMetrics;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
+use futures::StreamExt;
+use risingwave_batch::executor2::monitor::BatchMetrics;
+use risingwave_batch::executor2::{Executor2, RowSeqScanExecutor2};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::Result;
@@ -57,14 +58,14 @@ async fn test_row_seq_scan() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let mut executor = RowSeqScanExecutor::new(
+    let executor = Box::new(RowSeqScanExecutor2::new(
         table,
         1,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
+    ));
 
     let epoch: u64 = 0;
     state
@@ -89,10 +90,11 @@ async fn test_row_seq_scan() -> Result<()> {
         .unwrap();
     state.commit(epoch).await.unwrap();
 
-    executor.open().await.unwrap();
     assert_eq!(executor.schema().fields().len(), 3);
 
-    let res_chunk = executor.next().await?.unwrap();
+    let mut stream = executor.execute();
+    let res_chunk = stream.next().await.unwrap().unwrap();
+
     assert_eq!(res_chunk.dimension(), 3);
     assert_eq!(
         res_chunk
@@ -113,7 +115,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![Some(4)]
     );
 
-    let res_chunk2 = executor.next().await?.unwrap();
+    let res_chunk2 = stream.next().await.unwrap().unwrap();
     assert_eq!(res_chunk2.dimension(), 3);
     assert_eq!(
         res_chunk2
@@ -133,6 +135,5 @@ async fn test_row_seq_scan() -> Result<()> {
             .collect::<Vec<_>>(),
         vec![Some(5)]
     );
-    executor.close().await.unwrap();
     Ok(())
 }

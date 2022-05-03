@@ -71,7 +71,7 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
 
     return StreamNode.newBuilder()
-        .setHashJoinNode(hashJoinNode)
+        .setHashJoin(hashJoinNode)
         .addAllPkIndices(primaryKeyIndices)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();

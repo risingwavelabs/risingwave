@@ -20,7 +20,7 @@ use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
 
-use crate::executor::Message;
+use crate::executor_v2::Message;
 
 mod barrier_manager;
 mod compute_client_pool;

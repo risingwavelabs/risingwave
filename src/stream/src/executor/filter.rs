@@ -16,7 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
 use crate::executor::ExecutorBuilder;
@@ -32,15 +32,12 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Filter)?;
         let search_condition = build_from_prost(node.get_search_condition()?)?;
 
-        Ok(FilterExecutor::new_from_v1(
-            params.input.remove(0),
-            search_condition,
-            params.executor_id,
-            params.op_info,
+        Ok(
+            FilterExecutor::new(params.input.remove(0), search_condition, params.executor_id)
+                .boxed(),
         )
-        .boxed())
     }
 }

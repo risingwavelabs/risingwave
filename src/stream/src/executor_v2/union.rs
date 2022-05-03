@@ -20,11 +20,11 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::StateStore;
 
-use super::{BoxedExecutor, Executor, Message, PkIndicesRef};
-use crate::executor::{ExecutorBuilder, PkIndices};
+use super::*;
+use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -110,7 +110,7 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
-        try_match_expand!(node.get_node().unwrap(), Node::UnionNode)?;
+        try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;
         Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
     }
 }
@@ -123,7 +123,6 @@ mod tests {
     use risingwave_common::array::StreamChunk;
 
     use super::*;
-    use crate::executor::Barrier;
 
     #[tokio::test]
     async fn union() {

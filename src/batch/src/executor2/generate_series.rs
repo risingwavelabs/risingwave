@@ -14,17 +14,19 @@
 
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I32ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-pub(super) struct GenerateSeriesI32Executor {
+pub struct GenerateSeriesI32Executor2 {
     start: i32,
     stop: i32,
     step: i32,
@@ -34,57 +36,25 @@ pub(super) struct GenerateSeriesI32Executor {
     identity: String,
 }
 
-impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+impl BoxedExecutor2Builder for GenerateSeriesI32Executor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::GenerateInt32Series
         )?;
 
-        Ok(Box::new(
-            Self {
-                start: node.start,
-                stop: node.stop,
-                step: node.step,
-                cur: node.start,
-                schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-                identity: source.plan_node().get_identity().clone(),
-            }
-            .fuse(),
-        ))
+        Ok(Box::new(Self {
+            start: node.start,
+            stop: node.stop,
+            step: node.step,
+            cur: node.start,
+            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 
-#[async_trait::async_trait]
-impl Executor for GenerateSeriesI32Executor {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        let chunk_size = self.next_chunk_size();
-        if chunk_size == 0 {
-            return Ok(None);
-        }
-
-        let mut builder = I32ArrayBuilder::new(chunk_size).unwrap();
-        let mut current_value = self.cur;
-        for _ in 0..chunk_size {
-            builder.append(Some(current_value)).unwrap();
-            current_value += self.step;
-        }
-        self.cur = current_value;
-
-        let arr = builder.finish()?;
-        let columns = vec![Column::new(Arc::new(arr.into()))];
-        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-        Ok(Some(chunk))
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
+impl Executor2 for GenerateSeriesI32Executor2 {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -92,9 +62,38 @@ impl Executor for GenerateSeriesI32Executor {
     fn identity(&self) -> &str {
         &self.identity
     }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
 }
 
-impl GenerateSeriesI32Executor {
+impl GenerateSeriesI32Executor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
+        let mut chunk_size = self.next_chunk_size();
+
+        while chunk_size != 0 {
+            let mut builder = I32ArrayBuilder::new(chunk_size).unwrap();
+            let mut current_value = self.cur;
+            for _ in 0..chunk_size {
+                builder.append(Some(current_value)).unwrap();
+                current_value += self.step;
+            }
+            self.cur = current_value;
+
+            let arr = builder.finish()?;
+            let columns = vec![Column::new(Arc::new(arr.into()))];
+            let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+
+            yield chunk;
+
+            chunk_size = self.next_chunk_size();
+        }
+    }
+}
+
+impl GenerateSeriesI32Executor2 {
     fn next_chunk_size(&self) -> usize {
         if self.cur > self.stop {
             return 0;
@@ -109,6 +108,7 @@ impl GenerateSeriesI32Executor {
 
 #[cfg(test)]
 mod tests {
+    use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl};
     use risingwave_common::try_match_expand;
 
@@ -122,17 +122,18 @@ mod tests {
     }
 
     async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
-        let mut executor = GenerateSeriesI32Executor {
+        let executor = Box::new(GenerateSeriesI32Executor2 {
             start,
             stop,
             step,
             cur: start,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-            identity: "GenerateSeriesI32Executor".to_string(),
-        };
+            identity: "GenerateSeriesI32Executor2".to_string(),
+        });
         let mut remained_values = ((stop - start) / step + 1) as usize;
+        let mut stream = executor.execute();
         while remained_values > 0 {
-            let chunk = executor.next().await.unwrap().unwrap();
+            let chunk = stream.next().await.unwrap().unwrap();
             let col = chunk.column_at(0);
             let arr = try_match_expand!(col.array_ref(), ArrayImpl::Int32).unwrap();
 
@@ -143,6 +144,6 @@ mod tests {
             }
             remained_values -= arr.len();
         }
-        assert!(executor.next().await.unwrap().is_none());
+        assert!(stream.next().await.is_none());
     }
 }

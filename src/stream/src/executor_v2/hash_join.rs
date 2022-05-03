@@ -26,14 +26,14 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::{build_from_prost, RowExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
+use super::managed_state::join::*;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
-use crate::executor::managed_state::join::*;
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
@@ -175,7 +175,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         // Get table id and used as keyspace prefix.
-        let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let source_r = params.input.remove(1);
         let source_l = params.input.remove(0);
         let params_l = JoinParams::new(
@@ -471,7 +471,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
     async fn hash_eq_match<'a>(
-        key: &K,
+        key: &'a K,
         ht: &'a mut JoinHashMap<K, S>,
     ) -> Option<&'a mut HashValueType<S>> {
         if key.has_null() {
@@ -694,8 +694,8 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
-    use crate::executor::{Barrier, Epoch, Message};
     use crate::executor_v2::test_utils::{MessageSender, MockSource};
+    use crate::executor_v2::{Barrier, Epoch, Message};
 
     fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();

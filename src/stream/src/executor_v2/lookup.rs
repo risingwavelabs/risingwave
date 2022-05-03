@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::ExecutorBuilder;
@@ -118,7 +118,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let lookup = try_match_expand!(node.get_node().unwrap(), Node::LookupNode)?;
+        let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
 
         let arrangement = params.input.remove(1);
         let stream = params.input.remove(0);

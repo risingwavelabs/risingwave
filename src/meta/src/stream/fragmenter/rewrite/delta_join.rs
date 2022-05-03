@@ -19,7 +19,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     ArrangeNode, ArrangementInfo, DeltaIndexJoinNode, DispatchStrategy, DispatcherType,
     ExchangeNode, LookupNode, LookupUnionNode, StreamNode,
@@ -40,7 +40,7 @@ impl StreamFragmenter {
             identity: "Exchange (Lookup and Merge)".into(),
             fields: upstream.fields.clone(),
             pk_indices: upstream.pk_indices.clone(),
-            node: Some(Node::ExchangeNode(ExchangeNode {
+            node_body: Some(NodeBody::Exchange(ExchangeNode {
                 strategy: Some(Self::dispatch_no_shuffle()),
             })),
             input: vec![],
@@ -57,9 +57,9 @@ impl StreamFragmenter {
         state: &mut BuildFragmentGraphState,
         mut upstream: StreamNode,
     ) -> Result<(StreamFragmentEdge, StreamFragment, StreamNode)> {
-        match &upstream.node {
+        match &upstream.node_body {
             // If the upstream contains a exchange, we should follow that distribution.
-            Some(Node::ExchangeNode(exchange_node)) => {
+            Some(NodeBody::Exchange(exchange_node)) => {
                 let exchange_node = exchange_node.clone();
                 assert_eq!(upstream.input.len(), 1);
                 let child_node = upstream.input.remove(0);
@@ -86,7 +86,7 @@ impl StreamFragmenter {
                     identity: "Exchange (Arrange)".into(),
                     fields: upstream.fields.clone(),
                     pk_indices: upstream.pk_indices.clone(),
-                    node: Some(Node::ExchangeNode(ExchangeNode {
+                    node_body: Some(NodeBody::Exchange(ExchangeNode {
                         strategy: Some(strategy.clone()),
                     })),
                     operator_id,
@@ -159,7 +159,7 @@ impl StreamFragmenter {
                 identity: "Arrange".into(),
                 fields: exchange_node.fields.clone(),
                 pk_indices: exchange_node.pk_indices.clone(),
-                node: Some(Node::ArrangeNode(ArrangeNode {
+                node_body: Some(NodeBody::Arrange(ArrangeNode {
                     table_info: Some(arrangement_info),
                     table_id,
                 })),
@@ -188,7 +188,7 @@ impl StreamFragmenter {
             identity: "Lookup".into(),
             fields: output_fields,
             pk_indices: output_pk_indices,
-            node: Some(Node::LookupNode(lookup_node)),
+            node_body: Some(NodeBody::Lookup(lookup_node)),
             input: vec![
                 exchange_node_arrangement.clone(),
                 exchange_node_stream.clone(),
@@ -206,8 +206,8 @@ impl StreamFragmenter {
         node: &StreamNode,
         is_local_table_id: bool,
     ) -> Result<StreamNode> {
-        let delta_join_node = match &node.node {
-            Some(Node::DeltaIndexJoin(node)) => node,
+        let delta_join_node = match &node.node_body {
+            Some(NodeBody::DeltaIndexJoin(node)) => node,
             _ => unreachable!(),
         };
 
@@ -313,7 +313,7 @@ impl StreamFragmenter {
             identity: "Union".into(),
             fields: node.fields.clone(),
             pk_indices: node.pk_indices.clone(),
-            node: Some(Node::LookupUnionNode(LookupUnionNode { order: vec![1, 0] })),
+            node_body: Some(NodeBody::LookupUnion(LookupUnionNode { order: vec![1, 0] })),
             input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
             append_only: node.append_only,
         };
@@ -347,8 +347,8 @@ impl StreamFragmenter {
         current_fragment: &mut StreamFragment,
         mut node: StreamNode,
     ) -> Result<StreamNode> {
-        match &node.node {
-            Some(Node::DeltaIndexJoin(node)) => node,
+        match &node.node_body {
+            Some(NodeBody::DeltaIndexJoin(node)) => node,
             _ => unreachable!(),
         };
 
@@ -358,7 +358,7 @@ impl StreamFragmenter {
         // TODO: when distribution key is added to catalog, chain and delta join won't have any
         // exchange in-between. Then we can safely remove this function.
         fn check_no_exchange(node: &StreamNode) {
-            if let Node::ExchangeNode(_) = node.get_node().unwrap() {
+            if let NodeBody::Exchange(_) = node.get_node_body().unwrap() {
                 panic!("exchange not allowed between delta join and arrange");
             }
         }
@@ -387,8 +387,8 @@ impl StreamFragmenter {
         current_fragment: &mut StreamFragment,
         mut node: StreamNode,
     ) -> Result<StreamNode> {
-        let hash_join_node = match &node.node {
-            Some(Node::HashJoinNode(node)) => node,
+        let hash_join_node = match &node.node_body {
+            Some(NodeBody::HashJoin(node)) => node,
             _ => unreachable!(),
         };
 
@@ -450,7 +450,7 @@ impl StreamFragmenter {
         );
 
         let delta_join_node = StreamNode {
-            node: Some(Node::DeltaIndexJoin(DeltaIndexJoinNode {
+            node_body: Some(NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
                 join_type: hash_join_node.join_type,
                 left_key: hash_join_node.left_key.clone(),
                 right_key: hash_join_node.right_key.clone(),

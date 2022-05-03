@@ -59,16 +59,19 @@ impl ChainExecutor {
         upstream: BoxedExecutor,
         upstream_indices: Vec<usize>,
         notifier: FinishCreateMviewNotifier,
-        actor_id: ActorId,
-        info: ExecutorInfo,
+        schema: Schema,
     ) -> Self {
         Self {
+            info: ExecutorInfo {
+                schema,
+                pk_indices: upstream.pk_indices().to_owned(),
+                identity: "Chain".to_owned(),
+            },
             snapshot,
             upstream,
             upstream_indices,
+            actor_id: notifier.actor_id,
             notifier,
-            actor_id,
-            info,
         }
     }
 
@@ -143,9 +146,8 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
-    use crate::executor::{Barrier, Message, PkIndices};
     use crate::executor_v2::test_utils::MockSource;
-    use crate::executor_v2::{Executor, ExecutorInfo};
+    use crate::executor_v2::{Barrier, Executor, Message, PkIndices};
     use crate::task::{FinishCreateMviewNotifier, LocalBarrierManager};
 
     #[tokio::test]
@@ -179,18 +181,7 @@ mod test {
             actor_id: 0,
         };
 
-        let chain = ChainExecutor::new(
-            first,
-            second,
-            vec![0],
-            notifier,
-            0,
-            ExecutorInfo {
-                schema,
-                pk_indices: Vec::new(),
-                identity: "Chain".to_owned(),
-            },
-        );
+        let chain = ChainExecutor::new(first, second, vec![0], notifier, schema);
 
         let mut chain = Box::new(chain).execute();
 
