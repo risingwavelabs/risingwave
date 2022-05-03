@@ -1236,7 +1236,7 @@
   logical_plan: |
     LogicalProject { exprs: [$2, $3], expr_alias: [s_name, s_address] }
       LogicalFilter { predicate: ($4 = $9) AND ($10 = 'KENYA':Varchar) }
-        LogicalApply { type: LeftSemi, on: ($1 = $13) }
+        LogicalJoin { type: LeftSemi, on: ($1 = $13) }
           LogicalJoin { type: Inner, on: always }
             LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
             LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
