@@ -7,7 +7,7 @@ public class StreamPlannerConfigurations {
   private StreamPlannerConfigurations() {}
 
   /**
-   * The key of config entry should be set exactly the same as the parameter explicitly decalred in
+   * The key of config entry should be set exactly the same as the parameter explicitly declared in
    * SQL. For example, SET enable_new_subquery_stream_planner to TRUE => the key of
    * `ENABLE_NEW_SUBQUERY_PLANNER` config should be set to 'enable_new_subquery_stream_planner'.
    */
