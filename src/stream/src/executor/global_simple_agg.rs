@@ -15,6 +15,7 @@
 //! Streaming Aggregators
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
@@ -41,7 +42,13 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        let keyspace = Keyspace::executor_root(store, params.executor_id);
+        // Build vector of keyspace via table ids.
+        // One keyspace for one agg call.
+        let keyspace = node
+            .get_table_ids()
+            .iter()
+            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .collect();
         let key_indices = node
             .get_distribution_keys()
             .iter()
