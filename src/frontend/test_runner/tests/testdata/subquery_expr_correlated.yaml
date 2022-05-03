@@ -212,6 +212,7 @@
     select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
   binder_error: 'Bind error: Subquery must return only one column'
 - sql: |
+    /* correlated outer subquery with an uncorrelated inner subquery */
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
@@ -229,6 +230,7 @@
                   LogicalProject { exprs: [$1], expr_alias: [ ] }
                     LogicalScan { table: t3, columns: [_row_id#0, x, y] }
 - sql: |
+    /* correlated inner subquery with depth = 2 */
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
@@ -244,6 +246,7 @@
               LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 2 } = $2) }
                 LogicalScan { table: t3, columns: [_row_id#0, x, y] }
 - sql: |
+    /* uncorrelated outer subquery with a correlated inner subquery */
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
