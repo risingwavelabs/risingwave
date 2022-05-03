@@ -317,8 +317,10 @@ impl LogicalAgg {
     /// `create` will analyze the select exprs and group exprs, and construct a plan like
     ///
     /// ```text
-    /// LogicalProject -> LogicalAgg -> LogicalProject -> input
+    /// LogicalAgg -> LogicalProject -> input
     /// ```
+    ///
+    /// It also returns the rewritten select exprs that reference into the aggregated results.
     pub fn create(
         select_exprs: Vec<ExprImpl>,
         group_exprs: Vec<ExprImpl>,
