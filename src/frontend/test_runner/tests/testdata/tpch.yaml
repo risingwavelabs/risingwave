@@ -776,6 +776,84 @@
                                 StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag, _row_id#0], pk_indices: [4] }
                     StreamExchange { dist: HashShard([0]) }
                       StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id#0], pk_indices: [2] }
+- id: tpch_q11
+  before:
+    - create_tables
+  sql: |
+    select
+      ps_partkey,
+      sum(ps_supplycost * ps_availqty) as value
+    from
+      partsupp,
+      supplier,
+      nation
+    where
+      ps_suppkey = s_suppkey
+      and s_nationkey = n_nationkey
+      and n_name = 'ARGENTINA'
+    group by
+      ps_partkey
+    having
+      sum(ps_supplycost * ps_availqty) > (
+        select
+          sum(ps_supplycost * ps_availqty) * 0.0001000000
+        from
+          partsupp,
+          supplier,
+          nation
+        where
+          ps_suppkey = s_suppkey
+          and s_nationkey = n_nationkey
+          and n_name = 'ARGENTINA'
+      )
+    order by
+      value desc;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [ps_partkey, value] }
+      LogicalFilter { predicate: ($2 > $3) }
+        LogicalJoin { type: LeftOuter, on: always }
+          LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
+            LogicalProject { exprs: [$1, ($4 * $3)], expr_alias: [ ,  ] }
+              LogicalFilter { predicate: ($2 = $7) AND ($10 = $15) AND ($16 = 'ARGENTINA':Varchar) }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
+                    LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
+                  LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+          LogicalProject { exprs: [($0 * 0.0001000000:Decimal)], expr_alias: [ ] }
+            LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+              LogicalProject { exprs: [($4 * $3)], expr_alias: [ ] }
+                LogicalFilter { predicate: ($2 = $7) AND ($10 = $15) AND ($16 = 'ARGENTINA':Varchar) }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalJoin { type: Inner, on: always }
+                      LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
+                      LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
+                    LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [ps_partkey, value] }
+      LogicalFilter { predicate: ($2 > $3) }
+        LogicalJoin { type: LeftOuter, on: always }
+          LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
+            LogicalProject { exprs: [$0, ($2 * $1)], expr_alias: [ ,  ] }
+              LogicalJoin { type: Inner, on: ($3 = $4) }
+                LogicalProject { exprs: [$0, $2, $3, $5], expr_alias: [ ,  ,  ,  ] }
+                  LogicalJoin { type: Inner, on: ($1 = $4) }
+                    LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost] }
+                    LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                LogicalProject { exprs: [$0], expr_alias: [ ] }
+                  LogicalFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                    LogicalScan { table: nation, columns: [n_nationkey, n_name] }
+          LogicalProject { exprs: [($0 * 0.0001000000:Decimal)], expr_alias: [ ] }
+            LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+              LogicalProject { exprs: [($1 * $0)], expr_alias: [ ] }
+                LogicalJoin { type: Inner, on: ($2 = $3) }
+                  LogicalProject { exprs: [$1, $2, $4], expr_alias: [ ,  ,  ] }
+                    LogicalJoin { type: Inner, on: ($0 = $3) }
+                      LogicalScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
+                      LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                  LogicalProject { exprs: [$0], expr_alias: [ ] }
+                    LogicalFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                      LogicalScan { table: nation, columns: [n_nationkey, n_name] }
 - id: tpch_q12
   before:
     - create_tables
