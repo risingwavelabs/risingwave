@@ -160,3 +160,28 @@
     BatchSimpleAgg { aggs: [count] }
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [] }
+- sql: |
+    /* having with agg call */
+    create table t (v1 real not null);
+    select 1 from t having sum(v1) > 5;
+  batch_plan: |
+    BatchProject { exprs: [1:Int32], expr_alias: [ ] }
+      BatchFilter { predicate: ($0 > 5:Int32) }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: t, columns: [v1] }
+- sql: |
+    /* having with group column */
+    create table t (v1 real not null);
+    select 1 from t group by v1 having v1 > 5;
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalFilter { predicate: ($0 > 5:Int32) }
+        LogicalAgg { group_keys: [0], agg_calls: [] }
+          LogicalProject { exprs: [$1], expr_alias: [ ] }
+            LogicalScan { table: t, columns: [_row_id#0, v1] }
+- sql: |
+    /* having with non-group column */
+    create table t (v1 real not null, v2 int);
+    select 1 from t group by v1 having v2 > 5;
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
