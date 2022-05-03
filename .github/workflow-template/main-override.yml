@@ -12,7 +12,9 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-permissions: write-all
+permissions:
+  id-token: write
+  contents: write
 
 jobs:
   start-runner-c:
