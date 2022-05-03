@@ -53,13 +53,13 @@ impl Planner {
         // TODO: select-agg, group-by, having can also contain subquery exprs.
         let has_agg_call = select_items.iter().any(|expr| expr.has_agg_call());
         if !group_by.is_empty() || has_agg_call {
-            LogicalAgg::create(select_items, aliases, group_by, root)
-        } else {
-            if select_items.iter().any(|e| e.has_subquery()) {
-                (root, select_items) = self.substitute_subqueries(root, select_items)?;
-            }
-            Ok(LogicalProject::create(root, select_items, aliases))
+            (root, select_items) = LogicalAgg::create(select_items, group_by, root)?;
         }
+
+        if select_items.iter().any(|e| e.has_subquery()) {
+            (root, select_items) = self.substitute_subqueries(root, select_items)?;
+        }
+        Ok(LogicalProject::create(root, select_items, aliases))
     }
 
     /// Helper to create a dummy node as child of [`LogicalProject`].
