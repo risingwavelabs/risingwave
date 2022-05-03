@@ -1078,8 +1078,9 @@
         from
           lineitem
         group by
-          l_orderkey having
-            sum(l_quantity) > 1
+          l_orderkey
+        having
+          sum(l_quantity) > 1
       )
       and c_custkey = o_custkey
       and o_orderkey = l_orderkey
@@ -1112,9 +1113,11 @@
                               BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_totalprice, o_orderdate] }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
-                  BatchHashAgg { group_keys: [$0], aggs: [] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: lineitem, columns: [l_orderkey] }
+                  BatchProject { exprs: [$0], expr_alias: [l_orderkey] }
+                    BatchFilter { predicate: ($1 > 1:Int32) }
+                      BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
   stream_plan: |
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }
       StreamTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
@@ -1135,9 +1138,11 @@
                                 StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_totalprice, o_orderdate, _row_id#0], pk_indices: [4] }
                         StreamExchange { dist: HashShard([0]) }
                           StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, _row_id#0], pk_indices: [2] }
-                    StreamHashAgg { group_keys: [$0], aggs: [count] }
-                      StreamExchange { dist: HashShard([0]) }
-                        StreamTableScan { table: lineitem, columns: [l_orderkey, _row_id#0], pk_indices: [1] }
+                    StreamProject { exprs: [$0], expr_alias: [l_orderkey] }
+                      StreamFilter { predicate: ($2 > 1:Int32) }
+                        StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, _row_id#0], pk_indices: [2] }
 - id: tpch_q19
   before:
     - create_tables
