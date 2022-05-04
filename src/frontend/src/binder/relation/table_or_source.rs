@@ -166,6 +166,7 @@ impl Binder {
 
         let source_id = TableId::new(source.id);
 
+        println!("bind_table_source4: {:?}", source);
         let columns = source
             .columns
             .iter()
@@ -174,7 +175,9 @@ impl Binder {
             .collect();
 
         // Note(bugen): do not bind context here.
-
+        println!("bind_table_source1: {:?}", source_name);
+        println!("bind_table_source2: {:?}", source_id);
+        println!("bind_table_source3: {:?}", columns);
         Ok(BoundTableSource {
             name: source_name,
             source_id,

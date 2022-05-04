@@ -141,6 +141,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: ProstTable,
         _plan: StreamNode,
     ) -> Result<()> {
+        println!("create_materialized_view1: {:?}", table);
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
         self.add_id(table.id, table.database_id, table.schema_id);
@@ -153,6 +154,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: ProstTable,
         plan: StreamNode,
     ) -> Result<()> {
+        println!("create_materialized_source1: {:?}", table);
         let source_id = self.create_source_inner(source)?;
         table.optional_associated_source_id =
             Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));

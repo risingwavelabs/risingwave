@@ -26,7 +26,7 @@ mod scalar_impl;
 use std::fmt::{Debug, Display, Formatter};
 
 pub use native_type::*;
-use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::data_type::{TypeName, ListItemType};
 pub use scalar_impl::*;
 
 mod chrono_wrapper;
@@ -101,9 +101,31 @@ impl From<&ProstDataType> for DataType {
             TypeName::Struct => DataType::Struct {
                 fields: Arc::new([]),
             },
-            TypeName::List => DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            TypeName::List => {
+                let list_item_type = match proto.get_list_item_type().expect("missing list item type field") {
+                    ListItemType::Int16 => DataType::Int16,
+                    ListItemType::Int32 => DataType::Int32,
+                    ListItemType::Int64 => DataType::Int64,
+                    ListItemType::Float => DataType::Float32,
+                    ListItemType::Double => DataType::Float64,
+                    ListItemType::Boolean => DataType::Boolean,
+                    // TODO(TaoWu): Java frontend still interprets CHAR as a separate type.
+                    // So to run e2e, we may return VARCHAR that mismatches with what Java frontend
+                    // expected. Fix this when Java frontend fully deprecated.
+                    ListItemType::Varchar | ListItemType::Char => DataType::Varchar,
+                    ListItemType::Date => DataType::Date,
+                    ListItemType::Time => DataType::Time,
+                    ListItemType::Timestamp => DataType::Timestamp,
+                    ListItemType::Timestampz => DataType::Timestampz,
+                    ListItemType::Decimal => DataType::Decimal,
+                    ListItemType::Interval => DataType::Interval,
+                    ListItemType::Symbol => DataType::Varchar,
+                    _ => DataType::Int32
+                };
+                DataType::List {
+                    datatype: Box::new(list_item_type),
+                }
+            }
         }
     }
 }
@@ -159,9 +181,14 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
+        let list_item_type = match self {
+            DataType::List { datatype } => *datatype.clone(),
+            _ => DataType::Int16
+        };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
+            list_item_type: list_item_type.prost_type_name() as i32,
             ..Default::default()
         }
     }

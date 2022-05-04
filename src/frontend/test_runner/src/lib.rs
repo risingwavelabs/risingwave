@@ -166,6 +166,8 @@ impl TestCase {
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
+        println!("run1: {:?}", self);
+        println!("run2: {:?}", frontend.opts);
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
@@ -177,6 +179,7 @@ impl TestCase {
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
         self.create_source(session.clone()).await?;
+        println!("run3: {:?}", self);
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -233,6 +236,7 @@ impl TestCase {
         mut result: Option<TestCaseResult>,
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
+        println!("run_sql1: {:?}", statements);
         for stmt in statements {
             let context = OptimizerContext::new(session.clone());
             match stmt.clone() {
@@ -290,7 +294,6 @@ impl TestCase {
     ) -> Result<TestCaseResult> {
         let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
-
         let bound = {
             let mut binder = Binder::new(
                 session.env().catalog_reader().read_guard(),

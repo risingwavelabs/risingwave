@@ -46,8 +46,11 @@ impl Binder {
             .iter()
             .map(|c| c.data_type.clone())
             .collect();
-
-        // When the column types of `source` query does not match `expected_types`, casting is
+        
+        println!("bind_insert1: {:?}", table_source);
+        println!("bind_insert2: {:?}", expected_types);
+        println!("bind_insert3: {:?}", source);
+            // When the column types of `source` query does not match `expected_types`, casting is
         // needed.
         //
         // In PG, when the `source` is a `VALUES` without order / limit / offset, special treatment
@@ -123,6 +126,7 @@ impl Binder {
         expected_types: Vec<DataType>,
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
+        println!("cast_on_insert1: {:?}", expected_types);
         let msg = match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Equal => {
                 return exprs

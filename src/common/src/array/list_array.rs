@@ -53,7 +53,7 @@ impl ArrayBuilder for ListArrayBuilder {
             capacity,
             ArrayMeta::List {
                 // Default datatype
-                datatype: Box::new(DataType::Int16),
+                datatype: Box::new(DataType::Int32),
             },
         )
     }

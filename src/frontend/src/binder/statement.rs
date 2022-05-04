@@ -27,6 +27,7 @@ pub enum BoundStatement {
 
 impl Binder {
     pub(super) fn bind_statement(&mut self, stmt: Statement) -> Result<BoundStatement> {
+        println!("bind_statement1: {:?}", stmt);
         match stmt {
             Statement::Insert {
                 table_name,

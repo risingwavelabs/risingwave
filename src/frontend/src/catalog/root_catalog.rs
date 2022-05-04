@@ -160,6 +160,9 @@ impl Catalog {
         schema_name: &str,
         source_name: &str,
     ) -> Result<&SourceCatalog> {
+        println!("get_source_by_name1: {:?}", db_name);
+        println!("get_source_by_name2: {:?}", schema_name);
+        println!("get_source_by_name3: {:?}", source_name);
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
