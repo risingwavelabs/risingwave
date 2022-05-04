@@ -24,6 +24,7 @@ pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,
     inputs: Vec<ExprImpl>,
+    distinct: bool,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -83,7 +84,7 @@ impl AggCall {
 
     /// Returns error if the function name matches with an existing function
     /// but with illegal arguments.
-    pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>) -> Result<Self> {
+    pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>, distinct: bool) -> Result<Self> {
         // TODO(TaoWu): Add arguments validator.
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(&agg_kind, &data_types).ok_or_else(|| {
@@ -97,11 +98,12 @@ impl AggCall {
             agg_kind,
             return_type,
             inputs,
+            distinct,
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>) {
-        (self.agg_kind, self.inputs)
+    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool) {
+        (self.agg_kind, self.inputs, self.distinct)
     }
 
     pub fn agg_kind(&self) -> AggKind {
