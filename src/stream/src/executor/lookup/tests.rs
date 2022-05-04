@@ -19,6 +19,7 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::{deserialize_datum_from, DataType};
+use risingwave_common::util::ordered::{deserialize_column_id, SENTINEL_CELL_ID};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::{Keyspace, StateStore};
@@ -239,11 +240,14 @@ async fn test_lookup_this_epoch() {
 
     for (k, v) in store.scan::<_, Vec<u8>>(.., None, u64::MAX).await.unwrap() {
         let mut deserializer = memcomparable::Deserializer::new(v);
-        println!(
-            "{:?} => {:?}",
-            k,
-            deserialize_datum_from(&DataType::Int64, &mut deserializer).unwrap()
-        );
+        // Do not deserialize datum for SENTINEL_CELL_ID cuz the value length is 0.
+        if deserialize_column_id(&k[k.len() - 4..]).unwrap() != SENTINEL_CELL_ID {
+            println!(
+                "{:?} => {:?}",
+                k,
+                deserialize_datum_from(&DataType::Int64, &mut deserializer).unwrap()
+            );
+        }
     }
 
     println!("{:#?}", msgs);
