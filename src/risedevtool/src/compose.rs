@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::{
@@ -45,14 +45,29 @@ pub trait Compose {
     fn compose(&self) -> Result<ComposeService>;
 }
 
+fn get_cmd_args(cmd: &Command) -> Result<Vec<String>> {
+    let mut result = vec![];
+    result.push(
+        cmd.get_program()
+            .to_str()
+            .ok_or_else(|| anyhow!("Cannot convert to UTF-8 string"))?
+            .to_string(),
+    );
+    for arg in cmd.get_args() {
+        result.push(
+            arg.to_str()
+                .ok_or_else(|| anyhow!("Cannot convert to UTF-8 string"))?
+                .to_string(),
+        );
+    }
+    Ok(result)
+}
+
 impl Compose for ComputeNodeConfig {
     fn compose(&self) -> Result<ComposeService> {
         let mut command = Command::new("/risingwave/bin/compute-node");
         ComputeNodeService::apply_command_args(&mut command, self)?;
-        let command = command
-            .get_args()
-            .map(|x| x.to_owned().to_string_lossy().to_string())
-            .collect();
+        let command = get_cmd_args(&command)?;
 
         Ok(ComposeService {
             image: "ghcr.io/singularity-data/risingwave:latest".into(),
@@ -65,7 +80,6 @@ impl Compose for ComputeNodeConfig {
                 .iter()
                 .map(|x| x.id.clone())
                 .collect(),
-            ports: vec![],
             ..Default::default()
         })
     }
@@ -75,10 +89,7 @@ impl Compose for MetaNodeConfig {
     fn compose(&self) -> Result<ComposeService> {
         let mut command = Command::new("/risingwave/bin/meta-node");
         MetaNodeService::apply_command_args(&mut command, self)?;
-        let command = command
-            .get_args()
-            .map(|x| x.to_owned().to_string_lossy().to_string())
-            .collect();
+        let command = get_cmd_args(&command)?;
 
         Ok(ComposeService {
             image: "ghcr.io/singularity-data/risingwave:latest".into(),
@@ -88,7 +99,6 @@ impl Compose for MetaNodeConfig {
                 self.exporter_port.to_string(),
                 self.dashboard_port.to_string(),
             ],
-            ports: vec![],
             ..Default::default()
         })
     }
@@ -98,10 +108,7 @@ impl Compose for FrontendConfig {
     fn compose(&self) -> Result<ComposeService> {
         let mut command = Command::new("/risingwave/bin/frontend-v2");
         FrontendServiceV2::apply_command_args(&mut command, self)?;
-        let command = command
-            .get_args()
-            .map(|x| x.to_owned().to_string_lossy().to_string())
-            .collect();
+        let command = get_cmd_args(&command)?;
 
         Ok(ComposeService {
             image: "ghcr.io/singularity-data/risingwave:latest".into(),
