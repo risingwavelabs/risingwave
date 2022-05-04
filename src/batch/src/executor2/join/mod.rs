@@ -15,10 +15,13 @@
 mod chunked_data;
 pub mod hash_join;
 mod hash_join_state;
+mod row_level_iter;
+mod sort_merge_join;
 
 pub use chunked_data::*;
 pub use hash_join::*;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
+pub use sort_merge_join::*;
 
 use crate::executor2::join::JoinType::Inner;
 #[derive(Copy, Clone, Debug, PartialEq)]
