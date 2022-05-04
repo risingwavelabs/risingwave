@@ -22,7 +22,7 @@ use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDi
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
 
-/// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
+/// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// The iterator of the current table.
     sstable_iter: Option<TI::SSTableIterator>,
@@ -39,7 +39,7 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
-    /// and arranged in descending order when it serves as a reverse iterator.
+    /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(tables: Vec<SstableInfo>, sstable_store: SstableStoreRef) -> Self {
         Self {
             sstable_iter: None,

@@ -44,11 +44,11 @@ impl CompactorService {
     /// Apply command args accroding to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
         cmd.arg("--host")
-            .arg(format!("{}:{}", config.address, config.port))
+            .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
-                config.exporter_address, config.exporter_port
+                config.listen_address, config.exporter_port
             ))
             .arg("--metrics-level")
             .arg("1");
@@ -64,8 +64,8 @@ impl CompactorService {
             ([minio], []) => {
                 cmd.arg("--state-store").arg(format!(
                     "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
-                    hummock_user = minio.hummock_user,
-                    hummock_password = minio.hummock_password,
+                    hummock_user = minio.root_user,
+                    hummock_password = minio.root_password,
                     hummock_bucket = minio.hummock_bucket,
                     minio_addr = minio.address,
                     minio_port = minio.port,
@@ -90,7 +90,7 @@ impl CompactorService {
         match provide_meta_node.as_slice() {
             [] => {
                 return Err(anyhow!(
-                    "Cannot start node: no meta node found in this configuration."
+                    "Cannot configure node: no meta node found in this configuration."
                 ));
             }
             [meta_node] => {
@@ -99,7 +99,7 @@ impl CompactorService {
             }
             other_meta_nodes => {
                 return Err(anyhow!(
-                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
                     other_meta_nodes.len()
                 ));
             }

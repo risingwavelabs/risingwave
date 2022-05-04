@@ -285,6 +285,7 @@ mod tests {
     use maplit::hashmap;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::plan_common::ColumnDesc;
     use serde_value::Value;

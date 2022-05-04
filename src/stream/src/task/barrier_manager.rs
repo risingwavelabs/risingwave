@@ -21,7 +21,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 use self::managed_state::ManagedBarrierState;
-use crate::executor_v2::*;
+use crate::executor::*;
 use crate::task::ActorId;
 
 mod managed_state;
@@ -39,7 +39,7 @@ pub struct FinishedCreateMview {
     pub epoch: u64,
 
     /// The id of the actor that is responsible for running this DDL. Usually the actor of
-    /// [`crate::executor_v2::ChainExecutor`] for creating MV.
+    /// [`crate::executor::ChainExecutor`] for creating MV.
     pub actor_id: ActorId,
 }
 

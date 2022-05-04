@@ -392,6 +392,15 @@ impl StreamFragmenter {
             }
         }
 
+        match stream_node.node_body.as_mut().unwrap() {
+            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                for _ in &node.agg_calls {
+                    node.table_ids.push(state.gen_table_id());
+                }
+            }
+            _ => {}
+        }
+
         let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
         let inputs = inputs
