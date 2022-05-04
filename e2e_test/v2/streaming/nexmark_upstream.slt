@@ -11,6 +11,8 @@ flush;
 
 include ../../streaming/nexmark/q0.slt.part
 include ../../streaming/nexmark/q1.slt.part
+include ../../streaming/nexmark/q2.slt.part
+include ../../streaming/nexmark/q3.slt.part
 
 include ../../streaming/nexmark/drop_views.slt.part
 
