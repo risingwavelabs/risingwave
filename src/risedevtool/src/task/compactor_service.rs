@@ -17,10 +17,10 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{CompactorConfig, ExecuteContext, Task};
+use crate::{add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -55,55 +55,10 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        match (provide_minio.as_slice(), provide_aws_s3.as_slice()) {
-            ([], []) => {
-                return Err(anyhow!(
-                    "Compactor is not compatible with in-memory state backend. Need to enable either minio or aws-s3.",
-                ))
-            }
-            ([minio], []) => {
-                cmd.arg("--state-store").arg(format!(
-                    "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
-                    hummock_user = minio.root_user,
-                    hummock_password = minio.root_password,
-                    hummock_bucket = minio.hummock_bucket,
-                    minio_addr = minio.address,
-                    minio_port = minio.port,
-                ));
-                true
-            }
-            ([], [aws_s3]) => {
-                cmd.arg("--state-store")
-                    .arg(format!("hummock+s3://{}", aws_s3.bucket));
-                true
-            }
-            (other_minio, other_s3) => {
-                return Err(anyhow!(
-                    "{} minio and {} s3 instance found in config, but only 1 is needed",
-                    other_minio.len(),
-                    other_s3.len()
-                ))
-            }
-        };
+        add_storage_backend(&config.id, provide_minio, provide_aws_s3, cmd)?;
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
-        match provide_meta_node.as_slice() {
-            [] => {
-                return Err(anyhow!(
-                    "Cannot configure node: no meta node found in this configuration."
-                ));
-            }
-            [meta_node] => {
-                cmd.arg("--meta-address")
-                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            }
-            other_meta_nodes => {
-                return Err(anyhow!(
-                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
-                    other_meta_nodes.len()
-                ));
-            }
-        };
+        add_meta_node(provide_meta_node, cmd)?;
 
         Ok(())
     }

@@ -227,6 +227,17 @@ pub struct ZooKeeperConfig {
     pub persist_data: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct RedPandaConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub internal_port: u16,
+    pub outside_port: u16,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -243,6 +254,7 @@ pub enum ServiceConfig {
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
     ZooKeeper(ZooKeeperConfig),
+    RedPanda(RedPandaConfig),
 }
 
 impl ServiceConfig {
@@ -261,6 +273,7 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
+            Self::RedPanda(c) => &c.id,
         }
     }
 }

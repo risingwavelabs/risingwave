@@ -112,11 +112,13 @@ risedev:
   ######################################
 
   compose:
-    - use: meta-node
-      enable-dashboard-v2: false
-      unsafe-disable-recovery: true
+    - use: minio
+      id: minio-0
+      address: ${id}
       listen-address: "0.0.0.0"
+      console-address: "0.0.0.0"
 
+    - use: meta-node
       # Id must starts with `meta-node`, therefore to be picked up by other
       # components.
       id: meta-node-0
@@ -125,15 +127,24 @@ risedev:
       # in host network mode, we should use IP directly in this field.
       address: ${id}
 
-    - use: compute-node
       listen-address: "0.0.0.0"
+
+    - use: compute-node
       id: compute-node-0
+      listen-address: "0.0.0.0"
       address: ${id}
 
     - use: frontend
-      listen-address: "0.0.0.0"
       id: frontend-node-0
+      listen-address: "0.0.0.0"
       address: ${id}
+
+    - use: compactor
+      id: compactor-0
+      listen-address: "0.0.0.0"
+      address: ${id}
+
+    - use: redpanda
 
   #################################
   ### Configurations used on CI ###
@@ -498,3 +509,14 @@ template:
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
+
+  # Only supported in RiseDev compose
+  redpanda:
+    # Id to be picked-up by services
+    id: redpanda
+
+    # Port used inside docker-compose cluster (e.g. create MV)
+    internal-port: 29092
+
+    # Port used on host (e.g. import data, connecting using kafkacat)
+    outside-port: 9092
