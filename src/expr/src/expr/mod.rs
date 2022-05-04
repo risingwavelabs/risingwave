@@ -20,6 +20,7 @@ pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
 mod expr_case;
 mod expr_field;
+mod expr_nullif;
 mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
