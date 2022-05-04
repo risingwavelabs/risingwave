@@ -58,6 +58,24 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "nullif" => {
+                    if inputs.len() != 2 {
+                        return Err(ErrorCode::BindError(
+                            "Nullif function must contain 2 arguments".to_string(),
+                        )
+                        .into());
+                    }
+                    ExprType::Nullif
+                }
+                "coalesce" => {
+                    if inputs.len() <= 0 {
+                        return Err(ErrorCode::BindError(
+                            "Coalesce function must contain at least 1 argument".to_string(),
+                        )
+                            .into());
+                    }
+                    ExprType::Coalesce
+                },
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit

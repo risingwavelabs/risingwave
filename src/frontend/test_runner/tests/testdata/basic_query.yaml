@@ -119,3 +119,34 @@
     BatchDelete { table: t }
       BatchFilter { predicate: ($1 = 1:Int32) }
         BatchScan { table: t, columns: [_row_id#0, v1, v2] }
+- sql: |
+    create table t (v1 int);
+    select nullif(v1, 1) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Nullif($0, 1:Int32)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamProject { exprs: [Nullif($0, 1:Int32), $1], expr_alias: [ ,  ] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+- sql: |
+    create table t (v1 int);
+    select nullif(v1, 1, 2) from t;
+  binder_error: 'Bind error: Nullif function must contain 2 arguments'
+- sql: |
+    create table t (v1 int);
+    select coalesce(v1, 1, 2) from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Coalesce($0, 1:Int32, 2:Int32)], expr_alias: [ ] }
+        BatchScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamProject { exprs: [Coalesce($0, 1:Int32, 2:Int32), $1], expr_alias: [ ,  ] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+- sql: |
+    create table t (v1 int);
+    select coalesce() from t;
+  binder_error: 'Bind error: Coalesce function must contain at least 1 argument'
+
