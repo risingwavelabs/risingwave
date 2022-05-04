@@ -3,7 +3,7 @@ name: Docker
 on:
   pull_request:
     paths:
-      - ".github/workflows/docker_build.yml"
+      - ".github/workflows/docker_pr.yml"
       - "docker/**"
 
 env:
@@ -15,7 +15,6 @@ concurrency:
 
 permissions:
   id-token: write
-  contents: read
 
 jobs:
   start-runner-d:
@@ -108,6 +107,13 @@ jobs:
           tags: ghcr.io/singularity-data/risingwave
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
       # All below steps will re-use the previous docker cache, so no actual build will happen.
       - name: Build compute-node
         uses: docker/build-push-action@v2
@@ -119,6 +125,13 @@ jobs:
           tags: ghcr.io/singularity-data/compute-node
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
       - name: Build meta-node
         uses: docker/build-push-action@v2
         with:
@@ -129,6 +142,13 @@ jobs:
           tags: ghcr.io/singularity-data/meta-node
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
       - name: Build frontend-node
         uses: docker/build-push-action@v2
         with:
@@ -139,6 +159,13 @@ jobs:
           tags: ghcr.io/singularity-data/frontend-node
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
       - name: Build compactor
         uses: docker/build-push-action@v2
         with:

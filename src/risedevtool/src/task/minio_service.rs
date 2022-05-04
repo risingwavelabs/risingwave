@@ -83,12 +83,12 @@ impl Task for MinioService {
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
+        let data_path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
+        std::fs::create_dir_all(&data_path)?;
+
         cmd.arg("--config-dir")
             .arg(Path::new(&prefix_config).join("minio"))
-            .arg(&path);
-
-        let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
-        std::fs::create_dir_all(&path)?;
+            .arg(&data_path);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
