@@ -336,6 +336,9 @@ template:
     # Listen port of frontend-legacy
     port: 4567
 
+    # Listen address
+    listen-address: ${address}
+
     # Id of this instance
     id: frontend-legacy-${port}
 
