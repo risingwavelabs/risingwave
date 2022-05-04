@@ -87,6 +87,7 @@ impl Binder {
                         order: vec![],
                         limit: None,
                         offset: None,
+                        order_exprs: vec![],
                     },
                     vec![],
                 )

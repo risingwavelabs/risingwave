@@ -17,9 +17,10 @@ use std::collections::HashMap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
+use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query, Value};
 
 use crate::binder::{Binder, BoundSetExpr};
+use crate::expr::ExprImpl;
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
@@ -30,6 +31,7 @@ pub struct BoundQuery {
     pub order: Vec<FieldOrder>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub order_exprs: Vec<ExprImpl>,
 }
 
 impl BoundQuery {
@@ -76,16 +78,21 @@ impl Binder {
             }),
             BoundSetExpr::Values(_) => {}
         };
+        let mut order_exprs = vec![];
+        let schema_len = body.schema().len();
         let order = query
             .order_by
             .into_iter()
-            .map(|order_by_expr| self.bind_order_by_expr(order_by_expr, &name_to_index))
+            .map(|order_by_expr| {
+                self.bind_order_by_expr(order_by_expr, &name_to_index, &mut order_exprs, schema_len)
+            })
             .collect::<Result<_>>()?;
         Ok(BoundQuery {
             body,
             order,
             limit,
             offset,
+            order_exprs,
         })
     }
 
@@ -93,22 +100,32 @@ impl Binder {
         &mut self,
         order_by_expr: OrderByExpr,
         name_to_index: &HashMap<String, usize>,
+        order_exprs: &mut Vec<ExprImpl>,
+        schema_len: usize,
     ) -> Result<FieldOrder> {
         let direct = match order_by_expr.asc {
             None | Some(true) => Direction::Asc,
             Some(false) => Direction::Desc,
         };
-        let name = match order_by_expr.expr {
-            Expr::Identifier(name) => name.value,
+        let index = match order_by_expr.expr {
+            Expr::Identifier(name) => *name_to_index.get(&name.value).ok_or_else(|| {
+                ErrorCode::ItemNotFound(format!("Output column \"{}\"", name.value))
+            })?,
+            Expr::Value(Value::Number(number, _)) => match number.parse::<usize>() {
+                Ok(index) if index <= schema_len => index - 1,
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Invalid value in ORDER BY: {}",
+                        number
+                    ))
+                    .into())
+                }
+            },
             expr => {
-                return Err(
-                    ErrorCode::NotImplemented(format!("ORDER BY {:?}", expr), 1635.into()).into(),
-                )
+                order_exprs.push(self.bind_expr(expr)?);
+                schema_len + order_exprs.len() - 1
             }
         };
-        let index = *name_to_index
-            .get(&name)
-            .ok_or_else(|| ErrorCode::ItemNotFound(format!("output column \"{}\"", name)))?;
         Ok(FieldOrder { index, direct })
     }
 }

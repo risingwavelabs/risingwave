@@ -26,7 +26,8 @@ pub const LIMIT_ALL_COUNT: usize = usize::MAX / 2;
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
-        let mut plan = self.plan_set_expr(query.body)?;
+        let order_exprs_len = query.order_exprs.len();
+        let mut plan = self.plan_set_expr(query.body, query.order_exprs)?;
         let order = Order {
             field_order: query.order,
         };
@@ -43,7 +44,7 @@ impl Planner {
         }
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
-        out_fields.insert_range(..);
+        out_fields.insert_range(..plan.schema().len() - order_exprs_len);
         let root = PlanRoot::new(plan, dist, order, out_fields);
         Ok(root)
     }
