@@ -23,22 +23,38 @@ RUN rustup self update \
   && rustup default $(cat "/risingwave/rust-toolchain") \
   && rustup component add rustfmt
 
-RUN cargo clean && cargo build --release
+RUN cargo fetch
+RUN cargo build --release
 
-FROM ubuntu:20.04
+FROM ubuntu:20.04 as image-base
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
+FROM image-base as frontend-node
 RUN mkdir -p /risingwave/bin
-
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev
-
 COPY --from=builder /risingwave/target/release/frontend-v2 /risingwave/bin/frontend-v2
-COPY --from=builder /risingwave/target/release/compute-node /risingwave/bin/compute-node	
-COPY --from=builder /risingwave/target/release/meta-node /risingwave/bin/meta-node
-COPY --from=builder /risingwave/target/release/compactor /risingwave/bin/compactor
-COPY --from=builder /risingwave/target/release/risingwave /risingwave/bin/risingwave
+EXPOSE 4566
+ENTRYPOINT [ "/risingwave/bin/frontend-v2" ]
 
-# Expose the necessary ports for the services:
-# - 4566 is for frontend.
-# - 5687 is for compute-node.
-# - 5690 is for meta-node.
-EXPOSE 4566 5687 5690
+FROM image-base as compute-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/target/release/compute-node /risingwave/bin/compute-node
+EXPOSE 5687
+ENTRYPOINT [ "/risingwave/bin/compute-node" ]
+
+FROM image-base as meta-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/target/release/meta-node /risingwave/bin/meta-node
+EXPOSE 5690
+ENTRYPOINT [ "/risingwave/bin/meta-node" ]
+
+FROM image-base as compactor-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/target/release/compactor /risingwave/bin/compactor
+EXPOSE 6660
+ENTRYPOINT [ "/risingwave/bin/compactor" ]
+
+FROM image-base as risingwave
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/target/release/risingwave /risingwave/bin/risingwave
+ENTRYPOINT [ "/risingwave/bin/risingwave" ]
+CMD [ "playground" ]
