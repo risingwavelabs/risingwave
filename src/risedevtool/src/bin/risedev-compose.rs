@@ -13,20 +13,35 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Read;
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
+use clap::Parser;
 use risedev::{Compose, ComposeFile, ConfigExpander, ServiceConfig};
 
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
+pub struct RiseDevComposeOpts {
+    #[clap(short, long)]
+    directory: Option<String>,
+
+    #[clap(default_value = "compose")]
+    profile: String,
+}
+
 fn main() -> Result<()> {
+    let opts = RiseDevComposeOpts::parse();
+
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")?.read_to_string(&mut content)?;
         content
     };
     let risedev_config = ConfigExpander::expand(&risedev_config)?;
-    let (steps, services) = ConfigExpander::select(&risedev_config, "compose")?;
+    let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
     let mut compose_services = HashMap::new();
 
@@ -57,7 +72,11 @@ fn main() -> Result<()> {
 
     let yaml = serde_yaml::to_string(&compose_file)?;
 
-    println!("{}", yaml);
+    if let Some(directory) = opts.directory {
+        fs::write(Path::new(&directory).join("docker-compose.yml"), yaml)?;
+    } else {
+        println!("{}", yaml);
+    }
 
     Ok(())
 }

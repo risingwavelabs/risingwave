@@ -122,7 +122,6 @@ impl Compose for FrontendConfig {
                 .iter()
                 .map(|x| x.id.clone())
                 .collect(),
-            ..Default::default()
         })
     }
 }
