@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node;
 
 use super::*;
-use crate::executor_v2::HopWindowExecutor;
+use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 

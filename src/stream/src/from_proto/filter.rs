@@ -15,7 +15,7 @@
 use risingwave_expr::expr::build_from_prost;
 
 use super::*;
-use crate::executor_v2::FilterExecutor;
+use crate::executor::FilterExecutor;
 
 pub struct FilterExecutorBuilder;
 

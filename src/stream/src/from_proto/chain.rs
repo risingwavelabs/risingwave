@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use crate::executor_v2::{ChainExecutor, RearrangedChainExecutor};
+use crate::executor::{ChainExecutor, RearrangedChainExecutor};
 
 pub struct ChainExecutorBuilder;
 

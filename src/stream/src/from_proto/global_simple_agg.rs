@@ -17,8 +17,8 @@
 use risingwave_common::catalog::TableId;
 
 use super::*;
-use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::SimpleAggExecutor;
+use crate::executor::aggregation::AggCall;
+use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
 

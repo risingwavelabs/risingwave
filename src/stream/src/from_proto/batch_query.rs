@@ -24,7 +24,7 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
-use crate::executor_v2::BatchQueryExecutor;
+use crate::executor::BatchQueryExecutor;
 
 pub struct BatchQueryExecutorBuilder;
 

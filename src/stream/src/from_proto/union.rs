@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use crate::executor_v2::UnionExecutor;
+use crate::executor::UnionExecutor;
 
 pub struct UnionExecutorBuilder;
 

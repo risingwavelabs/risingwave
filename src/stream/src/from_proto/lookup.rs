@@ -17,7 +17,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 
 use super::*;
-use crate::executor_v2::{LookupExecutor, LookupExecutorParams};
+use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 

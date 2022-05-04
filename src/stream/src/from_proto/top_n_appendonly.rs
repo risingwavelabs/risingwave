@@ -15,7 +15,7 @@
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
-use crate::executor_v2::AppendOnlyTopNExecutor;
+use crate::executor::AppendOnlyTopNExecutor;
 
 pub struct AppendOnlyTopNExecutorBuilder;
 
