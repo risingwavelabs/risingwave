@@ -20,8 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 
 use super::*;
-use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{HashAggExecutor, PkIndices};
+use crate::executor::aggregation::AggCall;
+use crate::executor::{HashAggExecutor, PkIndices};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 

@@ -57,7 +57,7 @@ use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
 use self::union::*;
-use crate::executor_v2::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 trait ExecutorBuilder {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use crate::executor_v2::LookupUnionExecutor;
+use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 

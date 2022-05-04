@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
-use crate::executor_v2::MaterializeExecutor;
+use crate::executor::MaterializeExecutor;
 
 pub struct MaterializeExecutorBuilder;
 

@@ -18,7 +18,7 @@ use risingwave_connector::SplitImpl;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor_v2::SourceExecutor;
+use crate::executor::SourceExecutor;
 
 pub struct SourceExecutorBuilder;
 

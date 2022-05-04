@@ -20,8 +20,8 @@ use risingwave_expr::expr::{build_from_prost, RowExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 
 use super::*;
-use crate::executor_v2::hash_join::*;
-use crate::executor_v2::PkIndices;
+use crate::executor::hash_join::*;
+use crate::executor::PkIndices;
 
 pub struct HashJoinExecutorBuilder;
 

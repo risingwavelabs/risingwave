@@ -18,8 +18,8 @@ use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::*;
-use crate::executor_v2::aggregation::{AggArgs, AggCall};
-use crate::executor_v2::LocalSimpleAggExecutor;
+use crate::executor::aggregation::{AggArgs, AggCall};
+use crate::executor::LocalSimpleAggExecutor;
 
 pub struct LocalSimpleAggExecutorBuilder;
 

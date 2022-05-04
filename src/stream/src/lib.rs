@@ -44,6 +44,6 @@
 extern crate log;
 
 pub mod common;
-pub mod executor_v2;
+pub mod executor;
 pub mod from_proto;
 pub mod task;

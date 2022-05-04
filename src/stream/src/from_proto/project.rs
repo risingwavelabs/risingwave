@@ -15,7 +15,7 @@
 use risingwave_expr::expr::build_from_prost;
 
 use super::*;
-use crate::executor_v2::ProjectExecutor;
+use crate::executor::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 
