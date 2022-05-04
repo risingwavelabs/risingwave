@@ -47,7 +47,7 @@ impl Expression for NullifExpression {
                 .iter()
                 .zip_eq(bool_array.iter())
                 .try_for_each(|(c, d)| {
-                    if let Some(true) = d {
+                    if let Some(false) = d {
                         builder.append_datum(&c.to_owned_datum())
                     } else {
                         builder.append_null()
@@ -126,7 +126,7 @@ mod tests {
             .map(|x| Arc::new(x.into()))
             .unwrap();
         let col1 = Column::new(array);
-        let array = BoolArray::from_slice(&[Some(true), Some(true), Some(false), Some(false)])
+        let array = BoolArray::from_slice(&[Some(false), Some(false), Some(true), Some(true)])
             .map(|x| Arc::new(x.into()))
             .unwrap();
         let col2 = Column::new(array);
