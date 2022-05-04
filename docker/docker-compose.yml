@@ -2,8 +2,9 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/singularity-data/compactor-node:latest"
+    image: "ghcr.io/singularity-data/risingwave:latest"
     command:
+      - compactor-node
       - "--host"
       - "0.0.0.0:6660"
       - "--prometheus-listener-addr"
@@ -24,8 +25,9 @@ services:
     environment: []
     container_name: compactor-0
   compute-node-0:
-    image: "ghcr.io/singularity-data/compute-node:latest"
+    image: "ghcr.io/singularity-data/risingwave:latest"
     command:
+      - compute-node
       - "--host"
       - "0.0.0.0:5688"
       - "--prometheus-listener-addr"
@@ -49,8 +51,9 @@ services:
     environment: []
     container_name: compute-node-0
   frontend-node-0:
-    image: "ghcr.io/singularity-data/frontend-node:latest"
+    image: "ghcr.io/singularity-data/risingwave:latest"
     command:
+      - frontend-node
       - "--host"
       - "0.0.0.0:4566"
       - "--meta-addr"
@@ -65,8 +68,9 @@ services:
     environment: []
     container_name: frontend-node-0
   meta-node-0:
-    image: "ghcr.io/singularity-data/meta-node:latest"
+    image: "ghcr.io/singularity-data/risingwave:latest"
     command:
+      - meta-node
       - "--host"
       - "0.0.0.0:5690"
       - "--dashboard-host"
