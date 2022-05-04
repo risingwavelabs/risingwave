@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use risedev::{Compose, ComposeFile, ConfigExpander, ServiceConfig};
+use risedev::{Compose, ComposeFile, ComposeVolume, ConfigExpander, ServiceConfig};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -43,31 +43,39 @@ fn main() -> Result<()> {
     let risedev_config = ConfigExpander::expand(&risedev_config)?;
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
-    let mut compose_services = HashMap::new();
+    let mut compose_services = BTreeMap::new();
+    let mut volumes = BTreeMap::new();
 
     for step in steps.iter() {
         let service = services.get(step).unwrap();
-        let compose = match service {
-            ServiceConfig::Minio(_) => return Err(anyhow!("not supported")),
+        let mut compose = match service {
+            ServiceConfig::Minio(c) => {
+                volumes.insert(c.id.clone(), ComposeVolume::default());
+                c.compose()?
+            }
             ServiceConfig::Etcd(_) => return Err(anyhow!("not supported")),
             ServiceConfig::Prometheus(_) => return Err(anyhow!("not supported")),
             ServiceConfig::ComputeNode(c) => c.compose()?,
             ServiceConfig::MetaNode(c) => c.compose()?,
             ServiceConfig::Frontend(_) => return Err(anyhow!("not supported")),
             ServiceConfig::FrontendV2(c) => c.compose()?,
-            ServiceConfig::Compactor(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::Compactor(c) => c.compose()?,
             ServiceConfig::Grafana(_) => return Err(anyhow!("not supported")),
             ServiceConfig::Jaeger(_) => return Err(anyhow!("not supported")),
             ServiceConfig::Kafka(_) => return Err(anyhow!("not supported")),
             ServiceConfig::ZooKeeper(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::AwsS3(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::AwsS3(_) => continue,
+            ServiceConfig::RedPanda(c) => c.compose()?,
         };
+        compose.container_name = service.id().to_string();
         compose_services.insert(step.to_string(), compose);
     }
 
     let compose_file = ComposeFile {
         version: "3".into(),
         services: compose_services,
+        volumes,
+        name: format!("risingwave-{}", opts.profile),
     };
 
     let yaml = serde_yaml::to_string(&compose_file)?;

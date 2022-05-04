@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
@@ -128,6 +128,7 @@ fn task_main(
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
+            ServiceConfig::RedPanda(_) => None,
         };
 
         if let Some(x) = listen_info {
@@ -311,6 +312,9 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
+            }
+            ServiceConfig::RedPanda(_) => {
+                return Err(anyhow!("redpanda is only supported in RiseDev compose."));
             }
         }
 
