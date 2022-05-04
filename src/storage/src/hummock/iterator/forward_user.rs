@@ -18,14 +18,14 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
 use super::{ForwardHummockIterator, MergeIterator};
-use crate::hummock::iterator::ReverseUserIterator;
+use crate::hummock::iterator::BackwardUserIterator;
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
 pub enum DirectedUserIterator {
     Forward(UserIterator),
-    Backward(ReverseUserIterator),
+    Backward(BackwardUserIterator),
 }
 
 impl DirectedUserIterator {

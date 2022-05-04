@@ -22,11 +22,11 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
-    BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator,
-    ReverseConcatIterator, ReverseMergeIterator, ReverseUserIterator, UserIterator,
+    BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
+    BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
 };
 use super::utils::{validate_epoch, validate_table_key_range};
-use super::{HummockStorage, ReverseSSTableIterator, SSTableIterator};
+use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
 use crate::hummock::utils::{prune_ssts, search_sst_idx};
@@ -39,13 +39,13 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        reversed: bool,
+        backward: bool,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        // if `reverse` is true, use `overlapped_backward_sstable_iters`, otherwise use
+        // if `backward` is true, use `overlapped_backward_sstable_iters`, otherwise use
         // `overlapped_forward_sstable_iters`
         let mut overlapped_forward_iters = vec![];
         let mut overlapped_backward_iters = vec![];
@@ -60,8 +60,8 @@ impl HummockStorage {
 
             // Generate shared buffer iterators
             for shared_buffer in read_version.shared_buffer {
-                for batch in shared_buffer.get_overlap_batches(&key_range, reversed) {
-                    if reversed {
+                for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
+                    if backward {
                         overlapped_backward_iters
                             .push(Box::new(batch.into_backward_iter())
                                 as BoxedBackwardHummockIterator)
@@ -77,11 +77,11 @@ impl HummockStorage {
 
         // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
         // `key_range`
-        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, reversed);
+        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward);
         for table_info in table_infos.into_iter().rev() {
             let table = self.sstable_store.sstable(table_info.id).await?;
-            if reversed {
-                overlapped_backward_iters.push(Box::new(ReverseSSTableIterator::new(
+            if backward {
+                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                     table,
                     self.sstable_store(),
                 )) as BoxedBackwardHummockIterator);
@@ -98,15 +98,15 @@ impl HummockStorage {
             match level.level_type() {
                 LevelType::Overlapping => {
                     let table_infos =
-                        prune_ssts(level.get_table_infos().iter(), &key_range, reversed);
+                        prune_ssts(level.get_table_infos().iter(), &key_range, backward);
                     if table_infos.is_empty() {
                         continue;
                     }
 
                     for table_info in table_infos.into_iter().rev() {
                         let table = self.sstable_store.sstable(table_info.id).await?;
-                        if reversed {
-                            overlapped_backward_iters.push(Box::new(ReverseSSTableIterator::new(
+                        if backward {
+                            overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                                 table,
                                 self.sstable_store(),
                             ))
@@ -139,8 +139,8 @@ impl HummockStorage {
                     );
                     let table_infos = &level.get_table_infos()[start_table_idx..=end_table_idx];
 
-                    if reversed {
-                        overlapped_backward_iters.push(Box::new(ReverseConcatIterator::new(
+                    if backward {
+                        overlapped_backward_iters.push(Box::new(BackwardConcatIterator::new(
                             table_infos.iter().rev().cloned().collect(),
                             self.sstable_store(),
                         ))
@@ -157,19 +157,19 @@ impl HummockStorage {
         }
 
         assert!(
-            (reversed && overlapped_forward_iters.is_empty())
-                || (!reversed && overlapped_backward_iters.is_empty())
+            (backward && overlapped_forward_iters.is_empty())
+                || (!backward && overlapped_backward_iters.is_empty())
         );
 
         self.stats
             .iter_merge_sstable_counts
             .observe((overlapped_forward_iters.len() + overlapped_backward_iters.len()) as f64);
 
-        let mut user_iterator = if reversed {
-            let reverse_merge_iterator =
-                ReverseMergeIterator::new(overlapped_backward_iters, self.stats.clone());
-            DirectedUserIterator::Backward(ReverseUserIterator::with_epoch(
-                reverse_merge_iterator,
+        let mut user_iterator = if backward {
+            let backward_merge_iterator =
+                BackwardMergeIterator::new(overlapped_backward_iters, self.stats.clone());
+            DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
+                backward_merge_iterator,
                 (
                     key_range.end_bound().map(|b| b.as_ref().to_owned()),
                     key_range.start_bound().map(|b| b.as_ref().to_owned()),
@@ -296,18 +296,18 @@ impl StateStore for HummockStorage {
         async move { self.iter(key_range, epoch).await?.collect(limit).await }
     }
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.reverse_iter(key_range, epoch)
+            self.backward_iter(key_range, epoch)
                 .await?
                 .collect(limit)
                 .await
@@ -368,9 +368,9 @@ impl StateStore for HummockStorage {
         self.iter_inner(key_range, epoch, false)
     }
 
-    /// Returns a reversed iterator that scans from the end key to the begin key
+    /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
