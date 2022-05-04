@@ -43,6 +43,7 @@ impl Expression for NullifExpression {
         let mut builder = self.return_type.create_array_builder(input.cardinality())?;
 
         if let ArrayImpl::Bool(bool_array) = is_equal.as_ref() {
+            // If `is_equal` is true, add null otherwise add `origin` value.
             origin
                 .iter()
                 .zip_eq(bool_array.iter())

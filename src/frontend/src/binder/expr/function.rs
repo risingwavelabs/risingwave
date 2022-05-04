@@ -84,6 +84,8 @@ impl Binder {
         }
     }
 
+    /// Make sure inputs only have 2 value and rewrite the arguments.
+    /// Nullif(expr1,expr2) -> Nullif(expr1,Equal(expr1,expr2)).
     fn rewrite_nullif_args(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.len() != 2 {
             Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
