@@ -35,7 +35,7 @@ pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
     offsets: Vec<usize>,
     value: Box<ArrayBuilderImpl>,
-    value_type: Option<DataType>,
+    value_type: DataType,
     len: usize,
 }
 
@@ -60,13 +60,11 @@ impl ArrayBuilder for ListArrayBuilder {
 
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::List { datatype } = meta {
-            let value_type = *datatype.clone();
-            let value = datatype.clone().unwrap().clone().create_array_builder(capacity)?;
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 offsets: vec![0],
-                value: Box::new(value),
-                value_type,
+                value: Box::new(datatype.create_array_builder(capacity)?),
+                value_type: *datatype,
                 len: 0,
             })
         } else {
@@ -123,7 +121,7 @@ pub struct ListArray {
     bitmap: Bitmap,
     offsets: Vec<usize>,
     value: Box<ArrayImpl>,
-    value_type: Option<DataType>,
+    value_type: DataType,
     len: usize,
 }
 
@@ -165,7 +163,7 @@ impl Array for ListArray {
             list_array_data: Some(Box::new(ListArrayData {
                 offsets: self.offsets.iter().map(|u| *u as u32).collect(),
                 value: Some(Box::new(value)),
-                value_type: Some(self.value_type.as_ref().unwrap().to_protobuf()),
+                value_type: Some(self.value_type.to_protobuf()),
             })),
             null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
@@ -213,7 +211,7 @@ impl ListArray {
             bitmap,
             offsets: array_data.offsets.iter().map(|u| *u as usize).collect(),
             value: Box::new(value),
-            value_type: Some(DataType::from(&array_data.value_type.unwrap())),
+            value_type: DataType::from(&array_data.value_type.unwrap()),
             len: cardinality,
         };
         Ok(arr.into())

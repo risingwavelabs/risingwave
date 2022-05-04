@@ -328,7 +328,7 @@ impl Binder {
                 values
             ))),
             DataType::List {
-                datatype: Box::new(Some(ty)),
+                datatype: Box::new(ty),
             },
         ))
     }
@@ -351,7 +351,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => {
             DataType::List {
-            datatype: Box::new(Some(bind_data_type(datatype)?)),
+            datatype: Box::new(bind_data_type(datatype)?),
         }},
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(

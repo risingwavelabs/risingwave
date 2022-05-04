@@ -212,7 +212,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
     Struct { children: Arc<[DataType]> },
-    List { datatype: Box<Option<DataType>> },
+    List { datatype: Box<DataType> },
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.

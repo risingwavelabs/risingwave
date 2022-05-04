@@ -89,7 +89,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
             fields: Arc::new([]),
         },
         DataTypeName::List => DataType::List {
-            datatype: Box::new(None),
+            datatype: Box::new(DataType::Int32),
         },
     })
 }

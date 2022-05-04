@@ -40,8 +40,8 @@ impl std::fmt::Debug for Literal {
                 Some(v) => write!(f, "{}", v),
             }?;
             write!(f, ":{:?}", match &self.data_type {
-                DataType::List { datatype } => ((*datatype.clone()).unwrap()).clone(),
-                other => other.clone()
+                DataType::List { datatype } => datatype,
+                other => other
             })
         }
     }
