@@ -116,9 +116,6 @@ impl NestedLoopJoinExecutor2 {
                 }
                 NestedLoopJoinState::FirstProbe => {
                     let ret = self.probe(true, &mut state).await?;
-                    if state == NestedLoopJoinState::FirstProbe {
-                        state = NestedLoopJoinState::Probe;
-                    }
                     if let Some(data_chunk) = ret {
                         yield data_chunk;
                     }
@@ -276,6 +273,7 @@ impl NestedLoopJoinExecutor2 {
     ) -> Result<Option<DataChunk>> {
         if first_probe {
             self.probe_side_source.load_data().await?;
+            *state = NestedLoopJoinState::Probe;
         }
         let cur_row = self.probe_side_source.get_current_row_ref();
         // TODO(Bowen): If we assume the scanned chunk is always compact (no invisible tuples),
