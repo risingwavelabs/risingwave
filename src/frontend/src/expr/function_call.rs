@@ -120,9 +120,6 @@ impl FunctionCall {
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
-        println!("new_cast1: {:?}", child);
-        println!("new_cast2: {:?}", target);
-        println!("new_cast3: {:?}", allows);
         let source = child.return_type();
         if child.is_null() {
             Ok(Literal::new(None, target).into())

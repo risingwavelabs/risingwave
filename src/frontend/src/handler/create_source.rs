@@ -84,7 +84,6 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    println!("handle_create_source1: {:?}", context);
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];

@@ -38,6 +38,7 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
             name: "rowid_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            list_item_type: None,
         },
         ColumnDesc {
             data_type: DataType::Int64,
@@ -45,6 +46,7 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
             name: "join_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            list_item_type: None,
         },
     ]
 }
@@ -151,6 +153,7 @@ async fn create_source() -> Box<dyn Executor + Send> {
             name: "join_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            list_item_type: None,
         },
         ColumnDesc {
             data_type: DataType::Int64,
@@ -158,6 +161,7 @@ async fn create_source() -> Box<dyn Executor + Send> {
             name: "rowid_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            list_item_type: None,
         },
     ];
 

@@ -153,7 +153,7 @@ impl ProtobufParser {
                 column_type: Some(data_type.to_protobuf()),
                 field_descs: column_vec,
                 type_name: m.name().to_string(),
-                list_item_type: None //nstabel
+                list_item_type: None
             })
         } else {
             *index += 1;

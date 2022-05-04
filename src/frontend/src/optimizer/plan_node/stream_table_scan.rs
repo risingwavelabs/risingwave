@@ -108,7 +108,7 @@ impl StreamTableScan {
                     name: column_name.clone(),
                     field_descs: vec![],
                     type_name: "".to_string(),
-                    list_item_type: None //nstabel
+                    list_item_type: None
                 })
                 .collect(),
             distribution_keys: self

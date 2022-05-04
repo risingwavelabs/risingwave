@@ -338,6 +338,7 @@ mod tests {
                 name: String::new(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                list_item_type: None,
             },
             ColumnDesc {
                 column_id: ColumnId::from(1),
@@ -345,6 +346,7 @@ mod tests {
                 name: String::new(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                list_item_type: None,
             },
             ColumnDesc {
                 column_id: ColumnId::from(2),
@@ -352,6 +354,7 @@ mod tests {
                 name: String::new(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                list_item_type: None,
             },
         ];
         let source_manager = MemSourceManager::default();
@@ -465,6 +468,7 @@ mod tests {
                 name: String::new(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                list_item_type: None,
             },
             ColumnDesc {
                 column_id: ColumnId::from(1),
@@ -472,6 +476,7 @@ mod tests {
                 name: String::new(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                list_item_type: None,
             },
             ColumnDesc {
                 column_id: ColumnId::from(2),
@@ -479,6 +484,7 @@ mod tests {
                 name: String::new(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                list_item_type: None,
             },
         ];
         let source_manager = MemSourceManager::default();

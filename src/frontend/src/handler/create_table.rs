@@ -49,25 +49,22 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
                 name: column.name.value,
                 field_descs: vec![],
                 type_name: "".to_string(),
-                list_item_type: None //nstabel
+                list_item_type: None
             });
         }
         column_descs
     };
-    println!("bind_sql_columns1: {:?}", column_descs);
 
     let columns_catalog = column_descs
         .into_iter()
         .enumerate()
-        .map(|(i, c)| { 
-            println!("bind_sql_columns3: {:?}", c);
+        .map(|(i, c)| {
             ColumnCatalog {
                 column_desc: c.to_protobuf().into(),
                 is_hidden: i == 0, // the row id column is hidden
             }
         })
         .collect_vec();
-    println!("bind_sql_columns2: {:?}", columns_catalog);
     Ok(columns_catalog)
 }
 
@@ -77,7 +74,6 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
-    println!("gen_create_table_plan4: {:?}", columns);
     let source = make_prost_source(
         session,
         table_name,
@@ -85,11 +81,7 @@ pub(crate) fn gen_create_table_plan(
             columns: bind_sql_columns(columns)?,
         }),
     )?;
-    println!("gen_create_table_plan3: {:?}", context);
-    println!("gen_create_table_plan5: {:?}", source);
     let (plan, table) = gen_materialized_source_plan(context, source.clone())?;
-    println!("gen_create_table_plan1: {:?}", plan);
-    println!("gen_create_table_plan2: {:?}", table);
     Ok((plan, source, table))
 }
 
@@ -127,8 +119,6 @@ pub async fn handle_create_table(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
-    println!("handle_create_table1: {:?}", context);
-    println!("handle_create_table5: {:?}", columns);
     let session = context.session_ctx.clone();
 
     let (plan, source, table) = {
@@ -138,9 +128,6 @@ pub async fn handle_create_table(
 
         (plan, source, table)
     };
-    println!("handle_create_table2: {:?}", plan);
-    println!("handle_create_table3: {:?}", source);
-    println!("handle_create_table4: {:?}", table);
 
     log::trace!(
         "name={}, plan=\n{}",

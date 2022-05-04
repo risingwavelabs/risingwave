@@ -54,7 +54,6 @@ impl SourceCatalog {
 
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
-        println!("HERE3!!!!3: {:?}", prost);
         let id = prost.id;
         let name = prost.name.clone();
         let (source_type, prost_columns, pk_col_ids) = match &prost.info {
@@ -74,9 +73,7 @@ impl From<&ProstSource> for SourceCatalog {
             ),
             None => unreachable!(),
         };
-        println!("HERE3!!!!1: {:?}", prost_columns);
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
-        println!("HERE3!!!!2: {:?}", columns);
         Self {
             id,
             name,

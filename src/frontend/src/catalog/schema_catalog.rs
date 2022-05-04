@@ -37,7 +37,6 @@ pub struct SchemaCatalog {
 
 impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &ProstTable) {
-        println!("create_table1: {:?}", prost);
         let name = prost.name.clone();
         let id = prost.id.into();
         let table = prost.into();
