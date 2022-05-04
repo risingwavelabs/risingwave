@@ -20,8 +20,8 @@ pub struct FrontendGen;
 
 impl FrontendGen {
     pub fn gen_server_properties(&self, config: &FrontendConfig) -> String {
-        let frontend_host = &config.address;
-        let frontend_port = config.port;
+        let frontend_host = &config.listen_address;
+        let frontend_port = &config.port;
         let meta_node_hosts = config
             .provide_meta_node
             .as_ref()

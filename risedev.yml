@@ -184,11 +184,14 @@ risedev:
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
-    # Listen address of MinIO s3 endpoint
+    # Advertise address of MinIO s3 endpoint
     address: "127.0.0.1"
 
-    # Listen port of MinIO s3 endpoint
+    # Advertise port of MinIO s3 endpoint
     port: 9301
+
+    # Listen address of MinIO endpoint
+    listen-address: ${address}
 
     # Console address of MinIO s3 endpoint
     console-address: "127.0.0.1"
@@ -201,12 +204,6 @@ template:
 
     # Root password (can be used to login to MinIO console)
     root-password: hummockadmin
-
-    # Hummock username
-    hummock-user: hummock
-
-    # Hummock user password
-    hummock-password: "12345678"
 
     # Bucket name to store hummock information
     hummock-bucket: hummock001
@@ -221,11 +218,14 @@ template:
     # Id of this instance
     id: "etcd"
 
-    # Address of the single-node etcd.
+    # Advertise address of the single-node etcd.
     address: "127.0.0.1"
 
     # Listen port of the single-node etcd.
     port: 2388
+
+    # Listen address
+    listen-address: ${address}
 
     # Peer listen port of the single-node etcd.
     peer-port: 2389
@@ -234,14 +234,14 @@ template:
     unsafe-no-fsync: false
 
   compute-node:
-    # Compute-node listen address
+    # Compute-node advertise address
     address: "127.0.0.1"
+
+    # Listen address
+    listen-address: ${address}
 
     # Compute-node listen port
     port: 5688
-
-    # Prometheus exporter listen address
-    exporter-address: "127.0.0.1"
 
     # Prometheus exporter listen port
     exporter-port: 1222
@@ -274,20 +274,17 @@ template:
     enable-in-memory-kv-state-backend: false
 
   meta-node:
-    # Meta-node listen address
+    # Meta-node advertise address
     address: "127.0.0.1"
 
     # Meta-node listen port
     port: 5690
 
-    # Dashboard listen address
-    dashboard-address: "127.0.0.1"
+    # Listen address
+    listen-address: ${address}
 
     # Dashboard listen port
     dashboard-port: 5691
-
-    # Prometheus exporter listen address
-    exporter-address: "127.0.0.1"
 
     # Prometheus exporter listen port
     exporter-port: 1250
@@ -308,11 +305,14 @@ template:
     unsafe-disable-recovery: false
 
   prometheus:
-    # Listen address of Prometheus
+    # Advertise address of Prometheus
     address: "127.0.0.1"
 
     # Listen port of Prometheus
     port: 9500
+
+    # Listen address
+    listen-address: ${address}
 
     # Id of this instance
     id: prometheus
@@ -346,11 +346,14 @@ template:
     user-managed: false
 
   frontend:
-    # Listen address of frontend
+    # Advertise address of frontend
     address: "127.0.0.1"
 
     # Listen port of frontend
     port: 4566
+
+    # Listen address
+    listen-address: ${address}
 
     # Id of this instance
     id: frontend-${port}
@@ -362,14 +365,14 @@ template:
     user-managed: false
 
   compactor:
-    # Compactor listen address
+    # Compactor advertise address
     address: "127.0.0.1"
 
     # Compactor listen port
     port: 6660
 
-    # Prometheus exporter listen address
-    exporter-address: "127.0.0.1"
+    # Listen address
+    listen-address: ${address}
 
     # Prometheus exporter listen port
     exporter-port: 1260
@@ -430,11 +433,14 @@ template:
     # Id to be picked-up by services
     id: kafka-${port}
 
-    # Listen address of Kafka
+    # Advertise address of Kafka
     address: "127.0.0.1"
 
     # Listen port of Kafka
     port: 29092
+
+    # Listen address
+    listen-address: ${address}
 
     # ZooKeeper used by this Kafka instance
     provide-zookeeper: "zookeeper*"
@@ -450,8 +456,11 @@ template:
     # Id to be picked-up by services
     id: zookeeper-${port}
 
-    # Listen address of ZooKeeper
+    # Advertise address of ZooKeeper
     address: "127.0.0.1"
+
+    # Listen address
+    listen-address: ${address}
 
     # Listen port of ZooKeeper
     port: 2181

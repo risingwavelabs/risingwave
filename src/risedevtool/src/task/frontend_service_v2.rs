@@ -43,7 +43,7 @@ impl FrontendServiceV2 {
     /// Apply command args accroding to config
     pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
         cmd.arg("--host")
-            .arg(format!("{}:{}", config.address, config.port));
+            .arg(format!("{}:{}", config.listen_address, config.port));
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.len() {
