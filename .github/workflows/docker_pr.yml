@@ -6,6 +6,10 @@ on:
       - ".github/workflows/docker_build.yml"
       - "docker/**"
 
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build_docker_images:
     runs-on: ubuntu-latest
