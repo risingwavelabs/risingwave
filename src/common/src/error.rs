@@ -98,8 +98,8 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error("Parse string error: {0}")]
-    ParseError(BoxedError),
+    #[error("{1}: Parse string error: {0}")]
+    ParseError(BoxedError, String),
     #[error("Bind error: {0}")]
     BindError(String),
     #[error("Catalog error: {0}")]
@@ -131,6 +131,10 @@ pub enum ErrorCode {
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
+}
+
+pub fn parse_error(e: impl Error + Send + Sync + 'static, msg: impl Into<String>) -> RwError {
+    ErrorCode::ParseError(Box::new(e), msg.into()).into()
 }
 
 #[derive(Clone)]
@@ -263,7 +267,7 @@ impl ErrorCode {
             ErrorCode::NotImplemented(..) => 4,
             ErrorCode::IoError(_) => 5,
             ErrorCode::StorageError(_) => 6,
-            ErrorCode::ParseError(_) => 7,
+            ErrorCode::ParseError(_, _) => 7,
             ErrorCode::NumericValueOutOfRange => 8,
             ErrorCode::ProtocolError(_) => 9,
             ErrorCode::TaskNotFound => 10,

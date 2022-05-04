@@ -20,6 +20,7 @@ use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_expr::vector_op::cast::str_to_date;
 use risingwave_pb::plan_common::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
@@ -27,7 +28,6 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use super::common::str_to_date;
 use crate::{Event, SourceColumnDesc, SourceParser};
 
 /// Parser for Protobuf-encoded bytes.
