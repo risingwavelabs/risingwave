@@ -14,6 +14,11 @@
 
 //! Generate docker compose yaml files for risedev components.
 
+const DOCKER_COMPUTE_NODE_IMAGE: &str = "ghcr.io/singularity-data/compute-node:latest";
+const DOCKER_META_NODE_IMAGE: &str = "ghcr.io/singularity-data/meta-node:latest";
+const DOCKER_COMPACTOR_NODE_IMAGE: &str = "ghcr.io/singularity-data/compactor-node:latest";
+const DOCKER_FRONTEND_NODE_IMAGE: &str = "ghcr.io/singularity-data/frontend-node:latest";
+
 use std::collections::BTreeMap;
 use std::process::Command;
 
@@ -100,15 +105,15 @@ fn get_cmd_envs(cmd: &Command) -> Result<Vec<String>> {
 
 impl Compose for ComputeNodeConfig {
     fn compose(&self) -> Result<ComposeService> {
-        let mut command = Command::new("/risingwave/bin/compute-node");
+        let mut command = Command::new("compute-node");
         ComputeNodeService::apply_command_args(&mut command, self)?;
-        let command = get_cmd_args(&command, true)?;
+        let command = get_cmd_args(&command, false)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/compute-node:latest".into(),
+            image: DOCKER_COMPUTE_NODE_IMAGE.into(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node
@@ -123,12 +128,12 @@ impl Compose for ComputeNodeConfig {
 
 impl Compose for MetaNodeConfig {
     fn compose(&self) -> Result<ComposeService> {
-        let mut command = Command::new("/risingwave/bin/meta-node");
+        let mut command = Command::new("meta-node");
         MetaNodeService::apply_command_args(&mut command, self)?;
-        let command = get_cmd_args(&command, true)?;
+        let command = get_cmd_args(&command, false)?;
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/meta-node:latest".into(),
+            image: DOCKER_META_NODE_IMAGE.into(),
             command,
             expose: vec![
                 self.port.to_string(),
@@ -142,14 +147,14 @@ impl Compose for MetaNodeConfig {
 
 impl Compose for FrontendConfig {
     fn compose(&self) -> Result<ComposeService> {
-        let mut command = Command::new("/risingwave/bin/frontend-v2");
+        let mut command = Command::new("frontend-node");
         FrontendServiceV2::apply_command_args(&mut command, self)?;
-        let command = get_cmd_args(&command, true)?;
+        let command = get_cmd_args(&command, false)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/frontend-node:latest".into(),
+            image: DOCKER_FRONTEND_NODE_IMAGE.into(),
             command,
             ports: vec![format!("{}:{}", self.port, self.port)],
             expose: vec![self.port.to_string()],
@@ -161,15 +166,15 @@ impl Compose for FrontendConfig {
 
 impl Compose for CompactorConfig {
     fn compose(&self) -> Result<ComposeService> {
-        let mut command = Command::new("/risingwave/bin/compactor");
+        let mut command = Command::new("compactor-node");
         CompactorService::apply_command_args(&mut command, self)?;
-        let command = get_cmd_args(&command, true)?;
+        let command = get_cmd_args(&command, false)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/compactor-node:latest".into(),
+            image: DOCKER_COMPACTOR_NODE_IMAGE.into(),
             command,
             expose: vec![self.port.to_string()],
             depends_on: provide_meta_node
