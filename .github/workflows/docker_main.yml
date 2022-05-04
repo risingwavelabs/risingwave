@@ -73,7 +73,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: -v /var/run/docker.sock:/var/run/docker.sock --security-opt seccomp=unconfined
-    timeout-minutes: 20
+    timeout-minutes: 60
     needs:
       - start-runner-d
     steps:
@@ -112,7 +112,14 @@ jobs:
           push: true
           tags: ghcr.io/singularity-data/risingwave
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max,compression=uncompressed
+      - # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
       # All below steps will re-use the previous docker cache, so no actual build will happen.
       - name: Build compute-node
         uses: docker/build-push-action@v2
@@ -123,7 +130,7 @@ jobs:
           push: true
           tags: ghcr.io/singularity-data/compute-node
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-to: type=inline
       - name: Build meta-node
         uses: docker/build-push-action@v2
         with:
@@ -133,7 +140,7 @@ jobs:
           push: true
           tags: ghcr.io/singularity-data/meta-node
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-to: type=inline
       - name: Build frontend-node
         uses: docker/build-push-action@v2
         with:
@@ -143,14 +150,14 @@ jobs:
           push: true
           tags: ghcr.io/singularity-data/frontend-node
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-to: type=inline
       - name: Build compactor
         uses: docker/build-push-action@v2
         with:
           context: .
           file: ./docker/Dockerfile
-          target: compactor
+          target: compactor-node
           push: true
-          tags: ghcr.io/singularity-data/compactor
+          tags: ghcr.io/singularity-data/compactor-node
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-to: type=inline
