@@ -12,39 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::error::Result;
-use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::StateStore;
+//! Streaming Aggregators
 
-use crate::executor::ExecutorBuilder;
+use risingwave_common::catalog::TableId;
+
+use super::*;
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{BoxedExecutor, Executor, LocalSimpleAggExecutor};
-use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
+use crate::executor_v2::SimpleAggExecutor;
 
-pub struct LocalSimpleAggExecutorBuilder {}
+pub struct SimpleAggExecutorBuilder;
 
-impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
+impl ExecutorBuilder for SimpleAggExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        _store: impl StateStore,
+        node: &StreamNode,
+        store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LocalSimpleAgg)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
+        // Build vector of keyspace via table ids.
+        // One keyspace for one agg call.
+        let keyspace = node
+            .get_table_ids()
+            .iter()
+            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
+            .collect();
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
 
-        Ok(LocalSimpleAggExecutor::new(
+        Ok(SimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
+            keyspace,
             params.pk_indices,
             params.executor_id,
+            key_indices,
         )?
         .boxed())
     }

@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
-use risingwave_common::try_match_expand;
+use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_expr::expr::{build_from_prost, RowExpression};
-use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_expr::expr::RowExpression;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::*;
@@ -34,15 +28,13 @@ use super::error::StreamExecutorError;
 use super::managed_state::join::*;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
-use crate::executor::ExecutorBuilder;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
-type JoinTypePrimitive = u8;
+pub type JoinTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
     use super::JoinTypePrimitive;
@@ -52,9 +44,9 @@ pub mod JoinType {
     pub const FullOuter: JoinTypePrimitive = 3;
 }
 
-type SideTypePrimitive = u8;
+pub type SideTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
-mod SideType {
+pub mod SideType {
     use super::SideTypePrimitive;
     pub const Left: SideTypePrimitive = 0;
     pub const Right: SideTypePrimitive = 1;
@@ -74,7 +66,7 @@ const fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimit
 
 pub struct JoinParams {
     /// Indices of the join columns
-    key_indices: Vec<usize>,
+    pub key_indices: Vec<usize>,
 }
 
 impl JoinParams {
@@ -123,139 +115,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 
         // TODO: not working with rearranged chain
         // self.ht.clear();
-    }
-}
-
-struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
-
-struct HashJoinExecutorDispatcherArgs<S: StateStore> {
-    source_l: Box<dyn Executor>,
-    source_r: Box<dyn Executor>,
-    params_l: JoinParams,
-    params_r: JoinParams,
-    pk_indices: PkIndices,
-    executor_id: u64,
-    cond: Option<RowExpression>,
-    op_info: String,
-    key_indices: Vec<usize>,
-    keyspace_l: Keyspace<S>,
-    keyspace_r: Keyspace<S>,
-}
-
-impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
-    for HashJoinExecutorDispatcher<S, T>
-{
-    type Input = HashJoinExecutorDispatcherArgs<S>;
-    type Output = Result<BoxedExecutor>;
-
-    fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
-            args.source_l,
-            args.source_r,
-            args.params_l,
-            args.params_r,
-            args.pk_indices,
-            args.executor_id,
-            args.cond,
-            args.op_info,
-            args.key_indices,
-            args.keyspace_l,
-            args.keyspace_r,
-        )))
-    }
-}
-
-pub struct HashJoinExecutorBuilder {}
-
-impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        // Get table id and used as keyspace prefix.
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
-        let source_r = params.input.remove(1);
-        let source_l = params.input.remove(0);
-        let params_l = JoinParams::new(
-            node.get_left_key()
-                .iter()
-                .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
-        );
-        let params_r = JoinParams::new(
-            node.get_right_key()
-                .iter()
-                .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
-        );
-
-        let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
-            Err(_) => None,
-        };
-        trace!("Join non-equi condition: {:?}", condition);
-
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
-        macro_rules! impl_create_hash_join_executor {
-            ([], $( { $join_type_proto:ident, $join_type:ident } ),*) => {
-                fn create_hash_join_executor<S: StateStore>(
-                    typ: JoinTypeProto, kind: HashKeyKind,
-                    args: HashJoinExecutorDispatcherArgs<S>,
-                ) -> Result<BoxedExecutor> {
-                    match typ {
-                        $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
-                        _ => todo!("Join type {:?} not implemented", typ),
-                    }
-                }
-            }
-        }
-
-        macro_rules! for_all_join_types {
-            ($macro:ident $(, $x:tt)*) => {
-                $macro! {
-                    [$($x),*],
-                    { Inner, Inner },
-                    { LeftOuter, LeftOuter },
-                    { RightOuter, RightOuter },
-                    { FullOuter, FullOuter }
-                }
-            };
-        }
-
-        let keys = params_l
-            .key_indices
-            .iter()
-            .map(|idx| source_l.schema().fields[*idx].data_type())
-            .collect_vec();
-        let kind = calc_hash_key_kind(&keys);
-
-        let left_table_id = TableId::from(node.left_table_id);
-        let right_table_id = TableId::from(node.right_table_id);
-
-        let args = HashJoinExecutorDispatcherArgs {
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
-            cond: condition,
-            op_info: params.op_info,
-            key_indices,
-            keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
-            keyspace_r: Keyspace::table_root(store, &right_table_id),
-        };
-
-        for_all_join_types! { impl_create_hash_join_executor };
-        let join_type_proto = node.get_join_type()?;
-        create_hash_join_executor(join_type_proto, kind, args)
     }
 }
 
@@ -686,7 +545,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::hash::Key64;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::{InputRefExpression, RowExpression};

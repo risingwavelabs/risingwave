@@ -13,22 +13,17 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::{ExecutorBuilder, Result};
-use crate::executor_v2::{BoxedExecutor, Executor, MaterializeExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use super::*;
+use crate::executor_v2::MaterializeExecutor;
 
 pub struct MaterializeExecutorBuilder;
 
 impl ExecutorBuilder for MaterializeExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
@@ -65,7 +60,7 @@ pub struct ArrangeExecutorBuilder;
 impl ExecutorBuilder for ArrangeExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {

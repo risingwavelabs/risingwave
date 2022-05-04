@@ -18,15 +18,9 @@ use futures::stream::select_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::StateStore;
 
 use super::*;
-use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
@@ -99,20 +93,6 @@ pub fn merge(inputs: Vec<BoxedMessageStream>) -> BoxedMessageStream {
         streams.push(stream.boxed());
     }
     select_all(streams).boxed()
-}
-
-pub struct UnionExecutorBuilder {}
-
-impl ExecutorBuilder for UnionExecutorBuilder {
-    fn new_boxed_executor(
-        params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> risingwave_common::error::Result<BoxedExecutor> {
-        try_match_expand!(node.get_node_body().unwrap(), NodeBody::Union)?;
-        Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
-    }
 }
 
 #[cfg(test)]
