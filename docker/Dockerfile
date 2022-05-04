@@ -2,7 +2,9 @@ FROM ubuntu:20.04 as builder
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config bash
+
+SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 
@@ -23,20 +25,41 @@ RUN rustup self update \
   && rustup default $(cat "/risingwave/rust-toolchain") \
   && rustup component add rustfmt
 
-RUN cargo clean && cargo build --release
-
-FROM ubuntu:20.04
-
+RUN cargo fetch
 RUN mkdir -p /risingwave/bin
+RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release && \
+  mv /risingwave/target/release/{frontend-v2,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
+  cargo clean
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev
+FROM ubuntu:20.04 as image-base
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
-COPY --from=builder /risingwave/target/release/frontend-v2 /risingwave/bin/frontend-v2
-COPY --from=builder /risingwave/target/release/compute-node /risingwave/bin/compute-node	
-COPY --from=builder /risingwave/target/release/meta-node /risingwave/bin/meta-node
+FROM image-base as frontend-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/bin/frontend-v2 /risingwave/bin/frontend-v2
+EXPOSE 4566
+ENTRYPOINT [ "/risingwave/bin/frontend-v2" ]
 
-# Expose the necessary ports for the services:
-# - 4566 is for frontend.
-# - 5687 is for compute-node.
-# - 5690 is for meta-node.
-EXPOSE 4566 5687 5690
+FROM image-base as compute-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/bin/compute-node /risingwave/bin/compute-node
+EXPOSE 5687
+ENTRYPOINT [ "/risingwave/bin/compute-node" ]
+
+FROM image-base as meta-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/bin/meta-node /risingwave/bin/meta-node
+EXPOSE 5690
+ENTRYPOINT [ "/risingwave/bin/meta-node" ]
+
+FROM image-base as compactor-node
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/bin/compactor /risingwave/bin/compactor
+EXPOSE 6660
+ENTRYPOINT [ "/risingwave/bin/compactor" ]
+
+FROM image-base as risingwave
+RUN mkdir -p /risingwave/bin
+COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+ENTRYPOINT [ "/risingwave/bin/risingwave" ]
+CMD [ "playground" ]
