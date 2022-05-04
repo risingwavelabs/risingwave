@@ -182,8 +182,8 @@ pub fn serialize_pk_and_row(
     if row.is_none() {
         result.push((key, None));
     } else {
-        let value = serialize_cell(&None)?;
-        result.push((key, Some(value)));
+        // Store zero bytes for the value.
+        result.push((key, Some("".to_string().into_bytes())));
     }
 
     Ok(result)
