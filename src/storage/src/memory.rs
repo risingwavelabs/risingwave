@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use lazy_static::lazy_static;
-use tokio::sync::Mutex;
+use parking_lot::RwLock;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -38,7 +38,7 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 #[derive(Clone)]
 pub struct MemoryStateStore {
     /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
-    inner: Arc<Mutex<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
+    inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
 }
 
 impl Default for MemoryStateStore {
@@ -68,7 +68,7 @@ where
 impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(BTreeMap::new())),
+            inner: Arc::new(RwLock::new(BTreeMap::new())),
         }
     }
 
@@ -113,7 +113,7 @@ impl StateStore for MemoryStateStore {
             if limit == Some(0) {
                 return Ok(vec![]);
             }
-            let inner = self.inner.lock().await;
+            let inner = self.inner.read();
 
             let mut last_key = None;
             for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
@@ -153,7 +153,7 @@ impl StateStore for MemoryStateStore {
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let mut inner = self.inner.lock().await;
+            let mut inner = self.inner.write();
             let mut size: usize = 0;
             for (key, value) in kv_pairs {
                 size += key.len() + value.size();
