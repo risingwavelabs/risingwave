@@ -107,6 +107,26 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  ######################################
+  ### Configurations used in Compose ###
+  ######################################
+
+  compose:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      listen-address: "0.0.0.0"
+      id: meta-node-0
+      address: ${id}
+    - use: compute-node
+      listen-address: "0.0.0.0"
+      id: compute-node-0
+      address: ${id}
+    - use: frontend
+      listen-address: "0.0.0.0"
+      id: frontend-node-0
+      address: ${id}
+
   #################################
   ### Configurations used on CI ###
   #################################
