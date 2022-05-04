@@ -140,7 +140,6 @@ jobs:
     name: ec2-stop-c
     needs:
       - start-runner-c
-      - end-to-end-risedev-release
     runs-on: ubuntu-latest
     if: ${{ always() }}
     steps:
