@@ -40,6 +40,7 @@ use risingwave_common::error::Result;
 pub use top_n::*;
 pub use trace::*;
 pub use values::*;
+pub use hop_window::*;
 
 use crate::executor::executor2_wrapper::Executor2Wrapper;
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
