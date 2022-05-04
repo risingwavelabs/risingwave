@@ -174,6 +174,7 @@ impl Binder {
             .collect();
 
         // Note(bugen): do not bind context here.
+
         Ok(BoundTableSource {
             name: source_name,
             source_id,

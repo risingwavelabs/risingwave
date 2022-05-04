@@ -290,6 +290,7 @@ impl TestCase {
     ) -> Result<TestCaseResult> {
         let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
+
         let bound = {
             let mut binder = Binder::new(
                 session.env().catalog_reader().read_guard(),

@@ -1,15 +1,19 @@
 - sql: |
-    /* insert values on matching types */
     create table t (a varchar[]);
     insert into t values (ARRAY['foo', 'bar']), (ARRAY['fizz', 'buzz']);
   batch_plan: |
     BatchInsert { table: t }
       BatchValues { rows: [[ARRAY[foo, bar]:Varchar], [ARRAY[fizz, buzz]:Varchar]] }
+  logical_plan: |
+    LogicalInsert { table: t }
+      LogicalValues { rows: [[ARRAY[foo, bar]:Varchar], [ARRAY[fizz, buzz]:Varchar]], schema: Schema { fields: [:List { datatype: Varchar }] } }
 
 - sql: |
-    /* insert values on matching types */
     create table t (a int[]);
     insert into t values (ARRAY[22, 33]), (ARRAY[44, 55]);
   batch_plan: |
     BatchInsert { table: t }
       BatchValues { rows: [[ARRAY[22, 33]:Int32], [ARRAY[44, 55]:Int32]] }
+  logical_plan: |
+    LogicalInsert { table: t }
+      LogicalValues { rows: [[ARRAY[22, 33]:Int32], [ARRAY[44, 55]:Int32]], schema: Schema { fields: [:List { datatype: Int32 }] } }

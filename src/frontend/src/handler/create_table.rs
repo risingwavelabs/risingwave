@@ -58,11 +58,9 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
     let columns_catalog = column_descs
         .into_iter()
         .enumerate()
-        .map(|(i, c)| {
-            ColumnCatalog {
-                column_desc: c.to_protobuf().into(),
-                is_hidden: i == 0, // the row id column is hidden
-            }
+        .map(|(i, c)| ColumnCatalog {
+            column_desc: c.to_protobuf().into(),
+            is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
     Ok(columns_catalog)

@@ -14,18 +14,15 @@
 
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::array::ListValue;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
     UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
-
-use risingwave_common::array::ListValue;
-use crate::expr::Literal;
-use risingwave_common::types::ScalarImpl;
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind, Literal};
 
 mod binary_op;
 mod column;

@@ -92,7 +92,7 @@ impl ColumnDesc {
 
     /// Convert to proto
     pub fn to_protobuf(&self) -> ProstColumnDesc {
-        let ret = ProstColumnDesc {
+        ProstColumnDesc {
             column_type: Some(self.data_type.to_protobuf()),
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
@@ -104,8 +104,7 @@ impl ColumnDesc {
                 .collect_vec(),
             type_name: self.type_name.clone(),
             list_item_type: None
-        };
-        ret
+        }
     }
 
     /// Flatten a nested column to a list of columns (including itself).
