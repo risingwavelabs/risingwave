@@ -46,7 +46,6 @@ pub struct NestedLoopJoinExecutor2 {
     join_expr: BoxedExpression,
     /// Executor should handle different join type.
     join_type: JoinType,
-    /// return self schema.
     schema: Schema,
     /// Return data chunk in batch.
     chunk_builder: DataChunkBuilder,
