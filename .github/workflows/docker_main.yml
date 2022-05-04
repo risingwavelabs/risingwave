@@ -38,8 +38,9 @@ jobs:
           file: ./docker/Dockerfile
           target: risingwave
           push: true
-          tags: |
-            ghcr.io/singularity-data/risingwave
+          tags: ghcr.io/singularity-data/risingwave
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       # All below steps will re-use the previous docker cache, so no actual build will happen.
       - name: Build compute-node
         uses: docker/build-push-action@v2
@@ -48,8 +49,9 @@ jobs:
           file: ./docker/Dockerfile
           target: compute-node
           push: true
-          tags: |
-            ghcr.io/singularity-data/compute-node
+          tags: ghcr.io/singularity-data/compute-node
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       - name: Build meta-node
         uses: docker/build-push-action@v2
         with:
@@ -57,8 +59,9 @@ jobs:
           file: ./docker/Dockerfile
           target: meta-node
           push: true
-          tags: |
-            ghcr.io/singularity-data/meta-node
+          tags: ghcr.io/singularity-data/meta-node
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       - name: Build frontend-node
         uses: docker/build-push-action@v2
         with:
@@ -66,8 +69,9 @@ jobs:
           file: ./docker/Dockerfile
           target: frontend-node
           push: true
-          tags: |
-            ghcr.io/singularity-data/frontend-node
+          tags: ghcr.io/singularity-data/frontend-node
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
       - name: Build compactor
         uses: docker/build-push-action@v2
         with:
@@ -75,5 +79,6 @@ jobs:
           file: ./docker/Dockerfile
           target: compactor
           push: true
-          tags: |
-            ghcr.io/singularity-data/compactor
+          tags: ghcr.io/singularity-data/compactor
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
