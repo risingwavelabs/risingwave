@@ -24,7 +24,7 @@ RUN rustup self update \
   && rustup component add rustfmt
 
 RUN cargo fetch
-RUN cargo build --release
+RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release
 
 FROM ubuntu:20.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
