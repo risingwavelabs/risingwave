@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
@@ -160,9 +159,6 @@ pub trait Executor: Send + 'static {
 pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
-
-/// Boxed stream of [`StreamMessage`].
-pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
