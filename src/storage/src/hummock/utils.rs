@@ -25,13 +25,13 @@ pub fn range_overlap<R, B>(
     search_key_range: &R,
     inclusive_start_key: &[u8],
     inclusive_end_key: &[u8],
-    reverse: bool,
+    backward: bool,
 ) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    let (start_bound, end_bound) = if reverse {
+    let (start_bound, end_bound) = if backward {
         (search_key_range.end_bound(), search_key_range.start_bound())
     } else {
         (search_key_range.start_bound(), search_key_range.end_bound())
@@ -77,12 +77,12 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
     Ok(())
 }
 
-/// Prune SSTs that does not overlap with a specifc key range.
+/// Prune SSTs that does not overlap with a specific key range.
 /// Returns the sst ids after pruning
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     key_range: &R,
-    reversed: bool,
+    backward: bool,
 ) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B> + Send,
@@ -93,7 +93,7 @@ where
             let table_range = info.key_range.as_ref().unwrap();
             let table_start = user_key(table_range.left.as_slice());
             let table_end = user_key(table_range.right.as_slice());
-            range_overlap(key_range, table_start, table_end, reversed)
+            range_overlap(key_range, table_start, table_end, backward)
         })
         .collect();
     result_sst_ids

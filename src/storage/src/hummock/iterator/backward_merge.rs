@@ -15,7 +15,7 @@
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::Backward;
 
-pub type ReverseMergeIterator = UnorderedMergeIteratorInner<Backward>;
+pub type BackwardMergeIterator = UnorderedMergeIteratorInner<Backward>;
 
 #[cfg(test)]
 mod test {
@@ -28,11 +28,11 @@ mod test {
     };
     use crate::hummock::iterator::{BoxedBackwardHummockIterator, HummockIterator};
     use crate::hummock::test_utils::create_small_table_cache;
-    use crate::hummock::ReverseSSTableIterator;
+    use crate::hummock::BackwardSSTableIterator;
     use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
-    async fn test_reverse_merge_basic() {
+    async fn test_backward_merge_basic() {
         let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
@@ -60,21 +60,21 @@ mod test {
         .await;
         let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
             )),
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table2.id, table2.id, 1, Box::new(table2)),
                 sstable_store,
             )),
         ];
 
-        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut mi = BackwardMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut i = 3 * TEST_KEYS_COUNT;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -95,7 +95,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_reverse_merge_seek() {
+    async fn test_backward_merge_seek() {
         let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
@@ -123,21 +123,21 @@ mod test {
         .await;
         let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
             )),
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table2.id, table2.id, 1, Box::new(table2)),
                 sstable_store,
             )),
         ];
 
-        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut mi = BackwardMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         // right edge case
         mi.seek(iterator_test_key_of(0).as_slice()).await.unwrap();
@@ -180,7 +180,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_reverse_merge_invalidate_reset() {
+    async fn test_backward_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
@@ -200,17 +200,17 @@ mod test {
         .await;
         let cache = create_small_table_cache();
         let iters: Vec<BoxedBackwardHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
             )),
-            Box::new(ReverseSSTableIterator::new(
+            Box::new(BackwardSSTableIterator::new(
                 cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store,
             )),
         ];
 
-        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut mi = BackwardMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         mi.rewind().await.unwrap();
         let mut count = 0;

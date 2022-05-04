@@ -56,14 +56,14 @@ impl SharedBuffer {
     pub fn get_overlap_batches<R, B>(
         &self,
         key_range: &R,
-        reversed_range: bool,
+        backward_range: bool,
     ) -> Vec<SharedBufferBatch>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         let range = (
-            if reversed_range {
+            if backward_range {
                 key_range.end_bound().map(|b| b.as_ref().to_vec())
             } else {
                 key_range.start_bound().map(|b| b.as_ref().to_vec())
@@ -83,7 +83,7 @@ impl SharedBuffer {
                     key_range,
                     m.1.start_user_key(),
                     m.1.end_user_key(),
-                    reversed_range,
+                    backward_range,
                 )
             })
             .map(|entry| entry.1.clone())

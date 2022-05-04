@@ -134,12 +134,12 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -183,7 +183,7 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,

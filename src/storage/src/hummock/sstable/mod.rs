@@ -23,12 +23,12 @@ mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
+mod forward_sstable_iterator;
 pub mod multi_builder;
-mod sstable_iterator;
 use bytes::{Buf, BufMut};
-pub use sstable_iterator::*;
-mod reverse_sstable_iterator;
-pub use reverse_sstable_iterator::*;
+pub use forward_sstable_iterator::*;
+mod backward_sstable_iterator;
+pub use backward_sstable_iterator::*;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod utils;

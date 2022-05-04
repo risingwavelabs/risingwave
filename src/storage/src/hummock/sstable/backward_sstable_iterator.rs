@@ -23,8 +23,8 @@ use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorType, SstableStoreRef, TableHolder,
 };
 
-/// Reversely iterates on a table.
-pub struct ReverseSSTableIterator {
+/// Iterates backwards on a table.
+pub struct BackwardSSTableIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
@@ -37,7 +37,7 @@ pub struct ReverseSSTableIterator {
     sstable_store: SstableStoreRef,
 }
 
-impl ReverseSSTableIterator {
+impl BackwardSSTableIterator {
     pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
@@ -76,7 +76,7 @@ impl ReverseSSTableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for ReverseSSTableIterator {
+impl HummockIterator for BackwardSSTableIterator {
     type Direction = Backward;
 
     async fn next(&mut self) -> HummockResult<()> {
@@ -105,8 +105,8 @@ impl HummockIterator for ReverseSSTableIterator {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    /// Instead of setting idx to 0th block, a `ReverseSSTableIterator` rewinds to the last block in
-    /// the table.
+    /// Instead of setting idx to 0th block, a `BackwardSSTableIterator` rewinds to the last block
+    /// in the table.
     async fn rewind(&mut self) -> HummockResult<()> {
         self.seek_idx(self.sst.value().block_count() as isize - 1, None)
             .await
@@ -138,11 +138,11 @@ impl HummockIterator for ReverseSSTableIterator {
     }
 }
 
-impl SSTableIteratorType for ReverseSSTableIterator {
-    type SSTableIterator = ReverseSSTableIterator;
+impl SSTableIteratorType for BackwardSSTableIterator {
+    type SSTableIterator = BackwardSSTableIterator;
 
     fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
-        ReverseSSTableIterator::new(table, sstable_store)
+        BackwardSSTableIterator::new(table, sstable_store)
     }
 }
 
@@ -162,7 +162,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn test_reverse_sstable_iterator() {
+    async fn test_backward_sstable_iterator() {
         // build remote table
         let sstable_store = mock_sstable_store();
         let table =
@@ -173,7 +173,7 @@ mod tests {
         assert!(table.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
-        let mut sstable_iter = ReverseSSTableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSSTableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reverse_sstable_seek() {
+    async fn test_backward_sstable_seek() {
         let sstable_store = mock_sstable_store();
         let table =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
@@ -200,7 +200,7 @@ mod tests {
         assert!(table.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
-        let mut sstable_iter = ReverseSSTableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSSTableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

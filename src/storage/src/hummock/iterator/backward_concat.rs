@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::ReverseSSTableIterator;
+use crate::hummock::BackwardSSTableIterator;
 
-/// Reversely iterates on multiple non-overlapping tables.
+/// Iterates backwards on multiple non-overlapping tables.
 #[allow(dead_code)]
-pub type ReverseConcatIterator = ConcatIteratorInner<ReverseSSTableIterator>;
+pub type BackwardConcatIterator = ConcatIteratorInner<BackwardSSTableIterator>;
 
 /// Mirrors the tests used for `SSTableIterator`
 #[cfg(test)]
@@ -30,7 +30,7 @@ mod tests {
     use crate::hummock::iterator::HummockIterator;
 
     #[tokio::test]
-    async fn test_reverse_concat_iterator() {
+    async fn test_backward_concat_iterator() {
         let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
@@ -56,7 +56,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let mut iter = ReverseConcatIterator::new(
+        let mut iter = BackwardConcatIterator::new(
             vec![
                 table2.get_sstable_info(),
                 table1.get_sstable_info(),
@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reverse_concat_seek_exists() {
+    async fn test_backward_concat_seek_exists() {
         let sstable_store = mock_sstable_store();
         let table1 = gen_iterator_test_sstable_base(
             0,
@@ -121,7 +121,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let mut iter = ReverseConcatIterator::new(
+        let mut iter = BackwardConcatIterator::new(
             vec![
                 table3.get_sstable_info(),
                 table2.get_sstable_info(),
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reverse_concat_seek_not_exists() {
+    async fn test_backward_concat_seek_not_exists() {
         let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base(
             0,
@@ -207,7 +207,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let mut iter = ReverseConcatIterator::new(
+        let mut iter = BackwardConcatIterator::new(
             vec![
                 table2.get_sstable_info(),
                 table1.get_sstable_info(),
