@@ -14,7 +14,7 @@
 
 //! Generate docker compose yaml files for risedev components.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -42,8 +42,8 @@ pub struct ComposeService {
 #[derive(Debug, Clone, Serialize)]
 pub struct ComposeFile {
     pub version: String,
-    pub services: HashMap<String, ComposeService>,
-    pub volumes: HashMap<String, ComposeVolume>,
+    pub services: BTreeMap<String, ComposeService>,
+    pub volumes: BTreeMap<String, ComposeVolume>,
     pub name: String,
 }
 
@@ -108,7 +108,7 @@ impl Compose for ComputeNodeConfig {
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/risingwave:latest".into(),
+            image: "ghcr.io/singularity-data/compute-node:latest".into(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node
@@ -128,7 +128,7 @@ impl Compose for MetaNodeConfig {
         let command = get_cmd_args(&command, true)?;
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/risingwave:latest".into(),
+            image: "ghcr.io/singularity-data/meta-node:latest".into(),
             command,
             expose: vec![
                 self.port.to_string(),
@@ -149,7 +149,7 @@ impl Compose for FrontendConfig {
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/risingwave:latest".into(),
+            image: "ghcr.io/singularity-data/frontend-node:latest".into(),
             command,
             ports: vec![format!("{}:{}", self.port, self.port)],
             expose: vec![self.port.to_string()],
@@ -169,7 +169,7 @@ impl Compose for CompactorConfig {
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
-            image: "ghcr.io/singularity-data/risingwave:latest".into(),
+            image: "ghcr.io/singularity-data/compactor-node:latest".into(),
             command,
             expose: vec![self.port.to_string()],
             depends_on: provide_meta_node
@@ -222,7 +222,6 @@ impl Compose for RedPandaConfig {
         let mut command = Command::new("redpanda");
 
         command.args(vec![
-            "redpanda",
             "start",
             "--smp",
             "1",

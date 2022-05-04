@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
@@ -43,8 +43,8 @@ fn main() -> Result<()> {
     let risedev_config = ConfigExpander::expand(&risedev_config)?;
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
-    let mut compose_services = HashMap::new();
-    let mut volumes = HashMap::new();
+    let mut compose_services = BTreeMap::new();
+    let mut volumes = BTreeMap::new();
 
     for step in steps.iter() {
         let service = services.get(step).unwrap();
