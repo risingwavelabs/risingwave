@@ -25,15 +25,14 @@ use risingwave_pb::batch_plan::PlanNode;
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
-    LimitExecutor2, MergeSortExchangeExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
-    SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2,
-    ValuesExecutor2,
+    LimitExecutor2, MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, ProjectExecutor2,
+    RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2,
+    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -191,7 +190,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
@@ -221,7 +220,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
