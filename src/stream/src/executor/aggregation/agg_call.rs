@@ -54,7 +54,7 @@ impl AggArgs {
 #[derive(Clone, Debug)]
 pub struct AggCall {
     /// Aggregation Kind for constructing
-    /// [`crate::executor_v2::aggregation::StreamingAggStateImpl`]
+    /// [`crate::executor::aggregation::StreamingAggStateImpl`]
     pub kind: AggKind,
     /// Arguments of aggregation function input.
     pub args: AggArgs,

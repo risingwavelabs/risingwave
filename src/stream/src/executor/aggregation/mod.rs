@@ -303,8 +303,8 @@ pub fn agg_input_array_refs<'a>(
         .collect()
 }
 
-/// Generate [`crate::executor_v2::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor_v2::HashAggExecutor`], the group key indices should
+/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
+/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
 /// be provided.
 pub fn generate_agg_schema(
     input: &dyn Executor,
@@ -328,7 +328,7 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
-/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor_v2::HashAggExecutor`], the
+/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_agg_state<S: StateStore>(
     key: Option<&Row>,

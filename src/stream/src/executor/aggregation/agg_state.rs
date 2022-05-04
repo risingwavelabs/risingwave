@@ -22,10 +22,10 @@ use risingwave_storage::StateStore;
 
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
-/// States for [`crate::executor_v2::LocalSimpleAggExecutor`],
-/// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor_v2::HashAggExecutor`].
+/// States for [`crate::executor::LocalSimpleAggExecutor`],
+/// [`crate::executor::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
 pub struct AggState<S: StateStore> {
-    /// Current managed states for all [`crate::executor_v2::aggregation::AggCall`]s.
+    /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
@@ -85,7 +85,7 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
-    /// that for [`crate::executor_v2::HashAggExecutor`].
+    /// that for [`crate::executor::HashAggExecutor`].
     ///
     /// Returns how many rows are appended in builders.
     pub async fn build_changes(

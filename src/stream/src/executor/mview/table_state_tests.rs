@@ -22,7 +22,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::Keyspace;
 
-// use crate::executor_v2::mview::ManagedMViewState;
+// use crate::executor::mview::ManagedMViewState;
 
 #[tokio::test]
 async fn test_cell_based_table_iter() {
