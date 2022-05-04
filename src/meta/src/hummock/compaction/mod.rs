@@ -245,13 +245,15 @@ impl CompactStatus {
             }
             new_version.levels[compact_task.target_level as usize].table_infos = new_table_infos;
         } else {
-            for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
-                new_version.levels[idx].table_infos.retain(|sst| {
-                    input_level
-                        .table_infos
-                        .iter()
-                        .all(|stale| sst.id != stale.id)
-                });
+            for input_level in &compact_task.input_ssts {
+                new_version.levels[input_level.level_idx as usize]
+                    .table_infos
+                    .retain(|sst| {
+                        input_level
+                            .table_infos
+                            .iter()
+                            .all(|stale| sst.id != stale.id)
+                    });
             }
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
