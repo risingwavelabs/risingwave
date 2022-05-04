@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
+use itertools::Itertools;
+use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -28,7 +29,7 @@ use super::utils::{validate_epoch, validate_table_key_range};
 use super::{HummockStorage, ReverseSSTableIterator, SSTableIterator};
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
-use crate::hummock::utils::prune_ssts;
+use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -94,13 +95,14 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range, reversed);
-            if table_infos.is_empty() {
-                continue;
-            }
-
             match level.level_type() {
                 LevelType::Overlapping => {
+                    let table_infos =
+                        prune_ssts(level.get_table_infos().iter(), &key_range, reversed);
+                    if table_infos.is_empty() {
+                        continue;
+                    }
+
                     for table_info in table_infos.into_iter().rev() {
                         let table = self.sstable_store.sstable(table_info.id).await?;
                         if reversed {
@@ -119,15 +121,33 @@ impl HummockStorage {
                     }
                 }
                 LevelType::Nonoverlapping => {
+                    if level.get_table_infos().is_empty() {
+                        continue;
+                    }
+
+                    let start_table_idx = match key_range.start_bound() {
+                        Included(key) | Excluded(key) => search_sst_idx(level, key),
+                        _ => 0,
+                    };
+                    let end_table_idx = match key_range.end_bound() {
+                        Included(key) | Excluded(key) => search_sst_idx(level, key),
+                        _ => level.table_infos.len().saturating_sub(1),
+                    };
+                    assert!(
+                        start_table_idx < level.table_infos.len()
+                            && end_table_idx < level.table_infos.len()
+                    );
+                    let table_infos = &level.get_table_infos()[start_table_idx..=end_table_idx];
+
                     if reversed {
                         overlapped_backward_iters.push(Box::new(ReverseConcatIterator::new(
-                            table_infos.into_iter().rev().cloned().collect(),
+                            table_infos.iter().rev().cloned().collect(),
                             self.sstable_store(),
                         ))
                             as BoxedBackwardHummockIterator);
                     } else {
                         overlapped_forward_iters.push(Box::new(ConcatIterator::new(
-                            table_infos.into_iter().cloned().collect(),
+                            table_infos.iter().cloned().collect_vec(),
                             self.sstable_store(),
                         ))
                             as BoxedForwardHummockIterator);
@@ -240,14 +260,7 @@ impl StateStore for HummockStorage {
                         }
                     }
                     LevelType::Nonoverlapping => {
-                        let table_idx = level
-                            .table_infos
-                            .partition_point(|table| {
-                                let ord =
-                                    user_key(&table.key_range.as_ref().unwrap().left).cmp(key);
-                                ord == Ordering::Less || ord == Ordering::Equal
-                            })
-                            .saturating_sub(1); // considering the boundary of 0
+                        let table_idx = search_sst_idx(level, key);
                         assert!(table_idx < level.table_infos.len());
                         table_counts += 1;
                         // Because we will keep multiple version of one in the same sst file, we
