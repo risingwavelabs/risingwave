@@ -20,13 +20,19 @@ jobs:
         uses: docker/setup-qemu-action@v1
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
+      - name: Login to Github Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
       - name: Build risingwave
         uses: docker/build-push-action@v2
         with:
           context: .
           file: ./docker/Dockerfile
           target: risingwave
-          push: false
+          push: true
           tags: ghcr.io/singularity-data/risingwave
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
@@ -37,7 +43,7 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           target: compute-node
-          push: false
+          push: true
           tags: ghcr.io/singularity-data/compute-node
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
@@ -47,7 +53,7 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           target: meta-node
-          push: false
+          push: true
           tags: ghcr.io/singularity-data/meta-node
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
@@ -57,7 +63,7 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           target: frontend-node
-          push: false
+          push: true
           tags: ghcr.io/singularity-data/frontend-node
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
@@ -67,7 +73,7 @@ jobs:
           context: .
           file: ./docker/Dockerfile
           target: compactor
-          push: false
+          push: true
           tags: ghcr.io/singularity-data/compactor
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
