@@ -8,6 +8,13 @@ on:
   schedule:
     - cron: "0 18 */1 * *"
 
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/docker_build.yml"
+      - "docker/**"
+
 jobs:
   build_docker_images:
     runs-on: ubuntu-latest
