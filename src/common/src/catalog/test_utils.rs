@@ -17,8 +17,14 @@ use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::ColumnDesc;
 
 pub trait ColumnDescTestExt {
+    /// Create a [`ColumnDesc`] with the given name and type.
+    ///
+    /// **Note: Only used for tests.**
     fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self;
 
+    /// Create a [`ColumnDesc`] with `Struct` type.
+    ///
+    /// **Note: Only used for tests.**
     fn new_struct(name: &str, column_id: i32, type_name: &str, fields: Vec<ColumnDesc>) -> Self;
 }
 
