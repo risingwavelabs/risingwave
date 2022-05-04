@@ -282,6 +282,7 @@ impl SourceParser for ProtobufParser {
 mod tests {
     use std::io::Write;
 
+    use risingwave_common::test_prelude::*;
     use maplit::hashmap;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;

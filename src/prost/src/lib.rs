@@ -65,8 +65,6 @@ pub mod hummock_serde;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);
 
-mod imp;
-
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
