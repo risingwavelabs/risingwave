@@ -183,7 +183,7 @@ pub fn serialize_pk_and_row(
         result.push((key, None));
     } else {
         // Store zero bytes for the sentinel value.
-        result.push((key, Some("".to_string().into_bytes())));
+        result.push((key, Some(vec![])));
     }
 
     Ok(result)
