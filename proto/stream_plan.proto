@@ -72,6 +72,7 @@ message MaterializeNode {
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated int32 distribution_keys = 2;
+  repeated uint32 table_ids = 3;
 }
 
 message HashAggNode {

@@ -198,7 +198,7 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
-                    c.address, c.port, c.dashboard_address, c.dashboard_port
+                    c.address, c.port, c.address, c.dashboard_port
                 ));
             }
             ServiceConfig::Frontend(c) => {
