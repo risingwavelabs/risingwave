@@ -1,6 +1,28 @@
 ---
 version: "3"
 services:
+  compactor-0:
+    image: "ghcr.io/singularity-data/compactor-node:latest"
+    command:
+      - "--host"
+      - "0.0.0.0:6660"
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:1260"
+      - "--metrics-level"
+      - "1"
+      - "--state-store"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "--meta-address"
+      - "http://meta-node-0:5690"
+    expose:
+      - "6660"
+    ports: []
+    depends_on:
+      - meta-node-0
+      - minio-0
+    volumes: []
+    environment: []
+    container_name: compactor-0
   compute-node-0:
     image: "ghcr.io/singularity-data/compute-node:latest"
     command:
@@ -80,17 +102,7 @@ services:
     depends_on: []
     volumes:
       - "minio-0:/data"
-    entrypoint: "
-
-      /bin/sh -c '
-
-      set -e
-
-      mkdir -p \"/data/hummock001\"
-
-      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
-
-      '"
+    entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
     environment:
       - MINIO_PROMETHEUS_AUTH_TYPE=public
       - MINIO_ROOT_PASSWORD=hummockadmin
