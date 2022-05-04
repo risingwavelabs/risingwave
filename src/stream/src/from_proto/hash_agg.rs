@@ -16,19 +16,12 @@
 
 use std::marker::PhantomData;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::ExecutorBuilder;
+use super::*;
 use crate::executor_v2::aggregation::AggCall;
-use crate::executor_v2::{BoxedExecutor, Executor, HashAggExecutor, PkIndices};
-use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
+use crate::executor_v2::{HashAggExecutor, PkIndices};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
@@ -63,7 +56,7 @@ pub struct HashAggExecutorBuilder;
 impl ExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {

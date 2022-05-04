@@ -14,19 +14,11 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-use risingwave_common::error::Result;
-use risingwave_common::try_match_expand;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
-use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 mod cache;
 mod sides;
@@ -35,8 +27,6 @@ use self::sides::*;
 mod impl_;
 
 pub use impl_::LookupExecutorParams;
-
-use super::BoxedExecutor;
 
 #[cfg(test)]
 mod tests;
@@ -106,54 +96,5 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
 
     fn identity(&self) -> &str {
         "LookupExecutor"
-    }
-}
-
-pub struct LookupExecutorBuilder {}
-
-impl ExecutorBuilder for LookupExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
-
-        let arrangement = params.input.remove(1);
-        let stream = params.input.remove(0);
-
-        let arrangement_order_rules = lookup
-            .arrange_key
-            .iter()
-            // TODO: allow descending order
-            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
-            .collect();
-
-        let arrangement_table_id = match lookup.arrangement_table_id.as_ref().unwrap() {
-            ArrangementTableId::IndexId(x) => *x,
-            ArrangementTableId::TableId(x) => *x,
-        };
-
-        let arrangement_col_descs = lookup
-            .get_arrangement_table_info()?
-            .column_descs
-            .iter()
-            .map(ColumnDesc::from)
-            .collect();
-
-        Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
-            schema: Schema::new(node.fields.iter().map(Field::from).collect()),
-            arrangement,
-            stream,
-            arrangement_keyspace: Keyspace::table_root(store, &TableId::from(arrangement_table_id)),
-            arrangement_col_descs,
-            arrangement_order_rules,
-            pk_indices: params.pk_indices,
-            use_current_epoch: lookup.use_current_epoch,
-            stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
-            arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
-            column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-        })))
     }
 }

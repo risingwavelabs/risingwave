@@ -17,26 +17,21 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::error::Result;
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
-use risingwave_common::try_match_expand;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{BatchQueryExecutor, BoxedExecutor, Executor, ExecutorInfo};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use super::*;
+use crate::executor_v2::BatchQueryExecutor;
 
 pub struct BatchQueryExecutorBuilder;
 
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
