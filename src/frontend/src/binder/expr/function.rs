@@ -59,23 +59,9 @@ impl Binder {
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
                 "nullif" => {
-                    if inputs.len() != 2 {
-                        return Err(ErrorCode::BindError(
-                            "Nullif function must contain 2 arguments".to_string(),
-                        )
-                        .into());
-                    }
+                    inputs = Self::rewrite_nullif_args(inputs)?;
                     ExprType::Nullif
                 }
-                "coalesce" => {
-                    if inputs.len() <= 0 {
-                        return Err(ErrorCode::BindError(
-                            "Coalesce function must contain at least 1 argument".to_string(),
-                        )
-                            .into());
-                    }
-                    ExprType::Coalesce
-                },
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -95,6 +81,17 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    fn rewrite_nullif_args(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
+        } else {
+            inputs[1] =
+                FunctionCall::new(ExprType::Equal, vec![inputs[0].clone(), inputs[1].clone()])?
+                    .into();
+            Ok(inputs)
         }
     }
 
