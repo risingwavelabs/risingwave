@@ -115,6 +115,13 @@ impl Compose for FrontendConfig {
             command,
             ports: vec![format!("{}:{}", self.port, self.port)],
             expose: vec![self.port.to_string()],
+            depends_on: self
+                .provide_meta_node
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|x| x.id.clone())
+                .collect(),
             ..Default::default()
         })
     }
