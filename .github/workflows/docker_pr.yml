@@ -1,0 +1,64 @@
+name: Docker
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/docker_build.yml"
+      - "docker/**"
+
+jobs:
+  build_docker_images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Build risingwave
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: risingwave
+          push: false
+          tags: |
+            ghcr.io/singularity-data/risingwave
+      # All below steps will re-use the previous docker cache, so no actual build will happen.
+      - name: Build compute-node
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: compute-node
+          push: false
+          tags: |
+            ghcr.io/singularity-data/compute-node
+      - name: Build meta-node
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: meta-node
+          push: false
+          tags: |
+            ghcr.io/singularity-data/meta-node
+      - name: Build frontend-node
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: frontend-node
+          push: false
+          tags: |
+            ghcr.io/singularity-data/frontend-node
+      - name: Build compactor
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: compactor
+          push: false
+          tags: |
+            ghcr.io/singularity-data/compactor

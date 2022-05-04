@@ -107,6 +107,34 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  ######################################
+  ### Configurations used in Compose ###
+  ######################################
+
+  compose:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      listen-address: "0.0.0.0"
+
+      # Id must starts with `meta-node`, therefore to be picked up by other
+      # components.
+      id: meta-node-0
+
+      # Advertise address can be `id`, so as to use docker's DNS. If running
+      # in host network mode, we should use IP directly in this field.
+      address: ${id}
+
+    - use: compute-node
+      listen-address: "0.0.0.0"
+      id: compute-node-0
+      address: ${id}
+
+    - use: frontend
+      listen-address: "0.0.0.0"
+      id: frontend-node-0
+      address: ${id}
+
   #################################
   ### Configurations used on CI ###
   #################################

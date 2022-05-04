@@ -90,7 +90,7 @@ impl CompactorService {
         match provide_meta_node.as_slice() {
             [] => {
                 return Err(anyhow!(
-                    "Cannot start node: no meta node found in this configuration."
+                    "Cannot configure node: no meta node found in this configuration."
                 ));
             }
             [meta_node] => {
@@ -99,7 +99,7 @@ impl CompactorService {
             }
             other_meta_nodes => {
                 return Err(anyhow!(
-                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
                     other_meta_nodes.len()
                 ));
             }

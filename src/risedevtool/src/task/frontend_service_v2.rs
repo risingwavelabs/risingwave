@@ -49,7 +49,7 @@ impl FrontendServiceV2 {
         match provide_meta_node.len() {
             0 => {
                 return Err(anyhow!(
-                    "Cannot start node: no meta node found in this configuration."
+                    "Cannot configure node: no meta node found in this configuration."
                 ));
             }
             1 => {
@@ -59,7 +59,7 @@ impl FrontendServiceV2 {
             }
             other_size => {
                 return Err(anyhow!(
-                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
                     other_size
                 ));
             }

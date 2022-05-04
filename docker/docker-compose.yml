@@ -15,25 +15,19 @@ services:
     depends_on:
       - minio
     entrypoint: >
-      /bin/sh -c "
-      until (mc alias set hummock-minio http://minio:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY) do echo '...waiting...' && sleep 1; done;
-      mc admin user add hummock-minio/ hummock 12345678;
-      mc admin policy set hummock-minio/ readwrite user=hummock;
-      mc mb hummock-minio/hummock001;
-      exit 0;
-      "
+      /bin/sh -c " until (mc alias set hummock-minio http://minio:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY) do echo '...waiting...' && sleep 1; done; mc admin user add hummock-minio/ hummock 12345678; mc admin policy set hummock-minio/ readwrite user=hummock; mc mb hummock-minio/hummock001; exit 0; "
   metanode:
     container_name: metanode_container
-    image: ghcr.io/singularity-data/risingwave:latest
-    command: /risingwave/bin/meta-node --host 0.0.0.0:5690 --dashboard-host 0.0.0.0:5691 --prometheus-host 0.0.0.0:1250
+    image: ghcr.io/singularity-data/meta-node:latest
+    command: --host 0.0.0.0:5690 --dashboard-host 0.0.0.0:5691 --prometheus-host 0.0.0.0:1250
     expose:
       - "5690"
       - "5691"
       - "1250"
   computenode:
     container_name: computenode_container
-    image: ghcr.io/singularity-data/risingwave:latest
-    command: /risingwave/bin/compute-node --config-path /risingwave/config/risingwave.toml --client-address computenode:5688 --host 0.0.0.0:5688 --prometheus-listener-addr 0.0.0.0:1222 --metrics-level 1 --state-store hummock+minio://hummock:12345678@minio:9000/hummock001 --meta-address http://metanode:5690
+    image: ghcr.io/singularity-data/compute-node:latest
+    command: --config-path /risingwave/config/risingwave.toml --client-address computenode:5688 --host 0.0.0.0:5688 --prometheus-listener-addr 0.0.0.0:1222 --metrics-level 1 --state-store hummock+minio://hummock:12345678@minio:9000/hummock001 --meta-address http://metanode:5690
     expose:
       - "5688"
       - "1222"
@@ -43,8 +37,8 @@ services:
       - metanode
   frontend:
     container_name: frontend_container
-    image: ghcr.io/singularity-data/risingwave:latest
-    command: /risingwave/bin/frontend-v2 --client-address frontend:4566 --host 0.0.0.0:4566 --meta-addr http://metanode:5690
+    image: ghcr.io/singularity-data/frontend-node:latest
+    command: --client-address frontend:4566 --host 0.0.0.0:4566 --meta-addr http://metanode:5690
     ports:
       - "4566:4566"
     depends_on:
