@@ -36,6 +36,7 @@ pub struct ComposeService {
     pub volumes: Vec<String>,
     pub entrypoint: Option<String>,
     pub environment: Vec<String>,
+    pub container_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,6 +44,7 @@ pub struct ComposeFile {
     pub version: String,
     pub services: HashMap<String, ComposeService>,
     pub volumes: HashMap<String, ComposeVolume>,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

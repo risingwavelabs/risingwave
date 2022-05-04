@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 
     for step in steps.iter() {
         let service = services.get(step).unwrap();
-        let compose = match service {
+        let mut compose = match service {
             ServiceConfig::Minio(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 c.compose()?
@@ -67,6 +67,7 @@ fn main() -> Result<()> {
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => c.compose()?,
         };
+        compose.container_name = service.id().to_string();
         compose_services.insert(step.to_string(), compose);
     }
 
@@ -74,6 +75,7 @@ fn main() -> Result<()> {
         version: "3".into(),
         services: compose_services,
         volumes,
+        name: format!("risingwave-{}", opts.profile),
     };
 
     let yaml = serde_yaml::to_string(&compose_file)?;
