@@ -12,77 +12,84 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
-use std::sync::Arc;
-use std::vec::Vec;
+use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
+use num_traits::CheckedSub;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_common::util::sort_util::{HeapElem, OrderPair};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
+use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::expr::expr_node;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-
 pub struct HopWindowExecutor2 {
     child: BoxedExecutor2,
     identity: String,
-    chunk_size: usize,
-    offset: usize,
+    schema: Schema,
+    time_col_idx: usize,
+    window_slide: IntervalUnit,
+    window_size: IntervalUnit,
 }
 
 impl BoxedExecutor2Builder for HopWindowExecutor2 {
     fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
-
-        let top_n_node =
-            try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::TopN)?;
-
-        let order_pairs = top_n_node
-            .column_orders
-            .iter()
-            .map(OrderPair::from_prost)
-            .collect();
+        let hop_window_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::HopWindow
+        )?;
+        let time_col = hop_window_node.get_time_col()?.column_idx as usize;
+        let window_slide = hop_window_node.get_window_slide()?.into();
+        let window_size = hop_window_node.get_window_size()?.into();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build2()?;
-            return Ok(Box::new(Self::new(
+            let schema = child
+                .schema()
+                .clone()
+                .into_fields()
+                .into_iter()
+                .chain([
+                    Field::with_name(DataType::Timestamp, "window_start"),
+                    Field::with_name(DataType::Timestamp, "window_end"),
+                ])
+                .collect();
+            return Ok(Box::new(HopWindowExecutor2::new(
                 child,
-                order_pairs,
-                top_n_node.get_limit() as usize,
-                top_n_node.get_offset() as usize,
+                schema,
+                time_col,
+                window_slide,
+                window_size,
                 source.plan_node().get_identity().clone(),
-                DEFAULT_CHUNK_BUFFER_SIZE,
             )));
         }
-        Err(InternalError("TopN must have one child".to_string()).into())
+        Err(InternalError("HopWindow must have one child".to_string()).into())
     }
 }
 
 impl HopWindowExecutor2 {
     fn new(
         child: BoxedExecutor2,
-        order_pairs: Vec<OrderPair>,
-        limit: usize,
-        offset: usize,
+        schema: Schema,
+        time_col_idx: usize,
+        window_slide: IntervalUnit,
+        window_size: IntervalUnit,
         identity: String,
-        chunk_size: usize,
     ) -> Self {
         Self {
-            top_n_heap: TopNHeap {
-                min_heap: BinaryHeap::new(),
-                size: limit + offset,
-                order_pairs: Arc::new(order_pairs),
-            },
             child,
             identity,
-            chunk_size,
-            offset,
+            schema,
+            time_col_idx,
+            window_slide,
+            window_size,
         }
     }
 }
@@ -103,83 +110,113 @@ impl Executor2 for HopWindowExecutor2 {
 
 impl HopWindowExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
-            self.top_n_heap.fit(data_chunk);
-        }
+    async fn do_execute(self: Box<Self>) {
+        let Self {
+            child,
+            time_col_idx,
+            window_slide,
+            window_size,
+            ..
+        } = *self;
+        let units = window_size
+            .exact_div(&window_slide)
+            .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "window_size {} cannot be divided by window_slide {}",
+                    window_size, window_slide
+                )))
+            })?
+            .get();
 
-        if let Some(data_chunk) = self.top_n_heap.dump(self.offset) {
-            let batch_chunks = DataChunk::rechunk(&[data_chunk], DEFAULT_CHUNK_BUFFER_SIZE)?;
-            for ret_chunk in batch_chunks {
-                yield ret_chunk
+        let schema = self.schema;
+        let time_col_data_type = schema.fields()[time_col_idx].data_type();
+        let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
+
+        let window_slide_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
+                .boxed();
+
+        // The first window_start of hop window should be:
+        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
+        // Let's pre calculate (`window_size` - `window_slide`).
+        let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
+            RwError::from(ErrorCode::InternalError(format!(
+                "window_size {} cannot be subtracted by window_slide {}",
+                window_size, window_slide
+            )))
+        })?;
+        let window_size_sub_slide_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_size_sub_slide)),
+        )
+        .boxed();
+        let hop_expr = new_binary_expr(
+            expr_node::Type::TumbleStart,
+            risingwave_common::types::DataType::Timestamp,
+            new_binary_expr(
+                expr_node::Type::Subtract,
+                DataType::Timestamp,
+                time_col_ref,
+                window_size_sub_slide_expr,
+            ),
+            window_slide_expr,
+        );
+
+        #[for_await]
+        for data_chunk in child.execute() {
+            let data_chunk = data_chunk?;
+            let hop_start = hop_expr.eval(&data_chunk)?;
+            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
+            let (origin_cols, visibility) = data_chunk.into_parts();
+            // SAFETY: Already compacted.
+            assert!(visibility.is_none());
+            for i in 0..units {
+                let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
+                    RwError::from(ErrorCode::InternalError(format!(
+                        "window_slide {} cannot be multiplied by {}",
+                        window_slide, i
+                    )))
+                })?;
+                let window_start_offset_expr = LiteralExpression::new(
+                    DataType::Interval,
+                    Some(ScalarImpl::Interval(window_start_offset)),
+                )
+                .boxed();
+                let window_end_offset =
+                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
+                        RwError::from(ErrorCode::InternalError(format!(
+                            "window_slide {} cannot be multiplied by {}",
+                            window_slide, i
+                        )))
+                    })?;
+                let window_end_offset_expr = LiteralExpression::new(
+                    DataType::Interval,
+                    Some(ScalarImpl::Interval(window_end_offset)),
+                )
+                .boxed();
+                let window_start_expr = new_binary_expr(
+                    expr_node::Type::Add,
+                    DataType::Timestamp,
+                    InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                    window_start_offset_expr,
+                );
+                let window_start_col = window_start_expr.eval(&hop_start_chunk)?;
+                let window_end_expr = new_binary_expr(
+                    expr_node::Type::Add,
+                    DataType::Timestamp,
+                    InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                    window_end_offset_expr,
+                );
+                let window_end_col = window_end_expr.eval(&hop_start_chunk)?;
+                let mut new_cols = origin_cols.clone();
+                new_cols.extend_from_slice(&[
+                    Column::new(window_start_col),
+                    Column::new(window_end_col),
+                ]);
+                let new_chunk = DataChunk::new(new_cols, None);
+                yield new_chunk;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use futures::stream::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk, I32Array};
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-
-    use super::*;
-    use crate::executor::test_utils::MockExecutor;
-
-    #[tokio::test]
-    async fn test_simple_top_n_executor() {
-        let col0 = column_nonnull! { I32Array, [1, 2, 3, 4, 5] };
-        let col1 = column_nonnull! { I32Array, [5, 4, 3, 2, 1] };
-        let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-            ],
-        };
-        let mut mock_executor = MockExecutor::new(schema);
-        mock_executor.add(data_chunk);
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
-            },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
-            },
-        ];
-        let top_n_executor = Box::new(HopWindowExecutor2::new(
-            Box::new(mock_executor),
-            order_pairs,
-            3,
-            1,
-            "HopWindowExecutor2".to_string(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
-        ));
-        let fields = &top_n_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int32);
-        assert_eq!(fields[1].data_type, DataType::Int32);
-
-        let mut stream = top_n_executor.execute();
-        let res = stream.next().await;
-
-        assert!(matches!(res, Some(_)));
-        if let Some(res) = res {
-            let res = res.unwrap();
-            assert_eq!(res.cardinality(), 3);
-            assert_eq!(
-                res.column_at(0).array().as_int32().iter().collect_vec(),
-                vec![Some(4), Some(3), Some(2)]
-            );
-        }
-
-        let res = stream.next().await;
-        assert!(matches!(res, None));
     }
 }
