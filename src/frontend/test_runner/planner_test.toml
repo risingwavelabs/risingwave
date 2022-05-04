@@ -56,3 +56,14 @@ rm *.apply.yaml
 echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
 '''
 category = "RiseDev - Test"
+
+[tasks.run-planner-test]
+description = "Run planner test"
+category = "RiseDev - Test"
+dependencies = ["warn-on-missing-tools"]
+script = '''
+#!/bin/bash
+set -e
+
+cargo nextest run -p risingwave_frontend_test_runner "$@"
+'''

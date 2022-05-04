@@ -20,8 +20,9 @@ pub struct KafkaGen;
 
 impl KafkaGen {
     pub fn gen_server_properties(&self, config: &KafkaConfig, kafka_log_dirs: &str) -> String {
-        let kafka_host = &config.address;
-        let kafka_port = config.port;
+        let kafka_listen_host = &config.listen_address;
+        let kafka_advertise_host = &config.address;
+        let kafka_port = &config.port;
         let zookeeper_hosts = config
             .provide_zookeeper
             .as_ref()
@@ -64,12 +65,12 @@ broker.id={kafka_broker_id}
 #     listeners = listener_name://host_name:port
 #   EXAMPLE:
 #     listeners = PLAINTEXT://your.host.name:9092
-listeners=PLAINTEXT://{kafka_host}:{kafka_port}
+listeners=PLAINTEXT://{kafka_listen_host}:{kafka_port}
 
 # Hostname and port the broker will advertise to producers and consumers. If not set, 
 # it uses the value for "listeners" if configured.  Otherwise, it will use the value
 # returned from java.net.InetAddress.getCanonicalHostName().
-advertised.listeners=PLAINTEXT://{kafka_host}:{kafka_port}
+advertised.listeners=PLAINTEXT://{kafka_advertise_host}:{kafka_port}
 
 # Maps listener names to security protocols, the default is for them to be the same. See the config documentation for more details
 #listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_SSL:SASL_SSL

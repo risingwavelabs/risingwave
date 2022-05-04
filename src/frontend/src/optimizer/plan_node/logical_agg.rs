@@ -42,6 +42,8 @@ pub struct PlanAggCall {
 
     /// Column indexes of input columns
     pub inputs: Vec<InputRef>,
+
+    pub distinct: bool,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -60,8 +62,7 @@ impl PlanAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
-            // TODO: support distinct
-            distinct: false,
+            distinct: self.distinct,
         }
     }
 
@@ -70,6 +71,7 @@ impl PlanAggCall {
             agg_kind: AggKind::Count,
             return_type: DataType::Int64,
             inputs: vec![],
+            distinct: false,
         }
     }
 }
@@ -152,14 +154,14 @@ impl ExprRewriter for ExprHandler {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs) = agg_call.decompose();
+        let (agg_kind, inputs, distinct) = agg_call.decompose();
 
         for i in &inputs {
             if i.has_agg_call() {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
                     "Aggregation calls should not be nested".into(),
                 ));
-                return AggCall::new(agg_kind, inputs).unwrap().into();
+                return AggCall::new(agg_kind, inputs, distinct).unwrap().into();
             }
         }
 
@@ -188,6 +190,7 @@ impl ExprRewriter for ExprHandler {
                 agg_kind: AggKind::Sum,
                 return_type: left_return_type.clone(),
                 inputs: input_refs.clone(),
+                distinct,
             });
             let left = ExprImpl::from(InputRef::new(
                 self.group_key_len + self.agg_calls.len() - 1,
@@ -204,6 +207,7 @@ impl ExprRewriter for ExprHandler {
                 agg_kind: AggKind::Count,
                 return_type: right_return_type.clone(),
                 inputs: input_refs,
+                distinct,
             });
 
             let right = InputRef::new(
@@ -217,6 +221,7 @@ impl ExprRewriter for ExprHandler {
                 agg_kind,
                 return_type: return_type.clone(),
                 inputs: input_refs,
+                distinct,
             });
             ExprImpl::from(InputRef::new(
                 self.group_key_len + self.agg_calls.len() - 1,
@@ -253,6 +258,16 @@ impl ExprRewriter for ExprHandler {
             ));
             expr
         }
+    }
+
+    fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
+        if subquery.is_correlated() {
+            self.error = Some(ErrorCode::NotImplemented(
+                "correlated subquery in HAVING or SELECT with agg".into(),
+                2275.into(),
+            ));
+        }
+        subquery.into()
     }
 }
 
@@ -520,14 +535,7 @@ impl ToStream for LogicalAgg {
         // LogicalAgg.
         // Please note that the index of group keys need not be changed.
         let (mut agg_calls, group_keys, input) = agg.decompose();
-        agg_calls.insert(
-            0,
-            PlanAggCall {
-                agg_kind: AggKind::Count,
-                return_type: DataType::Int64,
-                inputs: vec![],
-            },
-        );
+        agg_calls.insert(0, PlanAggCall::count_star());
 
         let (mut map, _) = out_col_change.into_parts();
         map.iter_mut().skip(group_keys.len()).for_each(|index| {
@@ -602,7 +610,8 @@ mod tests {
 
         // Test case: select v1, min(v2) from test group by v1;
         {
-            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let min_v2 =
+                AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()], false).unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
             let group_exprs = vec![input_ref_1.clone().into()];
 
@@ -620,8 +629,10 @@ mod tests {
 
         // Test case: select v1, min(v2) + max(v3) from t group by v1;
         {
-            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
-            let max_v3 = AggCall::new(AggKind::Max, vec![input_ref_3.clone().into()]).unwrap();
+            let min_v2 =
+                AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()], false).unwrap();
+            let max_v3 =
+                AggCall::new(AggKind::Max, vec![input_ref_3.clone().into()], false).unwrap();
             let func_call =
                 FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
@@ -654,7 +665,7 @@ mod tests {
                 vec![input_ref_1.into(), input_ref_3.into()],
             )
             .unwrap();
-            let agg_call = AggCall::new(AggKind::Min, vec![v1_mult_v3.into()]).unwrap();
+            let agg_call = AggCall::new(AggKind::Min, vec![v1_mult_v3.into()], false).unwrap();
             let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
             let group_exprs = vec![input_ref_2.into()];
 
@@ -699,6 +710,7 @@ mod tests {
             agg_kind: AggKind::Min,
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
+            distinct: false,
         };
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
@@ -752,6 +764,7 @@ mod tests {
             agg_kind: AggKind::Min,
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
+            distinct: false,
         };
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
@@ -814,11 +827,13 @@ mod tests {
                 agg_kind: AggKind::Min,
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
+                distinct: false,
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
+                distinct: false,
             },
         ];
         let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());

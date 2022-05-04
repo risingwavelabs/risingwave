@@ -193,6 +193,7 @@ impl From<&ProstTable> for TableCatalog {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
