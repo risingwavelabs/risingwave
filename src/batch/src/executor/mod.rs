@@ -26,14 +26,14 @@ use risingwave_pb::batch_plan::PlanNode;
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
     LimitExecutor2, NestedLoopJoinExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
-    SortAggExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2,
+    ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -194,7 +194,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
@@ -224,7 +224,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Values => ValuesExecutor2,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor,

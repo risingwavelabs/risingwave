@@ -14,23 +14,26 @@
 
 use std::cmp::Ordering;
 
+use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode;
 use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
-use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::JoinType;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor2::join::row_level_iter::RowLevelIter;
+use crate::executor2::join::JoinType;
+use crate::executor2::{
+    BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2, ExecutorBuilder,
+};
 
-/// [`SortMergeJoinExecutor`] will not sort the data. If the join key is not sorted, optimizer
+/// [`SortMergeJoinExecutor2`] will not sort the data. If the join key is not sorted, optimizer
 /// should insert a sort executor above the data source.
-pub struct SortMergeJoinExecutor {
+pub struct SortMergeJoinExecutor2 {
     /// Ascending or descending. Note that currently the sort order of probe side and build side
     /// should be the same.
     sort_order: OrderType,
@@ -57,14 +60,21 @@ pub struct SortMergeJoinExecutor {
     identity: String,
 }
 
-#[async_trait::async_trait]
-impl Executor for SortMergeJoinExecutor {
-    async fn open(&mut self) -> risingwave_common::error::Result<()> {
-        // Init data source.
-        self.probe_side_source.load_data().await?;
-        self.build_side_source.load_data().await
+impl Executor2 for SortMergeJoinExecutor2 {
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl SortMergeJoinExecutor2 {
     /// The code logic:
     /// For each loop, only process one tuple from probe side and one tuple from build side. After
     /// one loop, either probe side or build side will advance to next tuple and start a new
@@ -73,11 +83,17 @@ impl Executor for SortMergeJoinExecutor {
     /// If yes, directly append last join results until next unequal probe key.
     ///
     /// The complexity is hard to avoid. May need more tests to ensure the correctness.
-    async fn next(&mut self) -> risingwave_common::error::Result<Option<DataChunk>> {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(mut self: Box<Self>) {
+        // Init data source.
+        self.probe_side_source.load_data().await?;
+        self.build_side_source.load_data().await?;
+
         loop {
             // If current row is the same with last row. Directly append cached join results.
             if self.compare_with_last_row(self.probe_side_source.get_current_row_ref()) {
-                if let Some(cur_probe_row) = self.probe_side_source.get_current_row_ref() {
+                let current_row_ref = self.probe_side_source.get_current_row_ref();
+                if let Some(cur_probe_row) = current_row_ref {
                     while self.last_join_results_write_idx < self.last_join_results.len() {
                         let build_row = &self.last_join_results[self.last_join_results_write_idx];
                         self.last_join_results_write_idx += 1;
@@ -89,7 +105,7 @@ impl Executor for SortMergeJoinExecutor {
                             .chunk_builder
                             .append_one_row_from_datum_refs(datum_refs)?
                         {
-                            return Ok(Some(ret_chunk));
+                            yield ret_chunk;
                         }
                     }
                 }
@@ -156,7 +172,7 @@ impl Executor for SortMergeJoinExecutor {
                                 .append_one_row_from_datum_refs(join_datum_refs)?;
                             self.build_side_source.advance_row();
                             if let Some(ret_chunk) = ret {
-                                return Ok(Some(ret_chunk));
+                                yield ret_chunk;
                             }
                         }
                     }
@@ -169,30 +185,18 @@ impl Executor for SortMergeJoinExecutor {
                 }
                 // Once probe row is None, consume all results or terminate.
                 (_, _) => {
-                    return if let Some(ret) = self.chunk_builder.consume_all()? {
-                        Ok(Some(ret))
+                    if let Some(ret) = self.chunk_builder.consume_all()? {
+                        yield ret
                     } else {
-                        Ok(None)
+                        break;
                     };
                 }
             }
         }
     }
-
-    async fn close(&mut self) -> risingwave_common::error::Result<()> {
-        Ok(())
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
-    }
 }
 
-impl SortMergeJoinExecutor {
+impl SortMergeJoinExecutor2 {
     pub(super) fn new(
         join_type: JoinType,
         schema: Schema,
@@ -228,10 +232,10 @@ impl SortMergeJoinExecutor {
     }
 }
 
-impl BoxedExecutorBuilder for SortMergeJoinExecutor {
-    fn new_boxed_executor(
+impl BoxedExecutor2Builder for SortMergeJoinExecutor2 {
+    fn new_boxed_executor2(
         source: &ExecutorBuilder,
-    ) -> risingwave_common::error::Result<BoxedExecutor> {
+    ) -> risingwave_common::error::Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 2);
 
         let sort_merge_join_node = try_match_expand!(
@@ -249,8 +253,8 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build()?;
-                let right_child = source.clone_for_plan(right_plan).build()?;
+                let left_child = source.clone_for_plan(left_plan).build2()?;
+                let right_child = source.clone_for_plan(right_plan).build2()?;
 
                 let fields = left_child
                     .schema()
@@ -277,18 +281,15 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                         // TODO: Support more join type.
                         let probe_table_source = RowLevelIter::new(left_child);
                         let build_table_source = RowLevelIter::new(right_child);
-                        Ok(Box::new(
-                            Self::new(
-                                join_type,
-                                schema,
-                                probe_table_source,
-                                build_table_source,
-                                probe_key_idxs,
-                                build_key_idxs,
-                                "SortMergeJoinExecutor".to_string(),
-                            )
-                            .fuse(),
-                        ))
+                        Ok(Box::new(Self::new(
+                            join_type,
+                            schema,
+                            probe_table_source,
+                            build_table_source,
+                            probe_key_idxs,
+                            build_key_idxs,
+                            "SortMergeJoinExecutor2".to_string(),
+                        )))
                     }
                     _ => Err(ErrorCode::NotImplemented(
                         format!("Do not support {:?} join type now.", join_type),
@@ -312,11 +313,10 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
-    use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
-    use crate::executor::BoxedExecutor;
-    use crate::executor2::executor_wrapper::ExecutorWrapper;
+    use crate::executor2::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor2};
+    use crate::executor2::join::JoinType;
+    use crate::executor2::BoxedExecutor2;
 
     struct TestFixture {
         left_types: Vec<DataType>,
@@ -348,7 +348,7 @@ mod tests {
             }
         }
 
-        fn create_left_executor(&self) -> BoxedExecutor {
+        fn create_left_executor(&self) -> BoxedExecutor2 {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -389,7 +389,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_right_executor(&self) -> BoxedExecutor {
+        fn create_right_executor(&self) -> BoxedExecutor2 {
             let schema = Schema {
                 fields: vec![
                     Field::unnamed(DataType::Int32),
@@ -444,7 +444,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_join_executor(&self) -> BoxedExecutor {
+        fn create_join_executor(&self) -> BoxedExecutor2 {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -459,14 +459,14 @@ mod tests {
                 .collect();
             let schema = Schema { fields };
 
-            Box::new(SortMergeJoinExecutor::new(
+            Box::new(SortMergeJoinExecutor2::new(
                 join_type,
                 schema,
                 RowLevelIter::new(left_child),
                 RowLevelIter::new(right_child),
                 vec![0],
                 vec![0],
-                "SortMergeJoinExecutor".to_string(),
+                "SortMergeJoinExecutor2".to_string(),
             ))
         }
 
@@ -475,11 +475,7 @@ mod tests {
             let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
             expected_mock_exec.add(expected);
 
-            diff_executor_output(
-                Box::new(ExecutorWrapper::from(join_executor)),
-                Box::new(expected_mock_exec),
-            )
-            .await;
+            diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
         }
     }
 
