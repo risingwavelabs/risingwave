@@ -122,9 +122,11 @@ impl ColPrunable for LogicalTopN {
             order_required_cols
         };
 
-        let input_required_cols = order_required_cols
-            .union(&input_required_bitset)
-            .collect_vec();
+        let input_required_cols = {
+            let mut tmp = order_required_cols.clone();
+            tmp.union_with(&input_required_bitset);
+            tmp.ones().collect_vec()
+        };
         let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         let new_order = Order {
             field_order: self

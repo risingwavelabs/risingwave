@@ -154,16 +154,23 @@ impl LogicalJoin {
         Self::o2r_col_mapping_inner(left_len, right_len, join_type).inverse()
     }
 
-    fn on2o_col_mapping_inner(
-        l2o_mapping: ColIndexMapping,
-        r2o_mapping: ColIndexMapping,
-        left_len: usize,
-    ) -> ColIndexMapping {
-        let (mut r2o_mapping_vec, _) = r2o_mapping.into_parts();
-        for target in r2o_mapping_vec.iter_mut().flatten() {
-            *target += left_len;
-        }
-        l2o_mapping.union(&ColIndexMapping::new(r2o_mapping_vec))
+    pub fn l2on_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::identity(self.left().schema().len())
+    }
+
+    pub fn on2l_col_mapping(&self) -> ColIndexMapping {
+        self.l2on_col_mapping().inverse()
+    }
+
+    pub fn r2on_col_mapping(&self) -> ColIndexMapping {
+        ColIndexMapping::with_shift_offset(
+            self.right().schema().len(),
+            self.left().schema().len().try_into().unwrap(),
+        )
+    }
+
+    pub fn on2r_col_mapping(&self) -> ColIndexMapping {
+        self.r2on_col_mapping().inverse()
     }
 
     pub fn o2l_col_mapping(&self) -> ColIndexMapping {
@@ -199,11 +206,20 @@ impl LogicalJoin {
     }
 
     pub fn on2o_col_mapping(&self) -> ColIndexMapping {
-        Self::on2o_col_mapping_inner(
-            self.l2o_col_mapping(),
-            self.r2o_col_mapping(),
-            self.left().schema().len(),
-        )
+        let l2o = self.l2o_col_mapping();
+        let r2o = self.r2o_col_mapping();
+        let left_len = self.left().schema().len();
+        let right_len = self.right().schema().len();
+        let on2o: Vec<Option<usize>> = (0..left_len + right_len)
+            .map(|i| {
+                if i < left_len {
+                    l2o.try_map(i)
+                } else {
+                    r2o.try_map(i - left_len)
+                }
+            })
+            .collect_vec();
+        ColIndexMapping::new(on2o)
     }
 
     pub fn o2on_col_mapping(&self) -> ColIndexMapping {
@@ -285,14 +301,17 @@ impl PlanTreeNodeBinary for LogicalJoin {
         right: PlanRef,
         right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let new_on = self
-            .on()
-            .clone()
-            .rewrite_expr(&mut Self::on2o_col_mapping_inner(
-                left_col_change.clone(),
-                right_col_change.clone(),
-                left.schema().len(),
-            ));
+        let new_on = {
+            let (mut left_map, _) = left_col_change.clone().into_parts();
+            let (mut right_map, _) = right_col_change.clone().into_parts();
+            for i in &mut right_map {
+                *i = Some(i.unwrap() + left.schema().len());
+            }
+            left_map.append(&mut right_map);
+            self.on()
+                .clone()
+                .rewrite_expr(&mut ColIndexMapping::new(left_map))
+        };
         let join = Self::new(left, right, self.join_type, new_on);
 
         let old_o2l = self.o2l_col_mapping().composite(&left_col_change);
@@ -313,7 +332,7 @@ impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let left_len = self.left().schema().len();
         let right_len = self.right().schema().len();
-        let _output_column_cnt = Self::out_column_num(left_len, right_len, self.join_type());
+        let output_column_cnt = Self::out_column_num(left_len, right_len, self.join_type());
 
         let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
 
@@ -325,48 +344,58 @@ impl ColPrunable for LogicalJoin {
             let on2o_col_mapping = self.on2o_col_mapping();
             on2o_col_mapping.rewrite_bitset(&condition)
         };
-
-        let total_required_cols = upstream_required_cols
-            .union(&join_condition_required_cols)
-            .collect_vec();
+        let total_required_cols = {
+            let mut tmp = upstream_required_cols.clone();
+            tmp.union_with(&join_condition_required_cols);
+            tmp.ones().collect_vec()
+        };
 
         let (left_required_cols, right_required_cols): (Vec<_>, Vec<_>) = {
             let o2l_mapping = self.o2l_col_mapping();
-            let o2r_mapping = self.o2l_col_mapping();
-            total_required_cols
-                
-                .into_iter()
-                .partition_map(|idx_in_output| {
-                    if let Some(idx_in_left) = o2l_mapping.try_map(idx_in_output) {
-                        Either::Left(idx_in_left)
-                    } else {
-                        Either::Right(o2r_mapping.map(idx_in_output))
-                    }
-                })
+            let o2r_mapping = self.o2r_col_mapping();
+            total_required_cols.iter().partition_map(|&idx_in_output| {
+                if let Some(idx_in_left) = o2l_mapping.try_map(idx_in_output) {
+                    Either::Left(idx_in_left)
+                } else {
+                    Either::Right(o2r_mapping.map(idx_in_output))
+                }
+            })
         };
 
-        let new_on = self
-            .on
-            .clone()
-            .rewrite_expr(&mut Self::on2o_col_mapping_inner(
-                ColIndexMapping::with_remaining_columns(&left_required_cols),
-                ColIndexMapping::with_remaining_columns(&right_required_cols),
-                left_required_cols.len(),
-            ));
-
+        let new_on = {
+            let left_col_change = ColIndexMapping::with_remaining_columns(&left_required_cols);
+            let right_col_change = ColIndexMapping::with_remaining_columns(&right_required_cols);
+            let mut new_map: Vec<Option<usize>> = vec![None; left_len + right_len];
+            let (left_map, _) = left_col_change.into_parts();
+            let (right_map, _) = right_col_change.into_parts();
+            for (i, v) in left_map.into_iter().enumerate() {
+                new_map[i] = v;
+            }
+            for (i, v) in right_map.into_iter().enumerate() {
+                new_map[i + left_len] = v.map(|x| x + left_required_cols.len());
+            }
+            self.on
+                .clone()
+                .rewrite_expr(&mut ColIndexMapping::new(new_map))
+        };
         let join = LogicalJoin::new(
             self.left.prune_col(&left_required_cols),
             self.right.prune_col(&right_required_cols),
             self.join_type,
             new_on,
         );
-
         if join_condition_required_cols.is_subset(&upstream_required_cols) {
             join.into()
         } else {
+            let mapping = ColIndexMapping::with_remaining_columns(&total_required_cols);
+            let required_cols = required_cols
+                .iter()
+                .copied()
+                .filter_map(|x| mapping.try_map(x))
+                .collect_vec();
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(required_cols),
+                ColIndexMapping::with_remaining_columns(&required_cols),
             )
         }
     }

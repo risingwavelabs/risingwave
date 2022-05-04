@@ -110,23 +110,29 @@ impl ColPrunable for LogicalFilter {
         let predicate_required_cols: FixedBitSet = visitor.into();
 
         let mut predicate = self.predicate.clone();
-        let input_required_cols = predicate_required_cols
-            .union(&required_cols_bitset)
-            .collect_vec();
+        let input_required_cols = {
+            let mut tmp = predicate_required_cols.clone();
+            tmp.union_with(&required_cols_bitset);
+            tmp.ones().collect_vec()
+        };
         let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
-
         if predicate_required_cols.is_subset(&required_cols_bitset) {
             filter.into()
         } else {
             // Given that `LogicalFilter` always has same schema of its input, if predicate's
             // `InputRef`s are not subset of the requirement of downstream operator, a
             // `LogicalProject` node should be added.
+            let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
             LogicalProject::with_mapping(
                 filter.into(),
-                ColIndexMapping::with_remaining_columns(required_cols),
+                ColIndexMapping::with_remaining_columns(&output_required_cols),
             )
         }
     }
@@ -202,11 +208,13 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
+        let filter: PlanRef = LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
 
         // Perform the prune
         let required_cols = vec![2];
+        println!("b:\n{}", filter.explain_to_string().unwrap());
         let plan = filter.prune_col(&required_cols);
+        println!("a:\n{}", plan.explain_to_string().unwrap());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

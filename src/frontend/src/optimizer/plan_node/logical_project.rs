@@ -99,13 +99,6 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
-        assert_eq!(
-            input.schema().fields().len(),
-            mapping.source_size(),
-            "invalid mapping given:\n----input: {:?}\n----mapping: {:?}",
-            input,
-            mapping
-        );
         if mapping.target_size() == 0 {
             // The mapping is empty, so the parent actually doesn't need the output of the input.
             // This can happen when the parent node only selects constant expressions.
@@ -242,7 +235,6 @@ impl fmt::Display for LogicalProject {
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let input_col_num = self.input().schema().len();
-        let mut input_required_cols = vec![None; input_col_num];
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
         // Record each InputRef's index.
@@ -250,22 +242,18 @@ impl ColPrunable for LogicalProject {
         required_cols.iter().for_each(|i| {
             if let ExprImpl::InputRef(ref input_ref) = self.exprs[*i] {
                 let input_idx = input_ref.index;
-                input_required_cols[*i] = Some(input_idx);
                 input_required_appeared.put(input_idx);
             } else {
                 input_ref_collector.visit_expr(&self.exprs[*i]);
             }
         });
+        let input_required_cols = {
+            let mut tmp = FixedBitSet::from(input_ref_collector);
+            tmp.union_with(&input_required_appeared);
+            tmp
+        };
 
-        // the required input columns have not been added into input_required_cols
-        for (a, b) in FixedBitSet::from(input_ref_collector)
-            .difference(&input_required_appeared)
-            .zip(input_required_cols.iter_mut().filter(|x| x.is_none()))
-        {
-            *b = Some(a);
-        }
-        let input_required_cols = input_required_cols.into_iter().flatten().collect_vec();
-
+        let input_required_cols = input_required_cols.ones().collect_vec();
         let new_input = self.input.prune_col(&input_required_cols);
         let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         // Rewrite each InputRef with new index.

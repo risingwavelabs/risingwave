@@ -423,7 +423,15 @@ impl fmt::Display for LogicalAgg {
 
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
+        let upstream_required_cols = {
+            let mapping = self.o2i_col_mapping();
+
+            FixedBitSet::from_iter(
+                required_cols
+                    .iter()
+                    .filter_map(|&output_idx| mapping.try_map(output_idx)),
+            )
+        };
         let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
         let mut agg_call_required_cols =
@@ -441,8 +449,7 @@ impl ColPrunable for LogicalAgg {
             })
             .collect();
         let input_required_cols = {
-            let mut tmp = FixedBitSet::new();
-            tmp.union_with(&upstream_required_cols);
+            let mut tmp: FixedBitSet = upstream_required_cols.clone();
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
@@ -456,7 +463,6 @@ impl ColPrunable for LogicalAgg {
                 .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
         });
         new_group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
-
         let agg = LogicalAgg::new(
             agg_calls,
             new_group_keys,
