@@ -16,12 +16,12 @@ use std::sync::Arc;
 
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
-use risingwave_batch::executor::{
-    CreateTableExecutor, Executor as BatchExecutor, RowSeqScanExecutor,
-};
+use risingwave_batch::executor::{CreateTableExecutor, Executor as BatchExecutor};
 use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
-use risingwave_batch::executor2::{DeleteExecutor2, Executor2, InsertExecutor2};
+use risingwave_batch::executor2::monitor::BatchMetrics;
+use risingwave_batch::executor2::{
+    DeleteExecutor2, Executor2, InsertExecutor2, RowSeqScanExecutor2,
+};
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
@@ -38,8 +38,10 @@ use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
-use risingwave_stream::executor::{Barrier, ExecutorV1, Message, PkIndices, StreamingMetrics};
-use risingwave_stream::executor_v2::{Executor, MaterializeExecutor, SourceExecutor};
+use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::{
+    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+};
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
@@ -164,16 +166,15 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
-    let mut materialize = MaterializeExecutor::new_from_v1(
+    let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
-        "MaterializeExecutor".to_string(),
     )
     .boxed()
-    .v1();
+    .execute();
 
     // 1.
     // Test insertion
@@ -217,17 +218,18 @@ async fn test_table_v2_materialize() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqExecutor".to_string(),
+        "RowSeqExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    assert!(scan.next().await?.is_none());
+    ));
+    let mut stream = scan.execute();
+    let result = stream.next().await;
 
+    assert!(result.is_none());
     // Send a barrier to start materialized view
     let curr_epoch = 1919;
     barrier_tx
@@ -235,7 +237,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -244,7 +246,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Poll `Materialize`, should output the same insertion stream chunk
-    let message = materialize.next().await?;
+    let message = materialize.next().await.unwrap()?;
     let mut col_row_ids = vec![];
     match message {
         Message::Chunk(c) => {
@@ -266,7 +268,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -275,17 +277,19 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    let col_data = c.columns()[0].array_ref().as_float64();
+    ));
+
+    let mut stream = scan.execute();
+    let result = stream.next().await.unwrap().unwrap();
+
+    let col_data = result.columns()[0].array_ref().as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -315,7 +319,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     });
 
     // Poll `Materialize`, should output the same deletion stream chunk
-    let message = materialize.next().await?;
+    let message = materialize.next().await.unwrap()?;
     match message {
         Message::Chunk(c) => {
             let col_data = c.columns()[0].array_ref().as_float64();
@@ -333,7 +337,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -342,17 +346,18 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to see the deletion now!
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    let col_data = c.columns()[0].array_ref().as_float64();
+    ));
+
+    let mut stream = scan.execute();
+    let result = stream.next().await.unwrap().unwrap();
+    let col_data = result.columns()[0].array_ref().as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 

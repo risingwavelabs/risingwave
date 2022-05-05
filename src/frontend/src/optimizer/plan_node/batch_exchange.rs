@@ -75,7 +75,7 @@ impl ToBatchProst for BatchExchange {
             })
         } else {
             NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                exchange_node: Some(ExchangeNode {
+                exchange: Some(ExchangeNode {
                     sources: vec![],
                     input_schema: self.base.schema.to_prost(),
                 }),

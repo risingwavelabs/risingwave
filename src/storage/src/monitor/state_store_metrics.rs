@@ -35,8 +35,8 @@ macro_rules! for_all_metrics {
 
             range_scan_size: Histogram,
             range_scan_duration: Histogram,
-            range_reverse_scan_size: Histogram,
-            range_reverse_scan_duration: Histogram,
+            range_backward_scan_size: Histogram,
+            range_backward_scan_duration: Histogram,
 
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
@@ -135,18 +135,18 @@ impl StateStoreMetrics {
         let range_scan_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
-            "state_store_range_reverse_scan_size",
-            "Total bytes scanned reversely from HummockStorage",
+            "state_store_range_backward_scan_size",
+            "Total bytes scanned backwards from HummockStorage",
             exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
         );
-        let range_reverse_scan_size = register_histogram_with_registry!(opts, registry).unwrap();
+        let range_backward_scan_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
-            "state_store_range_reverse_scan_duration",
-            "Total time of reverse scan that have been issued to state store",
+            "state_store_range_backward_scan_duration",
+            "Total time of backward scan that have been issued to state store",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
-        let range_reverse_scan_duration =
+        let range_backward_scan_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- write_batch -----
@@ -255,8 +255,8 @@ impl StateStoreMetrics {
 
             range_scan_size,
             range_scan_duration,
-            range_reverse_scan_size,
-            range_reverse_scan_duration,
+            range_backward_scan_size,
+            range_backward_scan_duration,
 
             write_batch_tuple_counts,
             write_batch_duration,

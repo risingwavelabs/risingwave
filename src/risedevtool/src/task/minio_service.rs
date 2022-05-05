@@ -38,6 +38,33 @@ impl MinioService {
     fn minio(&self) -> Result<Command> {
         Ok(Command::new(self.minio_path()?))
     }
+
+    /// Apply command args accroding to config
+    pub fn apply_command_args(cmd: &mut Command, config: &MinioConfig) -> Result<()> {
+        cmd.arg("server")
+            .arg("--address")
+            .arg(format!("{}:{}", config.listen_address, config.port))
+            .arg("--console-address")
+            .arg(format!("{}:{}", config.listen_address, config.console_port))
+            .env("MINIO_ROOT_USER", &config.root_user)
+            .env("MINIO_ROOT_PASSWORD", &config.root_password)
+            .env("MINIO_PROMETHEUS_AUTH_TYPE", "public");
+
+        let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
+        match provide_prometheus.len() {
+            0 => {}
+            1 => {
+                let prometheus = &provide_prometheus[0];
+                cmd.env(
+                    "MINIO_PROMETHEUS_URL",
+                    format!("http://{}:{}", prometheus.address, prometheus.port),
+                );
+            }
+            other_length => return Err(anyhow!("expected 0 or 1 promethus, get {}", other_length)),
+        }
+
+        Ok(())
+    }
 }
 
 impl Task for MinioService {
@@ -52,38 +79,16 @@ impl Task for MinioService {
 
         let mut cmd = self.minio()?;
 
+        Self::apply_command_args(&mut cmd, &self.config)?;
+
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
-        let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
-        std::fs::create_dir_all(&path)?;
+        let data_path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
+        std::fs::create_dir_all(&data_path)?;
 
-        cmd.arg("server")
-            .arg(&path)
-            .arg("--address")
-            .arg(format!("{}:{}", self.config.address, self.config.port))
-            .arg("--console-address")
-            .arg(format!(
-                "{}:{}",
-                self.config.console_address, self.config.console_port
-            ))
-            .arg("--config-dir")
+        cmd.arg("--config-dir")
             .arg(Path::new(&prefix_config).join("minio"))
-            .env("MINIO_ROOT_USER", &self.config.root_user)
-            .env("MINIO_ROOT_PASSWORD", &self.config.root_password)
-            .env("MINIO_PROMETHEUS_AUTH_TYPE", "public");
-
-        let provide_prometheus = self.config.provide_prometheus.as_ref().unwrap();
-        match provide_prometheus.len() {
-            0 => {}
-            1 => {
-                let prometheus = &provide_prometheus[0];
-                cmd.env(
-                    "MINIO_PROMETHEUS_URL",
-                    format!("http://{}:{}", prometheus.address, prometheus.port),
-                );
-            }
-            other_length => return Err(anyhow!("expected 0 or 1 promethus, get {}", other_length)),
-        }
+            .arg(&data_path);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

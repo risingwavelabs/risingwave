@@ -1,0 +1,22 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v1 int, v2 int);
+
+statement ok
+insert into t values (1, 2), (4, 3), (4, 2), (1, 3);
+
+query I rowsort
+select distinct v1 from t;
+----
+1
+4
+
+query I
+select distinct sum(v1) from t group by v2;
+----
+5
+
+statement ok
+drop table t

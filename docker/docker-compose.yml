@@ -1,50 +1,142 @@
+---
 version: "3"
 services:
-  minio:
-    container_name: minio_container
-    network_mode: host
+  compactor-0:
+    image: "ghcr.io/singularity-data/risingwave:latest"
+    command:
+      - compactor-node
+      - "--host"
+      - "0.0.0.0:6660"
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:1260"
+      - "--metrics-level"
+      - "1"
+      - "--state-store"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "--meta-address"
+      - "http://meta-node-0:5690"
+    expose:
+      - "6660"
+    ports: []
+    depends_on:
+      - meta-node-0
+      - minio-0
+    volumes: []
+    environment: []
+    container_name: compactor-0
+  compute-node-0:
+    image: "ghcr.io/singularity-data/risingwave:latest"
+    command:
+      - compute-node
+      - "--host"
+      - "0.0.0.0:5688"
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:1222"
+      - "--client-address"
+      - "compute-node-0:5688"
+      - "--metrics-level"
+      - "1"
+      - "--state-store"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "--meta-address"
+      - "http://meta-node-0:5690"
+    expose:
+      - "5688"
+      - "1222"
+    ports: []
+    depends_on:
+      - meta-node-0
+      - minio-0
+    volumes: []
+    environment: []
+    container_name: compute-node-0
+  frontend-node-0:
+    image: "ghcr.io/singularity-data/risingwave:latest"
+    command:
+      - frontend-node
+      - "--host"
+      - "0.0.0.0:4566"
+      - "--meta-addr"
+      - "http://meta-node-0:5690"
+    expose:
+      - "4566"
+    ports:
+      - "4566:4566"
+    depends_on:
+      - meta-node-0
+    volumes: []
+    environment: []
+    container_name: frontend-node-0
+  meta-node-0:
+    image: "ghcr.io/singularity-data/risingwave:latest"
+    command:
+      - meta-node
+      - "--host"
+      - "0.0.0.0:5690"
+      - "--dashboard-host"
+      - "0.0.0.0:5691"
+      - "--prometheus-host"
+      - "0.0.0.0:1250"
+      - "--backend"
+      - mem
+    expose:
+      - "5690"
+      - "1250"
+      - "5691"
+    ports: []
+    depends_on: []
+    volumes: []
+    environment: []
+    container_name: meta-node-0
+  minio-0:
     image: quay.io/minio/minio
-    command: server /data --console-address ":9001"
-    environment:
-      - "MINIO_ROOT_USER=AKIAIOSFODNN7EXAMPLE"
-      - "MINIO_ROOT_PASSWORD=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-  miniocreatebuckets:
-    image: minio/mc
-    network_mode: host
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until (mc alias set hummock-minio http://127.0.0.1:9000 AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY) do echo '...waiting...' && sleep 1; done;
-      mc admin user add hummock-minio/ hummock 12345678;
-      mc admin policy set hummock-minio/ readwrite user=hummock;
-      mc mb hummock-minio/hummock001;
-      exit 0;
-      "
-  metanode:
-    container_name: metanode_container
-    network_mode: host
-    image: ghcr.io/singularity-data/risingwave:latest
-    command: /risingwave/bin/meta-node --host 127.0.0.1:5690 --dashboard-host 127.0.0.1:5691 --prometheus-host 127.0.0.1:1250
-  computenode:
-    container_name: computenode_container
-    network_mode: host
-    image: ghcr.io/singularity-data/risingwave:latest
-    command: /risingwave/bin/compute-node --config-path /risingwave/config/risingwave.toml --host 127.0.0.1:5688 --prometheus-listener-addr 127.0.0.1:1222 --metrics-level 1 --state-store hummock+minio://hummock:12345678@127.0.0.1:9000/hummock001 --meta-address http://127.0.0.1:5690
+    command:
+      - server
+      - "--address"
+      - "0.0.0.0:9301"
+      - "--console-address"
+      - "0.0.0.0:9400"
+      - /data
+    expose:
+      - "9301"
+      - "9400"
+    ports:
+      - "9301:9301"
+      - "9400:9400"
+    depends_on: []
     volumes:
-      - ./src/config:/risingwave/config
-    depends_on:
-      - metanode
-  frontend:
-    container_name: frontend_container
-    network_mode: host
-    image: ghcr.io/singularity-data/risingwave:latest
-    command: /risingwave/bin/frontend-v2 --host 127.0.0.1:4566 --meta-addr http://127.0.0.1:5690
-    depends_on:
-      - metanode
-      - computenode
+      - "minio-0:/data"
+    entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
+    environment:
+      - MINIO_PROMETHEUS_AUTH_TYPE=public
+      - MINIO_ROOT_PASSWORD=hummockadmin
+      - MINIO_ROOT_USER=hummockadmin
+    container_name: minio-0
   redpanda:
-    container_name: redpanda_container
-    network_mode: host
-    image: docker.vectorized.io/vectorized/redpanda:latest
-    command: redpanda start --smp 1 --reserve-memory 0M --overprovisioned --node-id 0 --kafka-addr PLAINTEXT://0.0.0.0:9092 --advertise-kafka-addr PLAINTEXT://127.0.0.1:9092
+    image: "docker.vectorized.io/vectorized/redpanda:latest"
+    command:
+      - redpanda
+      - start
+      - "--smp"
+      - "1"
+      - "--reserve-memory"
+      - 0M
+      - "--overprovisioned"
+      - "--node-id"
+      - "0"
+      - "--kafka-addr"
+      - "PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092"
+      - "--advertise-kafka-addr"
+      - "PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092"
+    expose:
+      - "29092"
+    ports:
+      - "9092:9092"
+    depends_on: []
+    volumes: []
+    environment: []
+    container_name: redpanda
+volumes:
+  minio-0:
+    external: false
+name: risingwave-compose

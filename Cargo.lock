@@ -3161,6 +3161,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "serde_with",
  "serde_yaml",
  "tempfile",
  "yaml-rust",
@@ -3568,6 +3569,7 @@ name = "risingwave_hummock_sdk"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "hex",
  "log 0.4.16",
  "prost",
  "risingwave_pb",
@@ -3726,6 +3728,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_storage",
  "serde",

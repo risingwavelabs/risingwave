@@ -50,15 +50,14 @@ impl SourceParser for JSONParser {
 mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
-    use super::super::common::str_to_date;
     use crate::{JSONParser, SourceColumnDesc, SourceParser};
 
     #[test]
     fn test_json_parser() {
         let parser = JSONParser {};
-
-        let payload = r#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01"}"#.as_bytes();
+        let payload = r#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_bytes();
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
@@ -108,6 +107,12 @@ mod tests {
                 column_id: ColumnId::from(8),
                 skip_parse: false,
             },
+            SourceColumnDesc {
+                name: "timestamp".to_string(),
+                data_type: DataType::Timestamp,
+                column_id: ColumnId::from(9),
+                skip_parse: false,
+            },
         ];
 
         let result = parser.parse(payload, &descs);
@@ -124,6 +129,9 @@ mod tests {
         assert!(row[6].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
         assert!(row[7].eq(&Some(ScalarImpl::NaiveDate(
             str_to_date("2021-01-01").unwrap()
+        ))));
+        assert!(row[8].eq(&Some(ScalarImpl::NaiveDateTime(
+            str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
         ))));
 
         let payload = r#"{"i32":1}"#.as_bytes();
