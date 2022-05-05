@@ -63,7 +63,7 @@ impl ConnectorSource {
     /// Create a new stream reader.
     pub async fn stream_reader(
         &self,
-        splits: Vec<SplitImpl>,
+        splits: ConnectorStateV2,
         column_ids: Vec<ColumnId>,
     ) -> Result<ConnectorStreamReader> {
         log::debug!(
@@ -72,12 +72,9 @@ impl ConnectorSource {
             splits
         );
 
-        let reader = SplitReaderImpl::create(
-            Properties::new(self.config.0.clone()),
-            ConnectorStateV2::Splits(splits),
-        )
-        .await
-        .to_rw_result()?;
+        let reader = SplitReaderImpl::create(Properties::new(self.config.0.clone()), splits)
+            .await
+            .to_rw_result()?;
 
         let columns = self.get_target_columns(column_ids)?;
 

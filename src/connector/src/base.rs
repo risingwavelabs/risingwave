@@ -19,8 +19,11 @@ use itertools::Itertools;
 use kafka::enumerator::KafkaSplitEnumerator;
 use serde::{Deserialize, Serialize};
 
+use crate::dummy_connector::DummySplitReader;
 use crate::kafka::source::KafkaSplitReader;
 use crate::kinesis::source::reader::KinesisSplitReader;
+use crate::kinesis::split::KinesisOffset;
+use crate::pulsar::split::PulsarOffset;
 
 pub enum SourceOffset {
     Number(i64),
@@ -61,6 +64,44 @@ pub struct ConnectorState {
     pub end_offset: String,
 }
 
+impl From<SplitImpl> for ConnectorState {
+    fn from(split: SplitImpl) -> Self {
+        match split {
+            SplitImpl::Kafka(kafka) => Self {
+                identifier: Bytes::from(kafka.partition.to_string()),
+                start_offset: kafka.start_offset.unwrap().to_string(),
+                end_offset: if let Some(end_offset) = kafka.stop_offset {
+                    end_offset.to_string()
+                } else {
+                    "".to_string()
+                },
+            },
+            SplitImpl::Kinesis(kinesis) => Self {
+                identifier: Bytes::from(kinesis.shard_id),
+                start_offset: match kinesis.start_position {
+                    KinesisOffset::SequenceNumber(s) => s,
+                    _ => "".to_string(),
+                },
+                end_offset: match kinesis.end_position {
+                    KinesisOffset::SequenceNumber(s) => s,
+                    _ => "".to_string(),
+                },
+            },
+            SplitImpl::Pulsar(pulsar) => Self {
+                identifier: Bytes::from(pulsar.sub_topic),
+                start_offset: match pulsar.start_offset {
+                    PulsarOffset::MessageID(id) => id.to_string(),
+                    _ => "".to_string(),
+                },
+                end_offset: match pulsar.stop_offset {
+                    PulsarOffset::MessageID(id) => id.to_string(),
+                    _ => "".to_string(),
+                },
+            },
+        }
+    }
+}
+
 impl SplitMetaData for ConnectorState {
     fn id(&self) -> String {
         String::from_utf8(self.identifier.to_vec()).unwrap()
@@ -77,6 +118,8 @@ impl SplitMetaData for ConnectorState {
 
 #[derive(Debug, Clone)]
 pub enum ConnectorStateV2 {
+    // ConnectorState should change to Vec<ConnectorState> because there can be multiple readers
+    // in a source executor
     State(ConnectorState),
     Splits(Vec<SplitImpl>),
     None,
@@ -95,6 +138,7 @@ pub trait SplitReader {
 pub enum SplitReaderImpl {
     Kafka(KafkaSplitReader),
     Kinesis(KinesisSplitReader),
+    Dummy(DummySplitReader),
 }
 
 impl SplitReaderImpl {
@@ -102,10 +146,17 @@ impl SplitReaderImpl {
         match self {
             Self::Kafka(r) => r.next().await,
             Self::Kinesis(r) => r.next().await,
+            Self::Dummy(r) => r.next().await,
         }
     }
 
     pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
+        if let ConnectorStateV2::Splits(s) = &state {
+            if s.is_empty() {
+                return Ok(Self::Dummy(DummySplitReader {}));
+            }
+        }
+
         let upstream_type = config.get_connector_type()?;
         let connector = match upstream_type.as_str() {
             KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),

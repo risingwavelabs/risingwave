@@ -25,7 +25,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
-use risingwave_connector::{ConnectorState, SplitImpl};
+use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_source::*;
@@ -245,6 +245,23 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver.recv().await.unwrap();
 
+        let epoch = barrier.epoch.prev;
+
+        let mut recover_state = ConnectorStateV2::Splits(self.stream_source_splits.clone());
+        if !self.stream_source_splits.is_empty() {
+            if self.stream_source_splits.len() > 1 {
+                todo!("assign multiple split to one executor is not supported, source id: {:?}, splits: {:?}", self.source_id, self.stream_source_splits);
+            }
+
+            if let Ok(state) = self
+                .state_store
+                .try_recover_from_state_store(&self.stream_source_splits[0], epoch)
+                .await
+            {
+                recover_state = ConnectorStateV2::State(state);
+            }
+        }
+
         // todo: use epoch from msg to restore state from state store
         let stream_reader = match self.source_desc.source.as_ref() {
             SourceImpl::TableV2(t) => t
@@ -252,7 +269,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
             SourceImpl::Connector(c) => c
-                .stream_reader(self.stream_source_splits.clone(), self.column_ids.clone())
+                .stream_reader(recover_state, self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }
