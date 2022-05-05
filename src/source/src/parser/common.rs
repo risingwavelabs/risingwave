@@ -12,32 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{NaiveDate, NaiveDateTime};
 use num_traits::FromPrimitive;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{
-    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl, ScalarRef,
-};
+use risingwave_common::types::{DataType, Decimal, ScalarImpl, ScalarRef};
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use serde_json::Value;
 
 use crate::SourceColumnDesc;
-
-#[inline(always)]
-pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
-    Ok(NaiveDateWrapper::new(
-        NaiveDate::parse_from_str(elem, "%Y-%m-%d")
-            .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?,
-    ))
-}
-
-#[inline(always)]
-pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(
-        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f")
-            .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?,
-    ))
-}
 
 macro_rules! make_ScalarImpl {
     ($x:expr, $y:expr) => {

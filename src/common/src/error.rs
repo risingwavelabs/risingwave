@@ -98,8 +98,8 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error("Parse string error: {0}")]
-    ParseError(BoxedError),
+    #[error("Parse error: {0}")]
+    ParseError(String),
     #[error("Bind error: {0}")]
     BindError(String),
     #[error("Catalog error: {0}")]
@@ -131,6 +131,10 @@ pub enum ErrorCode {
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
+}
+
+pub fn parse_error(msg: impl Into<String>) -> RwError {
+    ErrorCode::ParseError(msg.into()).into()
 }
 
 #[derive(Clone)]
