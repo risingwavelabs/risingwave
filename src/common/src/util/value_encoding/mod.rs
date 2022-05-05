@@ -36,28 +36,11 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Serialize datum cannot be null into cell bytes.
-pub fn serialize_cell_not_null(cell: &Datum) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = vec![];
-    serialize_value(
-        cell.as_ref()
-            .expect("datum cannot be null")
-            .as_scalar_ref_impl(),
-        &mut buf,
-    );
-    Ok(buf)
-}
-
 /// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
 pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     if data.remaining() < 1 {
         return Ok(None);
     }
-    deserialize_value(ty, &mut data)
-}
-
-/// Deserialize cell bytes which cannot be null into datum.
-pub fn deserialize_cell_not_null(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     deserialize_value(ty, &mut data)
 }
 
