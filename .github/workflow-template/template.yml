@@ -16,8 +16,6 @@ env:
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
 
 permissions:
-      id-token: write
-      contents: read    # This is required for actions/checkout
 
 jobs:
   # Start 2 runners (a/b) to run build and test in parallel. Note that we also have runner C in main for release build.

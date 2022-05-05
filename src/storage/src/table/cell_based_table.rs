@@ -207,12 +207,11 @@ impl<S: StateStore> CellBasedTable<S> {
                     }
                 }
                 RowOp::Delete(old_row) => {
-                    // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
                         .cell_based_row_serializer
-                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .serialize_cell_key(&arrange_key_buf, &old_row, &self.column_ids)
                         .map_err(err)?;
-                    for (key, _) in bytes {
+                    for key in bytes {
                         local.delete(key);
                     }
                 }

@@ -24,7 +24,7 @@ env:
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
 permissions:
   id-token: write
-  contents: read
+  contents: write
 jobs:
   start-runner-a:
     name: ec2-start-a

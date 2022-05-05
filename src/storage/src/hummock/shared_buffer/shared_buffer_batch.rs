@@ -352,15 +352,15 @@ mod tests {
         assert_eq!(output, shared_buffer_items);
 
         // Backward iterator
-        let mut reverse_iter = shared_buffer_batch.clone().into_backward_iter();
-        reverse_iter.rewind().await.unwrap();
+        let mut backward_iter = shared_buffer_batch.clone().into_backward_iter();
+        backward_iter.rewind().await.unwrap();
         let mut output = vec![];
-        while reverse_iter.is_valid() {
+        while backward_iter.is_valid() {
             output.push((
-                reverse_iter.key().to_owned(),
-                reverse_iter.value().to_owned_value(),
+                backward_iter.key().to_owned(),
+                backward_iter.value().to_owned_value(),
             ));
-            reverse_iter.next().await.unwrap();
+            backward_iter.next().await.unwrap();
         }
         output.reverse();
         assert_eq!(output, shared_buffer_items);

@@ -158,7 +158,7 @@ pub fn serialize_pk_and_row(
     }
     let mut result = vec![];
     for (index, column_id) in column_ids.iter().enumerate() {
-        let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
+        let key = serialize_pk_and_column_id(pk_buf, column_id)?;
         match row {
             Some(values) => match &values[index] {
                 None => {
@@ -178,13 +178,12 @@ pub fn serialize_pk_and_row(
         }
     }
 
+    let key = serialize_pk_and_column_id(pk_buf, &SENTINEL_CELL_ID)?;
     if row.is_none() {
-        let key = [pk_buf, serialize_column_id(&SENTINEL_CELL_ID)?.as_slice()].concat();
         result.push((key, None));
     } else {
-        let key = [pk_buf, serialize_column_id(&SENTINEL_CELL_ID)?.as_slice()].concat();
-        let value = serialize_cell(&None)?;
-        result.push((key, Some(value)));
+        // Store zero bytes for the sentinel value.
+        result.push((key, Some(vec![])));
     }
 
     Ok(result)
@@ -209,6 +208,10 @@ pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     assert_eq!(bytes.len(), 4);
     let column_id = from_slice::<i32>(bytes)?;
     Ok(column_id.into())
+}
+
+pub fn serialize_pk_and_column_id(pk_buf: &[u8], col_id: &ColumnId) -> Result<Vec<u8>> {
+    Ok([pk_buf, serialize_column_id(col_id)?.as_slice()].concat())
 }
 
 #[cfg(test)]

@@ -72,6 +72,7 @@ message MaterializeNode {
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated int32 distribution_keys = 2;
+  repeated uint32 table_ids = 3;
 }
 
 message HashAggNode {
@@ -153,6 +154,8 @@ message ChainNode {
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
   // This option is used to disable barrier rearrangement.
   bool disable_rearrange = 4;
+  // Whether to place this chain on the same worker node as upstream actors.
+  bool same_worker_node = 5;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
