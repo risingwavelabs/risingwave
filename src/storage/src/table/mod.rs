@@ -23,4 +23,6 @@ use crate::error::StorageResult;
 #[async_trait::async_trait]
 pub trait TableIter: Send {
     async fn next(&mut self) -> StorageResult<Option<Row>>;
+
+    async fn next_with_pk(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>>;
 }
