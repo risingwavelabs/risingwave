@@ -26,7 +26,7 @@ mod scalar_impl;
 use std::fmt::{Debug, Display, Formatter};
 
 pub use native_type::*;
-use risingwave_pb::data::data_type::{TypeName, ListItemType};
+use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 
 mod chrono_wrapper;
@@ -103,23 +103,23 @@ impl From<&ProstDataType> for DataType {
             },
             TypeName::List => {
                 let list_item_type = match proto.get_list_item_type().expect("missing list item type field") {
-                    ListItemType::Int16 => DataType::Int16,
-                    ListItemType::Int32 => DataType::Int32,
-                    ListItemType::Int64 => DataType::Int64,
-                    ListItemType::Float => DataType::Float32,
-                    ListItemType::Double => DataType::Float64,
-                    ListItemType::Boolean => DataType::Boolean,
+                    TypeName::Int16 => DataType::Int16,
+                    TypeName::Int32 => DataType::Int32,
+                    TypeName::Int64 => DataType::Int64,
+                    TypeName::Float => DataType::Float32,
+                    TypeName::Double => DataType::Float64,
+                    TypeName::Boolean => DataType::Boolean,
                     // TODO(TaoWu): Java frontend still interprets CHAR as a separate type.
                     // So to run e2e, we may return VARCHAR that mismatches with what Java frontend
                     // expected. Fix this when Java frontend fully deprecated.
-                    ListItemType::Varchar | ListItemType::Char => DataType::Varchar,
-                    ListItemType::Date => DataType::Date,
-                    ListItemType::Time => DataType::Time,
-                    ListItemType::Timestamp => DataType::Timestamp,
-                    ListItemType::Timestampz => DataType::Timestampz,
-                    ListItemType::Decimal => DataType::Decimal,
-                    ListItemType::Interval => DataType::Interval,
-                    ListItemType::Symbol => DataType::Varchar,
+                    TypeName::Varchar | TypeName::Char => DataType::Varchar,
+                    TypeName::Date => DataType::Date,
+                    TypeName::Time => DataType::Time,
+                    TypeName::Timestamp => DataType::Timestamp,
+                    TypeName::Timestampz => DataType::Timestampz,
+                    TypeName::Decimal => DataType::Decimal,
+                    TypeName::Interval => DataType::Interval,
+                    TypeName::Symbol => DataType::Varchar,
                     _ => DataType::Int32
                 };
                 DataType::List {

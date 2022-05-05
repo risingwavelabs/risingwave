@@ -40,6 +40,8 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
+  // For LIST type.
+  data.DataType list_item_type = 6;
 }
 
 message OrderedColumnDesc {
