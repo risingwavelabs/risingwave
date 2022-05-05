@@ -81,3 +81,46 @@ impl<'a> Iterator for ArrayImplIterator<'a> {
         (size, Some(size))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use paste::paste;
+
+    use super::*;
+    use crate::array::ArrayBuilder;
+    use crate::for_all_variants;
+
+    macro_rules! test_trusted_len {
+        ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            $(
+                paste! {
+                    #[test]
+                    fn [<test_trusted_len_for_ $suffix_name _array>]() {
+                        use crate::array::$builder;
+                        let mut builder = $builder::new(3).unwrap();
+                        for _ in 0..3 {
+                            builder.append_null().unwrap();
+                        }
+                        let array = builder.finish().unwrap();
+                        let mut iter = array.iter();
+
+                        assert_eq!(iter.size_hint(), (3, Some(3))); iter.next();
+                        assert_eq!(iter.size_hint(), (2, Some(2))); iter.next();
+                        assert_eq!(iter.size_hint(), (1, Some(1))); iter.next();
+                        assert_eq!(iter.size_hint(), (0, Some(0)));
+
+                        let array_impl = ArrayImpl::from(array);
+                        let mut iter = array_impl.iter();
+
+                        assert_eq!(iter.size_hint(), (3, Some(3))); iter.next();
+                        assert_eq!(iter.size_hint(), (2, Some(2))); iter.next();
+                        assert_eq!(iter.size_hint(), (1, Some(1))); iter.next();
+                        assert_eq!(iter.size_hint(), (0, Some(0)));
+                    }
+                }
+            )*
+        };
+    }
+
+    for_all_variants! {test_trusted_len}
+}
