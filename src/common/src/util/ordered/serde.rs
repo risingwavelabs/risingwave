@@ -182,8 +182,8 @@ pub fn serialize_pk_and_row(
     if row.is_none() {
         result.push((key, None));
     } else {
-        let value = serialize_cell(&None)?;
-        result.push((key, Some(value)));
+        // Store zero bytes for the sentinel value.
+        result.push((key, Some(vec![])));
     }
 
     Ok(result)
