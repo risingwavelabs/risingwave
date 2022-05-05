@@ -222,17 +222,17 @@ impl Compactor {
         output_ssts.sort_by_key(|(split_index, _)| *split_index);
 
         // After a compaction is done, mutate the compaction task.
-        compactor.compact_done(&output_ssts, compact_success).await;
+        compactor.compact_done(output_ssts, compact_success).await;
     }
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
-    async fn compact_done(&mut self, output_ssts: &[CompactOutput], task_ok: bool) {
+    async fn compact_done(&mut self, output_ssts: Vec<CompactOutput>, task_ok: bool) {
         self.compact_task.task_status = task_ok;
         self.compact_task
             .sorted_output_ssts
             .reserve(self.compact_task.splits.len());
 
-        for (_, sst) in output_ssts.iter() {
+        for (_, sst) in output_ssts {
             // for table in &sub_output {
             //     add_table(
             //         compact_task
@@ -248,7 +248,7 @@ impl Compactor {
 
             self.compact_task
                 .sorted_output_ssts
-                .extend(sst.iter().map(|(sst, vnode_bitmap)| SstableInfo {
+                .extend(sst.into_iter().map(|(sst, vnode_bitmap)| SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
@@ -256,7 +256,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
-                    vnode_bitmap: vnode_bitmap.clone(),
+                    vnode_bitmap,
                 }));
         }
 

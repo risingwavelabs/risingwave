@@ -168,7 +168,7 @@ impl SharedBufferUploader {
         .await?;
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
-            .iter()
+            .into_iter()
             .map(|(sst, vnode_bitmap)| SstableInfo {
                 id: sst.id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -177,7 +177,7 @@ impl SharedBufferUploader {
                     inf: false,
                 }),
                 file_size: sst.meta.estimated_size as u64,
-                vnode_bitmap: vnode_bitmap.clone(),
+                vnode_bitmap,
             })
             .collect();
 
