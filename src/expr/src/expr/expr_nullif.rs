@@ -16,8 +16,8 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, ArrayRef, DataChunk};
-use risingwave_common::error::{internal_error, Result, RwError};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::{ensure, ensure_eq, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -28,8 +28,8 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Ex
 #[derive(Debug)]
 pub struct NullifExpression {
     return_type: DataType,
-    origin: BoxedExpression,
-    is_equal: BoxedExpression,
+    left: BoxedExpression,
+    right: BoxedExpression,
 }
 
 impl Expression for NullifExpression {
@@ -38,35 +38,27 @@ impl Expression for NullifExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let origin = self.origin.eval(input)?;
-        let is_equal = self.is_equal.eval(input)?;
+        let left = self.left.eval(input)?;
+        let right = self.right.eval(input)?;
         let mut builder = self.return_type.create_array_builder(input.cardinality())?;
 
-        if let ArrayImpl::Bool(bool_array) = is_equal.as_ref() {
-            // If `is_equal` is true, add null otherwise add `origin` value.
-            origin
-                .iter()
-                .zip_eq(bool_array.iter())
-                .try_for_each(|(c, d)| {
-                    if let Some(false) = d {
-                        builder.append_datum(&c.to_owned_datum())
-                    } else {
-                        builder.append_null()
-                    }
-                })?;
-            Ok(Arc::new(builder.finish()?))
-        } else {
-            Err(internal_error("expects a bool array ref"))
-        }
+        left.iter().zip_eq(right.iter()).try_for_each(|(c, d)| {
+            if c != d {
+                builder.append_datum(&c.to_owned_datum())
+            } else {
+                builder.append_null()
+            }
+        })?;
+        Ok(Arc::new(builder.finish()?))
     }
 }
 
 impl NullifExpression {
-    pub fn new(return_type: DataType, origin: BoxedExpression, is_equal: BoxedExpression) -> Self {
+    pub fn new(return_type: DataType, left: BoxedExpression, right: BoxedExpression) -> Self {
         NullifExpression {
             return_type,
-            origin,
-            is_equal,
+            left,
+            right,
         }
     }
 }
@@ -83,9 +75,9 @@ impl<'a> TryFrom<&'a ExprNode> for NullifExpression {
         let children = func_call_node.children.to_vec();
         // Nullif `func_call_node` have 2 child nodes.
         ensure_eq!(children.len(), 2);
-        let origin = expr_build_from_prost(&children[0])?;
-        let is_equal = expr_build_from_prost(&children[1])?;
-        Ok(NullifExpression::new(ret_type, origin, is_equal))
+        let left = expr_build_from_prost(&children[0])?;
+        let right = expr_build_from_prost(&children[1])?;
+        Ok(NullifExpression::new(ret_type, left, right))
     }
 }
 
@@ -94,7 +86,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
+    use risingwave_common::array::{DataChunk, PrimitiveArray};
     use risingwave_common::types::ScalarImpl;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
@@ -121,42 +113,26 @@ mod tests {
     fn test_nullif_expr() {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(1, TypeName::Int32);
-        let input_node3 = make_input_ref(2, TypeName::Varchar);
 
         let array = PrimitiveArray::<i32>::from_slice(&[Some(2), Some(2), Some(4), Some(3)])
             .map(|x| Arc::new(x.into()))
             .unwrap();
         let col1 = Column::new(array);
-        let array = BoolArray::from_slice(&[Some(false), Some(false), Some(true), Some(true)])
+        let array = PrimitiveArray::<i32>::from_slice(&[Some(1), Some(3), Some(4), Some(3)])
             .map(|x| Arc::new(x.into()))
             .unwrap();
         let col2 = Column::new(array);
-        let array = Utf8Array::from_slice(&[Some("2"), Some("2"), Some("4"), Some("3")])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col3 = Column::new(array);
 
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2, col3]).build();
+        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
         let nullif_expr = NullifExpression::try_from(&make_nullif_function(
-            vec![input_node1, input_node2.clone()],
+            vec![input_node1, input_node2],
             TypeName::Int32,
         ))
         .unwrap();
         let res = nullif_expr.eval(&data_chunk).unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(2)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
-        assert_eq!(res.datum_at(2), None);
-        assert_eq!(res.datum_at(3), None);
-
-        let nullif_expr = NullifExpression::try_from(&make_nullif_function(
-            vec![input_node3, input_node2],
-            TypeName::Varchar,
-        ))
-        .unwrap();
-        let res = nullif_expr.eval(&data_chunk).unwrap();
-        assert_eq!(res.datum_at(0), Some(ScalarImpl::Utf8("2".to_string())));
-        assert_eq!(res.datum_at(1), Some(ScalarImpl::Utf8("2".to_string())));
         assert_eq!(res.datum_at(2), None);
         assert_eq!(res.datum_at(3), None);
     }
