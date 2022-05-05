@@ -22,7 +22,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 pub struct CountStar {
     return_type: DataType,
     result: usize,
-    reach_group_limit: bool,
+    reached_limit: bool,
 }
 
 impl CountStar {
@@ -30,7 +30,7 @@ impl CountStar {
         Self {
             return_type,
             result,
-            reach_group_limit: false,
+            reached_limit: false,
         }
     }
 }
@@ -73,8 +73,8 @@ impl Aggregator for CountStar {
         let mut groups_iter = groups.starting_indices().iter();
         if let Some(first) = groups_iter.next() {
             let first_count = {
-                if self.reach_group_limit {
-                    self.reach_group_limit = false;
+                if self.reached_limit {
+                    self.reached_limit = false;
                     first - self.result
                 } else {
                     first + self.result
@@ -90,7 +90,7 @@ impl Aggregator for CountStar {
 
                 // stop and save state if we reach limit
                 if groups.is_reach_limit(group_cnt) {
-                    self.reach_group_limit = true;
+                    self.reached_limit = true;
                     self.result = *prev;
                     break;
                 }
