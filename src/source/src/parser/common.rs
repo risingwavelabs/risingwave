@@ -87,6 +87,13 @@ pub(crate) fn json_parse_value(
                 Err(e) => Err(e),
             },
         },
+        DataType::Timestamp => match value.and_then(|v| v.as_str()) {
+            None => Err(RwError::from(InternalError("parse error".to_string()))),
+            Some(date_str) => match str_to_timestamp(date_str) {
+                Ok(timestamp) => Ok(ScalarImpl::NaiveDateTime(timestamp)),
+                Err(e) => Err(e),
+            },
+        },
         _ => Err(ErrorCode::NotImplemented(
             "unsupported type for json_parse_value".to_string(),
             None.into(),

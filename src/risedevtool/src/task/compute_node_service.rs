@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::ComputeNodeConfig;
+use crate::{add_meta_node, add_storage_backend, ComputeNodeConfig};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -84,35 +84,16 @@ impl ComputeNodeService {
             }
             (true, _, _) => {
                 return Err(anyhow!(
-                "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
-            ))
+                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
+                ));
             }
             (false, [], []) => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 false
             }
-            (false, [minio], []) => {
-                cmd.arg("--state-store").arg(format!(
-                    "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
-                    hummock_user = minio.root_user,
-                    hummock_password = minio.root_password,
-                    hummock_bucket = minio.hummock_bucket,
-                    minio_addr = minio.address,
-                    minio_port = minio.port,
-                ));
+            (false, provide_minio, provide_aws_s3) => {
+                add_storage_backend(&config.id, provide_minio, provide_aws_s3, cmd)?;
                 true
-            }
-            (false, [], [aws_s3]) => {
-                cmd.arg("--state-store").arg(format!(
-                    "hummock+s3://{}", aws_s3.bucket
-                ));
-                true
-            }
-            (false, other_minio, other_s3) => {
-                return Err(anyhow!(
-                    "{} minio and {} s3 instance found in config, but only 1 is needed",
-                    other_minio.len(), other_s3.len()
-                ))
             }
         };
 
@@ -123,23 +104,7 @@ impl ComputeNodeService {
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
-        match provide_meta_node.as_slice() {
-            [] => {
-                return Err(anyhow!(
-                    "Cannot configure node: no meta node found in this configuration."
-                ));
-            }
-            [meta_node] => {
-                cmd.arg("--meta-address")
-                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            }
-            other_meta_nodes => {
-                return Err(anyhow!(
-                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
-                    other_meta_nodes.len()
-                ));
-            }
-        };
+        add_meta_node(provide_meta_node, cmd)?;
 
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
         if is_shared_backend && provide_compactor.is_empty() {

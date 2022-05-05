@@ -221,6 +221,7 @@ impl StreamFragmenter {
         let i0_length = arrange_0.fields.len();
         let i1_length = arrange_1.fields.len();
 
+        // lookup left table by right stream
         let lookup_0 = self.build_lookup_for_delta_join(
             state,
             (&exchange_a1l0, &exchange_a0l0),
@@ -243,6 +244,7 @@ impl StreamFragmenter {
             },
         );
 
+        // lookup right table by left stream
         let lookup_1 = self.build_lookup_for_delta_join(
             state,
             (&exchange_a0l1, &exchange_a1l1),
@@ -280,7 +282,8 @@ impl StreamFragmenter {
             lookup_1_frag.fragment_id,
             StreamFragmentEdge {
                 dispatch_strategy: Self::dispatch_no_shuffle(),
-                same_worker_node: true,
+                // stream input doesn't need to be on the same worker node as lookup
+                same_worker_node: false,
                 link_id: exchange_a0l1.operator_id,
             },
         );
@@ -290,7 +293,8 @@ impl StreamFragmenter {
             lookup_0_frag.fragment_id,
             StreamFragmentEdge {
                 dispatch_strategy: Self::dispatch_no_shuffle(),
-                same_worker_node: true,
+                // stream input doesn't need to be on the same worker node as lookup
+                same_worker_node: false,
                 link_id: exchange_a1l0.operator_id,
             },
         );
