@@ -86,7 +86,7 @@ impl ColumnDesc {
             name: String::new(),
             field_descs: vec![],
             type_name: String::new(),
-            list_item_type: None
+            list_item_type: None,
         }
     }
 
@@ -103,7 +103,7 @@ impl ColumnDesc {
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
-            list_item_type: None
+            list_item_type: None,
         }
     }
 
@@ -147,7 +147,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            list_item_type: None
+            list_item_type: None,
         }
     }
 
@@ -171,7 +171,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
-            list_item_type: None
+            list_item_type: None,
         }
     }
 
@@ -195,7 +195,7 @@ impl ColumnDesc {
                 .map(Self::from_field_without_column_id)
                 .collect_vec(),
             type_name: field.type_name.clone(),
-            list_item_type: None
+            list_item_type: None,
         }
     }
 }
@@ -224,7 +224,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
                 name: prost.name,
                 type_name: prost.type_name,
                 field_descs: descs,
-                list_item_type: None
+                list_item_type: None,
             }
         } else {
             Self {
@@ -233,7 +233,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
                 name: prost.name,
                 type_name: prost.type_name,
                 field_descs: vec![],
-                list_item_type: None
+                list_item_type: None,
             }
         }
     }
@@ -253,7 +253,7 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
-            list_item_type: None
+            list_item_type: None,
         }
     }
 }

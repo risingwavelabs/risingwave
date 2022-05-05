@@ -89,7 +89,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
             fields: Arc::new([]),
         },
         DataTypeName::List => DataType::List {
-            datatype: Box::new(DataType::Int32),//nstabel
+            // TODO(nanderstabel) : perhaps change datatype to Box<Option<DataType>> to avoid dummy
+            // DataType
+            datatype: Box::new(DataType::Int32),
         },
     })
 }

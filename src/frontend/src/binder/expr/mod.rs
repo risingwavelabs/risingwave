@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use itertools::zip_eq;
+use risingwave_common::array::ListValue;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::array::ListValue;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
     UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind, Literal};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -305,25 +305,23 @@ impl Binder {
     }
 
     pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<Literal> {
-        
         let ty = match self.bind_expr(exprs.first().unwrap().clone())? {
             ExprImpl::Literal(l) => l.return_type(),
-            _ => unreachable!()
+            _ => unreachable!(),
         };
         let values = exprs
             .into_iter()
-            .map(|e|{
+            .map(|e| {
                 if let ExprImpl::Literal(l) = self.bind_expr(e).ok()? {
-                        l.get_data().clone()
-                    } else {
-                        None
-                    }
-            }).collect();
+                    l.get_data().clone()
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         Ok(Literal::new(
-            Some(ScalarImpl::List(ListValue::new(
-                values
-            ))),
+            Some(ScalarImpl::List(ListValue::new(values))),
             DataType::List {
                 datatype: Box::new(ty),
             },
@@ -346,10 +344,9 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestampz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => {
-            DataType::List {
+        AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
-        }},
+        },
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
                 "CHAR is not supported, please use VARCHAR instead\n".to_string(),

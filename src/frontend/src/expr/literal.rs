@@ -39,10 +39,14 @@ impl std::fmt::Debug for Literal {
                 Some(ScalarImpl::List(v)) => write!(f, "{}", v),
                 Some(v) => write!(f, "{}", v),
             }?;
-            write!(f, ":{:?}", match &self.data_type {
-                DataType::List { datatype } => datatype,
-                other => other
-            })
+            write!(
+                f,
+                ":{:?}",
+                match &self.data_type {
+                    DataType::List { datatype } => datatype,
+                    other => other,
+                }
+            )
         }
     }
 }

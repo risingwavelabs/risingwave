@@ -102,7 +102,11 @@ impl From<&ProstDataType> for DataType {
                 fields: Arc::new([]),
             },
             TypeName::List => {
-                let list_item_type = match proto.get_list_item_type().expect("missing list item type field") {
+                // TODO(nanderstabel) : avoid code duplication
+                let list_item_type = match proto
+                    .get_list_item_type()
+                    .expect("missing list item type field")
+                {
                     TypeName::Int16 => DataType::Int16,
                     TypeName::Int32 => DataType::Int32,
                     TypeName::Int64 => DataType::Int64,
@@ -120,7 +124,7 @@ impl From<&ProstDataType> for DataType {
                     TypeName::Decimal => DataType::Decimal,
                     TypeName::Interval => DataType::Interval,
                     TypeName::Symbol => DataType::Varchar,
-                    _ => DataType::Int32
+                    _ => DataType::Int32,
                 };
                 DataType::List {
                     datatype: Box::new(list_item_type),
@@ -181,9 +185,10 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
+        // TODO(nanderstabel) : refactor
         let list_item_type = match self {
             DataType::List { datatype } => *datatype.clone(),
-            _ => DataType::Int16
+            _ => DataType::Int16,
         };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
