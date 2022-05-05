@@ -14,7 +14,6 @@
 
 use drop_stream::*;
 use drop_table::*;
-use order_by::OrderByExecutor;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{self, InternalError};
@@ -30,9 +29,9 @@ use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
-    LimitExecutor2, MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, ProjectExecutor2,
-    RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2,
-    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    LimitExecutor2, MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2,
+    ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2,
+    StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -43,7 +42,6 @@ mod drop_table;
 pub mod executor2_wrapper;
 mod fuse;
 mod join;
-mod order_by;
 #[cfg(test)]
 pub mod test_utils;
 mod trace;
@@ -184,7 +182,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::OrderBy => OrderByExecutor2,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
@@ -214,7 +212,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::OrderBy => OrderByExecutor2,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
