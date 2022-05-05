@@ -41,13 +41,16 @@ pub trait OverlapStrategy: Send + Sync {
         tables: &[SstableInfo],
         others: &[SstableInfo],
     ) -> Vec<SstableInfo> {
+        if tables.is_empty() || others.is_empty() {
+            return vec![];
+        }
         let mut info = self.create_overlap_info();
         for table in tables {
             info.update(table);
         }
         others
             .iter()
-            .filter(|table| !info.check_overlap(*table))
+            .filter(|table| info.check_overlap(*table))
             .cloned()
             .collect_vec()
     }
