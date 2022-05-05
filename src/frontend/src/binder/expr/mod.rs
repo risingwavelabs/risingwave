@@ -305,6 +305,7 @@ impl Binder {
     }
 
     pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<Literal> {
+        // TODO(nanderstabel) : Refactor
         let ty = match self.bind_expr(exprs.first().unwrap().clone())? {
             ExprImpl::Literal(l) => l.return_type(),
             _ => unreachable!(),
