@@ -14,21 +14,30 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use itertools::Itertools;
 
 use crate::base::SplitEnumerator;
 use crate::pulsar::admin::PulsarAdminClient;
-use crate::pulsar::split::{PulsarOffset, PulsarSplit};
+use crate::pulsar::split::{PulsarSplit};
 use crate::pulsar::topic::{parse_topic, ParsedTopic};
-use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_TOPIC_KEY};
+use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_SCAN_STARTUP_MODE, PULSAR_CONFIG_TOPIC_KEY};
 use crate::utils::AnyhowProperties;
+use serde::{Serialize, Deserialize}; // 1.0.124
 
 pub struct PulsarSplitEnumerator {
     admin_client: PulsarAdminClient,
     topic: ParsedTopic,
-    stop_offset: PulsarOffset,
-    start_offset: PulsarOffset,
+    start_offset: PulsarEnumeratorOffset,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PulsarEnumeratorOffset {
+    Earliest,
+    Latest,
+    MessageId(String),
+    Timestamp(u64),
 }
 
 impl PulsarSplitEnumerator {
@@ -37,41 +46,96 @@ impl PulsarSplitEnumerator {
         let admin_url = properties.get_pulsar(PULSAR_CONFIG_ADMIN_URL_KEY)?;
         let parsed_topic = parse_topic(&topic)?;
 
+        let mut scan_start_offset = match properties
+            .0
+            .get(PULSAR_CONFIG_SCAN_STARTUP_MODE)
+            .map(String::as_str)
+        {
+            Some("earliest") => PulsarEnumeratorOffset::Earliest,
+            Some("latest") => PulsarEnumeratorOffset::Latest,
+            None => PulsarEnumeratorOffset::Earliest,
+            _ => {
+                return Err(anyhow!(
+                    "properties {} only support earliest and latest or leave it empty",
+                    PULSAR_CONFIG_SCAN_STARTUP_MODE
+                ));
+            }
+        };
+
+        // if let Some(s) = properties.0.get(KAFKA_CONFIG_TIME_OFFSET) {
+        //     let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
+        //     scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
+        // }
+
         // todo handle offset init
         Ok(PulsarSplitEnumerator {
             admin_client: PulsarAdminClient::new(admin_url),
             topic: parsed_topic,
-            stop_offset: PulsarOffset::None,
-            start_offset: PulsarOffset::None,
+            start_offset: scan_start_offset,
         })
     }
 }
+
+impl PulsarSplitEnumerator {}
 
 #[async_trait]
 impl SplitEnumerator for PulsarSplitEnumerator {
     type Split = PulsarSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
-        let meta = self.admin_client.get_topic_metadata(&self.topic).await?;
-
-        let ret = (0..meta.partitions)
-            .into_iter()
-            .map(|p| {
-                let sub_topic = self.topic.sub_topic(p as i32);
-                PulsarSplit {
-                    sub_topic: sub_topic.to_string(),
-                    start_offset: self.start_offset,
-                    stop_offset: self.stop_offset,
-                }
-            })
-            .collect();
-
-        Ok(ret)
+        match self.topic.partition_index {
+            // partitioned topic
+            None => {
+                self.admin_client.get_topic_metadata(&self.topic).await.and_then(|meta| {
+                    Ok((0..meta.partitions)
+                        .into_iter()
+                        .map(|p| {
+                            PulsarSplit {
+                                topic: self.topic.sub_topic(p as i32),
+                                start_offset: self.start_offset.clone(),
+                            }
+                        })
+                        .collect_vec())
+                })
+            }
+            // non partitioned topic
+            Some(_) => {
+                // we need to check topic exists
+                self.admin_client.get_topic_metadata(&self.topic).await.and_then(|_| {
+                    Ok(vec![PulsarSplit {
+                        topic: self.topic.clone(),
+                        start_offset: self.start_offset.clone(),
+                    }])
+                })
+            }
+        }
     }
 }
 
-impl PulsarSplitEnumerator {
-    fn fetch_start_offset(&self, _partitions: &[i32]) -> Result<HashMap<i32, PulsarOffset>> {
-        todo!()
+
+#[cfg(test)]
+mod test {
+    use std::collections::HashMap;
+    use crate::{AnyhowProperties, SplitEnumerator};
+    use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_TOPIC_KEY, PulsarEnumeratorOffset, PulsarSplitEnumerator};
+
+    #[tokio::test]
+    async fn test_tmp() {
+        let offset = vec![PulsarEnumeratorOffset::Latest, PulsarEnumeratorOffset::Earliest, PulsarEnumeratorOffset::MessageId("1:2:3:4".to_string())];
+
+        let s = serde_json::to_string(&offset).unwrap();
+
+        println!("{}", s);
+
+        let x: Vec<PulsarEnumeratorOffset> = serde_json::from_str(s.as_str()).unwrap();
+        println!("{:?}", x);
+
+        // let mut prop = HashMap::new();
+        // prop.insert(PULSAR_CONFIG_ADMIN_URL_KEY.to_string(), "http://localhost:8080".to_string());
+        // prop.insert(PULSAR_CONFIG_TOPIC_KEY.to_string(), "t2".to_string());
+        // let properties = AnyhowProperties::new(prop);
+        // let mut enumerator = PulsarSplitEnumerator::new(&properties).unwrap();
+        // let _ = enumerator.list_splits().await.unwrap();
+        // println!("hello");
     }
 }

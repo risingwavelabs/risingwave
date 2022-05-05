@@ -23,3 +23,5 @@ pub use split::*;
 
 const PULSAR_CONFIG_TOPIC_KEY: &str = "pulsar.topic";
 const PULSAR_CONFIG_ADMIN_URL_KEY: &str = "pulsar.admin.url";
+const PULSAR_CONFIG_SERVICE_URL_KEY: &str = "pulsar.service.url";
+const PULSAR_CONFIG_SCAN_STARTUP_MODE: &str = "pulsar.scan.startup.mode";
