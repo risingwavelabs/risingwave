@@ -69,7 +69,7 @@ impl EqGroups {
     }
 
     pub fn advance_offset(&mut self) {
-        if self.limit == 0 {
+        if (self.limit == 0) || (self.offset + self.limit >= self.indices.len()) {
             self.offset = self.indices.len();
         } else {
             self.offset += self.limit;
