@@ -38,8 +38,8 @@ use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
-use risingwave_stream::executor_v2::monitor::StreamingMetrics;
-use risingwave_stream::executor_v2::{
+use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::{
     Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;

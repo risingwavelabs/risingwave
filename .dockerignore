@@ -45,7 +45,6 @@ src/log/
 **/tags
 
 log/
-.git
 
 .risingwave/
 .bin/
@@ -53,3 +52,5 @@ log/
 # generated files
 risedev-components.user.env
 riselab-components.user.env
+
+.git/

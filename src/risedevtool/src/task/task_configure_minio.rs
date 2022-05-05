@@ -83,23 +83,26 @@ impl Task for ConfigureMinioTask {
 
         last_result?;
 
-        let mut cmd = self.mcli();
-        cmd.arg("admin")
-            .arg("user")
-            .arg("add")
-            .arg(format!("{}/", HUMMOCK_REMOTE_NAME))
-            .arg(&self.config.hummock_user)
-            .arg(&self.config.hummock_password);
-        ctx.run_command(cmd)?;
+        // Previously, we create a normal user for MinIO. Now we want to simplify the whole process,
+        // and only create the bucket and access using root credentials.
 
-        let mut cmd = self.mcli();
-        cmd.arg("admin")
-            .arg("policy")
-            .arg("set")
-            .arg(format!("{}/", HUMMOCK_REMOTE_NAME))
-            .arg("readwrite")
-            .arg(format!("user={}", self.config.hummock_user));
-        ctx.run_command(cmd)?;
+        // let mut cmd =
+        // self.mcli(); cmd.arg("admin")
+        //     .arg("user")
+        //     .arg("add")
+        //     .arg(format!("{}/", HUMMOCK_REMOTE_NAME))
+        //     .arg(&self.config.hummock_user)
+        //     .arg(&self.config.hummock_password);
+        // ctx.run_command(cmd)?;
+
+        // let mut cmd = self.mcli();
+        // cmd.arg("admin")
+        //     .arg("policy")
+        //     .arg("set")
+        //     .arg(format!("{}/", HUMMOCK_REMOTE_NAME))
+        //     .arg("readwrite")
+        //     .arg(format!("user={}", self.config.hummock_user));
+        // ctx.run_command(cmd)?;
 
         let mut cmd = self.mcli();
         cmd.arg("mb").arg(format!(

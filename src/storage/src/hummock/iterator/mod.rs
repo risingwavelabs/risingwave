@@ -14,20 +14,20 @@
 
 use super::{HummockResult, HummockValue};
 
-mod concat;
-pub use concat::*;
+mod forward_concat;
+pub use forward_concat::*;
+mod backward_concat;
 mod concat_inner;
-mod reverse_concat;
-pub use reverse_concat::*;
-mod reverse_merge;
-pub use reverse_merge::*;
-mod reverse_user;
-pub use reverse_user::*;
-mod merge;
-pub use merge::*;
+pub use backward_concat::*;
+mod backward_merge;
+pub use backward_merge::*;
+mod backward_user;
+pub use backward_user::*;
+mod forward_merge;
+pub use forward_merge::*;
+pub mod forward_user;
 mod merge_inner;
-pub mod user;
-pub use user::*;
+pub use forward_user::*;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
@@ -96,7 +96,7 @@ pub trait HummockIterator: Send + Sync {
     async fn rewind(&mut self) -> HummockResult<()>;
 
     /// Resets iterator and seeks to the first position where the key >= provided key, or key <=
-    /// provided key if this is a reverse iterator.
+    /// provided key if this is a backward iterator.
     ///
     /// Note:
     /// - Do not decide whether the position is valid or not by checking the returned error of this
