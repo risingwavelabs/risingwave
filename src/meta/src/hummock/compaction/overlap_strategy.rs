@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::SstableInfo;
@@ -24,7 +25,7 @@ pub trait OverlapInfo {
 
 pub trait OverlapStrategy: Send + Sync {
     fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool;
-    fn check_multiple_overlap(
+    fn check_base_level_overlap(
         &self,
         tables: &[SstableInfo],
         others: &[SstableInfo],
@@ -34,6 +35,21 @@ pub trait OverlapStrategy: Send + Sync {
             info.update(table);
         }
         info.check_multiple_overlap(others)
+    }
+    fn check_overlap_with_tables(
+        &self,
+        tables: &[SstableInfo],
+        others: &[SstableInfo],
+    ) -> Vec<SstableInfo> {
+        let mut info = self.create_overlap_info();
+        for table in tables {
+            info.update(table);
+        }
+        others
+            .iter()
+            .filter(|table| !info.check_overlap(*table))
+            .cloned()
+            .collect_vec()
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo>;

@@ -1,16 +1,21 @@
-// Copyright 2022 Singularity Data
+//  Copyright 2022 Singularity Data
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//  http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+// Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+// This source code is licensed under both the GPLv2 (found in the
+// COPYING file in the root directory) and Apache 2.0 License
+// (found in the LICENSE.Apache file in the root directory).
 
 use std::sync::Arc;
 
@@ -101,6 +106,8 @@ impl DynamicLevelSelector {
     }
 
     // TODO: calculate this scores in apply compact result.
+    // calculate base level and the base size of LSM tree build for current dataset. In other words,
+    //  `level_max_bytes` is our compaction goal which shall reach.
     fn calculate_level_base_score(&self, levels: &[Level]) -> SelectContext {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
@@ -185,7 +192,7 @@ impl DynamicLevelSelector {
                 continue;
             }
             if level_idx == 0 {
-                // The files in L0 may produce quickly because of the frequently epoch. So, if we
+                // The number of files in L0 can grow quickly due to frequent checkpoint. So, if we
                 // set level0_trigger_number too small, the manager will always
                 // compact the files in L0 and it would make the whole tree more unbalanced. So we
                 // set level0_trigger_number a large number to make compaction

@@ -160,7 +160,7 @@ impl TierCompactionPicker {
         // pick up files in L1 which are overlap with L0 to target level input.
         let new_add_tables = self
             .overlap_strategy
-            .check_multiple_overlap(select_tables, &level.table_infos);
+            .check_base_level_overlap(select_tables, &level.table_infos);
         if new_add_tables
             .iter()
             .any(|table| level_handlers.is_pending_compact(&table.id))
@@ -262,14 +262,18 @@ impl TierCompactionPicker {
                 if select_compaction_bytes >= self.config.max_compaction_bytes {
                     break;
                 }
+
                 select_level_ssts.push(other.clone());
                 if !self
                     .overlap_strategy
-                    .check_multiple_overlap(&select_level.table_infos[0..idx], &select_level_ssts)
+                    .check_overlap_with_tables(
+                        &select_level.table_infos[0..idx],
+                        &select_level_ssts,
+                    )
                     .is_empty()
                     || !self
                         .overlap_strategy
-                        .check_multiple_overlap(
+                        .check_overlap_with_tables(
                             &select_level_ssts,
                             &select_level.table_infos[0..idx],
                         )
