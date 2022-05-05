@@ -70,11 +70,14 @@ impl Aggregator for CountStar {
         // groups' sizes are simply distance between group start indices. The distance
         // between last element and `input.cardinality()` is the ongoing group that
         // may continue in following chunks.
+        //
+        // Since the number of groups in an output chunk is limited, if we reach the limit
+        // in the process of counting, we set the `reached_limit` flag and save the start
+        // index of previous group to `self.result`.
         let mut groups_iter = groups.starting_indices().iter();
         if let Some(first) = groups_iter.next() {
             let first_count = {
                 if self.reached_limit {
-                    self.reached_limit = false;
                     first - self.result
                 } else {
                     first + self.result
@@ -96,6 +99,7 @@ impl Aggregator for CountStar {
                 }
             }
             if group_cnt == groups.len() {
+                self.reached_limit = false;
                 self.result = input.cardinality() - prev;
             }
         } else {
