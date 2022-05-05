@@ -297,6 +297,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::vector_op::cast::str_to_date;
     use risingwave_pb::plan_common::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;

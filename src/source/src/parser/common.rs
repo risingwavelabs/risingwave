@@ -16,7 +16,7 @@ use num_traits::FromPrimitive;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Decimal, ScalarImpl, ScalarRef};
-use risingwave_expr::vector_op::cast::str_to_date;
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use serde_json::Value;
 
 use crate::SourceColumnDesc;
