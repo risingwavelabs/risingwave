@@ -24,7 +24,7 @@ use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectorState, ConnectorStateV2, SplitImpl, SplitMetaData};
+use crate::{ConnectorState, SplitImpl, SplitMetaData};
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.

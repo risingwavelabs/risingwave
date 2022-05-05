@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -200,11 +201,11 @@ struct SourceReader {
 }
 
 impl SourceReader {
-    #[try_stream(ok = Message, error = RwError)]
+    #[try_stream(ok = StreamChunkWithState, error = RwError)]
     async fn stream_reader(mut stream_reader: Box<dyn StreamSourceReader>) {
         loop {
             match stream_reader.next().await {
-                Ok(chunk) => yield Message::Chunk(chunk),
+                Ok(chunk) => yield chunk,
                 Err(e) => {
                     // TODO: report this error to meta service to mark the actors failed.
                     error!("hang up stream reader due to polling error: {}", e);
@@ -230,10 +231,14 @@ impl SourceReader {
         )));
     }
 
-    fn into_stream(self) -> impl Stream<Item = Result<Message>> {
+    fn into_stream(
+        self,
+    ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
+        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
+        let stream_reader = Self::stream_reader(self.stream_reader);
         select_with_strategy(
-            Self::barrier_receiver(self.barrier_receiver),
-            Self::stream_reader(self.stream_reader),
+            barrier_receiver.map(Either::Left),
+            stream_reader.map(Either::Right),
             |_: &mut ()| PollNext::Left, // perfer barrier
         )
     }
@@ -283,11 +288,35 @@ impl<S: StateStore> SourceExecutor<S> {
 
         #[for_await]
         for msg in reader.into_stream() {
-            match msg.map_err(StreamExecutorError::source_error)? {
+            match msg {
                 // This branch will be preferred.
-                Message::Barrier(barrier) => yield Message::Barrier(barrier),
-                // If there's barrier, this branch will be deferred.
-                Message::Chunk(mut chunk) => {
+                Either::Left(barrier) => {
+                    match barrier.map_err(StreamExecutorError::source_error)? {
+                        Message::Barrier(barrier) => {
+                            let epoch = barrier.epoch.prev;
+                            if self.state_cache.is_some() {
+                                self.state_store
+                                    .take_snapshot(self.state_cache.clone().unwrap(), epoch)
+                                    .await
+                                    .map_err(|e| {
+                                        StreamExecutorError::source_error(RwError::from(
+                                            InternalError(e.to_string()),
+                                        ))
+                                    })?;
+                            }
+                            yield Message::Barrier(barrier)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                Either::Right(chunk_with_state) => {
+                    let chunk_with_state =
+                        chunk_with_state.map_err(StreamExecutorError::source_error)?;
+                    self.state_cache = Some(ConnectorState::from_hashmap(
+                        chunk_with_state.split_offset_mapping,
+                    ));
+                    let mut chunk = chunk_with_state.chunk;
+
                     if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                         chunk = self.refill_row_id_column(chunk);
                     }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -62,6 +64,20 @@ pub struct ConnectorState {
     pub identifier: Bytes,
     pub start_offset: String,
     pub end_offset: String,
+}
+
+impl ConnectorState {
+    pub fn from_hashmap(state: HashMap<String, String>) -> Vec<Self> {
+        let mut connector_states: Vec<Self> = Vec::with_capacity(state.len());
+        for (split, offset) in state {
+            connector_states.push(Self {
+                identifier: Bytes::from(split),
+                start_offset: offset.clone(),
+                end_offset: "".to_string(),
+            })
+        }
+        connector_states
+    }
 }
 
 impl From<SplitImpl> for ConnectorState {

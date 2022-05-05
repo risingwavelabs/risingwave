@@ -21,7 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{ConnectorStateV2, Properties, SplitImpl, SplitReaderImpl};
+use risingwave_connector::{ConnectorStateV2, Properties, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
@@ -111,7 +111,7 @@ impl StreamSourceReader for ConnectorStreamReader {
                     if let Some(content) = msg.payload {
                         *split_offset_mapping
                             .entry(msg.split_id.clone())
-                            .or_insert("".to_string()) = msg.offset.to_string();
+                            .or_insert_with(|| "".to_string()) = msg.offset.to_string();
                         events.push(self.parser.parse(content.as_ref(), &self.columns)?);
                     }
                 }

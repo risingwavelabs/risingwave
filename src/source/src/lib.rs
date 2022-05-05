@@ -85,7 +85,7 @@ impl StreamSourceReader for SourceStreamReaderImpl {
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
-/// split_ids and values are the latest offset for each split.
+/// `split_id` and values are the latest offset for each split.
 #[derive(Clone, Debug)]
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
