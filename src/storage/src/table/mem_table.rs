@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![allow(dead_code)]
-use std::collections::btree_map::{self, Entry};
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
 use risingwave_common::array::Row;
@@ -30,7 +30,6 @@ pub enum RowOp {
 pub struct MemTable {
     pub buffer: BTreeMap<Row, RowOp>,
 }
-type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
 
 impl Default for MemTable {
     fn default() -> Self {
@@ -111,9 +110,5 @@ impl MemTable {
 
     pub fn into_parts(self) -> BTreeMap<Row, RowOp> {
         self.buffer
-    }
-
-    pub async fn iter(&self, _pk: Row) -> StorageResult<MemTableIter<'_>> {
-        todo!();
     }
 }
