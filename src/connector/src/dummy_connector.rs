@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::future;
 use async_trait::async_trait;
 
 use crate::{ConnectorStateV2, Properties, SourceMessage, SplitReader};
@@ -11,9 +12,10 @@ pub struct DummySplitReader;
 #[async_trait]
 impl SplitReader for DummySplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        // the dead loop is intentional
-        #[allow(clippy::empty_loop)]
-        loop {}
+        let pending = future::pending();
+        let () = pending.await;
+
+        unreachable!()
     }
 
     async fn new(_properties: Properties, _state: ConnectorStateV2) -> Result<Self>
