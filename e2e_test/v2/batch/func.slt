@@ -23,6 +23,8 @@ query I
 select nullif(t1.v1,1) from t1;
 ----
 NULL
+NULL
+NULL
 
 query I
 select coalesce(v1,v2,v3) from t1;
