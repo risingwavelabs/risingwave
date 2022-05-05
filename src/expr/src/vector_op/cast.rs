@@ -18,8 +18,8 @@ use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use num_traits::ToPrimitive;
-use risingwave_common::error::ErrorCode::{InternalError, InvalidInputSyntax, ParseError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::ErrorCode::{InternalError, InvalidInputSyntax};
+use risingwave_common::error::{parse_error, Result, RwError};
 use risingwave_common::types::{
     Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
@@ -56,24 +56,29 @@ pub fn str_to_str(n: &str) -> Result<String> {
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(
-        NaiveDate::parse_from_str(elem, "%Y-%m-%d")
-            .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
+        NaiveDate::parse_from_str(elem, "%Y-%m-%d").map_err(|_| {
+            parse_error("Can't cast string to date (expected format is YYYY-MM-DD)")
+        })?,
     ))
 }
 
 #[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
     Ok(NaiveTimeWrapper::new(
-        NaiveTime::parse_from_str(elem, "%H:%M:%S")
-            .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
+        NaiveTime::parse_from_str(elem, "%H:%M:%S%.f").map_err(|_| {
+            parse_error("Can't cast string to time (expected format is HH:MM:SS[.MS])")
+        })?,
     ))
 }
 
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
     Ok(NaiveDateTimeWrapper::new(
-        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
-            .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
+        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f").map_err(|_| {
+            parse_error(
+                "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])",
+            )
+        })?,
     ))
 }
 
@@ -81,7 +86,11 @@ pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
         .map(|ret| ret.timestamp_nanos() / 1000)
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+        .map_err(|_| {
+            parse_error(
+                "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])",
+            )
+        })
 }
 
 #[inline(always)]
@@ -201,5 +210,32 @@ pub fn bool_to_str(input: bool) -> Result<String> {
     match input {
         true => Ok("true".into()),
         false => Ok("false".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parse_str() {
+        use super::*;
+
+        str_to_timestamp("1999-01-08 04:05:06").unwrap();
+        str_to_date("1999-01-08").unwrap();
+        str_to_time("04:05:06").unwrap();
+
+        assert_eq!(
+            str_to_timestamp("1999-01-08 04:05:06AA")
+                .unwrap_err()
+                .to_string(),
+            "Parse error: Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])".to_string()
+        );
+        assert_eq!(
+            str_to_date("1999-01-08AA").unwrap_err().to_string(),
+            "Parse error: Can't cast string to date (expected format is YYYY-MM-DD)".to_string()
+        );
+        assert_eq!(
+            str_to_time("AA04:05:06").unwrap_err().to_string(),
+            "Parse error: Can't cast string to time (expected format is HH:MM:SS[.MS])".to_string()
+        );
     }
 }

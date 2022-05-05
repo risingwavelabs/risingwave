@@ -1,0 +1,414 @@
+- id: create_tables
+  sql: |
+    CREATE TABLE person (
+        id BIGINT,
+        name VARCHAR,
+        emailAddress VARCHAR,
+        creditCard VARCHAR,
+        city VARCHAR,
+        state VARCHAR,
+        dateTime TIMESTAMP
+    );
+
+    CREATE TABLE auction (
+        id BIGINT,
+        itemName VARCHAR,
+        description VARCHAR,
+        initialBid BIGINT,
+        reserve BIGINT,
+        dateTime TIMESTAMP,
+        expires TIMESTAMP,
+        seller BIGINT,
+        category BIGINT
+    );
+
+    CREATE TABLE bid (
+        auction BIGINT,
+        bidder BIGINT,
+        price BIGINT,
+        channel VARCHAR,
+        url VARCHAR,
+        dateTime TIMESTAMP
+    );
+- id: nexmark_q0
+  before:
+    - create_tables
+  sql: |
+    CREATE MATERIALIZED VIEW nexmark_q0
+      AS
+    SELECT auction, bidder, price, dateTime FROM bid;
+- id: nexmark_q0
+  before:
+    - create_tables
+  sql: |
+    SELECT auction, bidder, price, dateTime FROM bid;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, dateTime, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id#0], pk_indices: [4] }
+- id: nexmark_q1
+  before:
+    - create_tables
+  sql: |
+    SELECT
+      auction,
+      bidder,
+      0.908 * price as price,
+      dateTime
+    FROM bid;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1, (0.908:Decimal * $2), $3], expr_alias: [auction, bidder, price, dateTime] }
+        BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, dateTime, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamProject { exprs: [$0, $1, (0.908:Decimal * $2), $3, $4], expr_alias: [auction, bidder, price, dateTime,  ] }
+        StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id#0], pk_indices: [4] }
+- id: nexmark_q2
+  before:
+    - create_tables
+  sql: "SELECT auction, price FROM bid \nWHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;\n"
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ((((($0 = 1007:Int32) OR ($0 = 1020:Int32)) OR ($0 = 2001:Int32)) OR ($0 = 2019:Int32)) OR ($0 = 2087:Int32)) }
+        BatchScan { table: bid, columns: [auction, price] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, price, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+      StreamFilter { predicate: ((((($0 = 1007:Int32) OR ($0 = 1020:Int32)) OR ($0 = 2001:Int32)) OR ($0 = 2019:Int32)) OR ($0 = 2087:Int32)) }
+        StreamTableScan { table: bid, columns: [auction, price, _row_id#0], pk_indices: [2] }
+- id: nexmark_q3
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        P.name, P.city, P.state, A.id
+    FROM
+        auction AS A INNER JOIN person AS P on A.seller = P.id
+    WHERE
+        A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$3, $4, $5, $0], expr_alias: [name, city, state, id] }
+        BatchHashJoin { type: Inner, predicate: $1 = $2 }
+          BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
+            BatchExchange { order: [], dist: HashShard([1]) }
+              BatchFilter { predicate: ($2 = 10:Int32) }
+                BatchScan { table: auction, columns: [id, seller, category] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchFilter { predicate: ((($3 = 'or':Varchar) OR ($3 = 'id':Varchar)) OR ($3 = 'ca':Varchar)) }
+              BatchScan { table: person, columns: [id, name, city, state] }
+  stream_plan: |
+    StreamMaterialize { columns: [name, city, state, id, _row_id#0(hidden), _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
+      StreamExchange { dist: HashShard([4, 5]) }
+        StreamProject { exprs: [$4, $5, $6, $0, $2, $7], expr_alias: [name, city, state, id,  ,  ] }
+          StreamHashJoin { type: Inner, predicate: $1 = $3 }
+            StreamProject { exprs: [$0, $1, $3], expr_alias: [ ,  ,  ] }
+              StreamExchange { dist: HashShard([1]) }
+                StreamFilter { predicate: ($2 = 10:Int32) }
+                  StreamTableScan { table: auction, columns: [id, seller, category, _row_id#0], pk_indices: [3] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamFilter { predicate: ((($3 = 'or':Varchar) OR ($3 = 'id':Varchar)) OR ($3 = 'ca':Varchar)) }
+                StreamTableScan { table: person, columns: [id, name, city, state, _row_id#0], pk_indices: [4] }
+- id: nexmark_q4
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        Q.category,
+        AVG(Q.final)
+    FROM (
+        SELECT MAX(B.price) AS final, A.category
+        FROM auction A, bid B
+        WHERE A.id = B.auction AND B.dateTime BETWEEN A.dateTime AND A.expires
+        GROUP BY A.id, A.category
+    ) Q
+    GROUP BY Q.category;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, ($1 / $2)], expr_alias: [category,  ] }
+        BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1)] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$1, $2], expr_alias: [ ,  ] }
+              BatchHashAgg { group_keys: [$0, $1], aggs: [max($2)] }
+                BatchProject { exprs: [$0, $3, $5], expr_alias: [ ,  ,  ] }
+                  BatchExchange { order: [], dist: HashShard([0, 3]) }
+                    BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
+                      BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: auction, columns: [id, dateTime, expires, category] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: bid, columns: [auction, price, dateTime] }
+  stream_plan: |
+    StreamMaterialize { columns: [category, expr#1], pk_columns: [category] }
+      StreamExchange { dist: HashShard([0]) }
+        StreamProject { exprs: [$0, ($2 / $3)], expr_alias: [category,  ] }
+          StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
+            StreamProject { exprs: [$1, $3, $0], expr_alias: [ ,  ,  ] }
+              StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
+                StreamProject { exprs: [$0, $3, $6, $4, $8], expr_alias: [ ,  ,  ,  ,  ] }
+                  StreamExchange { dist: HashShard([0, 3]) }
+                    StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }
+                      StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                        StreamExchange { dist: HashShard([0]) }
+                          StreamTableScan { table: auction, columns: [id, dateTime, expires, category, _row_id#0], pk_indices: [4] }
+                        StreamExchange { dist: HashShard([0]) }
+                          StreamTableScan { table: bid, columns: [auction, price, dateTime, _row_id#0], pk_indices: [3] }
+- id: nexmark_q5
+  before:
+    - create_tables
+  sql: |
+    SELECT AuctionBids.auction, AuctionBids.num
+    FROM (
+      SELECT
+        B1.auction,
+        count(*) AS num,
+        HOP_START(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS starttime,
+        HOP_END(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS endtime
+      FROM bid B1
+      GROUP BY
+        B1.auction,
+        HOP(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+    ) AS AuctionBids
+    JOIN (
+      SELECT
+        max(CountBids.num) AS maxn,
+        CountBids.starttime,
+        CountBids.endtime
+      FROM (
+        SELECT
+          count(*) AS num,
+          HOP_START(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS starttime,
+          HOP_END(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS endtime
+        FROM bid B2
+        GROUP BY
+          B2.auction,
+          HOP(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+        ) AS CountBids
+      GROUP BY CountBids.starttime, CountBids.endtime
+    ) AS MaxBids
+    ON AuctionBids.starttime = MaxBids.starttime AND
+        AuctionBids.endtime = MaxBids.endtime AND
+        AuctionBids.num >= MaxBids.maxn;
+  binder_error: 'Feature is not yet implemented: unsupported function: "hop", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q6
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        Q.seller,
+        AVG(Q.final) OVER
+            (PARTITION BY Q.seller ORDER BY Q.dateTime ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
+    FROM (
+        SELECT MAX(B.price) AS final, A.seller, B.dateTime
+        FROM auction AS A, bid AS B
+        WHERE A.id = B.auction and B.dateTime between A.dateTime and A.expires
+        GROUP BY A.id, A.seller
+    ) AS Q;
+  planner_error: "Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function"
+- id: nexmark_q7
+  before:
+    - create_tables
+  sql: |
+    SELECT B.auction, B.price, B.bidder, B.dateTime
+    from bid B
+    JOIN (
+      SELECT MAX(B1.price) AS maxprice, TUMBLE_ROWTIME(B1.dateTime, INTERVAL '10' SECOND) as dateTime
+      FROM bid B1
+      GROUP BY TUMBLE(B1.dateTime, INTERVAL '10' SECOND)
+    ) B1
+    ON B.price = B1.maxprice
+    WHERE B.dateTime BETWEEN B1.dateTime  - INTERVAL '10' SECOND AND B1.dateTime;
+  binder_error: 'Feature is not yet implemented: unsupported function: "tumble", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q8
+  before:
+    - create_tables
+  sql: |
+    SELECT P.id, P.name, P.starttime
+    FROM (
+      SELECT P.id, P.name,
+            TUMBLE_START(P.dateTime, INTERVAL '10' SECOND) AS starttime,
+            TUMBLE_END(P.dateTime, INTERVAL '10' SECOND) AS endtime
+      FROM person P
+      GROUP BY P.id, P.name, TUMBLE(P.dateTime, INTERVAL '10' SECOND)
+    ) P
+    JOIN (
+      SELECT A.seller,
+            TUMBLE_START(A.dateTime, INTERVAL '10' SECOND) AS starttime,
+            TUMBLE_END(A.dateTime, INTERVAL '10' SECOND) AS endtime
+      FROM auction A
+      GROUP BY A.seller, TUMBLE(A.dateTime, INTERVAL '10' SECOND)
+    ) A
+    ON P.id = A.seller AND P.starttime = A.starttime AND P.endtime = A.endtime;
+  binder_error: 'Feature is not yet implemented: unsupported function: "tumble", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q9
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        id, itemName, description, initialBid, reserve, dateTime, expires, seller, category,
+        auction, bidder, price, bid_dateTime
+    FROM (
+      SELECT A.*, B.auction, B.bidder, B.price, B.dateTime AS bid_dateTime,
+        ROW_NUMBER() OVER (PARTITION BY A.id ORDER BY B.price DESC, B.dateTime ASC) AS rownum
+      FROM auction A, bid B
+      WHERE A.id = B.auction AND B.dateTime BETWEEN A.dateTime AND A.expires
+    )
+    WHERE rownum <= 1;
+  binder_error: 'Feature is not yet implemented: unsupported function: "row_number", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q10
+  before:
+    - create_tables
+  sql: |
+    SELECT auction, bidder, price, dateTime, DATE_FORMAT(dateTime, 'yyyy-MM-dd'), DATE_FORMAT(dateTime, 'HH:mm')
+    FROM bid;
+  binder_error: 'Feature is not yet implemented: unsupported function: "date_format", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q11
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        B.bidder,
+        count(*) as bid_count,
+        SESSION_START(B.dateTime, INTERVAL '10' SECOND) as starttime,
+        SESSION_END(B.dateTime, INTERVAL '10' SECOND) as endtime
+    FROM bid B
+    GROUP BY B.bidder, SESSION(B.dateTime, INTERVAL '10' SECOND);
+  binder_error: 'Feature is not yet implemented: unsupported function: "session", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q12
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        B.bidder,
+        count(*) as bid_count,
+        TUMBLE_START(B.p_time, INTERVAL '10' SECOND) as starttime,
+        TUMBLE_END(B.p_time, INTERVAL '10' SECOND) as endtime
+    FROM (SELECT *, PROCTIME() as p_time FROM bid) B
+    GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
+  binder_error: 'Feature is not yet implemented: unsupported function: "proctime", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q13
+  before:
+    - create_tables
+  sql: |
+    /* SELECT
+        B.auction,
+        B.bidder,
+        B.price,
+        B.dateTime,
+        S.`value`
+    FROM (SELECT *, PROCTIME() as p_time FROM bid) B
+    JOIN side_input FOR SYSTEM_TIME AS OF B.p_time AS S
+    ON mod(B.auction, 10000) = S.key; */
+    /* parser error */
+    select 1;
+- id: nexmark_q14
+  before:
+    - create_tables
+  sql: "SELECT \n    auction,\n    bidder,\n    0.908 * price as price,\n    CASE\n        WHEN HOUR(dateTime) >= 8 AND HOUR(dateTime) <= 18 THEN 'dayTime'\n        WHEN HOUR(dateTime) <= 6 OR HOUR(dateTime) >= 20 THEN 'nightTime'\n        ELSE 'otherTime'\n    END AS bidTimeType,\n    dateTime,\n    extra,\n    count_char(extra, 'c') AS c_counts\nFROM bid\nWHERE 0.908 * price > 1000000 AND 0.908 * price < 50000000;\n"
+  binder_error: 'Feature is not yet implemented: unsupported function: "hour", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q15
+  before:
+    - create_tables
+  sql: |
+    /* SELECT
+        DATE_FORMAT(dateTime, 'yyyy-MM-dd') as `day`,
+        count(*) AS total_bids,
+        count(*) filter (where price < 10000) AS rank1_bids,
+        count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+        count(*) filter (where price >= 1000000) AS rank3_bids,
+        count(distinct bidder) AS total_bidders,
+        count(distinct bidder) filter (where price < 10000) AS rank1_bidders,
+        count(distinct bidder) filter (where price >= 10000 and price < 1000000) AS rank2_bidders,
+        count(distinct bidder) filter (where price >= 1000000) AS rank3_bidders,
+        count(distinct auction) AS total_auctions,
+        count(distinct auction) filter (where price < 10000) AS rank1_auctions,
+        count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,
+        count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
+    FROM bid
+    GROUP BY DATE_FORMAT(dateTime, 'yyyy-MM-dd'); */
+    /* parser error */
+    select 1
+- id: nexmark_q16
+  before:
+    - create_tables
+  sql: "/* \nSELECT\n    channel,\n    DATE_FORMAT(dateTime, 'yyyy-MM-dd') as `day`,\n    max(DATE_FORMAT(dateTime, 'HH:mm')) as `minute`,\n    count(*) AS total_bids,\n    count(*) filter (where price < 10000) AS rank1_bids,\n    count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,\n    count(*) filter (where price >= 1000000) AS rank3_bids,\n    count(distinct bidder) AS total_bidders,\n    count(distinct bidder) filter (where price < 10000) AS rank1_bidders,\n    count(distinct bidder) filter (where price >= 10000 and price < 1000000) AS rank2_bidders,\n    count(distinct bidder) filter (where price >= 1000000) AS rank3_bidders,\n    count(distinct auction) AS total_auctions,\n    count(distinct auction) filter (where price < 10000) AS rank1_auctions,\n    count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,\n    count(distinct auction) filter (where price >= 1000000) AS rank3_auctions\nFROM bid\nGROUP BY channel, DATE_FORMAT(dateTime, 'yyyy-MM-dd'); */\n/* parser error */\nselect 1\n"
+- id: nexmark_q17
+  before:
+    - create_tables
+  sql: |
+    /*
+    SELECT
+        auction,
+        DATE_FORMAT(dateTime, 'yyyy-MM-dd') as `day`,
+        count(*) AS total_bids,
+        count(*) filter (where price < 10000) AS rank1_bids,
+        count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+        count(*) filter (where price >= 1000000) AS rank3_bids,
+        min(price) AS min_price,
+        max(price) AS max_price,
+        avg(price) AS avg_price,
+        sum(price) AS sum_price
+    FROM bid
+    GROUP BY auction, DATE_FORMAT(dateTime, 'yyyy-MM-dd'); */
+    /* parser error */
+    select 1
+- id: nexmark_q18
+  before:
+    - create_tables
+  sql: |
+    SELECT auction, bidder, price, channel, url, dateTime, extra
+    FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY bidder, auction ORDER BY dateTime DESC) AS rank_number
+          FROM bid)
+    WHERE rank_number <= 1;
+  binder_error: 'Feature is not yet implemented: unsupported function: "row_number", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q19
+  before:
+    - create_tables
+  sql: |
+    SELECT * FROM
+    (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
+    WHERE rank_number <= 10;
+  binder_error: 'Feature is not yet implemented: unsupported function: "row_number", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q20
+  before:
+    - create_tables
+  sql: |
+    /*
+    SELECT
+        auction, bidder, price, channel, url, B.dateTime,
+        itemName, description, initialBid, reserve, A.dateTime, expires, seller, category,
+    FROM
+        bid AS B INNER JOIN auction AS A on B.auction = A.id
+    WHERE A.category = 10;
+    */
+    /* parser error */
+    select 1
+- id: nexmark_q21
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        auction, bidder, price, channel,
+        CASE
+            WHEN lower(channel) = 'apple' THEN '0'
+            WHEN lower(channel) = 'google' THEN '1'
+            WHEN lower(channel) = 'facebook' THEN '2'
+            WHEN lower(channel) = 'baidu' THEN '3'
+            ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2)
+            END
+        AS channel_id FROM bid
+        where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
+              lower(channel) in ('apple', 'google', 'facebook', 'baidu');
+  binder_error: 'Feature is not yet implemented: unsupported function: "regexp_extract", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+- id: nexmark_q22
+  before:
+    - create_tables
+  sql: |
+    SELECT
+        auction, bidder, price, channel,
+        SPLIT_INDEX(url, '/', 3) as dir1,
+        SPLIT_INDEX(url, '/', 4) as dir2,
+        SPLIT_INDEX(url, '/', 5) as dir3 FROM bid;
+  binder_error: 'Feature is not yet implemented: unsupported function: "split_index", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'

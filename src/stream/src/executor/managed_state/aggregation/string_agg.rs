@@ -23,7 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
-use risingwave_common::util::value_encoding::{deserialize_cell_not_null, serialize_cell_not_null};
+use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
@@ -116,10 +116,9 @@ impl<S: StateStore> ManagedStringAggState<S> {
         assert!(!self.is_dirty());
         // Read all.
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
-        for (raw_key, raw_value) in all_data {
+        for (raw_key, mut raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell_not_null(&mut deserializer, DataType::Varchar)?.unwrap();
+            let value = deserialize_cell(&mut raw_value, &DataType::Varchar)?.unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(
                 raw_key,
@@ -255,7 +254,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     // TODO(Yuanxin): Implement value meta
                     local.put(
                         key,
-                        StorageValue::new_default_put(serialize_cell_not_null(&Some(val))?),
+                        StorageValue::new_default_put(serialize_cell(&Some(val))?),
                     );
                 }
                 None => {
