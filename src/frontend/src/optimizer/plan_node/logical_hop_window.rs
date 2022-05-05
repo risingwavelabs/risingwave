@@ -152,7 +152,10 @@ impl ColPrunable for LogicalHopWindow {
                 .collect_vec()
         };
         let input = self.input.prune_col(&upstream_required_cols);
-        let input_change = ColIndexMapping::with_remaining_columns(&upstream_required_cols);
+        let input_change = ColIndexMapping::with_remaining_columns(
+            &upstream_required_cols,
+            self.input().schema().len(),
+        );
         let (new_hop, _) = self.rewrite_with_input(input, input_change);
         match (require_win_start, require_win_end) {
             (true, true) => new_hop.into(),

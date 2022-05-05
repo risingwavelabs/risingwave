@@ -474,6 +474,7 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
 
     for c in cases {
+        println!("{}", c.sql);
         if let Err(e) = c.run(true).await {
             println!("\nTest case failed, the input SQL:\n{}\n{}", c.sql, e);
             failed_num += 1;

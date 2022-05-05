@@ -142,7 +142,7 @@ impl PlanRoot {
         // Prune Columns
         let out_fields: Vec<_> = self.out_fields.ones().collect();
         plan = plan.prune_col(&out_fields);
-        
+
         plan = {
             let rules = vec![
                 // merge should be applied before eliminate

@@ -14,7 +14,6 @@
 //
 use std::fmt;
 
-
 use risingwave_pb::plan_common::JoinType;
 
 use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};

@@ -362,40 +362,26 @@ impl ColPrunable for LogicalJoin {
             })
         };
 
-        let new_on = {
-            let left_col_change = ColIndexMapping::with_remaining_columns(&left_required_cols);
-            let right_col_change = ColIndexMapping::with_remaining_columns(&right_required_cols);
-            let mut new_map: Vec<Option<usize>> = vec![None; left_len + right_len];
-            let (left_map, _) = left_col_change.into_parts();
-            let (right_map, _) = right_col_change.into_parts();
-            for (i, v) in left_map.into_iter().enumerate() {
-                new_map[i] = v;
-            }
-            for (i, v) in right_map.into_iter().enumerate() {
-                new_map[i + left_len] = v.map(|x| x + left_required_cols.len());
-            }
-            self.on
-                .clone()
-                .rewrite_expr(&mut ColIndexMapping::new(new_map))
-        };
-        let join = LogicalJoin::new(
+        let (join, _) = self.rewrite_with_left_right(
             self.left.prune_col(&left_required_cols),
+            ColIndexMapping::with_remaining_columns(
+                &left_required_cols,
+                self.left().schema().len(),
+            ),
             self.right.prune_col(&right_required_cols),
-            self.join_type,
-            new_on,
+            ColIndexMapping::with_remaining_columns(
+                &right_required_cols,
+                self.right().schema().len(),
+            ),
         );
         if join_condition_required_cols.is_subset(&upstream_required_cols) {
             join.into()
         } else {
-            let mapping = ColIndexMapping::with_remaining_columns(&total_required_cols);
-            let required_cols = required_cols
-                .iter()
-                .copied()
-                .filter_map(|x| mapping.try_map(x))
-                .collect_vec();
+            // TODO: map required_cols
+            let src_size = join.schema().len();
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols),
+                ColIndexMapping::with_remaining_columns(required_cols, src_size),
             )
         }
     }

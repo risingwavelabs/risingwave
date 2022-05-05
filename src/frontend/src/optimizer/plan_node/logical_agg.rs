@@ -434,20 +434,9 @@ impl ColPrunable for LogicalAgg {
         };
         let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
-        let mut agg_call_required_cols =
+        let agg_call_required_cols =
             FixedBitSet::with_capacity(self.input().schema().fields().len());
-        // Do not prune the group keys.
-        let mut new_group_keys = self.group_keys.clone();
-        let mut agg_calls: Vec<_> = required_cols
-            .iter()
-            .filter(|&&index| index >= self.group_keys.len())
-            .map(|&index| {
-                let index = index - self.group_keys.len();
-                let agg_call = self.agg_calls[index].clone();
-                agg_call_required_cols.extend(agg_call.inputs.iter().map(|x| x.index()));
-                agg_call
-            })
-            .collect();
+
         let input_required_cols = {
             let mut tmp: FixedBitSet = upstream_required_cols.clone();
             tmp.union_with(&group_key_required_cols);
@@ -455,27 +444,27 @@ impl ColPrunable for LogicalAgg {
             tmp.ones().collect_vec()
         };
 
-        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
-        agg_calls.iter_mut().for_each(|agg_call| {
-            agg_call
-                .inputs
-                .iter_mut()
-                .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
-        });
-        new_group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
-        let agg = LogicalAgg::new(
-            agg_calls,
-            new_group_keys,
-            self.input.prune_col(&input_required_cols),
+        let mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
+        let (agg, _) = self.rewrite_with_input(
+            self.input().prune_col(&input_required_cols),
+            mapping.clone(),
         );
 
         if group_key_required_cols.is_subset(&upstream_required_cols) {
             agg.into()
         } else {
             // Some group key columns are not needed
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = agg.schema().len();
             LogicalProject::with_mapping(
                 agg.into(),
-                ColIndexMapping::with_remaining_columns(required_cols),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
         }
     }
@@ -832,8 +821,12 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![0, 3];
+        println!(
+            "{}",
+            PlanRef::from(agg.clone()).explain_to_string().unwrap()
+        );
         let plan = agg.prune_col(&required_cols);
-
+        println!("{}", plan.explain_to_string().unwrap());
         // Check the result
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);

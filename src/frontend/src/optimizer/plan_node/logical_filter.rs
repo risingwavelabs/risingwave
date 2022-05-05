@@ -115,7 +115,10 @@ impl ColPrunable for LogicalFilter {
             tmp.union_with(&required_cols_bitset);
             tmp.ones().collect_vec()
         };
-        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
@@ -125,14 +128,14 @@ impl ColPrunable for LogicalFilter {
             // Given that `LogicalFilter` always has same schema of its input, if predicate's
             // `InputRef`s are not subset of the requirement of downstream operator, a
             // `LogicalProject` node should be added.
-            let mapping = ColIndexMapping::with_remaining_columns(required_cols);
             let output_required_cols = required_cols
                 .iter()
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();
+            let src_size = filter.schema().len();
             LogicalProject::with_mapping(
                 filter.into(),
-                ColIndexMapping::with_remaining_columns(&output_required_cols),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
         }
     }
@@ -208,13 +211,12 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter: PlanRef = LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
+        let filter: PlanRef =
+            LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
 
         // Perform the prune
         let required_cols = vec![2];
-        println!("b:\n{}", filter.explain_to_string().unwrap());
         let plan = filter.prune_col(&required_cols);
-        println!("a:\n{}", plan.explain_to_string().unwrap());
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

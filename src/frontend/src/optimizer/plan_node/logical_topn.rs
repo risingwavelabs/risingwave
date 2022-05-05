@@ -127,7 +127,10 @@ impl ColPrunable for LogicalTopN {
             tmp.union_with(&input_required_bitset);
             tmp.ones().collect_vec()
         };
-        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         let new_order = Order {
             field_order: self
                 .order
@@ -145,9 +148,10 @@ impl ColPrunable for LogicalTopN {
         if order_required_cols.is_subset(&input_required_bitset) {
             top_n
         } else {
+            let src_size = top_n.schema().len();
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(required_cols),
+                ColIndexMapping::with_remaining_columns(required_cols, src_size),
             )
         }
     }

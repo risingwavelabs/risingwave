@@ -142,11 +142,11 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(2), None);
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
-    pub fn with_remaining_columns(cols: &[usize]) -> Self {
+    pub fn with_remaining_columns(cols: &[usize], src_size: usize) -> Self {
         if cols.is_empty() {
             return Self::new(vec![]);
         }
-        let mut map = vec![None; cols.iter().max().unwrap() + 1];
+        let mut map = vec![None; src_size];
         for (tar, &src) in cols.iter().enumerate() {
             map[src] = Some(tar);
         }
@@ -169,12 +169,12 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(2), None);
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
-    pub fn with_removed_columns(cols: &[usize]) -> Self {
-        let cols = (0..cols.iter().max().unwrap() + 1)
+    pub fn with_removed_columns(cols: &[usize], src_size: usize) -> Self {
+        let cols = (0..src_size)
             .into_iter()
             .filter(|x| !cols.contains(x))
             .collect_vec();
-        Self::with_remaining_columns(&cols)
+        Self::with_remaining_columns(&cols, src_size)
     }
 
     #[must_use]
@@ -376,7 +376,7 @@ mod tests {
     fn test_composite() {
         let add_mapping = ColIndexMapping::with_shift_offset(3, 3);
         let remaining_cols = vec![3, 5];
-        let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols);
+        let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols, 6);
         let composite = add_mapping.composite(&col_prune_mapping);
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);

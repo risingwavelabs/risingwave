@@ -255,7 +255,10 @@ impl ColPrunable for LogicalProject {
 
         let input_required_cols = input_required_cols.ones().collect_vec();
         let new_input = self.input.prune_col(&input_required_cols);
-        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         // Rewrite each InputRef with new index.
         let (exprs, expr_alias) = required_cols
             .iter()
