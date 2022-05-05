@@ -62,6 +62,10 @@ impl Binder {
                     inputs = Self::rewrite_nullif_args(inputs)?;
                     ExprType::Nullif
                 }
+                "coalesce" => {
+                    inputs = Self::check_coalesce_args(inputs)?;
+                    ExprType::Coalesce
+                }
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -93,6 +97,29 @@ impl Binder {
             inputs[1] =
                 FunctionCall::new(ExprType::Equal, vec![inputs[0].clone(), inputs[1].clone()])?
                     .into();
+            Ok(inputs)
+        }
+    }
+
+    /// Make sure inputs have more than 1 value and check the args have same `data_type`.
+    fn check_coalesce_args(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Coalesce function must contain at least 1 argument".to_string(),
+            )
+            .into())
+        } else {
+            let data_type = inputs[0].return_type();
+            for input in &inputs {
+                if data_type != input.return_type() {
+                    return Err(ErrorCode::BindError(format!(
+                        "Coalesce function cannot match types {:?} and {:?}",
+                        data_type,
+                        input.return_type()
+                    ))
+                    .into());
+                }
+            }
             Ok(inputs)
         }
     }
