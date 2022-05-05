@@ -87,13 +87,6 @@ impl<S: StateStore> CellBasedTable<S> {
         );
         let column_ids = generate_column_id(&column_descs);
 
-        assert!(
-            column_ids
-                .iter()
-                .is_sorted_by(|x, y| x.get_id().partial_cmp(&y.get_id())),
-            "cell based table currently only support sorted column id"
-        );
-
         Self {
             keyspace,
             schema,
@@ -240,6 +233,14 @@ impl<S: StateStore> CellBasedTable<S> {
                         .into_iter()
                         .map(|(k, v)| Ok::<_, StorageError>((generate_cell_id_from_pk(&k)?, k, v)))
                         .try_collect()?;
+
+                    debug_assert!(
+                        self.column_ids
+                            .iter()
+                            .is_sorted_by(|x, y| x.get_id().partial_cmp(&y.get_id())),
+                        "cell based table currently only support sorted column id"
+                    );
+
                     // TODO: support un-sorted cell id
                     let merged_iter = insert_bytes_iter
                         .into_iter()
@@ -322,6 +323,14 @@ impl<S: StateStore> CellBasedTable<S> {
                         .into_iter()
                         .map(|(k, v)| Ok::<_, StorageError>((generate_cell_id_from_pk(&k)?, k, v)))
                         .try_collect()?;
+
+                    debug_assert!(
+                        self.column_ids
+                            .iter()
+                            .is_sorted_by(|x, y| x.get_id().partial_cmp(&y.get_id())),
+                        "cell based table currently only support sorted column id"
+                    );
+
                     // TODO: support un-sorted cell id
                     let merged_iter = insert_bytes_iter
                         .into_iter()
