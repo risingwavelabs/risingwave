@@ -124,11 +124,11 @@
     select nullif(v1, 1) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Nullif($0, 1:Int32)], expr_alias: [ ] }
+      BatchProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0)], expr_alias: [ ] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamProject { exprs: [Nullif($0, 1:Int32), $1], expr_alias: [ ,  ] }
+      StreamProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0), $1], expr_alias: [ ,  ] }
         StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
@@ -137,7 +137,7 @@
 - sql: |
     create table t (v1 int);
     select nullif(v1, 'a') from t;
-  binder_error: 'Bind error: Nullif function cannot match types Int32 and Varchar'
+  binder_error: 'Feature is not yet implemented: Equal[Int32, Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1) from t;

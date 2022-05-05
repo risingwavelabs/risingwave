@@ -59,8 +59,8 @@ impl Binder {
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
                 "nullif" => {
-                    inputs = Self::check_nullif_args(inputs)?;
-                    ExprType::Nullif
+                    inputs = Self::write_nullif_to_case_args(inputs)?;
+                    ExprType::Case
                 }
                 "coalesce" => {
                     inputs = Self::check_coalesce_args(inputs)?;
@@ -89,19 +89,16 @@ impl Binder {
     }
 
     /// Make sure inputs only have 2 value and rewrite the arguments.
-    /// Nullif(expr1,expr2) -> Nullif(expr1,Equal(expr1,expr2)).
-    fn check_nullif_args(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+    /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
+    fn write_nullif_to_case_args(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.len() != 2 {
             Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
         } else {
-            if inputs[0].return_type() != inputs[1].return_type() {
-                return Err(ErrorCode::BindError(format!(
-                    "Nullif function cannot match types {:?} and {:?}",
-                    inputs[0].return_type(),
-                    inputs[1].return_type()
-                ))
-                .into());
-            }
+            let inputs = vec![
+                FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
+                Literal::new(None, inputs[0].return_type()).into(),
+                inputs[0].clone(),
+            ];
             Ok(inputs)
         }
     }
