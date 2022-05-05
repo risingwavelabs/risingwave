@@ -1,0 +1,11 @@
+statement ok
+drop materialized view nexmark_q0;
+
+statement ok
+drop materialized view nexmark_q1;
+
+statement ok
+drop materialized view nexmark_q2;
+
+statement ok
+drop materialized view nexmark_q3;

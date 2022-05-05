@@ -32,6 +32,7 @@ pub mod base;
 mod filesystem;
 mod kafka;
 pub mod kinesis;
+mod nexmark;
 mod pulsar;
 mod utils;
 pub use base::*;
