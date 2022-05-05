@@ -22,6 +22,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_pb::hummock::VNodeBitmap;
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -84,7 +85,7 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta) {
+) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
     let mut b = SSTableBuilder::new(opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
@@ -100,7 +101,7 @@ pub async fn gen_test_sstable_inner(
     sstable_store: SstableStoreRef,
     poliy: CachePolicy,
 ) -> Sstable {
-    let (data, meta) = gen_test_sstable_data(opts, kv_iter);
+    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
     let sst = Sstable { id: sst_id, meta };
     sstable_store.put(&sst, data, poliy).await.unwrap();
     sst

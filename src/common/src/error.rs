@@ -29,6 +29,8 @@ use tokio::task::JoinError;
 use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 
+use crate::util::value_encoding::error::ValueEncodingError;
+
 /// Header used to store serialized [`RwError`] in grpc status.
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
@@ -116,7 +118,8 @@ pub enum ErrorCode {
     InvalidInputSyntax(String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(MemComparableError),
-
+    #[error("Error while de/se values: {0}")]
+    ValueEncodingError(ValueEncodingError),
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
 
@@ -209,6 +212,12 @@ impl From<MemComparableError> for RwError {
     }
 }
 
+impl From<ValueEncodingError> for RwError {
+    fn from(value_encoding_error: ValueEncodingError) -> Self {
+        ErrorCode::ValueEncodingError(value_encoding_error).into()
+    }
+}
+
 impl From<std::io::Error> for RwError {
     fn from(io_err: IoError) -> Self {
         ErrorCode::IoError(io_err).into()
@@ -275,6 +284,7 @@ impl ErrorCode {
             ErrorCode::ItemNotFound(_) => 13,
             ErrorCode::InvalidInputSyntax(_) => 14,
             ErrorCode::MemComparableError(_) => 15,
+            ErrorCode::ValueEncodingError(_) => 16,
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,

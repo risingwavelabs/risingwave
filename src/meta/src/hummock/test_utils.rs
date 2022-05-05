@@ -94,6 +94,7 @@ pub fn generate_test_tables(epoch: u64, table_ids: Vec<u64>) -> Vec<SstableInfo>
                 inf: false,
             }),
             file_size: 1,
+            vnode_bitmap: vec![],
         });
     }
     sst_info
