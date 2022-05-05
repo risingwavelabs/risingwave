@@ -114,20 +114,8 @@ impl<S: StateStore> Keyspace<S> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
-    /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
-    /// the given prefix will be scanned.
-    /// The returned values are based on a snapshot corresponding to the given `epoch`
-    pub async fn scan(
-        &self,
-        limit: Option<usize>,
-        epoch: u64,
-    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
-        self.store.scan(range, limit, epoch).await
-    }
-
     /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
-    /// `limit` is None, all keys of the given prefix will be scanned.
+    /// `limit` is None, all keys of the given prefix will be scanned. Note that the prefix of this keyspace will be stripped.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan_with_start_key(
         &self,
@@ -135,26 +123,25 @@ impl<S: StateStore> Keyspace<S> {
         limit: Option<usize>,
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        assert!(
-            start_key[..self.prefix.len()] == self.prefix,
-            "{:?} does not start with prefix {:?}",
-            start_key,
-            self.prefix
-        );
-        let range = start_key..next_key(self.prefix.as_slice());
-        self.store.scan(range, limit, epoch).await
+        let start_key_with_prefix = [self.prefix.as_slice(), start_key.as_slice()].concat();
+        let range = start_key_with_prefix..next_key(self.prefix.as_slice());
+        let mut pairs = self.store.scan(range, limit, epoch).await?;
+        pairs
+            .iter_mut()
+            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
+        Ok(pairs)
     }
 
-    /// Scans from the keyspace, and then strips the prefix of this keyspace.
+    /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
+    /// the given prefix will be scanned. Note that the prefix of this keyspace will be stripped.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
-    ///
-    /// See also: [`Keyspace::scan`]
-    pub async fn scan_strip_prefix(
+    pub async fn scan(
         &self,
         limit: Option<usize>,
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let mut pairs = self.scan(limit, epoch).await?;
+        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
+        let mut pairs = self.store.scan(range, limit, epoch).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));

@@ -304,7 +304,7 @@ where
             // following logic.
             let all_data = self
                 .keyspace
-                .scan_strip_prefix(self.top_n_count, epoch)
+                .scan(self.top_n_count, epoch)
                 .await?;
 
             for (raw_key, mut raw_value) in all_data {
@@ -398,7 +398,7 @@ where
     #[allow(dead_code)]
     pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
         let epoch = u64::MAX;
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
         let mut result = vec![];
 
         for (raw_key, mut raw_value) in all_data {

@@ -218,7 +218,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             None => {
                 let keyspace = self.get_state_keyspace(key)?;
                 let all_data = keyspace
-                    .scan_strip_prefix(None, self.current_epoch)
+                    .scan(None, self.current_epoch)
                     .await
                     .unwrap();
                 let total_count = all_data.len();

@@ -412,7 +412,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let arrange_keyspace = self.arrangement.keyspace.append(key_prefix);
         let all_cells = arrange_keyspace
-            .scan_strip_prefix(None, lookup_epoch)
+            .scan(None, lookup_epoch)
             .await?;
 
         let mut all_rows = vec![];
