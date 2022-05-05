@@ -91,15 +91,28 @@ statement ok
 drop materialized view iii_mv2
 
 statement ok
-create materialized view iii_mv3 as select v2 from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
+create materialized view iii_mv3 as select v4 from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
 
 query IIII rowsort
-select v2 from iii_mv3;
+select v4 from iii_mv3;
 ----
-0
-0
-0
-0
+5
+5
+5
+5
+4
+4
+4
+4
+3
+3
+3
+3
+2
+2
+2
+2
+5
 
 statement ok
 drop materialized view iii_mv3
