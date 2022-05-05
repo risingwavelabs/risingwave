@@ -81,13 +81,15 @@ impl CompactionPicker for MinOverlappingPicker {
             return None;
         }
         scores.sort_by_key(|x| x.0);
-        let (_, table) = scores.pop().unwrap();
-        let select_input_ssts = vec![table];
+        let (_, table) = scores.first().unwrap();
+        let select_input_ssts = vec![table.clone()];
         let target_input_ssts = self
             .overlap_strategy
             .check_multiple_overlap(&select_input_ssts, &levels[target_level].table_infos);
-        level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         level_handlers[self.level].add_pending_task(self.compact_task_id, &select_input_ssts);
+        if !target_input_ssts.is_empty() {
+            level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
+        }
         Some(SearchResult {
             select_level: Level {
                 level_idx: self.level as u32,
@@ -101,5 +103,82 @@ impl CompactionPicker for MinOverlappingPicker {
             },
             split_ranges: vec![],
         })
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use risingwave_pb::hummock::LevelType;
+
+    use super::*;
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
+
+    #[test]
+    fn test_compact_l1() {
+        let picker = MinOverlappingPicker::new(0, 1, Arc::new(RangeOverlapStrategy::default()));
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(0, 1, 0, 100, 1),
+                    generate_table(1, 1, 101, 200, 1),
+                    generate_table(2, 1, 222, 300, 1),
+                ],
+            },
+            Level {
+                level_idx: 2,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(4, 1, 0, 100, 1),
+                    generate_table(5, 1, 101, 150, 1),
+                    generate_table(6, 1, 151, 201, 1),
+                    generate_table(7, 1, 501, 800, 1),
+                    generate_table(8, 2, 301, 400, 1),
+                ],
+            },
+        ];
+        let mut levels_handler = vec![
+            LevelHandler::new(0),
+            LevelHandler::new(1),
+            LevelHandler::new(2),
+        ];
+
+        // pick a non-overlapping files. It means that this file could be trival move to next level.
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.level_idx, 1);
+        assert_eq!(ret.target_level.level_idx, 2);
+        assert_eq!(ret.select_level.table_infos.len(), 1);
+        assert_eq!(ret.select_level.table_infos[0].id, 2);
+        assert_eq!(ret.target_level.table_infos.len(), 0);
+
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.level_idx, 1);
+        assert_eq!(ret.target_level.level_idx, 2);
+        assert_eq!(ret.select_level.table_infos.len(), 1);
+        assert_eq!(ret.target_level.table_infos.len(), 1);
+        assert_eq!(ret.select_level.table_infos[0].id, 0);
+        assert_eq!(ret.target_level.table_infos[0].id, 4);
+
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.level_idx, 1);
+        assert_eq!(ret.target_level.level_idx, 2);
+        assert_eq!(ret.select_level.table_infos.len(), 1);
+        assert_eq!(ret.target_level.table_infos.len(), 2);
+        assert_eq!(ret.select_level.table_infos[0].id, 1);
+        assert_eq!(ret.target_level.table_infos[0].id, 5);
+        assert_eq!(ret.target_level.table_infos[1].id, 6);
     }
 }
