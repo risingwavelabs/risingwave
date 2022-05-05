@@ -3307,6 +3307,7 @@ dependencies = [
  "paste",
  "prometheus",
  "prost",
+ "quanta",
  "rand 0.8.5",
  "risingwave_pb",
  "rust_decimal",

@@ -15,9 +15,12 @@
 use core::fmt;
 use std::time::{Duration, SystemTime};
 
+use quanta::Clock;
+
 lazy_static::lazy_static! {
     /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch: 2021-04-01T00:00:00Z.
     pub static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
+    static ref EPOCH_CLOCK: Clock = Clock::new();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -32,11 +35,15 @@ impl Epoch {
     }
 
     // TODO: use a monotonic library to replace SystemTime.
-    pub fn physical_now() -> u64 {
+    fn physical_now() -> u64 {
         UNIX_SINGULARITY_DATE_EPOCH
             .elapsed()
             .expect("system clock set earlier than singularity date!")
             .as_millis() as u64
+    }
+
+    fn monotonic_now() -> u64 {
+        EPOCH_CLOCK.now().as_u64() / 1_000_000 // actually nano seconds.
     }
 
     /// Returns the epoch in real system time.
@@ -59,6 +66,8 @@ impl fmt::Display for Epoch {
 
 #[cfg(test)]
 mod tests {
+    use std::time::UNIX_EPOCH;
+
     use chrono::{Local, TimeZone, Utc};
 
     use super::*;
@@ -69,5 +78,23 @@ mod tests {
         let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
         let singularity_st = SystemTime::from(singularity_dt);
         assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);
+    }
+
+    #[test]
+    fn test_monotonic_clock() {
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            let x1 = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            let x2 = Epoch::monotonic_now();
+            println!(
+                "instant: {:?}, x1: {}, x2: {}",
+                std::time::Instant::now(),
+                x1,
+                x2
+            );
+        }
     }
 }
