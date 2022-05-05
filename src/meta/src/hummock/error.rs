@@ -48,6 +48,9 @@ impl From<meta_store::Error> for Error {
                 // TODO: need more concrete error from meta store.
                 Error::InvalidContext(0)
             }
+            // TODO: Currently meta_store::Error::Internal is equivalent to EtcdError, which
+            // includes both retryable and non-retryable. Need to expand meta_store::Error::Internal
+            // to more detail meta_store errors.
             meta_store::Error::Internal(err) => Error::MetaStoreError(err),
         }
     }
