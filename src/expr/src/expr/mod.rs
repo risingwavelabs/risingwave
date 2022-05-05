@@ -25,7 +25,6 @@ mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
-mod expr_nullif;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod pg_sleep;
@@ -47,7 +46,6 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::build_expr_from_prost::*;
 use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_field::FieldExpression;
-use crate::expr::expr_nullif::NullifExpression;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
@@ -84,7 +82,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Add | Subtract | Multiply | Divide | Modulus => build_binary_expr_prost(prost),
         Extract | RoundDigit | TumbleStart | Position => build_binary_expr_prost(prost),
         StreamNullByRowCount | And | Or => build_nullable_binary_expr_prost(prost),
-        Nullif => NullifExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Coalesce => CoalesceExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),

@@ -106,7 +106,6 @@ impl FunctionCall {
                 align_types(inputs.iter_mut())?;
                 Ok(DataType::Boolean)
             }
-            ExprType::Nullif => Ok(inputs[0].return_type()),
             ExprType::Coalesce => Ok(inputs[0].return_type()),
             _ => infer_type(
                 func_type,
