@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
-    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
@@ -74,6 +74,8 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
+type CompactOutput = (usize, Vec<(Sstable, Vec<VNodeBitmap>)>);
+
 impl Compactor {
     /// Create a new compactor.
     pub fn new(context: Arc<CompactorContext>, compact_task: CompactTask) -> Self {
@@ -88,7 +90,7 @@ impl Compactor {
         context: Arc<CompactorContext>,
         buffers: &[SharedBufferBatch],
         stats: Arc<StateStoreMetrics>,
-    ) -> HummockResult<Vec<Sstable>> {
+    ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
         let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();
         start_user_keys.sort();
         start_user_keys.dedup();
@@ -224,7 +226,7 @@ impl Compactor {
     }
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
-    async fn compact_done(&mut self, output_ssts: &[(usize, Vec<Sstable>)], task_ok: bool) {
+    async fn compact_done(&mut self, output_ssts: &[CompactOutput], task_ok: bool) {
         self.compact_task.task_status = task_ok;
         self.compact_task
             .sorted_output_ssts
@@ -246,7 +248,7 @@ impl Compactor {
 
             self.compact_task
                 .sorted_output_ssts
-                .extend(sst.iter().map(|sst| SstableInfo {
+                .extend(sst.iter().map(|(sst, vnode_bitmap)| SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
@@ -254,6 +256,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
+                    vnode_bitmap: vnode_bitmap.clone(),
                 }));
         }
 
@@ -276,7 +279,7 @@ impl Compactor {
         &self,
         split_index: usize,
         iter: MergeIterator,
-    ) -> HummockResult<(usize, Vec<Sstable>)> {
+    ) -> HummockResult<CompactOutput> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
             left: Bytes::copy_from_slice(split.get_left()),
@@ -317,10 +320,10 @@ impl Compactor {
         // Seal.
         builder.seal_current();
 
-        let mut ssts: Vec<Sstable> = Vec::new();
+        let mut ssts = Vec::new();
         ssts.reserve(builder.len());
         // TODO: decide upload concurrency
-        for (table_id, data, meta) in builder.finish() {
+        for (table_id, data, meta, vnode_bitmap) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
             let len = self
                 .context
@@ -337,7 +340,7 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
 
-            ssts.push(sst);
+            ssts.push((sst, vnode_bitmap));
         }
 
         Ok((split_index, ssts))
