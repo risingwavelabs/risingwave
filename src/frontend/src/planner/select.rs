@@ -41,11 +41,11 @@ impl Planner {
             distinct,
             ..
         }: BoundSelect,
-        order_exprs: Vec<ExprImpl>,
+        extra_order_exprs: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         // Append expressions in ORDER BY.
-        aliases.extend(vec![None; order_exprs.len()]);
-        select_items.extend(order_exprs);
+        aliases.extend(vec![None; extra_order_exprs.len()]);
+        select_items.extend(extra_order_exprs);
 
         // Plan the FROM clause.
         let mut root = match from {

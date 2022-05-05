@@ -23,10 +23,10 @@ impl Planner {
     pub(super) fn plan_set_expr(
         &mut self,
         set_expr: BoundSetExpr,
-        order_exprs: Vec<ExprImpl>,
+        extra_order_exprs: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         match set_expr {
-            BoundSetExpr::Select(s) => self.plan_select(*s, order_exprs),
+            BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs),
             BoundSetExpr::Values(v) => self.plan_values(*v),
         }
     }

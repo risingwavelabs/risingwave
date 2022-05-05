@@ -31,7 +31,7 @@ pub struct BoundQuery {
     pub order: Vec<FieldOrder>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
-    pub order_exprs: Vec<ExprImpl>,
+    pub extra_order_exprs: Vec<ExprImpl>,
 }
 
 impl BoundQuery {
@@ -78,13 +78,18 @@ impl Binder {
             }),
             BoundSetExpr::Values(_) => {}
         };
-        let mut order_exprs = vec![];
-        let schema_len = body.schema().len();
+        let mut extra_order_exprs = vec![];
+        let visible_output_num = body.schema().len();
         let order = query
             .order_by
             .into_iter()
             .map(|order_by_expr| {
-                self.bind_order_by_expr(order_by_expr, &name_to_index, &mut order_exprs, schema_len)
+                self.bind_order_by_expr(
+                    order_by_expr,
+                    &name_to_index,
+                    &mut extra_order_exprs,
+                    visible_output_num,
+                )
             })
             .collect::<Result<_>>()?;
         Ok(BoundQuery {
@@ -92,7 +97,7 @@ impl Binder {
             order,
             limit,
             offset,
-            order_exprs,
+            extra_order_exprs,
         })
     }
 
@@ -100,19 +105,17 @@ impl Binder {
         &mut self,
         order_by_expr: OrderByExpr,
         name_to_index: &HashMap<String, usize>,
-        order_exprs: &mut Vec<ExprImpl>,
-        schema_len: usize,
+        extra_order_exprs: &mut Vec<ExprImpl>,
+        visible_output_num: usize,
     ) -> Result<FieldOrder> {
         let direct = match order_by_expr.asc {
             None | Some(true) => Direction::Asc,
             Some(false) => Direction::Desc,
         };
         let index = match order_by_expr.expr {
-            Expr::Identifier(name) => *name_to_index.get(&name.value).ok_or_else(|| {
-                ErrorCode::ItemNotFound(format!("Output column \"{}\"", name.value))
-            })?,
+            Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.value) => *index,
             Expr::Value(Value::Number(number, _)) => match number.parse::<usize>() {
-                Ok(index) if index <= schema_len => index - 1,
+                Ok(index) if index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "Invalid value in ORDER BY: {}",
@@ -122,8 +125,8 @@ impl Binder {
                 }
             },
             expr => {
-                order_exprs.push(self.bind_expr(expr)?);
-                schema_len + order_exprs.len() - 1
+                extra_order_exprs.push(self.bind_expr(expr)?);
+                visible_output_num + extra_order_exprs.len() - 1
             }
         };
         Ok(FieldOrder { index, direct })

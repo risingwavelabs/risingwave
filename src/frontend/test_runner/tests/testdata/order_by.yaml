@@ -44,7 +44,7 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
-  binder_error: 'Item not found: Output column "v"'
+  binder_error: 'Item not found: Invalid column: v'
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5;
@@ -72,19 +72,19 @@
 - sql: |
     /* order by expression that would be valid in select list */
     create table t (x int, y int, z int);
-    select x, y from t order by x + y, z + 1000;
+    select x, y from t order by x + y, z;
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $1, ($0 + $1), ($2 + 1000:Int32)], expr_alias: [x, y,  ,  ] }
+    LogicalProject { exprs: [$0, $1, ($0 + $1), $2], expr_alias: [x, y,  ,  ] }
       LogicalScan { table: t, columns: [x, y, z] }
   batch_plan: |
     BatchProject { exprs: [$0, $1], expr_alias: [x, y] }
       BatchExchange { order: [$2 ASC, $3 ASC], dist: Single }
         BatchSort { order: [$2 ASC, $3 ASC] }
-          BatchProject { exprs: [$0, $1, ($0 + $1), ($2 + 1000:Int32)], expr_alias: [x, y,  ,  ] }
+          BatchProject { exprs: [$0, $1, ($0 + $1), $2], expr_alias: [x, y,  ,  ] }
             BatchScan { table: t, columns: [x, y, z] }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, expr#2(hidden), expr#3(hidden), _row_id#0(hidden)], pk_columns: [_row_id#0], order_descs: [expr#2, expr#3, _row_id#0] }
-      StreamProject { exprs: [$0, $1, ($0 + $1), ($2 + 1000:Int32), $3], expr_alias: [x, y,  ,  ,  ] }
+    StreamMaterialize { columns: [x, y, expr#2(hidden), z(hidden), _row_id#0(hidden)], pk_columns: [_row_id#0], order_descs: [expr#2, z, _row_id#0] }
+      StreamProject { exprs: [$0, $1, ($0 + $1), $2, $3], expr_alias: [x, y,  ,  ,  ] }
         StreamTableScan { table: t, columns: [x, y, z, _row_id#0], pk_indices: [3] }
 - sql: |
     /* order by the number of an output column */
@@ -106,10 +106,3 @@
     create table t (x int, y int);
     select x + y as sum from t order by sum + 1;
   binder_error: 'Item not found: Invalid column: sum'
-- sql: |
-    /* order by column label */
-    create table t (x int, y int);
-    select x + y as sum from t order by sum;
-  optimized_logical_plan: |
-    LogicalProject { exprs: [($0 + $1)], expr_alias: [sum] }
-      LogicalScan { table: t, columns: [x, y] }
