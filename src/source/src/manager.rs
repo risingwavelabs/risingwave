@@ -144,7 +144,7 @@ impl SourceManager for MemSourceManager {
         match properties.get_connector_type()?.as_str() {
             // TODO support more connector here
             // fixme: The specific source type should not appear outside the connector crate
-            KINESIS_SOURCE | KAFKA_SOURCE | NEXMARK_SOURCE | PULSAR_SOURCE=> {}
+            KINESIS_SOURCE | KAFKA_SOURCE | NEXMARK_SOURCE | PULSAR_SOURCE => {}
             other => {
                 return Err(RwError::from(ProtocolError(format!(
                     "source type {} not supported",

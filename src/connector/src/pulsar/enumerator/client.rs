@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
 use crate::base::SplitEnumerator;
 use crate::pulsar::admin::PulsarAdminClient;
-use crate::pulsar::split::{PulsarSplit};
+use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::topic::{parse_topic, ParsedTopic};
-use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_SCAN_STARTUP_MODE, PULSAR_CONFIG_TOPIC_KEY};
+use crate::pulsar::{
+    PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_SCAN_STARTUP_MODE, PULSAR_CONFIG_TOPIC_KEY,
+};
 use crate::utils::AnyhowProperties;
-use serde::{Serialize, Deserialize}; // 1.0.124
 
 pub struct PulsarSplitEnumerator {
     admin_client: PulsarAdminClient,
@@ -46,7 +46,7 @@ impl PulsarSplitEnumerator {
         let admin_url = properties.get_pulsar(PULSAR_CONFIG_ADMIN_URL_KEY)?;
         let parsed_topic = parse_topic(&topic)?;
 
-        let mut scan_start_offset = match properties
+        let scan_start_offset = match properties
             .0
             .get(PULSAR_CONFIG_SCAN_STARTUP_MODE)
             .map(String::as_str)
@@ -85,43 +85,48 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
         match self.topic.partition_index {
             // partitioned topic
-            None => {
-                self.admin_client.get_topic_metadata(&self.topic).await.and_then(|meta| {
-                    Ok((0..meta.partitions)
+            None => self
+                .admin_client
+                .get_topic_metadata(&self.topic)
+                .await
+                .map(|meta| {
+                    (0..meta.partitions)
                         .into_iter()
-                        .map(|p| {
-                            PulsarSplit {
-                                topic: self.topic.sub_topic(p as i32),
-                                start_offset: self.start_offset.clone(),
-                            }
+                        .map(|p| PulsarSplit {
+                            topic: self.topic.sub_topic(p as i32),
+                            start_offset: self.start_offset.clone(),
                         })
-                        .collect_vec())
-                })
-            }
+                        .collect_vec()
+                }),
             // non partitioned topic
             Some(_) => {
                 // we need to check topic exists
-                self.admin_client.get_topic_metadata(&self.topic).await.and_then(|_| {
-                    Ok(vec![PulsarSplit {
-                        topic: self.topic.clone(),
-                        start_offset: self.start_offset.clone(),
-                    }])
-                })
+                self.admin_client
+                    .get_topic_metadata(&self.topic)
+                    .await
+                    .map(|_| {
+                        vec![PulsarSplit {
+                            topic: self.topic.clone(),
+                            start_offset: self.start_offset.clone(),
+                        }]
+                    })
             }
         }
     }
 }
 
-
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-    use crate::{AnyhowProperties, SplitEnumerator};
-    use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_TOPIC_KEY, PulsarEnumeratorOffset, PulsarSplitEnumerator};
+
+    use crate::pulsar::PulsarEnumeratorOffset;
 
     #[tokio::test]
     async fn test_tmp() {
-        let offset = vec![PulsarEnumeratorOffset::Latest, PulsarEnumeratorOffset::Earliest, PulsarEnumeratorOffset::MessageId("1:2:3:4".to_string())];
+        let offset = vec![
+            PulsarEnumeratorOffset::Latest,
+            PulsarEnumeratorOffset::Earliest,
+            PulsarEnumeratorOffset::MessageId("1:2:3:4".to_string()),
+        ];
 
         let s = serde_json::to_string(&offset).unwrap();
 

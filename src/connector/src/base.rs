@@ -36,11 +36,10 @@ use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
 use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
+use crate::pulsar::source::reader::PulsarSplitReader;
 use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
 use crate::utils::AnyhowProperties;
 use crate::{kafka, kinesis, nexmark, pulsar, Properties};
-use crate::{kafka, kinesis, pulsar, Properties};
-use crate::pulsar::source::reader::PulsarSplitReader;
 
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
