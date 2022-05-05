@@ -535,6 +535,7 @@ async fn test_get_row_for_string() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_shuffled_column_id_for_get_row() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(3), ColumnId::from(2), ColumnId::from(1)];

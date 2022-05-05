@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use bytes::Bytes;
-use itertools::Itertools;
+use bytes::{Buf, Bytes};
+use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
@@ -86,6 +86,14 @@ impl<S: StateStore> CellBasedTable<S> {
                 .collect_vec(),
         );
         let column_ids = generate_column_id(&column_descs);
+
+        assert!(
+            column_ids
+                .iter()
+                .is_sorted_by(|x, y| x.get_id().partial_cmp(&y.get_id())),
+            "cell based table currently only support sorted column id"
+        );
+
         Self {
             keyspace,
             schema,
@@ -224,46 +232,34 @@ impl<S: StateStore> CellBasedTable<S> {
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, new_row, &self.column_ids)
                         .map_err(err)?;
-                    let mut insert_bytes_iter = insert_bytes.into_iter().fuse().peekable();
-                    let mut delete_bytes_iter = delete_bytes.into_iter().fuse().peekable();
-                    loop {
-                        match (insert_bytes_iter.peek(), delete_bytes_iter.peek()) {
-                            (None, None) => break,
-                            (None, Some((delete_pk, _))) => {
-                                local.delete(delete_pk);
-                                delete_bytes_iter.next();
+                    let insert_bytes_iter: Vec<(i32, Vec<u8>, Vec<u8>)> = insert_bytes
+                        .into_iter()
+                        .map(|(k, v)| Ok::<_, StorageError>((generate_cell_id_from_pk(&k)?, k, v)))
+                        .try_collect()?;
+                    let delete_bytes_iter: Vec<(i32, Vec<u8>, Vec<u8>)> = delete_bytes
+                        .into_iter()
+                        .map(|(k, v)| Ok::<_, StorageError>((generate_cell_id_from_pk(&k)?, k, v)))
+                        .try_collect()?;
+                    // TODO: support un-sorted cell id
+                    let merged_iter = insert_bytes_iter
+                        .into_iter()
+                        .merge_join_by(delete_bytes_iter.into_iter(), |(x, _, _), (y, _, _)| {
+                            x.cmp(y)
+                        });
+                    for item in merged_iter {
+                        match item {
+                            EitherOrBoth::Left((_, k, v)) => {
+                                // Only insert
+                                local.put(k, StorageValue::new_default_put(v));
                             }
-                            (Some(_), None) => {
-                                let (insert_pk, insert_row) = insert_bytes_iter.next().unwrap();
-                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
+                            EitherOrBoth::Right((_, k, _)) => {
+                                // Only delete
+                                local.delete(k);
                             }
-                            (Some((insert_pk, _)), Some((delete_pk, _))) => {
-                                let delete_cell_id = gengrate_cell_id_from_pk(delete_pk)?;
-                                let insert_cell_id = gengrate_cell_id_from_pk(insert_pk)?;
-                                match delete_cell_id.cmp(insert_cell_id) {
-                                    std::cmp::Ordering::Less => {
-                                        local.delete(delete_pk);
-                                        delete_bytes_iter.next();
-                                    }
-                                    std::cmp::Ordering::Equal => {
-                                        let (insert_pk, insert_row) =
-                                            insert_bytes_iter.next().unwrap();
-                                        local.put(
-                                            insert_pk,
-                                            StorageValue::new_default_put(insert_row),
-                                        );
-
-                                        delete_bytes_iter.next();
-                                    }
-                                    std::cmp::Ordering::Greater => {
-                                        let (insert_pk, insert_row) =
-                                            insert_bytes_iter.next().unwrap();
-                                        local.put(
-                                            insert_pk,
-                                            StorageValue::new_default_put(insert_row),
-                                        );
-                                    }
-                                }
+                            EitherOrBoth::Both((_, ik, iv), (_, dk, _)) => {
+                                // update (dk, dv) -> (ik, iv)
+                                debug_assert_eq!(ik, dk);
+                                local.put(ik, StorageValue::new_default_put(iv));
                             }
                         }
                     }
@@ -286,6 +282,7 @@ impl<S: StateStore> CellBasedTable<S> {
         let hash_builder = CRC32FastBuilder {};
         for (pk, row_op) in buffer {
             let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
+            // TODO: use distribution key instead of pk to hash vnode
             let vnode = pk.hash_row(&hash_builder).to_vnode();
             let value_meta = ValueMeta::with_vnode(vnode);
             match row_op {
@@ -317,46 +314,34 @@ impl<S: StateStore> CellBasedTable<S> {
                         .cell_based_row_serializer
                         .serialize(&arrange_key_buf, new_row, &self.column_ids)
                         .map_err(err)?;
-                    let mut insert_bytes_iter = insert_bytes.into_iter().fuse().peekable();
-                    let mut delete_bytes_iter = delete_bytes.into_iter().fuse().peekable();
-                    loop {
-                        match (insert_bytes_iter.peek(), delete_bytes_iter.peek()) {
-                            (None, None) => break,
-                            (None, Some((delete_pk, _))) => {
-                                local.delete_with_value_meta(delete_pk, value_meta);
-                                delete_bytes_iter.next();
+                    let insert_bytes_iter: Vec<(i32, Vec<u8>, Vec<u8>)> = insert_bytes
+                        .into_iter()
+                        .map(|(k, v)| Ok::<_, StorageError>((generate_cell_id_from_pk(&k)?, k, v)))
+                        .try_collect()?;
+                    let delete_bytes_iter: Vec<(i32, Vec<u8>, Vec<u8>)> = delete_bytes
+                        .into_iter()
+                        .map(|(k, v)| Ok::<_, StorageError>((generate_cell_id_from_pk(&k)?, k, v)))
+                        .try_collect()?;
+                    // TODO: support un-sorted cell id
+                    let merged_iter = insert_bytes_iter
+                        .into_iter()
+                        .merge_join_by(delete_bytes_iter.into_iter(), |(x, _, _), (y, _, _)| {
+                            x.cmp(y)
+                        });
+                    for item in merged_iter {
+                        match item {
+                            EitherOrBoth::Left((_, k, v)) => {
+                                // Only insert
+                                local.put(k, StorageValue::new_put(value_meta, v));
                             }
-                            (Some(_), None) => {
-                                let (insert_pk, insert_row) = insert_bytes_iter.next().unwrap();
-                                local.put(insert_pk, StorageValue::new_put(value_meta, insert_row));
+                            EitherOrBoth::Right((_, k, _)) => {
+                                // Only delete
+                                local.delete(k);
                             }
-                            (Some((insert_pk, _)), Some((delete_pk, _))) => {
-                                let delete_cell_id = gengrate_cell_id_from_pk(delete_pk)?;
-                                let insert_cell_id = gengrate_cell_id_from_pk(insert_pk)?;
-                                match delete_cell_id.cmp(insert_cell_id) {
-                                    std::cmp::Ordering::Less => {
-                                        local.delete_with_value_meta(delete_pk, value_meta);
-                                        delete_bytes_iter.next();
-                                    }
-                                    std::cmp::Ordering::Equal => {
-                                        let (insert_pk, insert_row) =
-                                            insert_bytes_iter.next().unwrap();
-                                        local.put(
-                                            insert_pk,
-                                            StorageValue::new_put(value_meta, insert_row),
-                                        );
-
-                                        delete_bytes_iter.next();
-                                    }
-                                    std::cmp::Ordering::Greater => {
-                                        let (insert_pk, insert_row) =
-                                            insert_bytes_iter.next().unwrap();
-                                        local.put(
-                                            insert_pk,
-                                            StorageValue::new_put(value_meta, insert_row),
-                                        );
-                                    }
-                                }
+                            EitherOrBoth::Both((_, ik, iv), (_, dk, _)) => {
+                                // update (dk, dv) -> (ik, iv)
+                                debug_assert_eq!(ik, dk);
+                                local.put(ik, StorageValue::new_put(value_meta, iv));
                             }
                         }
                     }
@@ -387,14 +372,14 @@ fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
 }
 
-fn gengrate_cell_id_from_pk(pk: &[u8]) -> StorageResult<&[u8]> {
+fn generate_cell_id_from_pk(pk: &[u8]) -> StorageResult<i32> {
     if pk.len() < 4 {
         return Err(StorageError::CellBasedTable(
             ErrorCode::InternalError("corrupted key".to_owned()).into(),
         ));
     }
-    let (_, cell_id) = pk.split_at(pk.len() - 4);
-    Ok(cell_id)
+    let (_, mut cell_id) = pk.split_at(pk.len() - 4);
+    Ok(cell_id.get_i32())
 }
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
