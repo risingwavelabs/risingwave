@@ -22,7 +22,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 pub struct CountStar {
     return_type: DataType,
     result: usize,
-    ongoing: bool,
+    reach_group_limit: bool,
 }
 
 impl CountStar {
@@ -30,7 +30,7 @@ impl CountStar {
         Self {
             return_type,
             result,
-            ongoing: false,
+            reach_group_limit: false,
         }
     }
 }
@@ -57,7 +57,7 @@ impl Aggregator for CountStar {
         input: &DataChunk,
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
-    ) -> Result<usize> {
+    ) -> Result<()> {
         let builder = match builder {
             ArrayBuilderImpl::Int64(b) => b,
             _ => {
@@ -71,10 +71,10 @@ impl Aggregator for CountStar {
         // between last element and `input.cardinality()` is the ongoing group that
         // may continue in following chunks.
         let mut groups_iter = groups.starting_indices().iter();
-        let next_chunk_offset;
         if let Some(first) = groups_iter.next() {
             let first_count = {
-                if self.ongoing {
+                if self.reach_group_limit {
+                    self.reach_group_limit = false;
                     first - self.result
                 } else {
                     first + self.result
@@ -90,26 +90,19 @@ impl Aggregator for CountStar {
 
                 // stop and save state if we reach limit
                 if groups.is_reach_limit(group_cnt) {
-                    self.ongoing = true;
+                    self.reach_group_limit = true;
                     self.result = *prev;
                     break;
                 }
             }
-
             if group_cnt == groups.len() {
-                next_chunk_offset = input.cardinality();
                 self.result = input.cardinality() - prev;
-                self.ongoing = false;
-            } else {
-                next_chunk_offset =
-                    groups.chunk_offset() + groups.starting_indices()[group_cnt - 1];
             }
         } else {
             self.result += input.cardinality();
-            next_chunk_offset = input.cardinality();
         }
 
-        Ok(next_chunk_offset)
+        Ok(())
     }
 
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
