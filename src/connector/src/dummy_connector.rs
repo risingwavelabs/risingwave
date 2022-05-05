@@ -1,6 +1,6 @@
 use anyhow::Result;
-use futures::future;
 use async_trait::async_trait;
+use futures::future;
 
 use crate::{ConnectorStateV2, Properties, SourceMessage, SplitReader};
 

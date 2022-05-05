@@ -313,7 +313,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     let chunk_with_state =
                         chunk_with_state.map_err(StreamExecutorError::source_error)?;
                     self.state_cache = Some(ConnectorState::from_hashmap(
-                        chunk_with_state.split_offset_mapping,
+                        chunk_with_state.split_offset_mapping.unwrap(),
                     ));
                     let mut chunk = chunk_with_state.chunk;
 

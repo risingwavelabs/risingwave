@@ -89,7 +89,7 @@ impl StreamSourceReader for SourceStreamReaderImpl {
 #[derive(Clone, Debug)]
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
-    pub split_offset_mapping: HashMap<String, String>,
+    pub split_offset_mapping: Option<HashMap<String, String>>,
 }
 
 #[async_trait]

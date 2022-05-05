@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
@@ -148,7 +147,7 @@ impl StreamSourceReader for TableV2StreamReader {
 
         Ok(StreamChunkWithState {
             chunk,
-            split_offset_mapping: HashMap::new(),
+            split_offset_mapping: None,
         })
     }
 }

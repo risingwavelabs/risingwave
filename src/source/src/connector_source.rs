@@ -101,7 +101,7 @@ impl StreamSourceReader for ConnectorStreamReader {
         match self.reader.next().await.to_rw_result()? {
             None => Ok(StreamChunkWithState {
                 chunk: StreamChunk::default(),
-                split_offset_mapping: HashMap::new(),
+                split_offset_mapping: None,
             }),
             Some(batch) => {
                 let mut events = Vec::with_capacity(batch.len());
@@ -128,7 +128,7 @@ impl StreamSourceReader for ConnectorStreamReader {
                         Self::build_columns(&self.columns, rows.as_ref())?,
                         None,
                     ),
-                    split_offset_mapping,
+                    split_offset_mapping: Some(split_offset_mapping),
                 })
             }
         }

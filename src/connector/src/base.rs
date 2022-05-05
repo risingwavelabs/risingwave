@@ -68,6 +68,9 @@ pub struct ConnectorState {
 
 impl ConnectorState {
     pub fn from_hashmap(state: HashMap<String, String>) -> Vec<Self> {
+        if state.is_empty() {
+            return vec![];
+        }
         let mut connector_states: Vec<Self> = Vec::with_capacity(state.len());
         for (split, offset) in state {
             connector_states.push(Self {
