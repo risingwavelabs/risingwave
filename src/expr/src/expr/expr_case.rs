@@ -77,7 +77,11 @@ impl Expression for CaseExpression {
             if let Some((_, t)) = when_thens
                 .iter()
                 .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))
-                .find(|(w, _)| *w.unwrap_or(ScalarRefImpl::Bool(false)).into_scalar_impl().as_bool())
+                .find(|(w, _)| {
+                    *w.unwrap_or(ScalarRefImpl::Bool(false))
+                        .into_scalar_impl()
+                        .as_bool()
+                })
             {
                 output_array.append_datum(&t.to_owned_datum())?;
             } else if let Some(els) = els.as_mut() {
