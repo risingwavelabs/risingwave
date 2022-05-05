@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
 use num_traits::FromPrimitive;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Decimal, NaiveDateWrapper, ScalarImpl, ScalarRef};
+use risingwave_common::types::{
+    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl, ScalarRef,
+};
 use serde_json::Value;
+
+use crate::SourceColumnDesc;
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
@@ -27,7 +31,13 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     ))
 }
 
-use crate::SourceColumnDesc;
+#[inline(always)]
+pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
+    Ok(NaiveDateTimeWrapper::new(
+        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f")
+            .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?,
+    ))
+}
 
 macro_rules! make_ScalarImpl {
     ($x:expr, $y:expr) => {
@@ -92,6 +102,13 @@ pub(crate) fn json_parse_value(
             None => Err(RwError::from(InternalError("parse error".to_string()))),
             Some(date_str) => match str_to_date(date_str) {
                 Ok(date) => Ok(ScalarImpl::NaiveDate(date)),
+                Err(e) => Err(e),
+            },
+        },
+        DataType::Timestamp => match value.and_then(|v| v.as_str()) {
+            None => Err(RwError::from(InternalError("parse error".to_string()))),
+            Some(date_str) => match str_to_timestamp(date_str) {
+                Ok(timestamp) => Ok(ScalarImpl::NaiveDateTime(timestamp)),
                 Err(e) => Err(e),
             },
         },
