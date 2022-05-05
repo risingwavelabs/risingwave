@@ -1,3 +1,6 @@
+# NOTE: if this file is changed, also change `index.yaml` in planner test to ensure
+# create mv is using index.
+
 statement ok
 create table iii_t1 (v1 int, v2 int);
 
@@ -86,6 +89,20 @@ select v1, v2, v3, v4 from iii_mv2;
 
 statement ok
 drop materialized view iii_mv2
+
+statement ok
+create materialized view iii_mv3 as select v2 from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
+
+query IIII rowsort
+select v2 from iii_mv3;
+----
+0
+0
+0
+0
+
+statement ok
+drop materialized view iii_mv3
 
 statement ok
 drop materialized view iii_index_2
