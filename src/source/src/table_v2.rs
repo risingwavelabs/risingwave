@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
@@ -22,7 +23,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::StreamSourceReader;
+use crate::{StreamChunkWithState, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -123,7 +124,7 @@ pub struct TableV2StreamReader {
 
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
         let (chunk, notifier) = self
             .rx
             .recv()
@@ -145,7 +146,10 @@ impl StreamSourceReader for TableV2StreamReader {
         // Notify about that we've taken the chunk.
         notifier.send(chunk.cardinality()).ok();
 
-        Ok(chunk)
+        Ok(StreamChunkWithState {
+            chunk,
+            split_offset_mapping: HashMap::new(),
+        })
     }
 }
 
@@ -218,7 +222,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_connector::{ConnectorStateV2, Properties, SplitImpl, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
 /// processing. [`ConnectorSource`] introduces schema at this level while [`SplitReaderImpl`]
@@ -96,14 +97,21 @@ impl SourceChunkBuilder for ConnectorStreamReader {}
 
 #[async_trait]
 impl StreamSourceReader for ConnectorStreamReader {
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
         match self.reader.next().await.to_rw_result()? {
-            None => Ok(StreamChunk::default()),
+            None => Ok(StreamChunkWithState {
+                chunk: StreamChunk::default(),
+                split_offset_mapping: HashMap::new(),
+            }),
             Some(batch) => {
                 let mut events = Vec::with_capacity(batch.len());
+                let mut split_offset_mapping: HashMap<String, String> = HashMap::new();
 
                 for msg in batch {
                     if let Some(content) = msg.payload {
+                        *split_offset_mapping
+                            .entry(msg.split_id.clone())
+                            .or_insert("".to_string()) = msg.offset.to_string();
                         events.push(self.parser.parse(content.as_ref(), &self.columns)?);
                     }
                 }
@@ -114,11 +122,14 @@ impl StreamSourceReader for ConnectorStreamReader {
                     rows.extend(event.rows);
                     ops.extend(event.ops);
                 }
-                Ok(StreamChunk::new(
-                    ops,
-                    Self::build_columns(&self.columns, rows.as_ref())?,
-                    None,
-                ))
+                Ok(StreamChunkWithState {
+                    chunk: StreamChunk::new(
+                        ops,
+                        Self::build_columns(&self.columns, rows.as_ref())?,
+                        None,
+                    ),
+                    split_offset_mapping,
+                })
             }
         }
     }
