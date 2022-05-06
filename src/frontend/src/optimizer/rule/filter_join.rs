@@ -16,7 +16,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::Rule;
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::rule::BoxedRule;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -204,12 +204,12 @@ impl FilterJoinRule {
         for expr in &predicate.conjunctions {
             if let ExprImpl::FunctionCall(func) = expr {
                 match func.get_expr_type() {
-                    risingwave_pb::expr::expr_node::Type::Equal
-                    | risingwave_pb::expr::expr_node::Type::NotEqual
-                    | risingwave_pb::expr::expr_node::Type::LessThan
-                    | risingwave_pb::expr::expr_node::Type::LessThanOrEqual
-                    | risingwave_pb::expr::expr_node::Type::GreaterThan
-                    | risingwave_pb::expr::expr_node::Type::GreaterThanOrEqual => {
+                    ExprType::Equal
+                    | ExprType::NotEqual
+                    | ExprType::LessThan
+                    | ExprType::LessThanOrEqual
+                    | ExprType::GreaterThan
+                    | ExprType::GreaterThanOrEqual => {
                         for input in func.inputs() {
                             if let ExprImpl::InputRef(input) = input {
                                 let idx = input.index;
