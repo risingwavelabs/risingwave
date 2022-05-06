@@ -19,7 +19,10 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use risedev::{Compose, ComposeFile, ComposeVolume, ConfigExpander, ServiceConfig};
+use risedev::{
+    Compose, ComposeFile, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
+};
+use serde::Deserialize;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -32,6 +35,15 @@ pub struct RiseDevComposeOpts {
     profile: String,
 }
 
+fn load_docker_image_config(risedev_config: &str) -> Result<DockerImageConfig> {
+    #[derive(Deserialize)]
+    struct ConfigInRiseDev {
+        compose: DockerImageConfig,
+    }
+    let config: ConfigInRiseDev = serde_yaml::from_str(risedev_config)?;
+    Ok(config.compose)
+}
+
 fn main() -> Result<()> {
     let opts = RiseDevComposeOpts::parse();
 
@@ -40,6 +52,8 @@ fn main() -> Result<()> {
         File::open("risedev.yml")?.read_to_string(&mut content)?;
         content
     };
+
+    let docker_image_config = load_docker_image_config(&risedev_config)?;
     let risedev_config = ConfigExpander::expand(&risedev_config)?;
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
@@ -51,21 +65,30 @@ fn main() -> Result<()> {
         let mut compose = match service {
             ServiceConfig::Minio(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
-                c.compose()?
+                c.compose(&docker_image_config)?
             }
             ServiceConfig::Etcd(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::Prometheus(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::ComputeNode(c) => c.compose()?,
-            ServiceConfig::MetaNode(c) => c.compose()?,
+            ServiceConfig::Prometheus(c) => {
+                volumes.insert(c.id.clone(), ComposeVolume::default());
+                c.compose(&docker_image_config)?
+            }
+            ServiceConfig::ComputeNode(c) => c.compose(&docker_image_config)?,
+            ServiceConfig::MetaNode(c) => c.compose(&docker_image_config)?,
             ServiceConfig::Frontend(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::FrontendV2(c) => c.compose()?,
-            ServiceConfig::Compactor(c) => c.compose()?,
-            ServiceConfig::Grafana(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::FrontendV2(c) => c.compose(&docker_image_config)?,
+            ServiceConfig::Compactor(c) => c.compose(&docker_image_config)?,
+            ServiceConfig::Grafana(_) => {
+                return Err(anyhow!("not supported, please run Grafana outside cluster"))
+            }
             ServiceConfig::Jaeger(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::Kafka(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::ZooKeeper(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::Kafka(_) => {
+                return Err(anyhow!("not supported, please use redpanda instead"))
+            }
+            ServiceConfig::ZooKeeper(_) => {
+                return Err(anyhow!("not supported, please use redpanda instead"))
+            }
             ServiceConfig::AwsS3(_) => continue,
-            ServiceConfig::RedPanda(c) => c.compose()?,
+            ServiceConfig::RedPanda(c) => c.compose(&docker_image_config)?,
         };
         compose.container_name = service.id().to_string();
         compose_services.insert(step.to_string(), compose);
