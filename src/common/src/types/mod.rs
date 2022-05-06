@@ -125,9 +125,13 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataType::Struct { .. } => {
-                todo!()
-            }
+            DataType::Struct { fields } => StructArrayBuilder::with_meta(
+                capacity,
+                ArrayMeta::Struct {
+                    children: fields.clone(),
+                },
+            )?
+            .into(),
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {

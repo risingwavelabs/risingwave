@@ -58,6 +58,14 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "nullif" => {
+                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
+                    ExprType::Case
+                }
+                "coalesce" => {
+                    inputs = Self::check_coalesce_args(inputs)?;
+                    ExprType::Coalesce
+                }
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -77,6 +85,44 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    /// Make sure inputs only have 2 value and rewrite the arguments.
+    /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
+    fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
+        } else {
+            let inputs = vec![
+                FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
+                Literal::new(None, inputs[0].return_type()).into(),
+                inputs[0].clone(),
+            ];
+            Ok(inputs)
+        }
+    }
+
+    /// Make sure inputs have more than 1 value and check the args have same `data_type`.
+    fn check_coalesce_args(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Coalesce function must contain at least 1 argument".to_string(),
+            )
+            .into())
+        } else {
+            let data_type = inputs[0].return_type();
+            for input in &inputs {
+                if data_type != input.return_type() {
+                    return Err(ErrorCode::BindError(format!(
+                        "Coalesce function cannot match types {:?} and {:?}",
+                        data_type,
+                        input.return_type()
+                    ))
+                    .into());
+                }
+            }
+            Ok(inputs)
         }
     }
 
