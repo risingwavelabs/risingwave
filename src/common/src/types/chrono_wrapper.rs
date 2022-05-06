@@ -26,7 +26,7 @@ use crate::util::value_encoding::error::ValueEncodingError;
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 
 macro_rules! impl_chrono_wrapper {
-    ($({ $variant_name:ident, $chrono:ty, $array:ident, $builder:ident }),*) => {
+    ($({ $variant_name:ident, $chrono:ty, $_array:ident, $_builder:ident }),*) => {
         $(
             #[derive(Clone, Copy, Debug, Eq, PartialOrd, Ord)]
             #[repr(transparent)]

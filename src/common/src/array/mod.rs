@@ -301,30 +301,6 @@ impl From<Utf8Array> for ArrayImpl {
     }
 }
 
-impl From<IntervalArray> for ArrayImpl {
-    fn from(arr: IntervalArray) -> Self {
-        Self::Interval(arr)
-    }
-}
-
-impl From<NaiveDateArray> for ArrayImpl {
-    fn from(arr: NaiveDateArray) -> Self {
-        Self::NaiveDate(arr)
-    }
-}
-
-impl From<NaiveDateTimeArray> for ArrayImpl {
-    fn from(arr: NaiveDateTimeArray) -> Self {
-        Self::NaiveDateTime(arr)
-    }
-}
-
-impl From<NaiveTimeArray> for ArrayImpl {
-    fn from(arr: NaiveTimeArray) -> Self {
-        Self::NaiveTime(arr)
-    }
-}
-
 impl From<StructArray> for ArrayImpl {
     fn from(arr: StructArray) -> Self {
         Self::Struct(arr)

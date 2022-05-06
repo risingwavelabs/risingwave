@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
@@ -24,66 +25,113 @@ use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::for_all_native_types;
-use crate::types::{NativeType, Scalar, ScalarRef};
+use crate::types::interval::IntervalUnit;
+use crate::types::{
+    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
+};
 
-/// Physical type of array items. It differs from `NativeType` with more limited type set.
-/// Specifically, it doesn't support u8/u16/u32/u64.
+/// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType
 where
-    for<'a> Self: NativeType + Scalar<ScalarRefType<'a> = Self> + ScalarRef<'a, ScalarType = Self>,
+    for<'a> Self: Sized
+        + Default
+        + PartialOrd
+        + Scalar<ScalarRefType<'a> = Self>
+        + ScalarRef<'a, ScalarType = Self>,
 {
+    // array methods
     /// A helper to convert a primitive array to `ArrayImpl`.
     fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
-
     /// A helper to convert `ArrayImpl` to self.
     fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>>;
-
     /// A helper to convert `ArrayImpl` to self.
     fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
-
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
-
     /// Creates an `ArrayBuilder` for this primitive type
     fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl>;
+
+    // item methods
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize>;
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H);
 }
 
-macro_rules! impl_primitive_array_item_type {
-    ([], $({ $scalar_type:ty, $variant_type:ident } ),*) => {
-        $(
-        impl PrimitiveArrayItemType for $scalar_type {
-            fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-                ArrayImpl::$variant_type(arr)
-            }
+macro_rules! impl_array_methods {
+    ($scalar_type:ty, $array_type_pb:ident, $array_impl_variant:ident) => {
+        fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+            ArrayImpl::$array_impl_variant(arr)
+        }
 
-            fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
-                match arr {
-                    ArrayImpl::$variant_type(inner) => Some(inner),
-                    _ => None,
-                }
-            }
-
-            fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
-                match arr {
-                    ArrayImpl::$variant_type(inner) => Some(inner),
-                    _ => None,
-                }
-            }
-
-            fn array_type() -> ArrayType {
-                ArrayType::$variant_type
-            }
-
-            fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
-                let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
-                Ok(ArrayBuilderImpl::$variant_type(array_builder))
+        fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
+            match arr {
+                ArrayImpl::$array_impl_variant(inner) => Some(inner),
+                _ => None,
             }
         }
-        )*
+
+        fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
+            match arr {
+                ArrayImpl::$array_impl_variant(inner) => Some(inner),
+                _ => None,
+            }
+        }
+
+        fn array_type() -> ArrayType {
+            ArrayType::$array_type_pb
+        }
+
+        fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+            let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
+            Ok(ArrayBuilderImpl::$array_impl_variant(array_builder))
+        }
     };
 }
 
-for_all_native_types! { impl_primitive_array_item_type }
+macro_rules! impl_primitive_for_native_types {
+    ([], $({ $naive_type:ty, $scalar_type:ident } ),*) => {
+        $(
+            impl PrimitiveArrayItemType for $naive_type {
+                impl_array_methods!($naive_type, $scalar_type, $scalar_type);
+
+                fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+                    NativeType::to_protobuf(self, output)
+                }
+
+                fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+                    NativeType::hash_wrapper(self, state)
+                }
+            }
+        )*
+    }
+}
+
+for_all_native_types! { impl_primitive_for_native_types }
+
+/// These types have `to_protobuf` and implement `Hash`.
+macro_rules! impl_primitive_for_others {
+    ($({ $scalar_type:ty, $array_type_pb:ident, $array_impl_variant:ident } ),*) => {
+        $(
+            impl PrimitiveArrayItemType for $scalar_type {
+                impl_array_methods!($scalar_type, $array_type_pb, $array_impl_variant);
+
+                fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+                    <$scalar_type>::to_protobuf(self, output)
+                }
+
+                fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+                    self.hash(state)
+                }
+            }
+        )*
+    }
+}
+
+impl_primitive_for_others! {
+    { IntervalUnit, Interval, Interval },
+    { NaiveDateWrapper, Date, NaiveDate },
+    { NaiveTimeWrapper, Time, NaiveTime },
+    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+}
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
 #[derive(Debug)]
