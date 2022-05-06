@@ -17,6 +17,7 @@ mod current_version_id;
 mod pinned_snapshot;
 mod pinned_version;
 pub mod sstable_id_info;
+mod sstable_info;
 mod stale_sstables;
 mod version;
 

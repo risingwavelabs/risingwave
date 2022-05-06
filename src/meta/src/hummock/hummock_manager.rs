@@ -115,6 +115,7 @@ struct Versioning {
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
     sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
+    sstable_infos: BTreeMap<HummockSSTableId, SstableInfo>,
 }
 
 impl Versioning {
@@ -147,6 +148,7 @@ where
                 pinned_snapshots: Default::default(),
                 stale_sstables: Default::default(),
                 sstable_id_infos: Default::default(),
+                sstable_infos: Default::default(),
             }),
             compaction: RwLock::new(Compaction {
                 compact_status: CompactStatus::default(),
@@ -234,6 +236,11 @@ where
             .collect();
 
         versioning_guard.sstable_id_infos = SstableIdInfo::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .map(|s| (s.id, s))
+            .collect();
+        versioning_guard.sstable_infos = SstableInfo::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|s| (s.id, s))
@@ -362,6 +369,7 @@ where
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
+        let mut sstable_infos = VarTransaction::new(&mut versioning.sstable_infos);
 
         let current_hummock_version = hummock_versions
             .get(&current_version_id.id())
@@ -391,6 +399,10 @@ where
                     sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
                 }
             }
+        }
+
+        for sstable in &sstables {
+            sstable_infos.insert(sstable.id, sstable.clone());
         }
 
         // Check whether the epoch is valid
@@ -431,6 +443,7 @@ where
             Some(context_id),
             current_version_id,
             sstable_id_infos,
+            sstable_infos,
             new_hummock_version
         )?;
 
@@ -636,6 +649,7 @@ where
             let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
             let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
             let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
+            let mut sstable_infos = VarTransaction::new(&mut versioning.sstable_infos);
             let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
                 old_version.id,
                 HummockStaleSstables {
@@ -653,18 +667,19 @@ where
             new_version.id = current_version_id.id();
             hummock_versions.insert(new_version.id, new_version);
 
-            for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
-                match sstable_id_infos.get_mut(sst_id) {
+            for sstableinfo in &compact_task.sorted_output_ssts {
+                match sstable_id_infos.get_mut(&sstableinfo.id) {
                     None => {
                         return Err(Error::InternalError(format!(
                             "invalid sst id {}, may have been vacuumed",
-                            sst_id
+                            sstableinfo.id
                         )));
                     }
                     Some(mut sst_id_info) => {
                         sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
                     }
                 }
+                sstable_infos.insert(sstableinfo.id, sstableinfo.clone());
             }
 
             commit_multi_var!(
@@ -675,7 +690,8 @@ where
                 current_version_id,
                 hummock_versions,
                 version_stale_sstables,
-                sstable_id_infos
+                sstable_id_infos,
+                sstable_infos
             )?;
         } else {
             // The compact task is cancelled.
@@ -1033,6 +1049,7 @@ where
             let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
             let stale_sstables_copy = versioning_guard.stale_sstables.clone();
             let sst_id_infos_copy = versioning_guard.sstable_id_infos.clone();
+            let sst_infos_copy = versioning_guard.sstable_infos.clone();
             (
                 compact_status_copy,
                 compact_task_assignment_copy,
@@ -1042,6 +1059,7 @@ where
                 pinned_snapshots_copy,
                 stale_sstables_copy,
                 sst_id_infos_copy,
+                sst_infos_copy,
             )
         };
         let mem_state = get_state().await;
@@ -1066,14 +1084,17 @@ where
 
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
+        let versioning = versioning_guard.deref_mut();
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
+        let mut sstable_infos = VarTransaction::new(&mut versioning.sstable_infos);
 
         // Update in-mem state after transaction succeeds.
         for sst_id in sst_ids.as_ref() {
             sstable_id_infos.remove(sst_id);
+            sstable_infos.remove(sst_id);
         }
 
-        commit_multi_var!(self, None, sstable_id_infos)?;
+        commit_multi_var!(self, None, sstable_id_infos, sstable_infos)?;
 
         #[cfg(test)]
         {
