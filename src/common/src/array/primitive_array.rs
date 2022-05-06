@@ -133,8 +133,6 @@ impl_primitive_for_others! {
     { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
 }
 
-// for_all_chrono_variants! { impl_primitive_for_others }
-
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
 #[derive(Debug)]
 pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
