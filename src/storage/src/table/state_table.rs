@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #![allow(dead_code)]
+use std::cmp::Ordering;
+use std::collections::btree_map::Iter;
+use std::iter::Peekable;
 use std::sync::Arc;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
@@ -29,6 +32,9 @@ use crate::{Keyspace, StateStore};
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
+    keyspace: Keyspace<S>,
+
+    column_descs: Vec<ColumnDesc>,
     // /// Ordering of primary key (for assertion)
     order_types: Vec<OrderType>,
 
@@ -44,12 +50,16 @@ impl<S: StateStore> StateTable<S> {
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
     ) -> Self {
+        let cell_based_keyspace = keyspace.clone();
+        let cell_based_column_descs = column_descs.clone();
         Self {
+            keyspace,
+            column_descs,
             order_types: order_types.clone(),
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTable::new(
-                keyspace,
-                column_descs,
+                cell_based_keyspace,
+                cell_based_column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
                 Arc::new(StateStoreMetrics::unused()),
             ),
@@ -102,28 +112,112 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    pub async fn iter(&self, _pk: Row) -> StorageResult<StateTableRowIter<S>> {
-        todo!()
+    pub async fn iter(&self, epoch: u64) -> StorageResult<StateTableRowIter<'_, S>> {
+        let mem_table_iter = self.mem_table.buffer.iter().peekable();
+        StateTableRowIter::new(
+            self.keyspace.clone(),
+            self.column_descs.clone(),
+            mem_table_iter,
+            self.order_types.clone(),
+            epoch,
+            Arc::new(StateStoreMetrics::unused()),
+        )
+        .await
     }
 }
 
-pub struct StateTableRowIter<S: StateStore> {
+pub struct StateTableRowIter<'a, S: StateStore> {
+    mem_table_iter: Peekable<MemTableIter<'a>>,
     cell_based_iter: CellBasedTableRowIter<S>,
-    mem_table: MemTable,
+    cell_basde_item: Option<(Vec<u8>, Row)>,
+    order_types: Vec<OrderType>,
+    keyspace: Keyspace<S>,
 }
+type MemTableIter<'a> = Iter<'a, Row, RowOp>;
 
-impl<S: StateStore> StateTableRowIter<S> {
+impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
-        _keyspace: Keyspace<S>,
-        _table_descs: Vec<ColumnDesc>,
-        _epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
-    ) -> StorageResult<Self> {
-        todo!()
+        keyspace: Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        mem_table_iter: Peekable<MemTableIter<'a>>,
+        order_types: Vec<OrderType>,
+        epoch: u64,
+        stats: Arc<StateStoreMetrics>,
+    ) -> StorageResult<StateTableRowIter<'a, S>> {
+        let cell_based_iter =
+            CellBasedTableRowIter::new(keyspace.clone(), table_descs, epoch, stats).await?;
+        let state_table_iter = Self {
+            mem_table_iter,
+            cell_based_iter,
+            cell_basde_item: None,
+            order_types,
+            keyspace,
+        };
+
+        Ok(state_table_iter)
     }
 
-    async fn next(&mut self) -> StorageResult<Option<Row>> {
-        todo!()
+    pub async fn next(&mut self) -> StorageResult<Option<Row>> {
+        let cell_based_item;
+        match &self.cell_basde_item {
+            Some(last_cell_based_item) => {
+                cell_based_item = Some(last_cell_based_item.clone());
+                self.cell_basde_item = self.cell_based_iter.next_with_pk().await?;
+            }
+            None => cell_based_item = self.cell_based_iter.next_with_pk().await?,
+        }
+
+        let mut mem_table_iter_next_flag = false;
+        let mut res = None;
+        match (cell_based_item, self.mem_table_iter.peek()) {
+            (None, None) => {
+                return Ok(None);
+            }
+            (Some((_, row)), None) => {
+                return Ok(Some(row));
+            }
+            (None, Some((_, row_op))) => {
+                mem_table_iter_next_flag = true;
+                match row_op {
+                    RowOp::Insert(row) => res = Some(row.clone()),
+                    RowOp::Delete(_) => {}
+                    RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+                }
+            }
+            (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
+                let pk_serializer = OrderedRowSerializer::new(self.order_types.clone());
+                let mem_table_pk_bytes = serialize_pk(mem_table_pk, &pk_serializer).map_err(err)?;
+                let mem_table_pk_with_prefix = self.keyspace.prefixed_key(mem_table_pk_bytes);
+                match cell_based_pk.cmp(&mem_table_pk_with_prefix) {
+                    Ordering::Less => {
+                        res = Some(cell_based_row);
+                    }
+                    Ordering::Equal => {
+                        mem_table_iter_next_flag = true;
+                        match mem_table_row_op {
+                            RowOp::Insert(row) => {
+                                res = Some(row.clone());
+                            }
+                            RowOp::Delete(_) => {}
+                            RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+                        }
+                    }
+                    Ordering::Greater => {
+                        self.cell_basde_item = Some((cell_based_pk, cell_based_row));
+                        mem_table_iter_next_flag = true;
+                        match mem_table_row_op {
+                            RowOp::Insert(row) => res = Some(row.clone()),
+                            RowOp::Delete(_) => {}
+                            RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+                        }
+                    }
+                }
+            }
+        }
+        if mem_table_iter_next_flag {
+            self.mem_table_iter.next();
+        }
+        Ok(res)
     }
 }
 

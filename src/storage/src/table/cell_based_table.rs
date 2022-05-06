@@ -318,7 +318,7 @@ pub struct CellBasedTableRowIter<S: StateStore> {
 impl<S: StateStore> CellBasedTableRowIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
-    async fn new(
+    pub async fn new(
         keyspace: Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
@@ -404,6 +404,52 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             Ok(None)
         } else {
             Ok(Some(chunk))
+        }
+    }
+
+    pub async fn next_with_pk(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
+        if self.done {
+            return Ok(None);
+        }
+
+        loop {
+            let (key, value) = match self.buf.get(self.next_idx) {
+                Some(kv) => kv,
+                None => {
+                    // Need to consume more from state store
+                    self.consume_more().await?;
+                    if let Some(item) = self.buf.first() {
+                        item
+                    } else {
+                        let pk_and_row = self.cell_based_row_deserializer.take();
+                        self.done = true;
+                        return Ok(pk_and_row);
+                    }
+                }
+            };
+            tracing::trace!(
+                target: "events::storage::CellBasedTable::scan",
+                "CellBasedTable scanned key = {:?}, value = {:?}",
+                bytes::Bytes::copy_from_slice(key),
+                value
+            );
+
+            // there is no need to deserialize pk in cell-based table
+            if key.len() < self.keyspace.key().len() + 4 {
+                return Err(StorageError::CellBasedTable(
+                    ErrorCode::InternalError("corrupted key".to_owned()).into(),
+                ));
+            }
+
+            let pk_and_row = self
+                .cell_based_row_deserializer
+                .deserialize(key, value)
+                .map_err(err)?;
+            self.next_idx += 1;
+            match pk_and_row {
+                Some(pk_row) => return Ok(Some(pk_row)),
+                None => {}
+            }
         }
     }
 }
