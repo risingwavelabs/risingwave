@@ -15,6 +15,7 @@
 mod column;
 mod physical_table;
 mod schema;
+pub mod test_utils;
 use core::fmt;
 
 pub use column::*;

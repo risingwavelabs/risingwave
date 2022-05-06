@@ -14,6 +14,7 @@
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
+use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField, Value};
 
 use crate::binder::Binder;
@@ -55,9 +56,7 @@ impl Binder {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
         } else {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
-            let decimal = s
-                .parse::<Decimal>()
-                .map_err(|e| ErrorCode::ParseError(Box::new(e)))?;
+            let decimal = str_parse::<Decimal>(&s)?;
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         };
         Ok(Literal::new(data, data_type))

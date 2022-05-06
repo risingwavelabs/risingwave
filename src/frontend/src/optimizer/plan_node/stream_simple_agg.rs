@@ -86,6 +86,7 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
+            table_ids: vec![],
         })
     }
 }

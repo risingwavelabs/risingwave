@@ -36,7 +36,9 @@ impl Planner {
             where_clause,
             mut select_items,
             group_by,
+            mut having,
             aliases,
+            distinct,
             ..
         }: BoundSelect,
     ) -> Result<PlanRef> {
@@ -52,14 +54,26 @@ impl Planner {
         // Plan the SELECT clause.
         // TODO: select-agg, group-by, having can also contain subquery exprs.
         let has_agg_call = select_items.iter().any(|expr| expr.has_agg_call());
-        if !group_by.is_empty() || has_agg_call {
-            LogicalAgg::create(select_items, aliases, group_by, root)
-        } else {
-            if select_items.iter().any(|e| e.has_subquery()) {
-                (root, select_items) = self.substitute_subqueries(root, select_items)?;
-            }
-            Ok(LogicalProject::create(root, select_items, aliases))
+        if !group_by.is_empty() || having.is_some() || has_agg_call {
+            (root, select_items, having) =
+                LogicalAgg::create(select_items, group_by, having, root)?;
         }
+
+        if let Some(having) = having {
+            root = self.plan_where(root, having)?;
+        }
+
+        if select_items.iter().any(|e| e.has_subquery()) {
+            (root, select_items) = self.substitute_subqueries(root, select_items)?;
+        }
+        root = LogicalProject::create(root, select_items, aliases);
+
+        if distinct {
+            let group_keys = (0..root.schema().fields().len()).collect();
+            root = LogicalAgg::new(vec![], group_keys, root).into();
+        }
+
+        Ok(root)
     }
 
     /// Helper to create a dummy node as child of [`LogicalProject`].

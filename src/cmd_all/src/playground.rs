@@ -102,7 +102,6 @@ pub async fn playground() -> Result<()> {
             RisingWaveService::Meta(vec!["--backend".into(), "mem".into()]),
             RisingWaveService::Compute(vec!["--state-store".into(), "hummock+memory".into()]),
             RisingWaveService::Frontend(vec![]),
-            RisingWaveService::Compactor(vec![]),
         ]
     };
 

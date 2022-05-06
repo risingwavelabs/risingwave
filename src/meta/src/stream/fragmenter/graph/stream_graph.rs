@@ -89,11 +89,24 @@ struct StreamActorBuilder {
     /// upstreams, exchange node operator_id -> upstream actor ids
     upstreams: HashMap<u64, StreamActorUpstream>,
 
+    /// Whether to place this actors on the same node as chain's upstream MVs.
+    chain_same_worker_node: bool,
+
     /// whether this actor builder has been sealed
     sealed: bool,
 }
 
 impl StreamActorBuilder {
+    fn is_chain_same_worker_node(stream_node: &StreamNode) -> bool {
+        fn visit(stream_node: &StreamNode) -> bool {
+            if let Some(NodeBody::Chain(ref chain)) = stream_node.node_body {
+                return chain.same_worker_node;
+            }
+            stream_node.input.iter().any(visit)
+        }
+        visit(stream_node)
+    }
+
     pub fn new(
         actor_id: LocalActorId,
         fragment_id: LocalFragmentId,
@@ -102,6 +115,7 @@ impl StreamActorBuilder {
         Self {
             actor_id,
             fragment_id,
+            chain_same_worker_node: Self::is_chain_same_worker_node(&node),
             nodes: node,
             downstreams: vec![],
             upstreams: HashMap::new(),
@@ -238,14 +252,15 @@ impl StreamActorBuilder {
                 .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
-            same_worker_node_as_upstream: self.upstreams.iter().any(
-                |(
-                    _,
-                    StreamActorUpstream {
-                        same_worker_node, ..
-                    },
-                )| *same_worker_node,
-            ),
+            same_worker_node_as_upstream: self.chain_same_worker_node
+                || self.upstreams.iter().any(
+                    |(
+                        _,
+                        StreamActorUpstream {
+                            same_worker_node, ..
+                        },
+                    )| *same_worker_node,
+                ),
         }
     }
 }
@@ -477,6 +492,17 @@ impl StreamGraphBuilder {
                     for table_id in &mut node.table_ids {
                         *table_id += table_id_offset;
                     }
+                }
+
+                match new_stream_node.node_body.as_mut().unwrap() {
+                    NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        // In-place update the table id. Convert from local to global.
+                        for table_id in &mut node.table_ids {
+                            *table_id += table_id_offset;
+                        }
+                    }
+                    _ => {}
                 }
 
                 for (idx, input) in stream_node.input.iter().enumerate() {

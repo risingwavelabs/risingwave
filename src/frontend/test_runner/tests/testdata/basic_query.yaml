@@ -63,6 +63,30 @@
       BatchFilter { predicate: $0 AND $1 }
         BatchScan { table: t, columns: [v1, v2] }
 - sql: |
+    /* constant folding for IS TRUE, IS FALSE, IS NULL*/
+    create table t(a Boolean);
+    select * from t where (NULL IS NULL) IS TRUE AND FALSE IS FALSE AND a;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [a] }
+      LogicalFilter { predicate: $1 }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
+- sql: |
+    /* constant folding for IS NOT TRUE, IS NOT FALSE */
+    create table t(a Boolean);
+    select * from t where (NULL IS NOT TRUE) IS NOT FALSE AND a IS NOT TRUE;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [a] }
+      LogicalFilter { predicate: IsNotTrue($1) }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
+- sql: |
+    /* constant folding IS NOT NULL */
+    create table t(a double precision);
+    select * from t where (a IS NOT NULL AND 3.14 IS NOT NULL) OR (NULL IS NOT NULL);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [a] }
+      LogicalFilter { predicate: IsNotNull($1) }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
+- sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
   batch_plan: |

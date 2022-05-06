@@ -14,8 +14,6 @@
 
 use drop_stream::*;
 use drop_table::*;
-use merge_sort_exchange::*;
-use order_by::OrderByExecutor;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{self, InternalError};
@@ -26,14 +24,13 @@ use risingwave_pb::batch_plan::PlanNode;
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
-use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
-    LimitExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2,
+    LimitExecutor2, MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2,
+    ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2,
     StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
@@ -45,8 +42,6 @@ mod drop_table;
 pub mod executor2_wrapper;
 mod fuse;
 mod join;
-mod merge_sort_exchange;
-mod order_by;
 #[cfg(test)]
 pub mod test_utils;
 mod trace;
@@ -187,18 +182,18 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::OrderBy => OrderByExecutor2,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
         }?;
@@ -217,18 +212,18 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::OrderBy => OrderByExecutor2,
             NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
         }?;

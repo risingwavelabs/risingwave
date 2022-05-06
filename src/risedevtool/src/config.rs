@@ -115,6 +115,7 @@ impl ConfigExpander {
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "zookeeper" => ServiceConfig::ZooKeeper(serde_yaml::from_str(&out_str)?),
+                    "redpanda" => ServiceConfig::RedPanda(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),
                 };
                 Ok(result)

@@ -538,7 +538,7 @@ dependencies = [
 description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
-category = "RiseDev - SQLLogitTest"
+category = "RiseDev - SQLLogicTest"
 dependencies = ["warn-on-missing-tools"]
 script = """
 #!/bin/bash
@@ -547,3 +547,14 @@ set -e
 sqllogictest "$@"
 """
 description = "Run SQLLogicTest"
+
+[tasks.compose]
+category = "RiseDev - Compose"
+description = "Compose a docker-compose.yaml file"
+script = '''
+#!@shell
+set -e
+mkdir -p "${PREFIX_DOCKER}"
+cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
+echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
+'''

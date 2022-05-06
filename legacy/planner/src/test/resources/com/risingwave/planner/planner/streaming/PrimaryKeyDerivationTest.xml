@@ -313,7 +313,7 @@ RwStreamMaterialize(name=[t_changed_collation], collation=[[0 DESC, 6, 5]])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[0, 6, 5, 3, 7]
+[3, 7]
 ]]>
         </Resource>
     </TestCase>
