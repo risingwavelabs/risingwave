@@ -14,14 +14,14 @@
 
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Scalar};
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
     UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -102,6 +102,15 @@ impl Binder {
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
+            Expr::Row(exprs) => {
+                let value = self.bind_row(&exprs)?;
+                Ok(ExprImpl::Literal(Box::new(Literal::new(
+                    Some(value.to_scalar_value()),
+                    DataType::Struct {
+                        fields: vec![].into(),
+                    },
+                ))))
+            }
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),

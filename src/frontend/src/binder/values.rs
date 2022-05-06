@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::array::StructValue;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Values;
+use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_sqlparser::ast::{Expr, Values};
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
@@ -79,6 +80,22 @@ impl Binder {
             rows: bound,
             schema,
         })
+    }
+
+    pub fn bind_row(&mut self, exprs: &[Expr]) -> Result<StructValue> {
+        let fields = exprs
+            .iter()
+            .map(|e| match e {
+                Expr::Value(value) => Ok(self.bind_value(value.clone())?.get_data().clone()),
+                Expr::Row(expr) => Ok(Some(self.bind_row(expr)?.to_scalar_value())),
+                _ => Err(ErrorCode::NotImplemented(
+                    format!("unsupported expression {:?}", e),
+                    112.into(),
+                )
+                .into()),
+            })
+            .collect::<Result<Vec<Datum>>>()?;
+        Ok(StructValue::new(fields))
     }
 }
 

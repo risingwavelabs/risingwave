@@ -275,8 +275,8 @@ pub struct StructValue {
 }
 
 impl fmt::Display for StructValue {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.fields)
     }
 }
 
