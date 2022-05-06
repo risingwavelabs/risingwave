@@ -21,6 +21,7 @@ use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
 
@@ -142,5 +143,14 @@ impl ToBatchProst for BatchHashJoin {
                 .collect(),
             condition: None,
         })
+    }
+}
+
+impl ToLocalBatch for BatchHashJoin {
+    fn to_local(&self) -> PlanRef {
+        let left = self.left().to_local();
+        let right = self.right().to_local();
+
+        self.clone_with_left_right(left, right).into()
     }
 }

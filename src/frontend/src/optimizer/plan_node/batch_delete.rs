@@ -21,6 +21,7 @@ use risingwave_pb::plan_common::TableRefId;
 use super::{
     LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchDelete` implements [`LogicalDelete`]
@@ -77,5 +78,12 @@ impl ToBatchProst for BatchDelete {
             }
             .into(),
         })
+    }
+}
+
+impl ToLocalBatch for BatchDelete {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local();
+        self.clone_with_input(new_input).into()
     }
 }
