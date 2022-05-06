@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod etcd_meta_store;
-mod mem_meta_store;
-pub mod meta_store;
-#[cfg(test)]
-mod tests;
-mod transaction;
+use tokio_retry::Condition;
 
-pub type ColumnFamily = String;
-pub type Key = Vec<u8>;
-pub type Value = Vec<u8>;
+use crate::hummock::error::Error;
 
-pub use etcd_meta_store::*;
-pub use mem_meta_store::*;
-pub use meta_store::*;
-pub use transaction::*;
+#[derive(Default)]
+pub struct RetryableError {}
+
+impl Condition<Error> for RetryableError {
+    fn should_retry(&mut self, error: &Error) -> bool {
+        error.retryable()
+    }
+}

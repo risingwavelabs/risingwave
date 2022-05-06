@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod etcd_meta_store;
-mod mem_meta_store;
-pub mod meta_store;
-#[cfg(test)]
-mod tests;
-mod transaction;
+use thiserror::Error;
 
-pub type ColumnFamily = String;
-pub type Key = Vec<u8>;
-pub type Value = Vec<u8>;
-
-pub use etcd_meta_store::*;
-pub use mem_meta_store::*;
-pub use meta_store::*;
-pub use transaction::*;
+#[derive(Error, Debug)]
+pub enum ValueEncodingError {
+    #[error("Invalid bool value encoding: {0}")]
+    InvalidBoolEncoding(u8),
+    #[error("Invalid UTF8 value encofing: {0}")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
+    #[error("Invalid NaiveDate value encoding: days: {0}")]
+    InvalidNaiveDateEncoding(i32),
+    #[error("invalid NaiveDateTime value encoding: secs: {0} nsecs: {1}")]
+    InvalidNaiveDateTimeEncoding(i64, u32),
+    #[error("invalid NaiveTime value encoding: secs: {0} nano: {1}")]
+    InvalidNaiveTimeEncoding(u32, u32),
+}
