@@ -186,10 +186,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let mut recover_state = ConnectorStateV2::Splits(self.stream_source_splits.clone());
         if !self.stream_source_splits.is_empty() {
-            if self.stream_source_splits.len() > 1 {
-                todo!("assign multiple split to one executor is not supported, source id: {:?}, splits: {:?}", self.source_id, self.stream_source_splits);
-            }
-
             if let Ok(state) = self
                 .split_state_store
                 .try_recover_from_state_store(&self.stream_source_splits[0], epoch)
