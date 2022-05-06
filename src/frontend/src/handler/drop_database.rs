@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use crate::binder::Binder;
@@ -29,7 +29,9 @@ pub async fn handle_drop_database(
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
     let database_name = Binder::resolve_database_name(database_name)?;
-
+    if mode.is_some() {
+        return Err(ErrorCode::BindError("Drop database not support drop mode".to_string()).into());
+    }
     let database = {
         let reader = catalog_reader.read_guard();
         match reader.get_database_by_name(&database_name) {
@@ -53,18 +55,10 @@ pub async fn handle_drop_database(
     };
     let database_id = {
         // If the mode is `Restrict` or `None`, the `database` need to be empty.
-        if Some(DropMode::Restrict) == mode || None == mode {
-            if !database.is_empty() {
-                return Err(CatalogError::NotEmpty("database", database_name).into());
-            }
-            database.id()
-        } else {
-            return Err(ErrorCode::NotImplemented(
-                format!("unsupported drop mode: {:?}", mode),
-                TrackingIssue::none(),
-            )
-            .into());
+        if !database.is_empty() {
+            return Err(CatalogError::NotEmpty("database", database_name).into());
         }
+        database.id()
     };
 
     let catalog_writer = session.env().catalog_writer();

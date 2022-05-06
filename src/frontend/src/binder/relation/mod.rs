@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, internal_error, Result};
+use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
@@ -79,12 +79,12 @@ impl Binder {
     /// return the `database_name`
     pub fn resolve_database_name(name: ObjectName) -> Result<String> {
         let mut identifiers = name.0;
-        if identifiers.len > 1{
-            Err(internal_error("database name must contain 1 argument".into()))
+        if identifiers.len() > 1 {
+            return Err(internal_error("database name must contain 1 argument"));
         }
         let database_name = identifiers
             .pop()
-            .ok_or_else(|| internal_error("empty database name".into()))?
+            .ok_or_else(|| internal_error("empty database name"))?
             .value;
 
         Ok(database_name)
