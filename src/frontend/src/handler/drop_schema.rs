@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
@@ -52,20 +51,20 @@ pub async fn handle_drop_schema(
     let schema_id = {
         // If the mode is `Restrict` or `None`, the `schema` need to be empty.
         if Some(DropMode::Restrict) == mode || None == mode {
-            if !schema.is_table_empty() {
+            if let Some(table) = schema.iter_table().next() {
                 return Err(CatalogError::NotEmpty(
                     "schema",
                     schema_name,
                     "table",
-                    schema.iter_table().collect_vec()[0].name.clone(),
+                    table.name.clone(),
                 )
                 .into());
-            } else if !schema.is_source_empty() {
+            } else if let Some(source) = schema.iter_source().next() {
                 return Err(CatalogError::NotEmpty(
                     "schema",
                     schema_name,
                     "source",
-                    schema.iter_source().collect_vec()[0].name.clone(),
+                    source.name.clone(),
                 )
                 .into());
             }
