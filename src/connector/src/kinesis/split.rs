@@ -39,10 +39,8 @@ impl SplitMetaData for KinesisSplit {
         self.shard_id.to_string()
     }
 
-    fn to_json_bytes(&self) -> anyhow::Result<Bytes> {
-        Ok(Bytes::from(
-            serde_json::to_string(self).map_err(|e| anyhow!(e))?,
-        ))
+    fn to_json_bytes(&self) -> Bytes {
+        Bytes::from(serde_json::to_string(self).unwrap())
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {

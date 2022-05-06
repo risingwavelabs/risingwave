@@ -49,7 +49,7 @@ pub struct SourceMessage {
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
-    fn to_json_bytes(&self) -> Result<Bytes>;
+    fn to_json_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
@@ -66,10 +66,8 @@ impl SplitMetaData for ConnectorState {
         String::from_utf8(self.identifier.to_vec()).unwrap()
     }
 
-    fn to_json_bytes(&self) -> Result<Bytes> {
-        Ok(Bytes::from(
-            serde_json::to_string(self).map_err(|e| anyhow!(e))?,
-        ))
+    fn to_json_bytes(&self) -> Bytes {
+        Bytes::from(serde_json::to_string(self).unwrap())
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
@@ -155,7 +153,7 @@ impl SplitImpl {
         }
     }
 
-    pub fn to_json_bytes(&self) -> Result<Bytes> {
+    pub fn to_json_bytes(&self) -> Bytes {
         match self {
             SplitImpl::Kafka(k) => k.to_json_bytes(),
             SplitImpl::Pulsar(p) => p.to_json_bytes(),

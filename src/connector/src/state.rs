@@ -117,7 +117,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             states.iter().for_each(|state| {
                 // state inner key format (state_identifier | epoch)
                 let inner_key = StateStoredKey::new(state.id(), epoch).build_stored_key();
-                let value = state.to_json_bytes().unwrap();
+                let value = state.to_json_bytes();
                 // TODO(Yuanxin): Implement value meta
                 local_batch.put(inner_key, StorageValue::new_default_put(value));
             });
@@ -192,10 +192,8 @@ mod tests {
             self.partition.clone()
         }
 
-        fn to_json_bytes(&self) -> Result<Bytes> {
-            Ok(Bytes::from(
-                serde_json::to_string(self).map_err(|e| anyhow!(e))?,
-            ))
+        fn to_json_bytes(&self) -> Bytes {
+            Bytes::from(serde_json::to_string(self).unwrap())
         }
 
         fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
@@ -251,7 +249,7 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
-        let encode_value = state_instance.to_json_bytes()?;
+        let encode_value = state_instance.to_json_bytes();
         let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);

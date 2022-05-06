@@ -417,7 +417,7 @@ where
                             split_type: splits.first().unwrap().get_type(),
                             stream_source_splits: splits
                                 .iter()
-                                .map(|split| split.to_json_bytes().unwrap().to_vec())
+                                .map(|split| split.to_json_bytes().to_vec())
                                 .collect(),
                         });
                     }
