@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::TableRefId;
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::PlanBase;
+use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchInsert` implements [`LogicalInsert`]
@@ -79,5 +79,12 @@ impl ToBatchProst for BatchInsert {
             column_ids: vec![], // unused
             frontend_v2: true,
         })
+    }
+}
+
+impl ToLocalBatch for BatchInsert {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local();
+        self.clone_with_input(new_input).into()
     }
 }
