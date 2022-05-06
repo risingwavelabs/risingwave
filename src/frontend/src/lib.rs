@@ -31,6 +31,7 @@
 #![feature(let_else)]
 #![feature(trait_alias)]
 #![feature(drain_filter)]
+#![feature(if_let_guard)]
 #[macro_use]
 pub mod catalog;
 pub mod binder;
