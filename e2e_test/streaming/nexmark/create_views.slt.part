@@ -1,0 +1,4 @@
+include ./views/q0.slt.part
+include ./views/q1.slt.part
+include ./views/q2.slt.part
+include ./views/q3.slt.part

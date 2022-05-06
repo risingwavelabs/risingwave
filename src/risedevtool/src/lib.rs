@@ -24,6 +24,8 @@ mod preflight_check;
 pub use preflight_check::*;
 pub mod service_config;
 pub use service_config::*;
+mod compose;
+pub use compose::*;
 
 mod task;
 pub mod util;
