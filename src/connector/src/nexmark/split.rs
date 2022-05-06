@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::base::SourceSplit;
+use crate::base::SplitMetaData;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct NexmarkSplit {
@@ -24,13 +25,13 @@ pub struct NexmarkSplit {
     pub(crate) start_offset: Option<u64>,
 }
 
-impl SourceSplit for NexmarkSplit {
+impl SplitMetaData for NexmarkSplit {
     fn id(&self) -> String {
         format!("{}-{}", self.split_num, self.split_index)
     }
 
-    fn to_string(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    fn to_json_bytes(&self) -> Bytes {
+        Bytes::from(serde_json::to_string(self).unwrap())
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {

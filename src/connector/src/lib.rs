@@ -37,4 +37,5 @@ mod pulsar;
 mod utils;
 pub use base::*;
 pub use utils::{AnyhowProperties, Properties};
+pub mod dummy_connector;
 pub mod state;
