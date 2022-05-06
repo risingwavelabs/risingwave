@@ -244,9 +244,11 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Right(chunk_with_state) => {
                     let chunk_with_state =
                         chunk_with_state.map_err(StreamExecutorError::source_error)?;
-                    self.state_cache = Some(ConnectorState::from_hashmap(
-                        chunk_with_state.split_offset_mapping.unwrap(),
-                    ));
+                    if chunk_with_state.split_offset_mapping.is_some() {
+                        self.state_cache = Some(ConnectorState::from_hashmap(
+                            chunk_with_state.split_offset_mapping.unwrap(),
+                        ));
+                    }
                     let mut chunk = chunk_with_state.chunk;
 
                     if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
