@@ -146,7 +146,7 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
-        self.add_table_id(table.id, table.schema_id, table.database_id);
+        self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
     }
 
@@ -168,8 +168,8 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_table_id(source_id);
-        self.drop_table_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
+        self.drop_table_or_source_id(table_id.table_id);
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -180,7 +180,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_source(&self, source_id: u32) -> Result<()> {
-        let (database_id, schema_id) = self.drop_table_id(source_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
@@ -199,8 +199,8 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_table_id(table_id.table_id);
-        self.drop_table_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        self.drop_table_or_source_id(table_id.table_id);
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -230,17 +230,17 @@ impl MockCatalogWriter {
     }
 
     fn gen_id(&self) -> u32 {
-        // jump out the 0 value.
+        // Since the 0 value is `dev` schema and database, so jump out the 0 value.
         self.id.fetch_add(1, Ordering::SeqCst) + 1
     }
 
-    fn add_table_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
+    fn add_table_or_source_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
         self.table_id_to_schema_id
             .write()
             .insert(table_id, schema_id);
     }
 
-    fn drop_table_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+    fn drop_table_or_source_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
         let schema_id = self
             .table_id_to_schema_id
             .write()
@@ -265,7 +265,7 @@ impl MockCatalogWriter {
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
         self.catalog.write().create_source(source.clone());
-        self.add_table_id(source.id, source.schema_id, source.database_id);
+        self.add_table_or_source_id(source.id, source.schema_id, source.database_id);
         Ok(source.id)
     }
 
