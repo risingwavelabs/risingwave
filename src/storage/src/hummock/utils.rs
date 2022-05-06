@@ -121,16 +121,11 @@ pub fn vnode_bitmap_filter(
     if vnode_bitmap.is_empty() {
         return false;
     }
-    if let Some(vnode) = value_meta {
-        if let Some(table_id) = get_table_id(full_key) {
-            if let Ok(pos) = vnode_bitmap.binary_search_by_key(&table_id, |bitmap| bitmap.table_id)
-            {
-                (vnode_bitmap[pos].bitmap[(vnode >> 3) as usize] & (1 << (vnode & 0b111))) == 0
-            } else {
-                true
-            }
+    if let Some(vnode) = value_meta && let Some(table_id) = get_table_id(full_key) {
+        if let Ok(pos) = vnode_bitmap.binary_search_by_key(&table_id, |bitmap| bitmap.table_id) {
+            (vnode_bitmap[pos].bitmap[(vnode >> 3) as usize] & (1 << (vnode & 0b111))) == 0
         } else {
-            false
+            true
         }
     } else {
         false

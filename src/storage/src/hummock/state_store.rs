@@ -197,6 +197,7 @@ impl HummockStorage {
 
     /// Gets the value of a specified `key`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// if `key` has consistent hash virtual node value, then such value is stored in `value_meta`
     ///
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
