@@ -17,12 +17,14 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result as RwResult, RwError};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 
-use crate::SplitMetaData;
+use crate::{ConnectorState, SplitImpl, SplitMetaData};
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -160,6 +162,42 @@ impl<S: StateStore> SourceStateHandler<S> {
                 Ok(restore_values)
             }
             Err(e) => Err(anyhow!(e)),
+        }
+    }
+
+    pub async fn try_recover_from_state_store(
+        &self,
+        stream_source_splits: &SplitImpl,
+        epoch: u64,
+    ) -> RwResult<ConnectorState> {
+        let mut state = self
+            .restore_states(stream_source_splits.id())
+            .await
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?
+            .iter()
+            .filter(|(e, _)| e == &epoch)
+            .map(|(_, s)| {
+                ConnectorState::restore_from_bytes(s)
+                    .map_err(|e| RwError::from(InternalError(e.to_string())))
+            })
+            .collect::<RwResult<Vec<ConnectorState>>>()?;
+
+        assert!(state.len() <= 1);
+
+        if state.len() == 1 {
+            Ok(state.pop().unwrap())
+        } else if state.is_empty() {
+            Err(RwError::from(InternalError(format!(
+                "cannot found state for {:?}, epoch: {:?}",
+                stream_source_splits, epoch
+            ))))
+        } else {
+            Err(RwError::from(InternalError(format!(
+                "expected load one state from epoch {:?}, got {:?}: {:?}",
+                epoch,
+                state.len(),
+                state
+            ))))
         }
     }
 }
