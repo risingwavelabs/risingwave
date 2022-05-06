@@ -121,7 +121,6 @@ impl SortAggExecutor2 {
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?.compact()?;
-            let child_cardinality = child_chunk.cardinality();
             let group_columns = self
                 .group_keys
                 .iter_mut()
@@ -136,8 +135,7 @@ impl SortAggExecutor2 {
                 .collect::<Result<Vec<EqGroups>>>()?;
 
             let mut groups = EqGroups::intersect(&groups);
-            let mut chunk_offset = 0;
-            while chunk_offset < child_cardinality {
+            loop {
                 let limit = {
                     if left_capacity >= groups.len() {
                         left_capacity -= groups.len();
@@ -157,14 +155,12 @@ impl SortAggExecutor2 {
                     &groups,
                 )?;
 
-                chunk_offset = SortAggExecutor2::build_agg_states(
+                SortAggExecutor2::build_agg_states(
                     &mut self.agg_states,
                     &child_chunk,
                     &mut agg_builders,
                     &groups,
                 )?;
-
-                groups.advance_offset();
 
                 if left_capacity == 0 {
                     // yield output chunk
@@ -182,6 +178,11 @@ impl SortAggExecutor2 {
                         SortAggExecutor2::create_builders(&self.group_keys, &self.agg_states);
 
                     left_capacity = self.output_size_limit;
+                }
+
+                groups.advance_offset();
+                if groups.is_empty() {
+                    break;
                 }
             }
         }
@@ -227,16 +228,13 @@ impl SortAggExecutor2 {
         child_chunk: &DataChunk,
         agg_builders: &mut [ArrayBuilderImpl],
         groups: &EqGroups,
-    ) -> Result<usize> {
-        let next_row_indices = agg_states
+    ) -> Result<()> {
+        agg_states
             .iter_mut()
             .zip_eq(agg_builders)
-            .map(|(state, builder)| {
+            .try_for_each(|(state, builder)| {
                 state.update_and_output_with_sorted_groups(child_chunk, builder, groups)
             })
-            .collect::<Result<Vec<_>>>()?;
-
-        Ok(*next_row_indices.first().unwrap_or(&0))
     }
 
     fn create_builders(

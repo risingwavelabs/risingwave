@@ -1,0 +1,4 @@
+statement ok
+CREATE MATERIALIZED VIEW nexmark_q0
+AS
+SELECT auction, bidder, price, dateTime FROM bid;

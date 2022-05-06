@@ -40,7 +40,6 @@ pub type MergeSortExchangeExecutor2 = MergeSortExchangeExecutor2Impl<DefaultCrea
 /// The outputs of all the sources have been sorted in the same way.
 ///
 /// The size of the output is determined both by `K_PROCESSING_WINDOW_SIZE`.
-/// TODO: Does not handle `visibility` for now.
 pub struct MergeSortExchangeExecutor2Impl<C> {
     server_addr: HostAddr,
     env: BatchEnvironment,

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
 use std::str;
 
 use async_trait::async_trait;
 use risingwave_common::error::{ErrorCode, RwError};
+use thiserror::Error;
 
 use crate::storage::transaction::Transaction;
 use crate::storage::{Key, Value};
@@ -49,7 +51,7 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
 }
 
 // Error of metastore
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
     ItemNotFound(String),
     TransactionAbort(),
@@ -69,6 +71,23 @@ impl From<Error> for RwError {
                 "meta internal error: {}",
                 e
             ))),
+        }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::ItemNotFound(s) => {
+                write!(f, "{}", s)
+            }
+            Error::TransactionAbort() => {
+                // TODO: refine it
+                write!(f, "TransactionAbort")
+            }
+            Error::Internal(err) => {
+                write!(f, "{}", err)
+            }
         }
     }
 }

@@ -36,6 +36,7 @@ pub type SourceRef = Arc<SourceImpl>;
 
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
+const NEXMARK_SOURCE: &str = "nexmark";
 
 /// The local source manager on the compute node.
 pub trait SourceManager: Debug + Sync + Send {
@@ -141,7 +142,7 @@ impl SourceManager for MemSourceManager {
 
         match properties.get_connector_type()?.as_str() {
             // TODO support more connector here
-            KINESIS_SOURCE | KAFKA_SOURCE => {}
+            KINESIS_SOURCE | KAFKA_SOURCE | NEXMARK_SOURCE => {}
             other => {
                 return Err(RwError::from(ProtocolError(format!(
                     "source type {} not supported",

@@ -3731,6 +3731,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_storage",
  "serde",

@@ -73,3 +73,9 @@ impl CurrentHummockVersionId {
         self.id
     }
 }
+
+impl Default for CurrentHummockVersionId {
+    fn default() -> Self {
+        CurrentHummockVersionId::new()
+    }
+}
