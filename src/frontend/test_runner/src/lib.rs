@@ -93,6 +93,7 @@ pub struct CreateSource {
     row_format: String,
     name: String,
     file: Option<String>,
+    materialized: Option<bool>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -200,11 +201,16 @@ impl TestCase {
         match self.create_source.clone() {
             Some(source) => {
                 if let Some(content) = source.file {
+                    let materialized = if let Some(true) = source.materialized {
+                        "materialized".to_string()
+                    } else {
+                        "".to_string()
+                    };
                     let sql = format!(
-                        r#"CREATE SOURCE {}
+                        r#"CREATE {} SOURCE {}
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
-                        source.name, source.row_format
+                        materialized, source.name, source.row_format
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
