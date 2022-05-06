@@ -56,7 +56,7 @@ impl Default for SSTableBuilderOptions {
     }
 }
 
-pub const VNODE_BITS: usize = 8;
+pub const VNODE_BITS: usize = 16;
 pub const VNODE_BITMAP_LEN: usize = 1 << (VNODE_BITS - 3);
 pub struct SSTableBuilder {
     /// Options.
@@ -114,7 +114,7 @@ impl SSTableBuilder {
 
         // TODO: refine me
         let mut raw_value = BytesMut::default();
-        let value_meta = value.encode(&mut raw_value) & ((1 << VNODE_BITS) - 1);
+        let value_meta = value.encode(&mut raw_value) & ((1u32 << VNODE_BITS) - 1) as u16;
         let table_id = get_table_id(full_key);
         self.vnode_bitmaps
             .entry(table_id)
