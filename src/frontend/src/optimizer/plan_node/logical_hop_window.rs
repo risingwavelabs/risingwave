@@ -153,38 +153,45 @@ impl ColPrunable for LogicalHopWindow {
         let o2i = self.o2i_col_mapping();
         let input_required_cols = {
             let mut tmp = o2i.rewrite_bitset(required_cols);
+            // LogicalHopWindow should keep all required cols from upstream,
+            // as well as its own time_col.
             tmp.put(self.time_col.index());
             tmp
         };
         let input = self.input.prune_col(&input_required_cols);
         let input_change = ColIndexMapping::with_remaining_columns(&input_required_cols);
         let (new_hop, _) = self.rewrite_with_input(input, input_change);
-        match (require_win_start, require_win_end) {
-            (true, true) => new_hop.into(),
-            (true, false) => {
-                let proj_map = ColIndexMapping::identity_or_none(
-                    new_hop.schema().len(),
-                    new_hop.schema().len() - 1,
-                );
-                LogicalProject::with_mapping(new_hop.into(), proj_map)
+        let required_output_cols: FixedBitSet = {
+            // output cols = { cols required by upstream from input node } ∪ { additional window
+            // cols }
+
+            // `required_output_cols` indicates whether a column is needed or not
+            let mut required_output_cols = FixedBitSet::with_capacity(new_hop.schema().len());
+
+            // get indices of columns which are required by upstream in `new_hop`
+            let input_cols_required_by_upstream_in_new_hop = {
+                // map the indices from output to input
+                let input_required_cols = o2i.rewrite_bitset(required_cols);
+                // this mapping will only keeps required input columns
+                let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+                mapping.rewrite_bitset(&input_required_cols)
+            };
+            required_output_cols.union_with(&input_cols_required_by_upstream_in_new_hop);
+
+            let win_start_index = new_hop.schema().len() - 2;
+            let win_end_index = new_hop.schema().len() - 1;
+            if require_win_start {
+                required_output_cols.put(win_start_index);
             }
-            (false, true) => {
-                let mut proj_map = ColIndexMapping::identity_or_none(
-                    new_hop.schema().len(),
-                    new_hop.schema().len() - 1,
-                );
-                proj_map.put(new_hop.schema().len() - 1, Some(new_hop.schema().len() - 2));
-                proj_map.put(new_hop.schema().len() - 2, None);
-                LogicalProject::with_mapping(new_hop.into(), proj_map)
+            if require_win_end {
+                required_output_cols.put(win_end_index);
             }
-            (false, false) => {
-                let proj_map = ColIndexMapping::identity_or_none(
-                    new_hop.schema().len(),
-                    new_hop.schema().len() - 2,
-                );
-                LogicalProject::with_mapping(new_hop.into(), proj_map)
-            }
-        }
+            required_output_cols
+        };
+        LogicalProject::with_mapping(
+            new_hop.into(),
+            ColIndexMapping::with_remaining_columns(&required_output_cols),
+        )
     }
 }
 

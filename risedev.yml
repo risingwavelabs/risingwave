@@ -146,6 +146,11 @@ risedev:
 
     - use: redpanda
 
+    - use: prometheus
+      id: prometheus-0
+      listen-address: "0.0.0.0"
+      address: ${id}
+
   #################################
   ### Configurations used on CI ###
   #################################
@@ -219,6 +224,17 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
+
+compose:
+  risingwave: "ghcr.io/singularity-data/risingwave:latest"
+  compute-node: "ghcr.io/singularity-data/compute-node:latest"
+  meta-node: "ghcr.io/singularity-data/meta-node:latest"
+  compactor-node: "ghcr.io/singularity-data/compactor-node:latest"
+  frontend-node: "ghcr.io/singularity-data/frontend-node:latest"
+  prometheus: "prom/prometheus:latest"
+  minio: "quay.io/minio/minio:latest"
+  redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
+  grafana: "grafana/grafana-oss:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:

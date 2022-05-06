@@ -58,7 +58,7 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
-    use crate::SourceSplit;
+    use crate::SplitMetaData;
     #[tokio::test]
     async fn test_nexmark_split_enumerator() -> Result<()> {
         let mut enumerator = NexmarkSplitEnumerator { split_num: 4 };

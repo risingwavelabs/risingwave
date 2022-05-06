@@ -29,7 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
+use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
@@ -141,7 +141,14 @@ impl PlanRoot {
         };
 
         // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
+        //
+        // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
+        // they shouldn't be a part of output columns, so we use `out_fields` to control the
+        // visibility of these expressions. To avoid these expressions being pruned, we can't
+        // use `self.out_fields` as `required_cols` here.
+        let mut required_cols = FixedBitSet::with_capacity(self.plan.schema().len());
+        required_cols.insert_range(..);
+        plan = plan.prune_col(&required_cols);
 
         plan = {
             let rules = vec![
@@ -167,7 +174,25 @@ impl PlanRoot {
         plan = plan.to_batch_with_order_required(&self.required_order);
 
         // Convert to distributed plan
-        plan.to_distributed_with_required(&self.required_order, &self.required_dist)
+        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            let (exprs, expr_aliases) = self
+                .out_fields
+                .ones()
+                .zip_eq(self.schema.fields.clone())
+                .map(|(index, field)| {
+                    (
+                        InputRef::new(index, field.data_type).into(),
+                        Some(field.name),
+                    )
+                })
+                .unzip();
+            plan = BatchProject::new(LogicalProject::new(plan, exprs, expr_aliases)).into();
+        }
+
+        plan
     }
 
     /// Generate create index or create materialize view plan.
