@@ -165,12 +165,8 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let version_size = register_int_gauge_with_registry!(
-            "version_size",
-            "version size",
-            registry
-        )
-        .unwrap();
+        let version_size =
+            register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
 
         Self {
             registry,

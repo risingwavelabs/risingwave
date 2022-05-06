@@ -32,7 +32,9 @@ pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersi
         .iter()
         .fold(0, |accum, elem| accum + elem.tables.len());
     metrics.uncommitted_sst_num.set(uncommitted_sst_num as i64);
-    metrics.version_size.set(current_version.encoded_len() as i64);
+    metrics
+        .version_size
+        .set(current_version.encoded_len() as i64);
 }
 
 pub fn trigger_sst_stat(
