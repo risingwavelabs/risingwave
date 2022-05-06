@@ -75,13 +75,11 @@ impl ConnectorState {
             return vec![];
         }
         let mut connector_states: Vec<Self> = Vec::with_capacity(state.len());
-        for (split, offset) in state {
-            connector_states.push(Self {
-                identifier: Bytes::from(split),
-                start_offset: offset.clone(),
-                end_offset: "".to_string(),
-            })
-        }
+        connector_states.extend(state.iter().map(|(split, offset)| Self {
+            identifier: Bytes::from(split.to_owned()),
+            start_offset: offset.clone(),
+            end_offset: "".to_string(),
+        }));
         connector_states
     }
 }

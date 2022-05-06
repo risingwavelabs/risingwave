@@ -58,7 +58,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     source_identify: String,
 
-    state_store: SourceStateHandler<S>,
+    split_state_store: SourceStateHandler<S>,
     // store latest split to offset mapping
     state_cache: Option<Vec<ConnectorState>>,
 }
@@ -90,7 +90,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics: streaming_metrics,
             stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
-            state_store: SourceStateHandler::new(keyspace),
+            split_state_store: SourceStateHandler::new(keyspace),
             state_cache: None,
         })
     }
@@ -191,7 +191,7 @@ impl<S: StateStore> SourceExecutor<S> {
             }
 
             if let Ok(state) = self
-                .state_store
+                .split_state_store
                 .try_recover_from_state_store(&self.stream_source_splits[0], epoch)
                 .await
             {
@@ -227,7 +227,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         Message::Barrier(barrier) => {
                             let epoch = barrier.epoch.prev;
                             if self.state_cache.is_some() {
-                                self.state_store
+                                self.split_state_store
                                     .take_snapshot(self.state_cache.clone().unwrap(), epoch)
                                     .await
                                     .map_err(|e| {
