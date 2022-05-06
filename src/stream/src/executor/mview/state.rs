@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedMViewState<S> {
         for (arrange_keys, cells) in self.cache.drain() {
             let row = cells.into_option();
             let arrange_key_buf = serialize_pk(&arrange_keys, &self.key_serializer)?;
-            let bytes = serialize_pk_and_row(&arrange_key_buf, &row, &self.column_ids)?;
+            let bytes = serialize_pk_and_row_state(&arrange_key_buf, &row, &self.column_ids)?;
 
             // We compute vnode on arrange keys in materialized view since materialized views are
             // grouped by arrange keys.
