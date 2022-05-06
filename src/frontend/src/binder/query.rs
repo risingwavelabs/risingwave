@@ -115,7 +115,7 @@ impl Binder {
         let index = match order_by_expr.expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.value) => *index,
             Expr::Value(Value::Number(number, _)) => match number.parse::<usize>() {
-                Ok(index) if index <= visible_output_num => index - 1,
+                Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "Invalid value in ORDER BY: {}",
