@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
@@ -106,7 +106,7 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
 impl_plan_tree_node_for_binary! { StreamDeltaJoin }
 
 impl ToStreamProst for StreamDeltaJoin {
-    fn to_stream_prost_body(&self) -> Node {
+    fn to_stream_prost_body(&self) -> NodeBody {
         let left = self.left();
         let right = self.right();
         let left_table = left.as_stream_index_scan().unwrap();
@@ -116,7 +116,7 @@ impl ToStreamProst for StreamDeltaJoin {
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
-        Node::DeltaIndexJoin(DeltaIndexJoinNode {
+        NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: self
                 .eq_join_predicate

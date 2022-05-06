@@ -73,8 +73,7 @@ impl CellBasedRowDeserializer {
         }
 
         if let Some((column_desc, index)) = self.columns.get(&cell_id) {
-            let mut de = value_encoding::Deserializer::new(cell.clone());
-            if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
+            if let Some(datum) = deserialize_cell(&mut cell.clone(), &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
                 assert!(old.is_none());
             }
@@ -111,7 +110,7 @@ mod tests {
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::ordered::serialize_pk_and_row;
+    use risingwave_common::util::ordered::serialize_pk_and_row_state;
 
     use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 
@@ -145,9 +144,9 @@ mod tests {
             Some(ScalarImpl::Int64(2021)),
             Some(ScalarImpl::Float64(666.6f64.into())),
         ]);
-        let bytes1 = serialize_pk_and_row(&pk1, &Some(row1.clone()), &column_ids).unwrap();
-        let bytes2 = serialize_pk_and_row(&pk2, &Some(row2.clone()), &column_ids).unwrap();
-        let bytes3 = serialize_pk_and_row(&pk3, &Some(row3.clone()), &column_ids).unwrap();
+        let bytes1 = serialize_pk_and_row_state(&pk1, &Some(row1.clone()), &column_ids).unwrap();
+        let bytes2 = serialize_pk_and_row_state(&pk2, &Some(row2.clone()), &column_ids).unwrap();
+        let bytes3 = serialize_pk_and_row_state(&pk3, &Some(row3.clone()), &column_ids).unwrap();
         let bytes = [bytes1, bytes2, bytes3].concat();
         let partial_table_column_descs = table_column_descs.into_iter().skip(1).take(3).collect();
         let mut result = vec![];

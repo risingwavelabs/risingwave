@@ -21,13 +21,13 @@ pub struct PrometheusGen;
 impl PrometheusGen {
     pub fn gen_prometheus_yml(&self, config: &PrometheusConfig) -> String {
         let prometheus_host = &config.address;
-        let prometheus_port = config.port;
+        let prometheus_port = &config.port;
         let compute_node_targets = config
             .provide_compute_node
             .as_ref()
             .unwrap()
             .iter()
-            .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
         let meta_node_targets = config
@@ -35,7 +35,7 @@ impl PrometheusGen {
             .as_ref()
             .unwrap()
             .iter()
-            .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
         let minio_targets = config
@@ -51,7 +51,7 @@ impl PrometheusGen {
             .as_ref()
             .unwrap()
             .iter()
-            .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
         format!(

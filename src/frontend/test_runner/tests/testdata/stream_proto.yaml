@@ -7,11 +7,11 @@
     input:
       - input:
           - input:
-              - mergeNode: {}
+              - merge: {}
               - pkIndices:
                   - 1
                 appendOnly: true
-                batchPlanNode:
+                batchPlan:
                   tableRefId:
                     tableId: 1
                   columnDescs:
@@ -37,7 +37,7 @@
                   typeName: INT64
                   isNullable: true
                 name: "_row_id#0"
-            chainNode:
+            chain:
               tableRefId:
                 tableId: 1
               upstreamFields:
@@ -63,7 +63,7 @@
               typeName: INT64
               isNullable: true
             name: "_row_id#0"
-        filterNode:
+        filter:
           searchCondition:
             exprType: LESS_THAN
             returnType:
@@ -93,7 +93,7 @@
           typeName: INT64
           isNullable: true
         name: "_row_id#0"
-    materializeNode:
+    materialize:
       columnOrders:
         - orderType: ASCENDING
           inputRef:
@@ -138,11 +138,11 @@
     ---
     input:
       - input:
-          - mergeNode: {}
+          - merge: {}
           - pkIndices:
               - 1
             appendOnly: true
-            batchPlanNode:
+            batchPlan:
               tableRefId:
                 tableId: 1
               columnDescs:
@@ -168,7 +168,7 @@
               typeName: INT64
               isNullable: true
             name: "_row_id#0"
-        chainNode:
+        chain:
           tableRefId:
             tableId: 1
           upstreamFields:
@@ -194,7 +194,7 @@
           typeName: INT64
           isNullable: true
         name: "_row_id#0"
-    materializeNode:
+    materialize:
       columnOrders:
         - orderType: ASCENDING
           inputRef:
@@ -239,11 +239,11 @@
     ---
     input:
       - input:
-          - mergeNode: {}
+          - merge: {}
           - pkIndices:
               - 1
             appendOnly: true
-            batchPlanNode:
+            batchPlan:
               tableRefId:
                 tableId: 1
               columnDescs:
@@ -269,7 +269,7 @@
               typeName: INT64
               isNullable: true
             name: "_row_id#0"
-        chainNode:
+        chain:
           tableRefId:
             tableId: 1
           upstreamFields:
@@ -299,7 +299,7 @@
           typeName: INT64
           isNullable: true
         name: "_row_id#0"
-    materializeNode:
+    materialize:
       columnOrders:
         - orderType: ASCENDING
           inputRef:
@@ -346,11 +346,11 @@
       - input:
           - input:
               - input:
-                  - mergeNode: {}
+                  - merge: {}
                   - pkIndices:
                       - 1
                     appendOnly: true
-                    batchPlanNode:
+                    batchPlan:
                       tableRefId:
                         tableId: 1
                       columnDescs:
@@ -376,7 +376,7 @@
                       typeName: INT64
                       isNullable: true
                     name: "_row_id#0"
-                chainNode:
+                chain:
                   tableRefId:
                     tableId: 1
                   upstreamFields:
@@ -402,7 +402,7 @@
                   typeName: INT64
                   isNullable: true
                 name: "_row_id#0"
-            exchangeNode:
+            exchange:
               strategy:
                 type: SIMPLE
         pkIndices:
@@ -417,7 +417,7 @@
               typeName: INT64
               isNullable: true
             name: "agg#1"
-        globalSimpleAggNode:
+        globalSimpleAgg:
           aggCalls:
             - type: COUNT
               returnType:
@@ -444,7 +444,7 @@
           typeName: INT64
           isNullable: true
         name: "agg#1"
-    materializeNode:
+    materialize:
       columnOrders:
         - orderType: ASCENDING
           inputRef: {}
@@ -497,11 +497,11 @@
               - input:
                   - input:
                       - input:
-                          - mergeNode: {}
+                          - merge: {}
                           - pkIndices:
                               - 2
                             appendOnly: true
-                            batchPlanNode:
+                            batchPlan:
                               tableRefId:
                                 tableId: 1
                               columnDescs:
@@ -536,7 +536,7 @@
                               typeName: INT64
                               isNullable: true
                             name: "_row_id#0"
-                        chainNode:
+                        chain:
                           tableRefId:
                             tableId: 1
                           upstreamFields:
@@ -571,7 +571,7 @@
                           typeName: INT64
                           isNullable: true
                         name: "_row_id#0"
-                    exchangeNode:
+                    exchange:
                       strategy:
                         type: HASH
                         columnIndices:
@@ -591,7 +591,7 @@
                       typeName: INT64
                       isNullable: true
                     name: "_row_id#0"
-                projectNode:
+                project:
                   selectList:
                     - exprType: INPUT_REF
                       returnType:
@@ -625,7 +625,7 @@
                   typeName: INT64
                   isNullable: true
                 name: "agg#1"
-            hashAggNode:
+            hashAgg:
               distributionKeys:
                 - 0
               aggCalls:
@@ -654,7 +654,7 @@
               typeName: INT32
               isNullable: true
             name: v2
-        projectNode:
+        project:
           selectList:
             - exprType: INPUT_REF
               returnType:
@@ -678,7 +678,7 @@
           typeName: INT32
           isNullable: true
         name: v2
-    materializeNode:
+    materialize:
       columnOrders:
         - orderType: ASCENDING
           inputRef:

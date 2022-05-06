@@ -17,8 +17,8 @@ include ../../streaming/tpch/views/q3.slt.part
 include ../../streaming/tpch/views/q5.slt.part
 include ../../streaming/tpch/views/q6.slt.part
 include ../../streaming/tpch/views/q7.slt.part
-include ../../streaming/tpch/views/q8.slt.part
-include ../../streaming/tpch/views/q9.slt.part
+include ../../streaming/tpch/views/q8.join_reorder.workaround.slt.part
+include ../../streaming/tpch/views/q9.join_reorder.workaround.slt.part
 include ../../streaming/tpch/views/q10.slt.part
 include ../../streaming/tpch/views/q12.slt.part
 include ../../streaming/tpch/views/q14.slt.part
@@ -36,12 +36,11 @@ include ../../streaming/tpch/q12.slt.part
 include ../../streaming/tpch/q14.slt.part
 include ../../streaming/tpch/q19.slt.part
 
-halt
-
-# TODO: drop MV is not supported yet for delta joins
-
 statement ok
 drop materialized view tpch_q1;
+
+statement ok
+drop materialized view tpch_q3;
 
 statement ok
 drop materialized view tpch_q5;
@@ -65,13 +64,7 @@ statement ok
 drop materialized view tpch_q12;
 
 statement ok
-drop materialized view tpch_q13;
-
-statement ok
 drop materialized view tpch_q14;
-
-statement ok
-drop materialized view tpch_q17;
 
 statement ok
 drop materialized view tpch_q19;

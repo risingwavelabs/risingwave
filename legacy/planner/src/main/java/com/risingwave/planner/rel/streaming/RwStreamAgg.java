@@ -57,9 +57,9 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       var simpleAggNode = simpleAggNodeBuilder.build();
       var builder = StreamNode.newBuilder();
       if (isGlobal) {
-        builder.setGlobalSimpleAggNode(simpleAggNode);
+        builder.setGlobalSimpleAgg(simpleAggNode);
       } else {
-        builder.setLocalSimpleAggNode(simpleAggNode);
+        builder.setLocalSimpleAgg(simpleAggNode);
       }
       builder.addAllPkIndices(primaryKeyIndices);
       node = builder.build();
@@ -74,7 +74,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
 
       node =
           StreamNode.newBuilder()
-              .setHashAggNode(hashAggNodeBuilder.build())
+              .setHashAgg(hashAggNodeBuilder.build())
               .addAllPkIndices(primaryKeyIndices)
               .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
               .build();

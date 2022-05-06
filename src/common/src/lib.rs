@@ -33,6 +33,7 @@
 #![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
+#![feature(trusted_len)]
 
 #[macro_use]
 pub mod error;
@@ -53,4 +54,5 @@ pub mod types;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
+    pub use super::catalog::test_utils::ColumnDescTestExt;
 }

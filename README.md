@@ -20,11 +20,22 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 
 ```shell
 # Download the pre-built binary
-wget https://github.com/singularity-data/risingwave/releases/download/v0.1.5/risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
+wget https://github.com/singularity-data/risingwave/releases/download/v0.1.6/risingwave-v0.1.6-x86_64-unknown-linux.tar.gz
 # Unzip the binary
-tar xvf risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.6-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
+```
+
+**Use Docker (Linux, macOS)**
+
+Currently, only x86_64 is supported. We will provide arm64 builds in the future.
+
+```shell
+# Pull nightly build of RisingWave
+docker pull ghcr.io/singularity-data/risingwave:latest
+# Start RisingWave in single-binary playground mode
+docker run -it ghcr.io/singularity-data/risingwave:latest playground
 ```
 
 **Compile from Source with [RiseDev](./CONTRIBUTING.md#setting-up-development-environment) (Linux and macOS)**

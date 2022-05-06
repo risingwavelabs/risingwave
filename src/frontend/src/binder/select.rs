@@ -34,40 +34,11 @@ pub struct BoundSelect {
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
+    pub having: Option<ExprImpl>,
     schema: Schema,
 }
 
 impl BoundSelect {
-    pub fn create(
-        binder: &Binder,
-        distinct: bool,
-        select_items: Vec<ExprImpl>,
-        aliases: Vec<Option<String>>,
-        from: Option<Relation>,
-        where_clause: Option<ExprImpl>,
-        group_by: Vec<ExprImpl>,
-    ) -> Result<Self> {
-        // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
-        let fields = select_items
-            .iter()
-            .zip_eq(aliases.iter())
-            .map(|(s, a)| {
-                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                binder.expr_to_field(s, name)
-            })
-            .collect::<Result<Vec<Field>>>()?;
-
-        Ok(Self {
-            distinct,
-            select_items,
-            aliases,
-            from,
-            where_clause,
-            group_by,
-            schema: Schema { fields },
-        })
-    }
-
     /// The schema returned by this [`BoundSelect`].
     pub fn schema(&self) -> &Schema {
         &self.schema
@@ -95,16 +66,7 @@ impl Binder {
             .transpose()?;
         self.context.clause = None;
 
-        if let Some(selection) = &selection {
-            let return_type = selection.return_type();
-            if return_type != DataType::Boolean {
-                return Err(ErrorCode::InternalError(format!(
-                    "argument of WHERE must be boolean, not type {:?}",
-                    return_type
-                ))
-                .into());
-            }
-        }
+        Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
         let group_by = select
@@ -113,18 +75,33 @@ impl Binder {
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
 
+        // Bind HAVING clause.
+        let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
+        Self::require_bool_clause(&having, "HAVING")?;
+
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
-        BoundSelect::create(
-            self,
-            select.distinct,
+        // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
+        let fields = select_items
+            .iter()
+            .zip_eq(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                self.expr_to_field(s, name)
+            })
+            .collect::<Result<Vec<Field>>>()?;
+
+        Ok(BoundSelect {
+            distinct: select.distinct,
             select_items,
             aliases,
             from,
-            selection,
+            where_clause: selection,
             group_by,
-        )
+            having,
+            schema: Schema { fields },
+        })
     }
 
     pub fn bind_project(
@@ -193,10 +170,24 @@ impl Binder {
         column_binding
             .map(|c| {
                 (
-                    InputRef::new(c.index, c.desc.data_type.clone()).into(),
-                    Some(c.desc.name.clone()),
+                    InputRef::new(c.index, c.field.data_type.clone()).into(),
+                    Some(c.field.name.clone()),
                 )
             })
             .unzip()
+    }
+
+    fn require_bool_clause(expr: &Option<ExprImpl>, clause: &str) -> Result<()> {
+        if let Some(expr) = expr {
+            let return_type = expr.return_type();
+            if return_type != DataType::Boolean {
+                return Err(ErrorCode::InternalError(format!(
+                    "argument of {} must be boolean, not type {:?}",
+                    clause, return_type
+                ))
+                .into());
+            }
+        }
+        Ok(())
     }
 }

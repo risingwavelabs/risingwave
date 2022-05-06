@@ -62,7 +62,7 @@ where
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.task_status = true;
     hummock_manager
-        .report_compact_task(compact_task)
+        .report_compact_task(&compact_task)
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
@@ -94,6 +94,7 @@ pub fn generate_test_tables(epoch: u64, table_ids: Vec<u64>) -> Vec<SstableInfo>
                 inf: false,
             }),
             file_size: 1,
+            vnode_bitmap: vec![],
         });
     }
     sst_info

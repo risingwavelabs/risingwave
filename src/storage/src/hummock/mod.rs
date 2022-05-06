@@ -58,6 +58,7 @@ use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
+use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::LocalVersionManager;
 
 /// Hummock is the state store backend.
@@ -94,18 +95,18 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        let local_version_manager = Arc::new(LocalVersionManager::new(options.clone()));
+        // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
+        // true in `StorageConfig`
+        let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
 
-        LocalVersionManager::start_workers(
+        let local_version_manager = LocalVersionManager::new(
             options.clone(),
             sstable_store.clone(),
-            local_version_manager.clone(),
             stats.clone(),
             hummock_meta_client.clone(),
-        );
-
-        // Ensure at least one available version in cache.
-        local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
+            write_conflict_detector,
+        )
+        .await;
 
         let instance = Self {
             options: options.clone(),

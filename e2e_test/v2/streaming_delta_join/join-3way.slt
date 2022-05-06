@@ -33,18 +33,14 @@ select v1, v3, v5 from mv1;
 2 2 2
 3 3 3
 
-halt
-
-# TODO: drop MV is not supported yet for delta joins
-
 statement ok
 drop materialized view mv1;
 
 statement ok
-drop ttable tt1;
+drop table tt1;
 
 statement ok
-drop ttable tt2;
+drop table tt2;
 
 statement ok
-drop ttable tt3;
+drop table tt3;

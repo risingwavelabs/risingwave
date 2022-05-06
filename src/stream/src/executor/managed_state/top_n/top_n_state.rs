@@ -24,9 +24,9 @@ use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::managed_state::top_n::variants::*;
-use crate::executor::managed_state::top_n::PkAndRowIterator;
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
+use super::variants::*;
+use super::PkAndRowIterator;
 
 /// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
 /// the `AppendOnlyTopNExecutor` and `TopNExecutor`. For these ranges, we only care about one of the
@@ -338,7 +338,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             let column_ids = (0..self.data_types.len() as i32)
                 .map(ColumnId::from)
                 .collect::<Vec<_>>();
-            let bytes = serialize_pk_and_row(&pk_buf, &row, &column_ids)?;
+            let bytes = serialize_pk_and_row_state(&pk_buf, &row, &column_ids)?;
             for (key, value) in bytes {
                 match value {
                     // TODO(Yuanxin): Implement value meta
@@ -386,9 +386,8 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
+    use super::super::variants::TOP_N_MAX;
     use super::*;
-    use crate::executor::managed_state::top_n::top_n_state::ManagedTopNState;
-    use crate::executor::managed_state::top_n::variants::TOP_N_MAX;
     use crate::row_nonnull;
 
     fn create_managed_top_n_state<S: StateStore, const TOP_N_TYPE: usize>(
