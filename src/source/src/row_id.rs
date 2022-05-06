@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+use quanta::Clock;
 
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
 const WORKER_ID_SHIFT_BITS: u8 = 12;
 const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
 const WORKER_ID_UPPER_BOUND: u32 = 1 << 10;
+const NANOS_PER_MILLI: i64 = 1_000_000;
 
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///
@@ -26,8 +29,8 @@ const WORKER_ID_UPPER_BOUND: u32 = 1 << 10;
 /// |  41 bits  | 10 bits   | 12 bits  |
 #[derive(Debug)]
 pub struct RowIdGenerator {
-    /// Specific epoch using for generating row ids.
-    epoch: SystemTime,
+    /// Clock used to get current timestamp.
+    clock: Clock,
 
     /// Last timestamp part of row id.
     last_duration_ms: i64,
@@ -41,22 +44,20 @@ pub type RowId = i64;
 
 impl RowIdGenerator {
     pub fn new(worker_id: u32) -> Self {
-        Self::with_epoch(worker_id, UNIX_EPOCH)
-    }
-
-    pub fn with_epoch(worker_id: u32, epoch: SystemTime) -> Self {
         assert!(worker_id < WORKER_ID_UPPER_BOUND);
+        let clock = Clock::new();
+        let last_duration_ms = clock.now().as_u64() as i64 / NANOS_PER_MILLI;
         Self {
-            epoch,
-            last_duration_ms: epoch.elapsed().unwrap().as_millis() as i64,
+            clock,
+            last_duration_ms,
             worker_id,
             sequence: 0,
         }
     }
 
     pub fn next(&mut self) -> RowId {
-        let current_duration = self.epoch.elapsed().unwrap();
-        let current_duration_ms = current_duration.as_millis() as i64;
+        let current_duration = self.clock.now().as_u64();
+        let current_duration_ms = current_duration as i64 / NANOS_PER_MILLI;
         if current_duration_ms < self.last_duration_ms {
             tracing::warn!(
                 "Clock moved backwards: last_duration={}, current_duration={}",
@@ -83,8 +84,8 @@ impl RowIdGenerator {
             // here.
             tracing::warn!("Sequence for row-id reached upper bound, spin loop.");
             std::thread::sleep(
-                Duration::from_millis(current_duration.subsec_millis() as u64 + 1)
-                    - Duration::from_nanos(current_duration.subsec_nanos() as u64),
+                Duration::from_millis(current_duration_ms as u64 + 1)
+                    - Duration::from_nanos(current_duration as u64),
             );
             self.next()
         }
@@ -104,7 +105,7 @@ mod tests {
             assert!(row_id > last_row_id);
             last_row_id = row_id;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(1));
         let row_id = generator.next();
         assert!(row_id > last_row_id);
         assert_ne!(

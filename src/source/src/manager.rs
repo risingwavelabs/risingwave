@@ -22,7 +22,6 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::Properties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
@@ -162,10 +161,7 @@ impl SourceManager for MemSourceManager {
             format,
             columns,
             row_id_index,
-            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
-                self.worker_id,
-                *UNIX_SINGULARITY_DATE_EPOCH,
-            ))),
+            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::new(self.worker_id))),
         };
 
         let mut tables = self.get_sources()?;
@@ -197,10 +193,7 @@ impl SourceManager for MemSourceManager {
             columns: source_columns,
             format: SourceFormat::Invalid,
             row_id_index: 0, // always use the first column as row_id
-            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
-                self.worker_id,
-                *UNIX_SINGULARITY_DATE_EPOCH,
-            ))),
+            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::new(self.worker_id))),
         };
 
         sources.insert(*table_id, desc);

@@ -25,6 +25,7 @@ paste = "1"
 prost = "0.10"
 protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
+quanta = "0.9.3"
 rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }

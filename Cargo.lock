@@ -3725,6 +3725,7 @@ dependencies = [
  "prost",
  "protobuf",
  "protobuf-codegen-pure",
+ "quanta",
  "rand 0.8.5",
  "rdkafka",
  "risingwave_common",

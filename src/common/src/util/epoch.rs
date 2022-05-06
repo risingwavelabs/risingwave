@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use core::fmt;
-use std::time::{Duration, SystemTime};
 
 use quanta::Clock;
 
 lazy_static::lazy_static! {
-    /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch: 2021-04-01T00:00:00Z.
-    pub static ref UNIX_SINGULARITY_DATE_EPOCH: SystemTime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200);
     static ref EPOCH_CLOCK: Clock = Clock::new();
 }
 
@@ -34,8 +31,9 @@ impl Epoch {
         Self(Self::physical_now())
     }
 
+    /// `physical_now` returns the current physical epoch using current time in milliseconds.
     fn physical_now() -> u64 {
-        EPOCH_CLOCK.now().as_u64() // nano seconds.
+        EPOCH_CLOCK.now().as_u64() / 1_000_000
     }
 }
 
@@ -58,8 +56,8 @@ mod tests {
     #[test]
     fn test_monotonic_epoch() {
         let mut prev_epoch = Epoch::now();
-        for _ in 0..10000 {
-            std::thread::sleep(std::time::Duration::from_nanos(1));
+        for _ in 0..1000 {
+            std::thread::sleep(std::time::Duration::from_millis(1));
             let epoch = Epoch::now();
             assert!(prev_epoch < epoch);
             prev_epoch = epoch;
