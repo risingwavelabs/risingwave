@@ -41,10 +41,23 @@ impl CellBasedRowSerializer {
         row: Row,
         column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
-        let res = serialize_pk_and_row(pk, &Some(row), column_ids)?
+        let res = serialize_pk_and_row(pk, &row, column_ids)?
             .into_iter()
-            .map(|(pk, value)| (pk, value.unwrap()))
+            .flatten()
             .collect_vec();
+        Ok(res)
+    }
+
+    /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
+    /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
+    /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
+    pub fn serialize_without_filter(
+        &mut self,
+        pk: &[u8],
+        row: Row,
+        column_ids: &[ColumnId],
+    ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
+        let res = serialize_pk_and_row(pk, &row, column_ids)?;
         Ok(res)
     }
 
