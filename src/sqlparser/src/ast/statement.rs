@@ -292,6 +292,15 @@ impl<T: fmt::Display> fmt::Display for AstOption<T> {
     }
 }
 
+impl<T> From<AstOption<T>> for Option<T> {
+    fn from(val: AstOption<T>) -> Self {
+        match val {
+            AstOption::Some(t) => Some(t),
+            AstOption::None => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropStatement {

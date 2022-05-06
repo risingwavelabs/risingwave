@@ -78,11 +78,17 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
             ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
             ObjectType::Database => {
-                drop_database::handle_drop_database(context, object_name, if_exists, drop_mode)
-                    .await
+                drop_database::handle_drop_database(
+                    context,
+                    object_name,
+                    if_exists,
+                    drop_mode.into(),
+                )
+                .await
             }
             ObjectType::Schema => {
-                drop_schema::handle_drop_schema(context, object_name, if_exists, drop_mode).await
+                drop_schema::handle_drop_schema(context, object_name, if_exists, drop_mode.into())
+                    .await
             }
             _ => Err(
                 ErrorCode::InvalidInputSyntax(format!("DROP {} is unsupported", object_type))

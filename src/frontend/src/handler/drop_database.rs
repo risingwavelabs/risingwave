@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_sqlparser::ast::{AstOption, DropMode, ObjectName};
+use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
@@ -23,8 +23,8 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_database(
     context: OptimizerContext,
     database_name: ObjectName,
-    if_exist: bool,
-    mode: AstOption<DropMode>,
+    if_exists: bool,
+    mode: Option<DropMode>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
@@ -35,12 +35,16 @@ pub async fn handle_drop_database(
         match reader.get_database_by_name(&database_name) {
             Ok(db) => db.clone(),
             Err(err) => {
-                // If `if_exist` is true, not return error.
-                return if if_exist {
-                    return Ok(PgResponse::empty_result_with_notice(
+                // Unable to find this database. If `if_exists` is true,
+                // we can just return success.
+                return if if_exists {
+                    Ok(PgResponse::empty_result_with_notice(
                         StatementType::DROP_DATABASE,
-                        format!("database {} does not exist, skipping", database_name),
-                    ));
+                        format!(
+                            "NOTICE: database {} does not exist, skipping",
+                            database_name
+                        ),
+                    ))
                 } else {
                     Err(err)
                 };
@@ -49,14 +53,14 @@ pub async fn handle_drop_database(
     };
     let database_id = {
         // If the mode is `Restrict` or `None`, the `database` need to be empty.
-        if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
+        if Some(DropMode::Restrict) == mode || None == mode {
             if !database.is_empty() {
                 return Err(CatalogError::NotEmpty("database", database_name).into());
             }
             database.id()
         } else {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported drop mode: {}", mode),
+                format!("unsupported drop mode: {:?}", mode),
                 TrackingIssue::none(),
             )
             .into());

@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_sqlparser::ast::{AstOption, DropMode, ObjectName};
+use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
@@ -24,7 +24,7 @@ pub async fn handle_drop_schema(
     context: OptimizerContext,
     schema_name: ObjectName,
     if_exist: bool,
-    mode: AstOption<DropMode>,
+    mode: Option<DropMode>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
@@ -37,27 +37,27 @@ pub async fn handle_drop_schema(
             Ok(schema) => schema.clone(),
             Err(err) => {
                 // If `if_exist` is true, not return error.
-                if if_exist {
-                    return Ok(PgResponse::empty_result_with_notice(
+                return if if_exist {
+                    Ok(PgResponse::empty_result_with_notice(
                         StatementType::DROP_SCHEMA,
-                        format!("schema {} does not exist, skipping", schema_name),
-                    ));
+                        format!("NOTICE: schema {} does not exist, skipping", schema_name),
+                    ))
                 } else {
-                    return Err(err);
-                }
+                    Err(err)
+                };
             }
         }
     };
     let schema_id = {
         // If the mode is `Restrict` or `None`, the `schema` need to be empty.
-        if AstOption::Some(DropMode::Restrict) == mode || AstOption::None == mode {
+        if Some(DropMode::Restrict) == mode || None == mode {
             if !schema.is_empty() {
                 return Err(CatalogError::NotEmpty("schema", schema_name).into());
             }
             schema.id()
         } else {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported drop mode: {}", mode),
+                format!("unsupported drop mode: {:?}", mode),
                 TrackingIssue::none(),
             )
             .into());
