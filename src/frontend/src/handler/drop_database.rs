@@ -56,7 +56,13 @@ pub async fn handle_drop_database(
     let database_id = {
         // If the mode is `Restrict` or `None`, the `database` need to be empty.
         if !database.is_empty() {
-            return Err(CatalogError::NotEmpty("database", database_name).into());
+            return Err(CatalogError::NotEmpty(
+                "database",
+                database_name,
+                "schema",
+                database.get_all_schema_names()[0].clone(),
+            )
+            .into());
         }
         database.id()
     };
