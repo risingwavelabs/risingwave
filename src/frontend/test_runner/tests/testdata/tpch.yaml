@@ -1236,24 +1236,58 @@
       )
     order by
       s_suppkey;
-  optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue] }
-      LogicalJoin { type: Inner, on: ($4 = $5) }
-        LogicalProject { exprs: [$0, $1, $2, $3, $5], expr_alias: [ ,  ,  ,  ,  ] }
-          LogicalJoin { type: Inner, on: ($0 = $4) }
-            LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
-            LogicalProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
-              LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
-                LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
-                  LogicalFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                    LogicalScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
-        LogicalProject { exprs: [$0], expr_alias: [max_revenue] }
-          LogicalAgg { group_keys: [], agg_calls: [max($0)] }
-            LogicalProject { exprs: [$1], expr_alias: [ ] }
-              LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
-                LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
-                  LogicalFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                    LogicalScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
+  batch_plan: |
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue] }
+          BatchHashJoin { type: Inner, predicate: $4 = $5 }
+            BatchProject { exprs: [$0, $1, $2, $3, $5], expr_alias: [ ,  ,  ,  ,  ] }
+              BatchExchange { order: [], dist: HashShard([5]) }
+                BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
+                  BatchProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
+                    BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+                      BatchProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                            BatchScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
+            BatchProject { exprs: [$0], expr_alias: [max_revenue] }
+              BatchExchange { order: [], dist: HashShard([0]) }
+                BatchSimpleAgg { aggs: [max($0)] }
+                  BatchExchange { order: [], dist: Single }
+                    BatchProject { exprs: [$1], expr_alias: [ ] }
+                      BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+                        BatchProject { exprs: [$0, ($1 * (1:Int32 - $2))], expr_alias: [ ,  ] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                              BatchScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate] }
+  stream_plan: |
+    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, _row_id#0(hidden), l_suppkey(hidden), agg#0(hidden), max_revenue(hidden)], pk_columns: [_row_id#0, l_suppkey, agg#0, max_revenue], order_descs: [s_suppkey, _row_id#0, l_suppkey, agg#0, max_revenue] }
+      StreamExchange { dist: HashShard([5, 6, 7, 8]) }
+        StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $8, $7], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue,  ,  ,  ,  ] }
+          StreamHashJoin { type: Inner, predicate: $4 = $7 }
+            StreamProject { exprs: [$0, $1, $2, $3, $6, $4, $5], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
+              StreamExchange { dist: HashShard([6]) }
+                StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone, _row_id#0], pk_indices: [4] }
+                  StreamProject { exprs: [$0, $2], expr_alias: [l_suppkey, total_revenue] }
+                    StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+                      StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $4], expr_alias: [ ,  ,  ] }
+                        StreamExchange { dist: HashShard([0]) }
+                          StreamFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                            StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
+            StreamProject { exprs: [$1, $0], expr_alias: [max_revenue,  ] }
+              StreamExchange { dist: HashShard([1]) }
+                StreamSimpleAgg { aggs: [count, max($0)] }
+                  StreamExchange { dist: Single }
+                    StreamProject { exprs: [$2, $0], expr_alias: [ ,  ] }
+                      StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+                        StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $4], expr_alias: [ ,  ,  ] }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                              StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
 - id: tpch_q16
   before:
     - create_tables
