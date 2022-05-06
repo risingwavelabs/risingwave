@@ -115,7 +115,7 @@ where
             }
             Err(err) => {
                 tracing::warn!(
-                    "Failed to get compact task for compactor {}. {}",
+                    "Failed to get compact task for compactor {}. {:#?}",
                     compactor.context_id(),
                     err
                 );
@@ -144,9 +144,13 @@ where
                     err
                 );
                 compact_task.task_status = false;
-                if let Err(err) = self.hummock_manager.report_compact_task(compact_task).await {
+                if let Err(err) = self
+                    .hummock_manager
+                    .report_compact_task(&compact_task)
+                    .await
+                {
                     tracing::warn!(
-                        "Failed to cancel compaction task for worker {}: {}",
+                        "Failed to cancel compaction task for worker {}: {:#?}",
                         compactor.context_id(),
                         err
                     );

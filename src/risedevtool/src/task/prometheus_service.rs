@@ -38,6 +38,16 @@ impl PrometheusService {
     fn prometheus(&self) -> Result<Command> {
         Ok(Command::new(self.prometheus_path()?))
     }
+
+    /// Apply command args accroding to config
+    pub fn apply_command_args(cmd: &mut Command, config: &PrometheusConfig) -> Result<()> {
+        cmd.arg(format!(
+            "--web.listen-address={}:{}",
+            config.listen_address, config.port
+        ));
+
+        Ok(())
+    }
 }
 
 impl Task for PrometheusService {
@@ -60,11 +70,9 @@ impl Task for PrometheusService {
 
         let mut cmd = self.prometheus()?;
 
+        Self::apply_command_args(&mut cmd, &self.config)?;
+
         cmd.arg(format!(
-            "--web.listen-address={}:{}",
-            self.config.address, self.config.port
-        ))
-        .arg(format!(
             "--config.file={}",
             Path::new(&prefix_config)
                 .join("prometheus.yml")
