@@ -281,7 +281,11 @@ impl ColPrunable for LogicalJoin {
 
         let left_len = self.left.schema().fields.len();
 
-        let mut visitor = CollectInputRef::new(required_cols.clone());
+        let total_len = self.left().schema().len() + self.right().schema().len();
+        let mut resized_required_cols = required_cols.clone();
+        resized_required_cols.grow(total_len);
+
+        let mut visitor = CollectInputRef::new(resized_required_cols);
         self.on.visit_expr(&mut visitor);
         let left_right_required_cols = visitor.collect();
 
@@ -307,14 +311,20 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &left_right_required_cols {
+        let required_output_columns =
+            if matches!(self.join_type(), JoinType::LeftSemi | JoinType::LeftAnti) {
+                left_required_cols
+            } else if matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti) {
+                right_required_cols
+            } else {
+                left_right_required_cols
+            };
+        if required_cols == &required_output_columns {
             join.into()
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(&required_cols),
             )
         }
     }
@@ -494,6 +504,58 @@ mod tests {
         let right = join.right();
         let right = right.as_logical_values().unwrap();
         assert_eq!(right.schema().fields(), &fields[3..4]);
+    }
+
+    /// Semi join panicked previously at `prune_col`. Add test to prevent regression.
+    #[tokio::test]
+    async fn test_semi_join_does_not_panic() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = (1..7)
+            .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
+            .collect();
+        let left = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields[0..3].to_vec(),
+            },
+            ctx.clone(),
+        );
+        let right = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields[3..6].to_vec(),
+            },
+            ctx,
+        );
+        let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty))),
+                ],
+            )
+            .unwrap(),
+        ));
+        for join_type in [
+            JoinType::LeftSemi,
+            JoinType::RightSemi,
+            JoinType::LeftAnti,
+            JoinType::RightAnti,
+        ] {
+            let join = LogicalJoin::new(
+                left.clone().into(),
+                right.clone().into(),
+                join_type,
+                Condition::with_expr(on.clone()),
+            );
+
+            // Perform the prune
+            let mut required_cols = FixedBitSet::with_capacity(3);
+            required_cols.extend(vec![0, 1]);
+            let _ = join.prune_col(&required_cols); // should not panic here
+        }
     }
 
     /// Pruning
