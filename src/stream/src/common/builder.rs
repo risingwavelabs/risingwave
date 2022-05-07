@@ -65,9 +65,13 @@ impl StreamChunkBuilder {
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
-        assert!(capacity > 1);
+        // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
+        // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
+        // until `UpdateInsert` comes.
         let capacity = capacity - 1;
-        let ops = Vec::with_capacity(capacity); // leave room for paired `UpdateDelete` and `UpdateInsert`
+        assert!(capacity > 0);
+
+        let ops = Vec::with_capacity(capacity);
         let column_builders = data_types
             .iter()
             .map(|datatype| datatype.create_array_builder(capacity))
