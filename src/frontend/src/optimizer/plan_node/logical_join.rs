@@ -332,13 +332,16 @@ impl ColPrunable for LogicalJoin {
         } else if self.is_right_join() {
             right_required_input_cols
         } else {
-            left_right_required_input_cols
+            left_right_required_input_cols.clone()
         };
         if required_cols == &required_input_cols_in_output {
             join.into()
         } else {
+            let mapping =
+                ColIndexMapping::with_remaining_columns(&required_input_cols_in_output);
             let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
-            remaining_columns.extend(resized_required_cols.ones().map(|i| mapping.map(i)));
+            let out_cols_iterator = required_cols.ones().map(|i| mapping.map(i));
+            remaining_columns.extend(out_cols_iterator);
             LogicalProject::with_mapping(
                 join.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
@@ -550,7 +553,7 @@ mod tests {
                 Type::Equal,
                 vec![
                     ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
-                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(4, ty))),
                 ],
             )
             .unwrap(),
@@ -561,7 +564,6 @@ mod tests {
             JoinType::LeftAnti,
             JoinType::RightAnti,
         ] {
-            println!("JOIN TYPE: {:?}", join_type);
             let join = LogicalJoin::new(
                 left.clone().into(),
                 right.clone().into(),
@@ -569,22 +571,32 @@ mod tests {
                 Condition::with_expr(on.clone()),
             );
 
+            let offset = if join.is_right_join() { 3 } else { 0 };
+
             // Perform the prune
             let mut required_cols = FixedBitSet::with_capacity(3);
+            // key 0 is never used in the join (always key 1)
             required_cols.extend(vec![0]);
             // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has been wrapped in a projection
-            plan.as_logical_project().unwrap();
+            let as_plan = plan.as_logical_project().unwrap();
+            // Check the result
+            assert_eq!(as_plan.schema().fields().len(), 1);
+            assert_eq!(as_plan.schema().fields()[0], fields[offset + 0]);
 
-            println!("(ALL) JOIN TYPE: {:?}", join_type);
             // Perform the prune
             let mut required_cols = FixedBitSet::with_capacity(3);
             required_cols.extend(vec![0, 1, 2]);
             // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has not been wrapped in a projection
-            plan.as_logical_join().unwrap();
+            let as_plan = plan.as_logical_join().unwrap();
+            // Check the result
+            assert_eq!(as_plan.schema().fields().len(), 3);
+            assert_eq!(as_plan.schema().fields()[0], fields[offset + 0]);
+            assert_eq!(as_plan.schema().fields()[1], fields[offset + 1]);
+            assert_eq!(as_plan.schema().fields()[2], fields[offset + 2]);
         }
     }
 
