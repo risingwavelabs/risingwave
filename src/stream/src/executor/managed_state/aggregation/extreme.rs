@@ -302,10 +302,7 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-            let all_data = self
-                .keyspace
-                .scan(self.top_n_count, epoch)
-                .await?;
+            let all_data = self.keyspace.scan(self.top_n_count, epoch).await?;
 
             for (raw_key, mut raw_value) in all_data {
                 // let mut deserializer = value_encoding::Deserializer::new(raw_value);

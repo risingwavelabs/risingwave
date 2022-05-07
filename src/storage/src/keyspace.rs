@@ -115,8 +115,9 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
-    /// `limit` is None, all keys of the given prefix will be scanned. Note that the prefix of this keyspace will be stripped.
-    /// The returned values are based on a snapshot corresponding to the given `epoch`
+    /// `limit` is None, all keys of the given prefix will be scanned. Note that the prefix of this
+    /// keyspace will be stripped. The returned values are based on a snapshot corresponding to
+    /// the given `epoch`
     pub async fn scan_with_start_key(
         &self,
         start_key: Vec<u8>,
