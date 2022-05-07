@@ -146,8 +146,12 @@ impl SharedBufferUploader {
         }
 
         if let Some(detector) = &self.write_conflict_detector {
-            for batch in batches {
-                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
+            if let Some((key,_)) = self.batches.first_key_value(){
+                let mut is_first = true;
+                if !key.eq(&epoch){
+                    is_first = false;
+                }
+                detector.archive_epoch(epoch,is_first);
             }
         }
 
