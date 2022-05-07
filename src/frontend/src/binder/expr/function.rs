@@ -59,11 +59,7 @@ impl Binder {
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
                 "nullif" => {
-<<<<<<< HEAD
-                    inputs = Self::write_nullif_to_case_args(inputs)?;
-=======
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
->>>>>>> main
                     ExprType::Case
                 }
                 "coalesce" => {
