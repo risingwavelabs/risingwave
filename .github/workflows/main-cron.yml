@@ -8,7 +8,7 @@
 name: CI (main-cronjob)
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
   workflow_dispatch:
 env:
   RUST_TOOLCHAIN: nightly-2022-04-09
@@ -22,7 +22,6 @@ env:
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
 permissions:
   id-token: write
-  contents: read
 jobs:
   start-runner-a:
     name: ec2-start-a
@@ -114,51 +113,6 @@ jobs:
           github-token: ${{ secrets.WUTAO_PAT }}
           label: ${{ needs.start-runner-b.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner-b.outputs.ec2-instance-id }}
-        if: ${{ always() }}
-  start-runner-c:
-    name: ec2-start-c
-    runs-on: ubuntu-latest
-    outputs:
-      label: ${{ steps.start-ec2-runner.outputs.label }}
-      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
-    steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: GitHubActions
-          aws-region: us-east-2
-      - name: Start EC2 runner
-        id: start-ec2-runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: start
-          github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
-          subnet-id: subnet-59743123
-          security-group-id: sg-9ec32bfe
-  stop-runner-c:
-    name: ec2-stop-c
-    needs:
-      - start-runner-c
-      - end-to-end-risedev-release
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: GitHubActions
-          aws-region: us-east-2
-      - name: Stop EC2 runner C
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: stop
-          github-token: ${{ secrets.WUTAO_PAT }}
-          label: ${{ needs.start-runner-c.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner-c.outputs.ec2-instance-id }}
         if: ${{ always() }}
   frontend-check:
     name: frontend-check
@@ -432,6 +386,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-start ci-kafka
+          ./scripts/source/prepare_ci_kafka.sh
           sqllogictest -p 4566 './e2e_test/source/**/*.slt'
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}

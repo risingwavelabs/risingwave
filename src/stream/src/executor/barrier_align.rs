@@ -12,112 +12,150 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_stream::try_stream;
+use futures::future::{select, Either};
 use futures::StreamExt;
-use risingwave_common::error::Result;
-use tokio::select;
+use futures_async_stream::try_stream;
 
-use super::{Barrier, ExecutorV1, Message, StreamChunk};
-use crate::executor::BoxedExecutorV1Stream;
+use super::error::StreamExecutorError;
+use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
 
 #[derive(Debug, PartialEq)]
-enum BarrierWaitState {
-    Left,
-    Right,
-    Either,
-}
-
-#[derive(Debug)]
 pub enum AlignedMessage {
-    Left(Result<StreamChunk>),
-    Right(Result<StreamChunk>),
+    Left(StreamChunk),
+    Right(StreamChunk),
     Barrier(Barrier),
 }
 
-impl<'a> TryFrom<&'a AlignedMessage> for &'a Barrier {
-    type Error = ();
-
-    fn try_from(m: &'a AlignedMessage) -> std::result::Result<Self, Self::Error> {
-        match m {
-            AlignedMessage::Barrier(b) => Ok(b),
-            _ => Err(()),
-        }
-    }
-}
-
-pub struct BarrierAligner {
-    /// The input from the left executor
-    input_l: BoxedExecutorV1Stream,
-    /// The input from the right executor
-    input_r: BoxedExecutorV1Stream,
-    /// The barrier state
-    state: BarrierWaitState,
-}
-
-impl BarrierAligner {
-    pub fn new(mut input_l: Box<dyn ExecutorV1>, mut input_r: Box<dyn ExecutorV1>) -> Self {
-        // Wrap the input executors into streams to ensure cancellation-safety
-        let input_l = try_stream! {
-            loop {
-                let message = input_l.next().await?;
-                yield message;
-            }
-        };
-        let input_r = try_stream! {
-            loop {
-                let message = input_r.next().await?;
-                yield message;
-            }
-        };
-        Self {
-            input_l: Box::pin(input_l),
-            input_r: Box::pin(input_r),
-            state: BarrierWaitState::Either,
-        }
-    }
-
-    pub async fn next(&mut self) -> AlignedMessage {
-        loop {
-            select! {
-                message = self.input_l.next(), if self.state != BarrierWaitState::Right => {
-                    match message.unwrap() {
-                        Ok(message) => match message {
-                            Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
-                            Message::Barrier(barrier) => {
-                                match self.state {
-                                    BarrierWaitState::Left => {
-                                        self.state = BarrierWaitState::Either;
-                                        break AlignedMessage::Barrier(barrier);
-                                    }
-                                    BarrierWaitState::Either => {
-                                        self.state = BarrierWaitState::Right;
-                                    }
-                                    _ => unreachable!("Should not reach this barrier state: {:?}", self.state),
-                                };
-                            },
-                        },
-                        Err(e) => break AlignedMessage::Left(Err(e)),
-                    }
-                },
-                message = self.input_r.next(), if self.state != BarrierWaitState::Left => {
-                    match message.unwrap() {
-                        Ok(message) => match message {
-                            Message::Chunk(chunk) => break AlignedMessage::Right(Ok(chunk)),
-                            Message::Barrier(barrier) => match self.state {
-                                BarrierWaitState::Right => {
-                                    self.state = BarrierWaitState::Either;
-                                    break AlignedMessage::Barrier(barrier);
-                                }
-                                BarrierWaitState::Either => {
-                                    self.state = BarrierWaitState::Left;
-                                }
-                                _ => unreachable!("Should not reach this barrier state: {:?}", self.state),
-                            },
-                        },
-                        Err(e) => break AlignedMessage::Right(Err(e)),
+#[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
+pub async fn barrier_align(mut left: BoxedMessageStream, mut right: BoxedMessageStream) {
+    // TODO: handle stream end
+    loop {
+        match select(left.next(), right.next()).await {
+            Either::Left((None, _)) => {
+                // left stream end, passthrough right chunks
+                while let Some(msg) = right.next().await {
+                    match msg? {
+                        Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
+                        Message::Barrier(_) => {
+                            panic!("right barrier received while left stream end")
+                        }
                     }
                 }
+                break;
             }
+            Either::Right((None, _)) => {
+                // right stream end, passthrough left chunks
+                while let Some(msg) = left.next().await {
+                    match msg? {
+                        Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
+                        Message::Barrier(_) => {
+                            panic!("left barrier received while right stream end")
+                        }
+                    }
+                }
+                break;
+            }
+            Either::Left((Some(msg), _)) => match msg? {
+                Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
+                Message::Barrier(_) => loop {
+                    // received left barrier, waiting for right barrier
+                    match right.next().await.unwrap()? {
+                        Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
+                        Message::Barrier(barrier) => {
+                            yield AlignedMessage::Barrier(barrier);
+                            break;
+                        }
+                    }
+                },
+            },
+            Either::Right((Some(msg), _)) => match msg? {
+                Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
+                Message::Barrier(_) => loop {
+                    // received right barrier, waiting for left barrier
+                    match left.next().await.unwrap()? {
+                        Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
+                        Message::Barrier(barrier) => {
+                            yield AlignedMessage::Barrier(barrier);
+                            break;
+                        }
+                    }
+                },
+            },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use async_stream::try_stream;
+    use futures::TryStreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use tokio::time::sleep;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_barrier_align() {
+        let left = try_stream! {
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
+            yield Message::Barrier(Barrier::new_test_barrier(2));
+        }
+        .boxed();
+        let right = try_stream! {
+            sleep(Duration::from_millis(1)).await;
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Barrier(Barrier::new_test_barrier(2));
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
+        }
+        .boxed();
+        let output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
+        assert_eq!(
+            output,
+            vec![
+                AlignedMessage::Left(StreamChunk::from_pretty("I\n + 1")),
+                AlignedMessage::Right(StreamChunk::from_pretty("I\n + 1")),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(1)),
+                AlignedMessage::Left(StreamChunk::from_pretty("I\n + 2")),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(2)),
+                AlignedMessage::Right(StreamChunk::from_pretty("I\n + 3")),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn left_barrier_right_end_1() {
+        let left = try_stream! {
+            sleep(Duration::from_millis(1)).await;
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+            yield Message::Barrier(Barrier::new_test_barrier(1));
+        }
+        .boxed();
+        let right = try_stream! {
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+        }
+        .boxed();
+        let _output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn left_barrier_right_end_2() {
+        let left = try_stream! {
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+            yield Message::Barrier(Barrier::new_test_barrier(1));
+        }
+        .boxed();
+        let right = try_stream! {
+            sleep(Duration::from_millis(1)).await;
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+        }
+        .boxed();
+        let _output: Vec<_> = barrier_align(left, right).try_collect().await.unwrap();
     }
 }

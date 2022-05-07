@@ -21,7 +21,7 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
@@ -46,9 +46,6 @@ pub struct TableFragments {
 
     /// The status of actors
     actor_status: BTreeMap<ActorId, ActorStatus>,
-
-    /// distribution key of materialize node
-    distribution_keys: Vec<i32>,
 }
 
 impl MetadataModel for TableFragments {
@@ -64,7 +61,6 @@ impl MetadataModel for TableFragments {
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            distribution_keys: self.distribution_keys.clone(),
         }
     }
 
@@ -73,7 +69,6 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            distribution_keys: prost.distribution_keys,
         }
     }
 
@@ -83,16 +78,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(
-        table_id: TableId,
-        fragments: BTreeMap<FragmentId, Fragment>,
-        distribution_keys: Vec<i32>,
-    ) -> Self {
+    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            distribution_keys,
         }
     }
 
@@ -152,13 +142,8 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
 
-    /// Returns distribution keys.
-    pub fn distribution_keys(&self) -> &Vec<i32> {
-        self.distribution_keys.as_ref()
-    }
-
     fn contains_chain(stream_node: &StreamNode) -> bool {
-        if let Some(Node::ChainNode(_)) = stream_node.node {
+        if let Some(NodeBody::Chain(_)) = stream_node.node_body {
             return true;
         }
 
@@ -172,7 +157,7 @@ impl TableFragments {
     }
 
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
-        if let Some(Node::SourceNode(s)) = stream_node.node.as_ref() {
+        if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
                 return Some(s.table_ref_id.as_ref().unwrap().table_id as SourceId);
             }
@@ -203,7 +188,7 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
-        if let Some(Node::ChainNode(chain)) = stream_node.node.as_ref() {
+        if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
             table_ids.insert(TableId::from(&chain.table_ref_id));
         }
 

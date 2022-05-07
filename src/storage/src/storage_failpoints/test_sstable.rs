@@ -34,7 +34,7 @@ async fn test_failpoint_table_read() {
     // We should close buffer, so that table iterator must read in object_stores
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
+    let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
     let table = Sstable { id: 0, meta };
     sstable_store
         .put(&table, data, WriteCachePolicy::Disable)
@@ -81,7 +81,7 @@ async fn test_failpoint_vacuum_and_metadata() {
 
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
+    let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
     let table = Sstable { id: 0, meta };
     let result = sstable_store
         .put(&table, data.clone(), WriteCachePolicy::Disable)

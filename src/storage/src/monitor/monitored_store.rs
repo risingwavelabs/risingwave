@@ -49,9 +49,9 @@ where
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
-    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
+    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
     where
-        I: Future<Output = StorageResult<S::Iter<'a>>>,
+        I: Future<Output = StorageResult<S::Iter>>,
     {
         let iter = iter.await?;
 
@@ -68,7 +68,7 @@ impl<S> StateStore for MonitoredStateStore<S>
 where
     S: StateStore,
 {
-    type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>> where Self: 'a;
+    type Iter = MonitoredStateStoreIter<S::Iter>;
 
     define_state_store_associated_type!();
 
@@ -110,23 +110,23 @@ where
         }
     }
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            let timer = self.stats.range_reverse_scan_duration.start_timer();
+            let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self.inner.scan(key_range, limit, epoch).await?;
             timer.observe_duration();
 
             self.stats
-                .range_reverse_scan_size
+                .range_backward_scan_size
                 .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
 
             Ok(result)
@@ -163,13 +163,13 @@ where
         async move { self.monitored_iter(self.inner.iter(key_range, epoch)).await }
     }
 
-    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
+            self.monitored_iter(self.inner.backward_iter(key_range, epoch))
                 .await
         }
     }

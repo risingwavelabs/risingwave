@@ -15,13 +15,13 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::key::Epoch;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
@@ -192,7 +192,11 @@ async fn test_state_store_sync() {
     .await
     .unwrap();
 
-    let mut epoch: Epoch = 1;
+    let mut epoch: HummockEpoch = hummock_storage
+        .local_version_manager
+        .get_pinned_version()
+        .max_committed_epoch()
+        + 1;
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -207,7 +211,7 @@ async fn test_state_store_sync() {
     // check sync state store metrics
     // Note: epoch(8B) and ValueMeta(2B) will be appended to each kv pair
     assert_eq!(
-        (16 + (8 + VALUE_META_SIZE) * 2) as u64,
+        (16 + (8 + VALUE_META_SIZE) * 2) as usize,
         hummock_storage
             .local_version_manager()
             .get_shared_buffer_size()

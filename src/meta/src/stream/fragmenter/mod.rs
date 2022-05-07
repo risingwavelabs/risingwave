@@ -27,7 +27,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
 };
@@ -64,8 +64,6 @@ struct BuildFragmentGraphState {
 
     /// dependent table ids
     dependent_table_ids: HashSet<TableId>,
-    /// current materialize view's distribution keys
-    distribution_keys: Vec<i32>,
 }
 
 impl BuildFragmentGraphState {
@@ -152,7 +150,6 @@ impl StreamFragmenter {
                 mut fragment_graph,
                 next_local_fragment_id,
                 next_operator_id: _,
-                distribution_keys,
                 dependent_table_ids,
                 next_table_id: next_local_table_id,
             } = {
@@ -161,8 +158,7 @@ impl StreamFragmenter {
                 state
             };
 
-            // save distribution key and dependent table ids in ctx
-            ctx.distribution_keys = distribution_keys;
+            // save dependent table ids in ctx
             ctx.dependent_table_ids = dependent_table_ids;
 
             let fragment_len = fragment_graph.fragment_len() as u32;
@@ -260,10 +256,10 @@ impl StreamFragmenter {
         let mut inputs = vec![];
 
         for child_node in stream_node.input {
-            let input = match child_node.get_node()? {
+            let input = match child_node.get_node_body()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                Node::HashAggNode(_) | Node::HashJoinNode(_) | Node::DeltaIndexJoin(_) => {
+                NodeBody::HashAgg(_) | NodeBody::HashJoin(_) | NodeBody::DeltaIndexJoin(_) => {
                     // We didn't make `fields` available on Java frontend yet, so we check if schema
                     // is available (by `child_node.fields.is_empty()`) before deciding to do the
                     // rewrite.
@@ -279,7 +275,7 @@ impl StreamFragmenter {
                         StreamNode {
                             pk_indices: child_node.pk_indices.clone(),
                             fields: child_node.fields.clone(),
-                            node: Some(Node::ExchangeNode(ExchangeNode {
+                            node_body: Some(NodeBody::Exchange(ExchangeNode {
                                 strategy: Some(strategy.clone()),
                             })),
                             operator_id: state.gen_operator_id() as u64,
@@ -337,20 +333,15 @@ impl StreamFragmenter {
         mut stream_node: StreamNode,
     ) -> Result<StreamNode> {
         // Update current fragment based on the node we're visiting.
-        match stream_node.get_node()? {
-            Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
+        match stream_node.get_node_body()? {
+            NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
 
-            Node::MaterializeNode(ref node) => {
-                current_fragment.fragment_type = FragmentType::Sink;
-                // store distribution keys, later it will be persisted with `TableFragment`
-                assert!(state.distribution_keys.is_empty()); // should have only one sink node.
-                state.distribution_keys = node.distribution_keys.clone();
-            }
+            NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Sink,
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
-            Node::TopNNode(_) => current_fragment.is_singleton = true,
+            NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
-            Node::ChainNode(ref node) => {
+            NodeBody::Chain(ref node) => {
                 // TODO: Remove this when we deprecate Java frontend.
                 current_fragment.is_singleton = self.is_legacy_frontend;
 
@@ -365,7 +356,7 @@ impl StreamFragmenter {
 
         // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
         // with only equal conditions
-        if let Node::HashJoinNode(hash_join_node) = stream_node.node.as_mut().unwrap() {
+        if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_mut().unwrap() {
             // Allocate local table id. It will be rewrite to global table id after get table id
             // offset from id generator.
             hash_join_node.left_table_id = state.gen_table_id();
@@ -383,7 +374,8 @@ impl StreamFragmenter {
             }
         }
 
-        if let Node::DeltaIndexJoin(delta_index_join) = stream_node.node.as_mut().unwrap() {
+        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
+        {
             if delta_index_join.get_join_type()? == JoinType::Inner
                 && delta_index_join.condition.is_none()
             {
@@ -393,20 +385,36 @@ impl StreamFragmenter {
             }
         }
 
+        // Rewrite hash agg. One agg call -> one table id.
+        if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_mut().unwrap() {
+            for _ in &hash_agg_node.agg_calls {
+                hash_agg_node.table_ids.push(state.gen_table_id());
+            }
+        }
+
+        match stream_node.node_body.as_mut().unwrap() {
+            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                for _ in &node.agg_calls {
+                    node.table_ids.push(state.gen_table_id());
+                }
+            }
+            _ => {}
+        }
+
         let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
         let inputs = inputs
             .into_iter()
             .map(|mut child_node| -> Result<StreamNode> {
-                match child_node.get_node()? {
-                    Node::ExchangeNode(_) if child_node.input.is_empty() => {
+                match child_node.get_node_body()? {
+                    NodeBody::Exchange(_) if child_node.input.is_empty() => {
                         // When exchange node is generated when doing rewrites, it could be having
                         // zero input. In this case, we won't recursively
                         // visit its children.
                         Ok(child_node)
                     }
                     // Exchange node indicates a new child fragment.
-                    Node::ExchangeNode(exchange_node) => {
+                    NodeBody::Exchange(exchange_node) => {
                         let exchange_node = exchange_node.clone();
 
                         assert_eq!(child_node.input.len(), 1);
@@ -487,6 +495,7 @@ impl StreamFragmenter {
                             r#type: ty.into(),
                             column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
                             hash_mapping: None,
+                            dispatcher_id: dispatch_edge.link_id,
                             downstream_actor_id: vec![],
                         },
                         dispatch_edge.same_worker_node,

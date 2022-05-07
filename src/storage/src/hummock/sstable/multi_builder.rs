@@ -19,6 +19,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_pb::hummock::VNodeBitmap;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableBuilder, Sstable};
@@ -38,7 +39,7 @@ pub struct CapacitySplitTableBuilder {
     /// options.
     get_id_and_builder: BoxedIdBuilderGenerator,
 
-    finished_ssts: Vec<Sstable>,
+    finished_ssts: Vec<(Sstable, Vec<VNodeBitmap>)>,
 
     current_builder: Option<(HummockSSTableId, SSTableBuilder)>,
 }
@@ -98,8 +99,9 @@ impl CapacitySplitTableBuilder {
             && self.current_builder.as_mut().unwrap().1.reach_capacity()
         {
             let (table_id, current_builder) = self.current_builder.take().unwrap();
-            let meta = current_builder.finish().await?;
-            self.finished_ssts.push(Sstable { id: table_id, meta });
+            let (meta, vnode_bitmap) = current_builder.finish().await?;
+            self.finished_ssts
+                .push((Sstable { id: table_id, meta }, vnode_bitmap));
         }
 
         // Initialize a new builder if there is no current builder
@@ -120,16 +122,15 @@ impl CapacitySplitTableBuilder {
     /// will be no-op.
     pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some((id, builder)) = self.current_builder.take() {
-            self.finished_ssts.push(Sstable {
-                id,
-                meta: builder.finish().await?,
-            });
+            let (meta, vnode_bitmap) = builder.finish().await?;
+            self.finished_ssts
+                .push((Sstable { id, meta }, vnode_bitmap));
         }
         Ok(())
     }
 
     /// Finalizes all the tables to be ids and sstable builder output
-    pub async fn finish(mut self) -> HummockResult<Vec<Sstable>> {
+    pub async fn finish(mut self) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
         self.seal_current().await?;
         Ok(self.finished_ssts)
     }
@@ -227,7 +228,10 @@ mod tests {
 
         let results = block_on(builder.finish()).unwrap();
         assert!(results.len() > 1);
-        assert_eq!(results.iter().map(|p| p.id).duplicates().count(), 0);
+        assert_eq!(
+            results.iter().map(|(sst, _)| sst.id).duplicates().count(),
+            0
+        );
     }
 
     #[tokio::test]

@@ -48,6 +48,15 @@ impl Array for Utf8Array {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&str> {
+        if !self.is_null_unchecked(idx) {
+            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
+            Some(std::str::from_utf8_unchecked(data_slice))
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.offset.len() - 1
     }
@@ -317,6 +326,7 @@ mod tests {
         let array = builder.finish()?;
         assert_eq!(array.len(), 1);
         assert_eq!(array.value_at(0), Some("ranran"));
+        assert_eq!(unsafe { array.value_at_unchecked(0) }, Some("ranran"));
 
         Ok(())
     }

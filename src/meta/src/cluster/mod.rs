@@ -97,6 +97,10 @@ where
         self.core.read().await
     }
 
+    /// A worker node will immediately register itself to meta when it bootstraps.
+    /// The meta will assign it with a unique ID and set its state as `Starting`.
+    /// When the worker node is fully ready to serve, it will request meta again
+    /// (via `activate_worker_node`) to set its state to `Running`.
     pub async fn add_worker_node(
         &self,
         host_address: HostAddress,

@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
-use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{DispatchStrategy, StreamNode};
 
 use crate::model::LocalFragmentId;
@@ -76,21 +75,19 @@ impl StreamFragment {
         self.node = Some(Box::new(node));
     }
 
-    /// Seal the fragment and rewrite local ids inside the node.
-    /// TODO: when we add support of arrangement id in catalog, we won't need to rewrite stream node
-    /// content any more.
-    pub fn seal(&mut self, offset: u32, len: u32) {
-        fn visit(node: &mut StreamNode, (offset, len): (u32, u32)) {
-            for input in &mut node.input {
-                visit(input, (offset, len));
-            }
-            if let Some(Node::LookupNode(ref mut lookup)) = node.node {
-                assert!(lookup.arrange_local_fragment_id < len);
-                lookup.arrange_fragment_id = lookup.arrange_local_fragment_id + offset;
-            }
-        }
+    /// Seal the fragment and rewrite local fragment ids inside the node.
+    pub fn seal(&mut self, _offset: u32, _len: u32) {
+        // Previously, we need to update local fragment ids inside some plan nodes. Now it's not
+        // needed any more, but we still keep the code snippet here, in case someone would
+        // use it.
+        //
+        // fn visit(node: &mut StreamNode, (offset, len): (u32, u32)) {
+        //     for input in &mut node.input {
+        //         visit(input, (offset, len));
+        //     }
+        // }
+        // visit(self.node.as_mut().unwrap(), (offset, len));
 
-        visit(self.node.as_mut().unwrap(), (offset, len));
         self.is_sealed = true;
     }
 

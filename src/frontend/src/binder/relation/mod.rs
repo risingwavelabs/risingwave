@@ -15,7 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
+use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, TableAlias, TableFactor};
 
@@ -30,8 +30,6 @@ pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
-
-use crate::catalog::column_catalog::ColumnCatalog;
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
@@ -64,7 +62,7 @@ impl Binder {
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = ColumnCatalog>,
+        columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
         alias: Option<TableAlias>,
     ) -> Result<()> {
@@ -80,20 +78,20 @@ impl Binder {
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, mut catalog)| {
-                let name = match catalog.is_hidden {
-                    true => catalog.name().to_string(),
+            .for_each(|(index, (is_hidden, mut field))| {
+                let name = match is_hidden {
+                    true => field.name.to_string(),
                     false => alias_iter
                         .next()
                         .map(|t| t.value)
-                        .unwrap_or_else(|| catalog.name().to_string()),
+                        .unwrap_or_else(|| field.name.to_string()),
                 };
-                catalog.column_desc.name = name.clone();
+                field.name = name.clone();
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     begin + index,
-                    catalog.is_hidden,
-                    catalog.column_desc,
+                    is_hidden,
+                    field,
                 ));
                 self.context
                     .indexs_of

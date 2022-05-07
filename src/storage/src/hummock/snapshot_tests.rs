@@ -39,10 +39,10 @@ macro_rules! assert_count_range_scan {
     }};
 }
 
-macro_rules! assert_count_reverse_range_scan {
+macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .reverse_iter::<_, Vec<u8>>($range, $epoch)
+            .backward_iter::<_, Vec<u8>>($range, $epoch)
             .await
             .unwrap();
         let mut count = 0;
@@ -196,7 +196,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     assert_count_range_scan!(hummock_storage, .., 4, epoch);
 }
 
-async fn test_snapshot_reverse_range_scan_inner(enable_sync: bool, enable_commit: bool) {
+async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -265,14 +265,14 @@ async fn test_snapshot_reverse_range_scan_inner(enable_sync: bool, enable_commit
         };
     }
 
-    assert_count_reverse_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, .., 6, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, .., 8, epoch + 1);
-    assert_count_reverse_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
+    assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
+    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
+    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
+    assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
+    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
+    assert_count_backward_range_scan!(hummock_storage, .., 6, epoch);
+    assert_count_backward_range_scan!(hummock_storage, .., 8, epoch + 1);
+    assert_count_backward_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
 }
 
 #[tokio::test]
@@ -306,16 +306,16 @@ async fn test_snapshot_range_scan_with_commit() {
 }
 
 #[tokio::test]
-async fn test_snapshot_reverse_range_scan() {
-    test_snapshot_reverse_range_scan_inner(false, false).await;
+async fn test_snapshot_backward_range_scan() {
+    test_snapshot_backward_range_scan_inner(false, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_reverse_range_scan_with_sync() {
-    test_snapshot_reverse_range_scan_inner(true, false).await;
+async fn test_snapshot_backward_range_scan_with_sync() {
+    test_snapshot_backward_range_scan_inner(true, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_reverse_range_scan_with_commit() {
-    test_snapshot_reverse_range_scan_inner(true, true).await;
+async fn test_snapshot_backward_range_scan_with_commit() {
+    test_snapshot_backward_range_scan_inner(true, true).await;
 }

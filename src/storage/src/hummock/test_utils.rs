@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{get_remote_sst_id, HummockSSTableId};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_pb::hummock::VNodeBitmap;
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -86,7 +87,7 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub async fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta) {
+) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
     let sst_id = get_remote_sst_id(0x2333);
     let sstable_store = mock_sstable_store();
     let mut b = SSTableBuilder::new(
@@ -99,13 +100,13 @@ pub async fn gen_test_sstable_data(
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).await.unwrap()
     }
-    let meta = b.finish().await.unwrap();
+    let (meta, vnode_bitmap) = b.finish().await.unwrap();
     let data = sstable_store
         .remote_store()
         .read(&sstable_store.get_sst_data_path(sst_id), None)
         .await
         .unwrap();
-    (data, meta)
+    (data, meta, vnode_bitmap)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -116,7 +117,7 @@ pub async fn gen_test_sstable_inner(
     sstable_store: SstableStoreRef,
     policy: WriteCachePolicy,
 ) -> Sstable {
-    let (data, meta) = gen_test_sstable_data(opts, kv_iter).await;
+    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter).await;
     let sst = Sstable { id: sst_id, meta };
     sstable_store.put(&sst, data, policy).await.unwrap();
     sst

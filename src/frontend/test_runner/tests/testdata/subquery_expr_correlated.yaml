@@ -5,7 +5,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
       LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter }
+        LogicalApply { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x, y] }
           LogicalProject { exprs: [(1.5:Decimal * $0)], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [min($0)] }
@@ -29,13 +29,13 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
       LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter }
+        LogicalApply { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x, y] }
           LogicalProject { exprs: [$0], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [min($0)] }
               LogicalProject { exprs: [$1], expr_alias: [ ] }
                 LogicalFilter { predicate: ($2 = $3) }
-                  LogicalApply { type: LeftOuter }
+                  LogicalApply { type: LeftOuter, on: always }
                     LogicalScan { table: t2, columns: [_row_id#0, x, y] }
                     LogicalProject { exprs: [CorrelatedInputRef { index: 2, depth: 2 }], expr_alias: [y] }
                       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -47,13 +47,13 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
       LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter }
+        LogicalApply { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x, y] }
           LogicalProject { exprs: [$0], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [min($0)] }
               LogicalProject { exprs: [$1], expr_alias: [ ] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) AND (CorrelatedInputRef { index: 1, depth: 1 } = $3) }
-                  LogicalApply { type: LeftOuter }
+                  LogicalApply { type: LeftOuter, on: always }
                     LogicalScan { table: t2, columns: [_row_id#0, x, y] }
                     LogicalProject { exprs: [$0], expr_alias: [ ] }
                       LogicalAgg { group_keys: [], agg_calls: [max($0)] }
@@ -69,7 +69,7 @@
     select * from t1 where exists(select * from t2 where y = 100 and t1.x = t2.x and x = 1000 and t1.y = t2.y);
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
-      LogicalApply { type: LeftSemi }
+      LogicalApply { type: LeftSemi, on: always }
         LogicalScan { table: t1, columns: [_row_id#0, x, y] }
         LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
           LogicalFilter { predicate: ($2 = 100:Int32) AND (CorrelatedInputRef { index: 1, depth: 1 } = $1) AND ($1 = 1000:Int32) AND (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
@@ -87,7 +87,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
       LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter }
+        LogicalApply { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x, y] }
           LogicalProject { exprs: [(1.5:Decimal * $0)], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [min($0)] }
@@ -110,7 +110,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
       LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter }
+        LogicalApply { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x, y] }
           LogicalProject { exprs: [$0], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [count] }
@@ -134,7 +134,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
       LogicalFilter { predicate: ($1 > $3) }
-        LogicalApply { type: LeftOuter }
+        LogicalApply { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x, y] }
           LogicalProject { exprs: [($0 + $1)], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [count, count] }
@@ -151,3 +151,152 @@
                 LogicalScan { table: t1, columns: [_row_id#0, x, y] }
                 LogicalProject { exprs: [1:Int32, $0], expr_alias: [1,  ] }
                   LogicalScan { table: t2, columns: [y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y from t2 where t1.x = t2.x);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } = $1) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 = $3) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$1, $0], expr_alias: [y,  ] }
+          LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y not in (select y from t2 where t1.x = t2.x);
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y from t2 where t1.x + t2.x = 100 and t1.y = 1000);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalFilter { predicate: ((CorrelatedInputRef { index: 1, depth: 1 } + $1) = 100:Int32) AND (CorrelatedInputRef { index: 2, depth: 1 } = 1000:Int32) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND (($0 + $3) = 100:Int32) AND ($1 = 1000:Int32) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$1, $0], expr_alias: [y,  ] }
+          LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y from t2 where t1.x > t2.x + 1000);
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$2], expr_alias: [y] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } > ($1 + 1000:Int32)) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND ($0 > ($3 + 1000:Int32)) }
+        LogicalScan { table: t1, columns: [x, y] }
+        LogicalProject { exprs: [$1, $0], expr_alias: [y,  ] }
+          LogicalScan { table: t2, columns: [x, y] }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
+  binder_error: 'Bind error: Subquery must return only one column'
+- sql: |
+    /* correlated outer subquery with an uncorrelated inner subquery */
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(x int, y int);
+    select x from t1 where y in (select x from t2 where t2.y = t1.y and x > (select min(x) from t3));
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$1], expr_alias: [x] }
+          LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 2, depth: 1 }) AND ($1 > $3) }
+            LogicalJoin { type: LeftOuter, on: always }
+              LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+              LogicalProject { exprs: [$0], expr_alias: [ ] }
+                LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                  LogicalProject { exprs: [$1], expr_alias: [ ] }
+                    LogicalScan { table: t3, columns: [_row_id#0, x, y] }
+- sql: |
+    /* correlated inner subquery with depth = 2 */
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(x int, y int);
+    select x from t1 where y in (select x from t2 where y in (select y from t3 where t1.y = t3.y));
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalApply { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$1], expr_alias: [x] }
+          LogicalApply { type: LeftSemi, on: ($2 = $3) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+            LogicalProject { exprs: [$2], expr_alias: [y] }
+              LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 2 } = $2) }
+                LogicalScan { table: t3, columns: [_row_id#0, x, y] }
+- sql: |
+    /* uncorrelated outer subquery with a correlated inner subquery */
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(x int, y int);
+    select x from t1 where y in (select x from t2 where y in (select y from t3 where t2.y = t3.y));
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [x] }
+      LogicalJoin { type: LeftSemi, on: ($2 = $3) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$1], expr_alias: [x] }
+          LogicalApply { type: LeftSemi, on: ($2 = $3) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+            LogicalProject { exprs: [$2], expr_alias: [y] }
+              LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
+                LogicalScan { table: t3, columns: [_row_id#0, x, y] }
+- sql: |
+    /* correlated agg column in SELECT */
+    create table t (v1 int, v2 int);
+    select min(v1), (select max(v2)) from t;
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated group column in SELECT */
+    create table t (v1 int, v2 int);
+    select min(v1), (select v2) from t group by v2;
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated non-group column in SELECT */
+    create table t (v1 int, v2 int);
+    select min(v1), (select v2) from t;
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated agg column in HAVING */
+    create table t (v1 int, v2 int);
+    select 1 from t having min(v1) > (select max(v2));
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated group column in HAVING */
+    create table t (v1 int, v2 int);
+    select 1 from t group by v2 having min(v1) > (select v2);
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated non-group column in HAVING */
+    create table t (v1 int, v2 int);
+    select 1 from t having min(v1) > (select v2);
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated agg column belongs to outer query */
+    create table t (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    select
+      min(v1),
+      (select max(v2) + v3 from t2)  -- access to v3 is ok
+    from t;
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'

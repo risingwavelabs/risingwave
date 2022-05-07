@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
 use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
@@ -73,5 +74,12 @@ impl ToBatchProst for BatchLimit {
             limit: self.logical.limit() as u32,
             offset: self.logical.offset() as u32,
         })
+    }
+}
+
+impl ToLocalBatch for BatchLimit {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local();
+        self.clone_with_input(new_input).into()
     }
 }

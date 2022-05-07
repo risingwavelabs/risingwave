@@ -20,13 +20,13 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
+use risingwave_pb::data::{AddMutation, DispatcherMutation, NothingMutation, StopMutation};
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -59,7 +59,7 @@ pub enum Command {
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
-        dispatches: HashMap<ActorId, Vec<ActorInfo>>,
+        dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
     },
 }
 
@@ -130,18 +130,17 @@ where
             }
 
             Command::CreateMaterializedView { dispatches, .. } => {
-                let actors = dispatches
+                let mutations = dispatches
                     .iter()
-                    .map(|(&up_actor_id, down_actor_infos)| {
-                        (
-                            up_actor_id,
-                            Actors {
-                                info: down_actor_infos.to_vec(),
-                            },
-                        )
-                    })
+                    .map(
+                        |(&(up_actor_id, dispatcher_id), down_actor_infos)| DispatcherMutation {
+                            actor_id: up_actor_id,
+                            dispatcher_id,
+                            info: down_actor_infos.to_vec(),
+                        },
+                    )
                     .collect();
-                Mutation::Add(AddMutation { actors })
+                Mutation::Add(AddMutation { mutations })
             }
         };
 
@@ -200,8 +199,8 @@ where
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
-                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(upstream_actor_id, downstream_actor_infos)| {
+                        .filter(|((upstream_actor_id, _), _)| actors.contains(upstream_actor_id))
+                        .map(|((upstream_actor_id, _), downstream_actor_infos)| {
                             (
                                 *upstream_actor_id,
                                 downstream_actor_infos

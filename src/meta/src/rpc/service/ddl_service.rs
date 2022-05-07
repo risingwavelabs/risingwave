@@ -22,7 +22,7 @@ use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan_common::TableRefId;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use tonic::{Request, Response, Status};
 
@@ -248,11 +248,11 @@ where
                 stream_node: &StreamNode,
                 dependent_relations: &mut HashSet<TableId>,
             ) -> RwResult<()> {
-                match stream_node.node.as_ref().unwrap() {
-                    Node::SourceNode(source_node) => {
+                match stream_node.node_body.as_ref().unwrap() {
+                    NodeBody::Source(source_node) => {
                         dependent_relations.insert(source_node.get_table_ref_id()?.table_id as u32);
                     }
-                    Node::ChainNode(chain_node) => {
+                    NodeBody::Chain(chain_node) => {
                         dependent_relations.insert(chain_node.get_table_ref_id()?.table_id as u32);
                     }
                     _ => {}
@@ -390,7 +390,8 @@ where
         // Fill in the correct mview id for stream node.
         fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
             let mut mview_count = 0;
-            if let Node::MaterializeNode(materialize_node) = stream_node.node.as_mut().unwrap() {
+            if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
+            {
                 materialize_node.table_ref_id = TableRefId::from(&mview_id).into();
                 mview_count += 1;
             }
@@ -427,7 +428,7 @@ where
             &mut ctx,
         )
         .await?;
-        let table_fragments = TableFragments::new(mview_id, graph, ctx.distribution_keys.clone());
+        let table_fragments = TableFragments::new(mview_id, graph);
 
         // Create on compute node.
         self.stream_manager
@@ -467,7 +468,7 @@ where
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
             use risingwave_common::catalog::TableId;
             let mut source_count = 0;
-            if let Node::SourceNode(source_node) = stream_node.node.as_mut().unwrap() {
+            if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
                 // TODO: refactor using source id.
                 source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into();
                 source_count += 1;

@@ -263,6 +263,7 @@ pub mod tests {
     use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
     use crate::catalog::ColumnDesc;
+    use crate::test_prelude::*;
     use crate::types::DataType;
 
     pub fn build_prost_desc() -> ProstColumnDesc {

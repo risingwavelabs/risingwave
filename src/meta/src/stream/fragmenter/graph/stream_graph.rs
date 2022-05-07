@@ -21,9 +21,9 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
-use risingwave_pb::ProstFieldNotFound;
 
 use crate::cluster::WorkerId;
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
@@ -89,11 +89,24 @@ struct StreamActorBuilder {
     /// upstreams, exchange node operator_id -> upstream actor ids
     upstreams: HashMap<u64, StreamActorUpstream>,
 
+    /// Whether to place this actors on the same node as chain's upstream MVs.
+    chain_same_worker_node: bool,
+
     /// whether this actor builder has been sealed
     sealed: bool,
 }
 
 impl StreamActorBuilder {
+    fn is_chain_same_worker_node(stream_node: &StreamNode) -> bool {
+        fn visit(stream_node: &StreamNode) -> bool {
+            if let Some(NodeBody::Chain(ref chain)) = stream_node.node_body {
+                return chain.same_worker_node;
+            }
+            stream_node.input.iter().any(visit)
+        }
+        visit(stream_node)
+    }
+
     pub fn new(
         actor_id: LocalActorId,
         fragment_id: LocalFragmentId,
@@ -102,6 +115,7 @@ impl StreamActorBuilder {
         Self {
             actor_id,
             fragment_id,
+            chain_same_worker_node: Self::is_chain_same_worker_node(&node),
             nodes: node,
             downstreams: vec![],
             upstreams: HashMap::new(),
@@ -219,6 +233,10 @@ impl StreamActorBuilder {
         if dispatcher.is_empty() {
             dispatcher = vec![Dispatcher {
                 r#type: DispatcherType::Broadcast.into(),
+                // Currently when create MV on MV, we will add outputs to this dispatcher with id 0
+                // (cross-MV dispatcher).
+                // See also the rustdoc of this field.
+                dispatcher_id: 0,
                 ..Default::default()
             }]
         }
@@ -234,14 +252,15 @@ impl StreamActorBuilder {
                 .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
-            same_worker_node_as_upstream: self.upstreams.iter().any(
-                |(
-                    _,
-                    StreamActorUpstream {
-                        same_worker_node, ..
-                    },
-                )| *same_worker_node,
-            ),
+            same_worker_node_as_upstream: self.chain_same_worker_node
+                || self.upstreams.iter().any(
+                    |(
+                        _,
+                        StreamActorUpstream {
+                            same_worker_node, ..
+                        },
+                    )| *same_worker_node,
+                ),
         }
     }
 }
@@ -255,8 +274,6 @@ pub struct StreamGraphBuilder {
     table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
 
     table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
-
-    upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
 }
 
 impl StreamGraphBuilder {
@@ -264,7 +281,6 @@ impl StreamGraphBuilder {
     pub fn fill_info(&mut self, info: BuildGraphInfo) {
         self.table_node_actors = info.table_node_actors;
         self.table_sink_actor_ids = info.table_sink_actor_ids;
-        self.upstream_distribution_keys = info.upstream_distribution_keys;
     }
 
     /// Insert new generated actor.
@@ -439,18 +455,17 @@ impl StreamGraphBuilder {
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
     ) -> Result<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
-        match stream_node.get_node()? {
-            Node::ExchangeNode(_) => {
+        match stream_node.get_node_body()? {
+            NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
             }
-            Node::ChainNode(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
+            NodeBody::Chain(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                if let Node::HashJoinNode(node) = new_stream_node
-                    .node
-                    .as_mut()
-                    .ok_or(ProstFieldNotFound("prost stream node field not found"))?
-                {
+
+                // Table id rewrite done below.
+
+                if let NodeBody::HashJoin(node) = new_stream_node.node_body.as_mut().unwrap() {
                     // The operator id must be assigned with table ids. Otherwise it is a logic
                     // error.
                     let left_table_id = node.left_table_id + table_id_offset;
@@ -458,14 +473,46 @@ impl StreamGraphBuilder {
                     node.left_table_id = left_table_id;
                     node.right_table_id = right_table_id;
                 }
+
+                if let NodeBody::Lookup(node) = new_stream_node.node_body.as_mut().unwrap() {
+                    if let Some(ArrangementTableId::TableId(table_id)) =
+                        &mut node.arrangement_table_id
+                    {
+                        *table_id += table_id_offset;
+                    }
+                }
+
+                if let NodeBody::Arrange(node) = new_stream_node.node_body.as_mut().unwrap() {
+                    node.table_id += table_id_offset;
+                }
+
+                if let NodeBody::HashAgg(node) = new_stream_node.node_body.as_mut().unwrap() {
+                    assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                    // In-place update the table id. Convert from local to global.
+                    for table_id in &mut node.table_ids {
+                        *table_id += table_id_offset;
+                    }
+                }
+
+                match new_stream_node.node_body.as_mut().unwrap() {
+                    NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                        assert_eq!(node.table_ids.len(), node.agg_calls.len());
+                        // In-place update the table id. Convert from local to global.
+                        for table_id in &mut node.table_ids {
+                            *table_id += table_id_offset;
+                        }
+                    }
+                    _ => {}
+                }
+
                 for (idx, input) in stream_node.input.iter().enumerate() {
-                    match input.get_node()? {
-                        Node::ExchangeNode(_) => {
+                    match input.get_node_body()? {
+                        NodeBody::Exchange(_) => {
                             assert!(!input.get_fields().is_empty());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
                                 pk_indices: input.pk_indices.clone(),
-                                node: Some(Node::MergeNode(MergeNode {
+                                node_body: Some(NodeBody::Merge(MergeNode {
                                     upstream_actor_id: upstream_actor_id
                                         .remove(&input.get_operator_id())
                                         .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
@@ -477,7 +524,7 @@ impl StreamGraphBuilder {
                                 append_only: input.append_only,
                             };
                         }
-                        Node::ChainNode(_) => {
+                        NodeBody::Chain(_) => {
                             new_stream_node.input[idx] =
                                 self.resolve_chain_node(ctx, input, actor_id)?;
                         }
@@ -500,7 +547,7 @@ impl StreamGraphBuilder {
         stream_node: &StreamNode,
         actor_id: LocalActorId,
     ) -> Result<StreamNode> {
-        let Node::ChainNode(chain_node) = stream_node.get_node().unwrap()  else {
+        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap()  else {
             unreachable!()
         };
         let input = stream_node.get_input();
@@ -518,7 +565,7 @@ impl StreamGraphBuilder {
         if ctx.is_legacy_frontend {
             for &up_id in &upstream_actor_ids {
                 ctx.dispatches
-                    .entry(up_id)
+                    .entry((up_id, 0))
                     .or_default()
                     .push(actor_id.as_global_id());
             }
@@ -539,26 +586,15 @@ impl StreamGraphBuilder {
         }
 
         let merge_node = &input[0];
-        assert_matches!(merge_node.node, Some(Node::MergeNode(_)));
-
-        let mut batch_plan_node = input[1].clone();
-        // Get distribution key from fragment_manager
-        let distribution_keys = self
-            .upstream_distribution_keys
-            .get(&table_id)
-            .unwrap()
-            .clone();
-        if let Some(Node::BatchPlanNode(ref mut node)) = batch_plan_node.node {
-            node.distribution_keys = distribution_keys;
-        } else {
-            unreachable!("input[1].node should be a BatchPlanNode");
-        }
+        assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+        let batch_plan_node = &input[1];
+        assert_matches!(batch_plan_node.node_body, Some(NodeBody::BatchPlan(_)));
 
         let chain_input = vec![
             StreamNode {
                 input: vec![],
                 pk_indices: stream_node.pk_indices.clone(),
-                node: Some(Node::MergeNode(MergeNode {
+                node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: if ctx.is_legacy_frontend {
                         Vec::from_iter(upstream_actor_ids.into_iter())
                     } else {
@@ -571,13 +607,13 @@ impl StreamGraphBuilder {
                 identity: "MergeExecutor".to_string(),
                 append_only: stream_node.append_only,
             },
-            batch_plan_node,
+            batch_plan_node.clone(),
         ];
 
         Ok(StreamNode {
             input: chain_input,
             pk_indices: stream_node.pk_indices.clone(),
-            node: Some(Node::ChainNode(chain_node.clone())),
+            node_body: Some(NodeBody::Chain(chain_node.clone())),
             operator_id: stream_node.operator_id,
             identity: "ChainExecutor".to_string(),
             fields: chain_node.upstream_fields.clone(),
