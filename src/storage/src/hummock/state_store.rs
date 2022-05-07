@@ -19,13 +19,13 @@ use std::ops::RangeBounds;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_pb::hummock::LevelType;
+use risingwave_pb::hummock::{LevelType, VNodeBitmap};
 
 use super::iterator::{
     BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
     BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
 };
-use super::utils::{validate_epoch, validate_table_key_range, vnode_bitmap_filter};
+use super::utils::{bitmap_overlap, validate_epoch, validate_table_key_range};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
@@ -77,7 +77,7 @@ impl HummockStorage {
 
         // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
         // `key_range`
-        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward);
+        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward, None);
         for table_info in table_infos.into_iter().rev() {
             let table = self.sstable_store.sstable(table_info.id).await?;
             if backward {
@@ -98,7 +98,7 @@ impl HummockStorage {
             match level.level_type() {
                 LevelType::Overlapping => {
                     let table_infos =
-                        prune_ssts(level.get_table_infos().iter(), &key_range, backward);
+                        prune_ssts(level.get_table_infos().iter(), &key_range, backward, None);
                     if table_infos.is_empty() {
                         continue;
                     }
@@ -202,11 +202,11 @@ impl HummockStorage {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_with_value_meta<'a>(
+    async fn get_with_vnode_set<'a>(
         &'a self,
         key: &'a [u8],
         epoch: u64,
-        value_meta: Option<u8>,
+        vnode_set: Option<VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
         let (uncommitted_ssts, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
@@ -234,7 +234,12 @@ impl HummockStorage {
         let internal_key = key_with_epoch(key.to_vec(), epoch);
 
         // Query uploaded but uncommitted SSTs. Return the value if found.
-        let table_infos = prune_ssts(uncommitted_ssts.iter(), &(key..=key), false);
+        let table_infos = prune_ssts(
+            uncommitted_ssts.iter(),
+            &(key..=key),
+            false,
+            vnode_set.as_ref(),
+        );
         for table_info in table_infos.into_iter().rev() {
             let table = self.sstable_store.sstable(table_info.id).await?;
             table_counts += 1;
@@ -249,29 +254,29 @@ impl HummockStorage {
             }
             match level.level_type() {
                 LevelType::Overlapping => {
-                    let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key), false);
+                    let table_infos = prune_ssts(
+                        level.table_infos.iter(),
+                        &(key..=key),
+                        false,
+                        vnode_set.as_ref(),
+                    );
                     for table_info in table_infos.into_iter().rev() {
-                        if !vnode_bitmap_filter(
-                            &internal_key,
-                            value_meta,
-                            table_info.get_vnode_bitmap(),
-                        ) {
-                            let table = self.sstable_store.sstable(table_info.id).await?;
-                            table_counts += 1;
-                            if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
-                                return Ok(Some(v));
-                            }
+                        let table = self.sstable_store.sstable(table_info.id).await?;
+                        table_counts += 1;
+                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+                            return Ok(Some(v));
                         }
                     }
                 }
                 LevelType::Nonoverlapping => {
                     let table_idx = search_sst_idx(level, key);
                     assert!(table_idx < level.table_infos.len());
-                    if !vnode_bitmap_filter(
-                        &internal_key,
-                        value_meta,
-                        level.table_infos[table_idx].get_vnode_bitmap(),
-                    ) {
+                    if vnode_set.is_none()
+                        || bitmap_overlap(
+                            vnode_set.as_ref().unwrap(),
+                            level.table_infos[table_idx].get_vnode_bitmap(),
+                        )
+                    {
                         table_counts += 1;
                         // Because we will keep multiple version of one in the same sst file, we
                         // do not find it in the next adjacent file.
@@ -300,7 +305,7 @@ impl StateStore for HummockStorage {
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
-        async move { self.get_with_value_meta(key, epoch, None).await }
+        async move { self.get_with_vnode_set(key, epoch, None).await }
     }
 
     fn scan<R, B>(
