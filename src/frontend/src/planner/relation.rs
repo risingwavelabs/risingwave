@@ -15,16 +15,18 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
+    Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource, PlanRef,
+    LogicalGenerateSeries, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
+    LogicalSource, PlanRef,
 };
 use crate::planner::Planner;
 
@@ -37,6 +39,7 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
+            Relation::GenerateSeriesFunction(gs) => self.plan_generate_series_function(*gs),
         }
     }
 
@@ -82,6 +85,42 @@ impl Planner {
                 table_function.args,
             ),
         }
+    }
+
+    pub(super) fn plan_generate_series_function(
+        &mut self,
+        table_function: BoundGenerateSeriesFunction,
+    ) -> Result<PlanRef> {
+        let schema = Schema::new(vec![Field::with_name(
+            DataType::Timestamp,
+            "generate_series",
+        )]);
+        let args = table_function.args.into_iter();
+
+        let Some((ExprImpl::Literal(start_time), ExprImpl::Literal(stop_time),ExprImpl::Literal(step_interval))) = args.next_tuple() else {
+            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
+        };
+        let Some(ScalarImpl::NaiveDateTime(start_time)) = *start_time.get_data() else {
+            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
+        };
+
+        let Some(ScalarImpl::NaiveDateTime(stop_time)) = *stop_time.get_data() else {
+            return Err(ErrorCode::BindError("Invalid arguments for Generate series functionn".to_string()).into());
+        };
+
+        let Some(ScalarImpl::Interval(step_interval)) = *step_interval.get_data() else {
+            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
+        };
+        dbg!(&start_time);
+        dbg!(&stop_time);
+        dbg!(&step_interval);
+        Ok(LogicalGenerateSeries::create(
+            start_time,
+            stop_time,
+            step_interval,
+            schema,
+            self.ctx(),
+        ))
     }
 
     fn plan_tumble_window(
