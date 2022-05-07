@@ -337,11 +337,9 @@ impl ColPrunable for LogicalJoin {
         if required_cols == &required_input_cols_in_output {
             join.into()
         } else {
-            let mapping =
-                ColIndexMapping::with_remaining_columns(&required_input_cols_in_output);
+            let mapping = ColIndexMapping::with_remaining_columns(&required_input_cols_in_output);
             let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
-            let out_cols_iterator = required_cols.ones().map(|i| mapping.map(i));
-            remaining_columns.extend(out_cols_iterator);
+            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
                 join.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
