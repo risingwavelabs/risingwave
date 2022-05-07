@@ -114,10 +114,10 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter(&self, epoch: u64) -> StorageResult<StateTableRowIter<'_, S>> {
         let mem_table_iter = self.mem_table.buffer.iter().peekable();
         StateTableRowIter::new(
-            self.keyspace.clone(),
-            self.column_descs.clone(),
+            &self.keyspace,
+            &self.column_descs,
             mem_table_iter,
-            self.order_types.clone(),
+            &self.order_types,
             epoch,
         )
         .await
@@ -138,14 +138,15 @@ type MemTableIter<'a> = Iter<'a, Row, RowOp>;
 
 impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
-        keyspace: Keyspace<S>,
-        table_descs: Vec<ColumnDesc>,
+        keyspace: &Keyspace<S>,
+        table_descs: &[ColumnDesc],
         mem_table_iter: Peekable<MemTableIter<'a>>,
-        order_types: Vec<OrderType>,
+        order_types_vec: &[OrderType],
         epoch: u64,
     ) -> StorageResult<StateTableRowIter<'a, S>> {
         let cell_based_streaming_iter =
-            CellBasedTableStreamingIter::new(&keyspace, &table_descs, epoch).await?;
+            CellBasedTableStreamingIter::new(keyspace, table_descs, epoch).await?;
+        let order_types = order_types_vec.to_vec();
         let state_table_iter = Self {
             mem_table_iter,
             cell_based_streaming_iter,

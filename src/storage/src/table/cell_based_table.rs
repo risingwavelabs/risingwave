@@ -293,7 +293,7 @@ impl<S: StateStore> CellBasedTable<S> {
         &self,
         epoch: u64,
     ) -> StorageResult<CellBasedTableStreamingIter<S>> {
-        CellBasedTableStreamingIter::new(&self.keyspace, &self.column_descs.clone(), epoch).await
+        CellBasedTableStreamingIter::new(&self.keyspace, &self.column_descs, epoch).await
     }
 
     pub fn schema(&self) -> &Schema {
