@@ -311,7 +311,7 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        let required_output_columns =
+        let internally_required_columns =
             if matches!(self.join_type(), JoinType::LeftSemi | JoinType::LeftAnti) {
                 left_required_cols
             } else if matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti) {
@@ -319,7 +319,7 @@ impl ColPrunable for LogicalJoin {
             } else {
                 left_right_required_cols
             };
-        if required_cols == &required_output_columns {
+        if required_cols == &internally_required_columns {
             join.into()
         } else {
             LogicalProject::with_mapping(
@@ -554,7 +554,24 @@ mod tests {
             // Perform the prune
             let mut required_cols = FixedBitSet::with_capacity(3);
             required_cols.extend(vec![0, 1]);
-            let _ = join.prune_col(&required_cols); // should not panic here
+            // should not panic here
+            let plan = join.prune_col(&required_cols);
+            // Check that the join has been wrapped in a projection
+            assert_eq!(
+                plan.to_string().split_whitespace().next(),
+                Some("LogicalProject")
+            );
+
+            // Perform the prune
+            let mut required_cols = FixedBitSet::with_capacity(3);
+            required_cols.extend(vec![0, 1, 2]);
+            // should not panic here
+            let plan = join.prune_col(&required_cols);
+            // Check that the join has not been wrapped in a projection
+            assert_eq!(
+                plan.to_string().split_whitespace().next(),
+                Some("LogicalJoin")
+            );
         }
     }
 
