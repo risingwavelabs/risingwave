@@ -57,7 +57,7 @@ impl ReverseSSTableIterator {
                 .get(
                     self.sst.value(),
                     idx as u64,
-                    crate::hummock::CachePolicy::Fill,
+                    crate::hummock::ReadCachePolicy::Fill,
                 )
                 .await?;
             let mut block_iter = BlockIterator::new(block);

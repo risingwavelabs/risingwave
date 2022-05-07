@@ -20,18 +20,16 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
-use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::key::Epoch;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::StateStore;
 
 #[tokio::test]
 async fn test_basic() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -171,8 +169,7 @@ async fn test_basic() {
 
 #[tokio::test]
 async fn test_state_store_sync() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let sstable_store = mock_sstable_store();
 
     let mut config = default_config_for_test();
     config.shared_buffer_capacity = 64;
@@ -261,8 +258,7 @@ async fn test_state_store_sync() {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;

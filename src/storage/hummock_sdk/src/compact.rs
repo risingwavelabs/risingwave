@@ -14,6 +14,8 @@
 
 use risingwave_pb::hummock::CompactTask;
 
+use crate::HummockSSTableId;
+
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     s.push_str(&format!(
@@ -34,7 +36,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     ));
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
-        let tables: Vec<u64> = level_entry
+        let tables: Vec<HummockSSTableId> = level_entry
             .level
             .as_ref()
             .unwrap()

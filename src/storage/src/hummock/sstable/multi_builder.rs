@@ -12,33 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::Future;
+use futures::future::BoxFuture;
+// future.boxed() requires importing this `FutureExt`, while `clippy` false-positively reports
+// it as unused.
+#[allow(unused_imports)]
+use futures::FutureExt;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
+use risingwave_hummock_sdk::HummockSSTableId;
 
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuildOutput, SSTableBuilder, SstableWriter};
+use crate::hummock::{HummockResult, SSTableBuilder, Sstable};
+
+pub type BoxedIdBuilderGenerator = Box<
+    dyn FnMut() -> BoxFuture<'static, HummockResult<(HummockSSTableId, SSTableBuilder)>>
+        + Send
+        + Sync,
+>;
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
-pub struct CapacitySplitTableBuilder<B, W: SstableWriter> {
+pub struct CapacitySplitTableBuilder {
     /// When creating a new [`SSTableBuilder`], caller use this closure to specify the id and
     /// options.
-    get_id_and_builder: B,
+    get_id_and_builder: BoxedIdBuilderGenerator,
 
-    finished_ssts: Vec<(u64, SSTableBuildOutput<W::WriterOutput>)>,
+    finished_ssts: Vec<Sstable>,
 
-    current_builder: Option<(u64, SSTableBuilder<W>)>,
+    current_builder: Option<(HummockSSTableId, SSTableBuilder)>,
 }
 
-impl<B, F, W: SstableWriter> CapacitySplitTableBuilder<B, W>
-where
-    B: FnMut() -> F,
-    F: Future<Output = HummockResult<(u64, SSTableBuilder<W>)>>,
-{
+impl CapacitySplitTableBuilder {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B) -> Self {
+    pub fn new(get_id_and_builder: BoxedIdBuilderGenerator) -> Self {
         Self {
             get_id_and_builder,
             finished_ssts: Vec::new(),
@@ -91,13 +98,13 @@ where
             && self.current_builder.as_mut().unwrap().1.reach_capacity()
         {
             let (table_id, current_builder) = self.current_builder.take().unwrap();
-            let output = current_builder.finish().await?;
-            self.finished_ssts.push((table_id, output));
+            let meta = current_builder.finish().await?;
+            self.finished_ssts.push(Sstable { id: table_id, meta });
         }
 
         // Initialize a new builder if there is no current builder
         let builder = if self.current_builder.is_none() {
-            let (id, builder) = (self.get_id_and_builder)().await?;
+            let (id, builder) = (*self.get_id_and_builder)().await?;
             &mut self.current_builder.insert((id, builder)).1
         } else {
             &mut self.current_builder.as_mut().unwrap().1
@@ -112,17 +119,17 @@ where
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
     pub async fn seal_current(&mut self) -> HummockResult<()> {
-        if self.current_builder.is_some() {
-            let (id, builder) = self.current_builder.take().unwrap();
-            self.finished_ssts.push((id, builder.finish().await?));
+        if let Some((id, builder)) = self.current_builder.take() {
+            self.finished_ssts.push(Sstable {
+                id,
+                meta: builder.finish().await?,
+            });
         }
         Ok(())
     }
 
     /// Finalizes all the tables to be ids and sstable builder output
-    pub async fn finish(
-        mut self,
-    ) -> HummockResult<Vec<(u64, SSTableBuildOutput<W::WriterOutput>)>> {
+    pub async fn finish(mut self) -> HummockResult<Vec<Sstable>> {
         self.seal_current().await?;
         Ok(self.finished_ssts)
     }
@@ -137,31 +144,40 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
-    use crate::hummock::{InMemSstableWriter, SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{SSTableBuilderOptions, WriteCachePolicy, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
         let next_id = AtomicU64::new(1001);
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
-        let get_id_and_builder = || async {
-            Ok((
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(
-                    SSTableBuilderOptions {
-                        capacity: table_capacity,
-                        block_capacity: block_size,
-                        restart_interval: DEFAULT_RESTART_INTERVAL,
-                        bloom_false_positive: 0.1,
-                        compression_algorithm: CompressionAlgorithm::None,
-                    },
-                    InMemSstableWriter::new(table_capacity),
-                    true,
-                ),
-            ))
-        };
+        let sstable_store = mock_sstable_store();
+        let get_id_and_builder = Box::new(move || {
+            let sst_id = next_id.fetch_add(1, SeqCst);
+            let sstable_store = sstable_store.clone();
+            async move {
+                Ok((
+                    sst_id,
+                    SSTableBuilder::new(
+                        SSTableBuilderOptions {
+                            capacity: table_capacity,
+                            block_capacity: block_size,
+                            restart_interval: DEFAULT_RESTART_INTERVAL,
+                            bloom_false_positive: 0.1,
+                            compression_algorithm: CompressionAlgorithm::None,
+                        },
+                        sstable_store
+                            .new_sstable_writer(sst_id, WriteCachePolicy::Disable)
+                            .await
+                            .unwrap(),
+                    ),
+                ))
+            }
+            .boxed()
+        });
         let builder = CapacitySplitTableBuilder::new(get_id_and_builder);
         let results = block_on(builder.finish()).unwrap();
         assert!(results.is_empty());
@@ -170,25 +186,32 @@ mod tests {
     #[tokio::test]
     async fn test_lots_of_tables() {
         let next_id = AtomicU64::new(1001);
-
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
-        let get_id_and_builder = || async {
-            Ok((
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(
-                    SSTableBuilderOptions {
-                        capacity: table_capacity,
-                        block_capacity: block_size,
-                        restart_interval: DEFAULT_RESTART_INTERVAL,
-                        bloom_false_positive: 0.1,
-                        compression_algorithm: CompressionAlgorithm::None,
-                    },
-                    InMemSstableWriter::new(table_capacity),
-                    true,
-                ),
-            ))
-        };
+        let sstable_store = mock_sstable_store();
+        let get_id_and_builder = Box::new(move || {
+            let sst_id = next_id.fetch_add(1, SeqCst);
+            let sstable_store = sstable_store.clone();
+            async move {
+                Ok((
+                    sst_id,
+                    SSTableBuilder::new(
+                        SSTableBuilderOptions {
+                            capacity: table_capacity,
+                            block_capacity: block_size,
+                            restart_interval: DEFAULT_RESTART_INTERVAL,
+                            bloom_false_positive: 0.1,
+                            compression_algorithm: CompressionAlgorithm::None,
+                        },
+                        sstable_store
+                            .new_sstable_writer(sst_id, WriteCachePolicy::Disable)
+                            .await
+                            .unwrap(),
+                    ),
+                ))
+            }
+            .boxed()
+        });
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
         for i in 0..table_capacity {
@@ -204,20 +227,32 @@ mod tests {
 
         let results = block_on(builder.finish()).unwrap();
         assert!(results.len() > 1);
-        assert_eq!(results.iter().map(|p| p.0).duplicates().count(), 0);
+        assert_eq!(results.iter().map(|p| p.id).duplicates().count(), 0);
     }
 
     #[tokio::test]
     async fn test_table_seal() {
+        let opt = default_builder_opt_for_test();
         let next_id = AtomicU64::new(1001);
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let opt = default_builder_opt_for_test();
-            let writer = InMemSstableWriter::new(opt.capacity);
-            Ok((
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(opt, writer, true),
-            ))
-        });
+        let sstable_store = mock_sstable_store();
+        let mut builder = CapacitySplitTableBuilder::new(Box::new(move || {
+            let sst_id = next_id.fetch_add(1, SeqCst);
+            let opt = opt.clone();
+            let sstable_store = sstable_store.clone();
+            async move {
+                Ok((
+                    sst_id,
+                    SSTableBuilder::new(
+                        opt,
+                        sstable_store
+                            .new_sstable_writer(sst_id, WriteCachePolicy::Disable)
+                            .await
+                            .unwrap(),
+                    ),
+                ))
+            }
+            .boxed()
+        }));
         let mut epoch = 100;
 
         macro_rules! add {
@@ -252,15 +287,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
+        let opt = default_builder_opt_for_test();
         let next_id = AtomicU64::new(1001);
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let opt = default_builder_opt_for_test();
-            let writer = InMemSstableWriter::new(opt.capacity);
-            Ok((
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(opt, writer, true),
-            ))
-        });
+        let sstable_store = mock_sstable_store();
+        let mut builder = CapacitySplitTableBuilder::new(Box::new(move || {
+            let opt = opt.clone();
+            let sst_id = next_id.fetch_add(1, SeqCst);
+            let sstable_store = sstable_store.clone();
+            async move {
+                Ok((
+                    sst_id,
+                    SSTableBuilder::new(
+                        opt,
+                        sstable_store
+                            .new_sstable_writer(sst_id, WriteCachePolicy::Disable)
+                            .await
+                            .unwrap(),
+                    ),
+                ))
+            }
+            .boxed()
+        }));
 
         builder
             .add_full_key(

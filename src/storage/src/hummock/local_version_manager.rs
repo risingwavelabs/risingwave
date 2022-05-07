@@ -430,6 +430,7 @@ impl LocalVersionManager {
 mod tests {
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::HummockSSTableId;
     use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 
     use super::LocalVersionManager;
@@ -448,7 +449,7 @@ mod tests {
         )
     }
 
-    fn gen_dummy_sst_info(id: u64, batches: Vec<SharedBufferBatch>) -> SstableInfo {
+    fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
         let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
         let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
         for batch in batches.iter().skip(1) {

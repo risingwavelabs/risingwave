@@ -152,12 +152,15 @@ message CompactTask {
 }
 
 message LevelHandler {
+  // key ranges (and corresponding compaction task id, number of
+  // SSTs) to be merged to bottom level in order.
   message KeyRangeTaskId {
     KeyRange key_range = 1;
     uint64 task_id = 2;
     uint64 ssts = 3;
   }
   LevelType level_type = 1;
+  // A map from sst_id to task_id
   map<uint64, uint64> compacting_ssts = 2;
   repeated KeyRangeTaskId key_ranges = 3;
 }

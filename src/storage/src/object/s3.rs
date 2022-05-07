@@ -12,18 +12,68 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
+use bytes::BytesMut;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
 use super::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult};
-use crate::object::{Bytes, ObjectStore};
+use crate::object::{
+    BoxedObjectUploader, Bytes, InMemSstableDataStream, ObjectStore, ObjectUploader,
+    SstableDataStream,
+};
+
+async fn upload_bytes(
+    client: &Client,
+    data: Bytes,
+    bucket: String,
+    path: String,
+) -> ObjectResult<()> {
+    fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
+        "s3 upload error"
+    )));
+    client
+        .put_object()
+        .bucket(bucket)
+        .body(SdkBody::from(data).into())
+        .key(path)
+        .send()
+        .await?;
+    Ok(())
+}
+
+struct S3UploadHandle {
+    client: Arc<Client>,
+    bucket: String,
+    path: String,
+    buffer: BytesMut,
+}
+
+#[async_trait::async_trait]
+impl ObjectUploader for S3UploadHandle {
+    async fn upload(&mut self, bytes: &[u8]) -> ObjectResult<()> {
+        self.buffer.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    async fn finish(self: Box<S3UploadHandle>) -> ObjectResult<()> {
+        upload_bytes(&self.client, self.buffer.freeze(), self.bucket, self.path).await
+    }
+
+    async fn finish_with_data(self: Box<Self>) -> ObjectResult<Box<dyn SstableDataStream>> {
+        let obj = self.buffer.freeze();
+        upload_bytes(&self.client, obj.clone(), self.bucket, self.path).await?;
+        Ok(Box::new(InMemSstableDataStream::new(obj)))
+    }
+}
 
 /// Object store with S3 backend
 pub struct S3ObjectStore {
-    client: Client,
+    client: Arc<Client>,
     bucket: String,
 }
 
@@ -33,14 +83,17 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
         )));
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .body(SdkBody::from(obj).into())
-            .key(path)
-            .send()
-            .await?;
+        upload_bytes(&self.client, obj, self.bucket.clone(), path.to_string()).await?;
         Ok(())
+    }
+
+    async fn get_upload_handle(&self, path: &str) -> ObjectResult<BoxedObjectUploader> {
+        Ok(Box::new(S3UploadHandle {
+            client: self.client.clone(),
+            bucket: self.bucket.clone(),
+            path: path.to_string(),
+            buffer: BytesMut::new(),
+        }))
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
@@ -122,7 +175,7 @@ impl S3ObjectStore {
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String) -> Self {
         let shared_config = aws_config::load_from_env().await;
-        let client = Client::new(&shared_config);
+        let client = Arc::new(Client::new(&shared_config));
 
         Self { client, bucket }
     }
@@ -146,7 +199,7 @@ impl S3ObjectStore {
             None,
         ));
         let config = builder.build();
-        let client = Client::from_conf(config);
+        let client = Arc::new(Client::from_conf(config));
         Self {
             client,
             bucket: bucket.to_string(),

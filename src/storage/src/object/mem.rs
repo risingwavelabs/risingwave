@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -22,27 +23,73 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Mutex;
 
 use super::{ObjectError, ObjectResult};
-use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
+use crate::object::{
+    BlockLocation, BoxedObjectUploader, InMemSstableDataStream, ObjectMetadata, ObjectStore,
+    ObjectUploader, SstableDataStream,
+};
+
+async fn insert_bytes(
+    objects: &Mutex<HashMap<String, Bytes>>,
+    path: &str,
+    obj: Bytes,
+) -> ObjectResult<()> {
+    fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
+        "mem upload error"
+    )));
+    if obj.is_empty() {
+        Err(ObjectError::internal("upload empty object"))
+    } else {
+        let mut guard = objects.lock().await;
+        assert!(!guard.contains_key(path), "object already exists: {}", path);
+        guard.insert(path.to_string(), obj);
+        Ok(())
+    }
+}
+
+struct InMemObjectUploader {
+    objects: Arc<Mutex<HashMap<String, Bytes>>>,
+    path: String,
+    buffer: BytesMut,
+}
+
+#[async_trait::async_trait]
+impl ObjectUploader for InMemObjectUploader {
+    async fn upload(&mut self, data: &[u8]) -> ObjectResult<()> {
+        self.buffer.extend_from_slice(data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> ObjectResult<()> {
+        let obj = self.buffer.freeze();
+        insert_bytes(&self.objects, &self.path, obj).await
+    }
+
+    async fn finish_with_data(self: Box<Self>) -> ObjectResult<Box<dyn SstableDataStream>> {
+        let obj = self.buffer.freeze();
+        insert_bytes(&self.objects, &self.path, obj.clone()).await?;
+        Ok(Box::new(InMemSstableDataStream::new(obj)))
+    }
+}
 
 /// In-memory object storage, useful for testing.
 #[derive(Default)]
 pub struct InMemObjectStore {
-    objects: Mutex<HashMap<String, Bytes>>,
+    objects: Arc<Mutex<HashMap<String, Bytes>>>,
     compactor_shutdown_sender: parking_lot::Mutex<Option<UnboundedSender<()>>>,
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
-            "mem upload error"
-        )));
-        if obj.is_empty() {
-            Err(ObjectError::internal("upload empty object"))
-        } else {
-            self.objects.lock().await.insert(path.into(), obj);
-            Ok(())
-        }
+        insert_bytes(&self.objects, path, obj).await
+    }
+
+    async fn get_upload_handle(&self, path: &str) -> ObjectResult<BoxedObjectUploader> {
+        Ok(Box::new(InMemObjectUploader {
+            objects: self.objects.clone(),
+            path: path.to_string(),
+            buffer: BytesMut::new(),
+        }))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -81,7 +128,7 @@ impl ObjectStore for InMemObjectStore {
 impl InMemObjectStore {
     pub fn new() -> Self {
         Self {
-            objects: Mutex::new(HashMap::new()),
+            objects: Arc::new(Mutex::new(HashMap::new())),
             compactor_shutdown_sender: parking_lot::Mutex::new(None),
         }
     }
@@ -100,6 +147,14 @@ impl InMemObjectStore {
 
     pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
         *self.compactor_shutdown_sender.lock() = Some(shutdown_sender);
+    }
+}
+
+impl Drop for InMemObjectStore {
+    fn drop(&mut self) {
+        if let Some(sender) = self.compactor_shutdown_sender.lock().take() {
+            let _ = sender.send(());
+        }
     }
 }
 

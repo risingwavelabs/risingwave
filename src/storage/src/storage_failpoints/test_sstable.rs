@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_hummock_sdk::key::key_with_epoch;
 
 use crate::assert_bytes_eq;
@@ -24,7 +22,7 @@ use crate::hummock::test_utils::{
     TEST_KEYS_COUNT,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, SSTableIterator, Sstable};
+use crate::hummock::{SSTableIterator, Sstable, WriteCachePolicy};
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
@@ -36,14 +34,17 @@ async fn test_failpoint_table_read() {
     // We should close buffer, so that table iterator must read in object_stores
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
+    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
     let table = Sstable { id: 0, meta };
     sstable_store
-        .put(&table, data, CachePolicy::NotFill)
+        .put(&table, data, WriteCachePolicy::Disable)
         .await
         .unwrap();
 
-    let mut sstable_iter = SSTableIterator::new(Arc::new(table), sstable_store);
+    let mut sstable_iter = SSTableIterator::new(
+        sstable_store.sstable(table.id).await.unwrap(),
+        sstable_store,
+    );
     sstable_iter.rewind().await.unwrap();
 
     sstable_iter.seek(&test_key_of(500)).await.unwrap();
@@ -80,10 +81,10 @@ async fn test_failpoint_vacuum_and_metadata() {
 
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
+    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
     let table = Sstable { id: 0, meta };
     let result = sstable_store
-        .put(&table, data.clone(), CachePolicy::NotFill)
+        .put(&table, data.clone(), WriteCachePolicy::Disable)
         .await;
     assert!(result.is_err());
 
@@ -92,11 +93,14 @@ async fn test_failpoint_vacuum_and_metadata() {
     fail::remove(mem_upload_err);
 
     sstable_store
-        .put(&table, data, CachePolicy::NotFill)
+        .put(&table, data, WriteCachePolicy::Disable)
         .await
         .unwrap();
 
-    let mut sstable_iter = SSTableIterator::new(Arc::new(table), sstable_store);
+    let mut sstable_iter = SSTableIterator::new(
+        sstable_store.sstable(table.id).await.unwrap(),
+        sstable_store,
+    );
     let mut cnt = 0;
     sstable_iter.rewind().await.unwrap();
     while sstable_iter.is_valid() {

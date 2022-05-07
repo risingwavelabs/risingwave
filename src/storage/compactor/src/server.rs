@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::config::get_local_object_store;
 use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
@@ -66,9 +67,20 @@ pub async fn compactor_serve(
     ));
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let object_store = Arc::new(parse_object_store(&opts.state_store).await);
+    let remote_object_store = Arc::new(
+        parse_object_store(
+            opts.state_store
+                .strip_prefix("hummock+")
+                .expect("object store must be hummock for compactor server"),
+            true,
+        )
+        .await,
+    );
+    let local_object_store =
+        Arc::new(parse_object_store(get_local_object_store(&storage_config).as_str(), false).await);
     let sstable_store = Arc::new(SstableStore::new(
-        object_store,
+        remote_object_store,
+        local_object_store,
         storage_config.data_directory.to_string(),
         state_store_stats.clone(),
         storage_config.block_cache_capacity,

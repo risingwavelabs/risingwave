@@ -39,7 +39,6 @@ pub mod local_version_manager;
 pub mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
-mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
@@ -51,11 +50,11 @@ mod vacuum;
 pub mod value;
 pub use cache::{CachableEntry, LookupResult, LruCache};
 pub use error::*;
+pub use sstable::sstable_store::*;
 use value::*;
 
 use self::iterator::HummockIterator;
 use self::key::user_key;
-pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::local_version_manager::LocalVersionManager;

@@ -24,7 +24,7 @@ use rand::thread_rng;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId};
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, LevelEntry, LevelType, SstableInfo,
     TableSetStatistics,
@@ -150,10 +150,10 @@ impl CompactStatus {
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
-        let ord_table_id = |x: u64, y: u64| {
+        let ord_table_id = |x: HummockSSTableId, y: HummockSSTableId| {
             if x == y {
                 Ordering::Equal
-            } else if y.wrapping_sub(x) <= u64::MAX / 2 {
+            } else if y.wrapping_sub(x) <= HummockSSTableId::MAX / 2 {
                 Ordering::Less
             } else {
                 Ordering::Greater

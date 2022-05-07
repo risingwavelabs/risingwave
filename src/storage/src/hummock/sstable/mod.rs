@@ -29,8 +29,10 @@ use bytes::{Buf, BufMut};
 pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+pub mod sstable_store;
 mod utils;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -45,12 +47,12 @@ const VERSION: u32 = 1;
 #[derive(Clone, Debug)]
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
-    pub id: u64,
+    pub id: HummockSSTableId,
     pub meta: SstableMeta,
 }
 
 impl Sstable {
-    pub fn new(id: u64, meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
         Self { id, meta }
     }
 

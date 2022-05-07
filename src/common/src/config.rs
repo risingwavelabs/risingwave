@@ -14,6 +14,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -136,6 +137,31 @@ pub struct StorageConfig {
     /// Capacity of sstable meta cache.
     #[serde(default = "default::meta_cache_capacity")]
     pub meta_cache_capacity: usize,
+
+    /// Local object store root. We should call `get_local_object_store` to get the object store.
+    #[serde(default = "default::local_object_store_root")]
+    pub local_object_store_root: String,
+}
+
+pub fn get_local_object_store(config: &StorageConfig) -> String {
+    // If we use disk object store as local object store, we should assign a new directory for every
+    // time we restart. Here we assign the millisecond timestamp as the directory name.
+    if let Some(disk_object_store_root) = config.local_object_store_root.strip_prefix("disk://") {
+        let mut path = PathBuf::from(disk_object_store_root);
+        path.push(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("should be able to get timestamp")
+                .as_millis()
+                .to_string(),
+        );
+        "disk://".to_string()
+            + path
+                .to_str()
+                .expect("should be able to convert path to str")
+    } else {
+        config.local_object_store_root.clone()
+    }
 }
 
 impl Default for StorageConfig {
@@ -231,6 +257,10 @@ mod default {
     pub fn meta_cache_capacity() -> usize {
         // 64 MB
         67108864
+    }
+
+    pub fn local_object_store_root() -> String {
+        "disk:///tmp/risingwave/".to_string()
     }
 }
 

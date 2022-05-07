@@ -16,14 +16,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
-use futures::stream::{self, StreamExt};
-use futures::Future;
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{is_remote_sst_id, VersionedComparator};
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
@@ -36,10 +35,10 @@ use super::iterator::{
 };
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use super::sstable_store::SstableStoreRef;
-use super::{HummockError, HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use crate::hummock::sstable::sstable_store::SstableStoreRef;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{InMemSstableWriter, SSTableBuilderOptions, SstableWriter};
+use crate::hummock::{HummockError, SSTableBuilderOptions, WriteCachePolicy};
 use crate::monitor::StateStoreMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
@@ -87,6 +86,7 @@ impl Compactor {
         context: Arc<CompactorContext>,
         buffers: Vec<SharedBufferBatch>,
         stats: Arc<StateStoreMetrics>,
+        is_local: bool,
     ) -> HummockResult<Vec<Sstable>> {
         let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();
         start_user_keys.sort();
@@ -140,7 +140,40 @@ impl Compactor {
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
-                compactor.compact_key_range(split_index, iter).await
+                let builder = CapacitySplitTableBuilder::new(Box::new({
+                    let sstable_store = compactor.context.sstable_store.clone();
+                    let meta_client = compactor.context.hummock_meta_client.clone();
+                    let options = compactor.context.options.clone();
+                    move || {
+                        let sstable_store = sstable_store.clone();
+                        let meta_client = meta_client.clone();
+                        let options = options.clone();
+                        async move {
+                            let table_id = if is_local {
+                                sstable_store.get_next_local_sst_id()
+                            } else {
+                                meta_client
+                                    .get_new_table_id()
+                                    .await
+                                    .map_err(HummockError::meta_error)?
+                            };
+                            debug_assert_eq!(is_local, !is_remote_sst_id(table_id));
+                            let builder = SSTableBuilder::new(
+                                SSTableBuilderOptions::from_storage_config(&options),
+                                sstable_store
+                                    // TODO: may want to adjust the write cache policy for different
+                                    // object stores.
+                                    .new_sstable_writer(table_id, WriteCachePolicy::FillOnSuccess)
+                                    .await?,
+                            );
+                            Ok((table_id, builder))
+                        }
+                        .boxed()
+                    }
+                }));
+                compactor
+                    .compact_key_range(split_index, iter, builder)
+                    .await
             }));
         }
 
@@ -194,7 +227,35 @@ impl Compactor {
             let compactor = compactor.clone();
             compaction_futures.push(tokio::spawn(async move {
                 let merge_iter = compactor.build_sst_iter().await?;
-                compactor.compact_key_range(split_index, merge_iter).await
+                let builder = CapacitySplitTableBuilder::new(Box::new({
+                    let sstable_store = compactor.context.sstable_store.clone();
+                    let meta_client = compactor.context.hummock_meta_client.clone();
+                    let options = compactor.context.options.clone();
+                    move || {
+                        let sstable_store = sstable_store.clone();
+                        let meta_client = meta_client.clone();
+                        let options = options.clone();
+                        async move {
+                            let table_id = meta_client
+                                .get_new_table_id()
+                                .await
+                                .map_err(HummockError::meta_error)?;
+                            debug_assert!(is_remote_sst_id(table_id));
+                            let builder = SSTableBuilder::new(
+                                SSTableBuilderOptions::from_storage_config(&options),
+                                sstable_store
+                                    // For remote compaction we won't add data to cache.
+                                    .new_sstable_writer(table_id, WriteCachePolicy::Disable)
+                                    .await?,
+                            );
+                            Ok((table_id, builder))
+                        }
+                        .boxed()
+                    }
+                }));
+                compactor
+                    .compact_key_range(split_index, merge_iter, builder)
+                    .await
             }));
         }
 
@@ -275,6 +336,7 @@ impl Compactor {
         &self,
         split_index: usize,
         iter: MergeIterator,
+        mut builder: CapacitySplitTableBuilder,
     ) -> HummockResult<(usize, Vec<Sstable>)> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -282,22 +344,6 @@ impl Compactor {
             right: Bytes::copy_from_slice(split.get_right()),
             inf: split.get_inf(),
         };
-
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = self
-                .context
-                .hummock_meta_client
-                .get_new_table_id()
-                .await
-                .map_err(HummockError::meta_error)?;
-            let builder = SSTableBuilder::new(
-                SSTableBuilderOptions::from_storage_config(&self.context.options),
-                InMemSstableWriter::new(self.context.options.sstable_size as usize),
-                false,
-            );
-            Ok((table_id, builder))
-        });
 
         // Monitor time cost building shared buffer to SSTs.
         let build_l0_sst_timer = if self.context.is_share_buffer_compact {
@@ -317,30 +363,18 @@ impl Compactor {
             timer.observe_duration();
         }
 
-        let mut ssts: Vec<Sstable> = Vec::new();
-        ssts.reserve(builder.len());
-        // TODO: decide upload concurrency
-        for (table_id, output) in builder.finish().await? {
-            let sst = Sstable {
-                id: table_id,
-                meta: output.meta,
-            };
-            let len = self
-                .context
-                .sstable_store
-                .put(&sst, output.writer_output, super::CachePolicy::Fill)
-                .await?;
+        let ssts = builder.finish().await?;
 
-            if self.context.is_share_buffer_compact {
-                self.context
-                    .stats
-                    .shared_buffer_to_sstable_size
-                    .observe(len as _);
-            } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
-            }
-
-            ssts.push(sst);
+        if self.context.is_share_buffer_compact {
+            self.context
+                .stats
+                .shared_buffer_to_sstable_size
+                .observe(ssts.iter().map(|sst| sst.meta.estimated_size).sum::<u32>() as _);
+        } else {
+            self.context
+                .stats
+                .compaction_upload_sst_counts
+                .inc_by(ssts.len() as _);
         }
 
         Ok((split_index, ssts))
@@ -390,14 +424,14 @@ impl Compactor {
         Ok(MergeIterator::new(table_iters, self.context.stats.clone()))
     }
 
-    pub async fn try_vacuum(
+    pub async fn try_vacuum_remote(
         vacuum_task: Option<VacuumTask>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         if let Some(vacuum_task) = vacuum_task {
             tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
-            match Vacuum::vacuum(
+            match Vacuum::vacuum_remote(
                 sstable_store.clone(),
                 vacuum_task,
                 hummock_meta_client.clone(),
@@ -485,7 +519,7 @@ impl Compactor {
                                 Compactor::compact(compactor_context.clone(), compact_task).await;
                             }
 
-                            Compactor::try_vacuum(
+                            Compactor::try_vacuum_remote(
                                 vacuum_task,
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),
@@ -508,17 +542,13 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F, W: SstableWriter>(
-        sst_builder: &mut CapacitySplitTableBuilder<B, W>,
+    async fn compact_and_build_sst(
+        sst_builder: &mut CapacitySplitTableBuilder,
         kr: KeyRange,
         mut iter: MergeIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
-    ) -> HummockResult<()>
-    where
-        B: FnMut() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder<W>)>>,
-    {
+    ) -> HummockResult<()> {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
         } else {

@@ -20,7 +20,6 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::hummock::HummockStorage;
 use crate::storage_value::StorageValue;
@@ -40,17 +39,16 @@ async fn test_failpoint_state_store_read_upload() {
         worker_node.id,
     ));
 
-    let local_version_manager = Arc::new(LocalVersionManager::new());
-
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        local_version_manager.clone(),
         meta_client.clone(),
         Arc::new(crate::monitor::StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
+
+    let local_version_manager = hummock_storage.local_version_manager().clone();
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![

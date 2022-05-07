@@ -23,7 +23,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
+    get_remote_sst_id, HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId,
+    HummockVersionId,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
@@ -850,12 +851,13 @@ where
 
     pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         // TODO id_gen_manager generates u32, we need u64
-        let sstable_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::HummockSSTableId }>()
-            .await
-            .map(|id| id as HummockSSTableId)?;
+        let sstable_id = get_remote_sst_id(
+            self.env
+                .id_gen_manager()
+                .generate::<{ IdCategory::HummockSSTableId }>()
+                .await
+                .map(|id| id as HummockSSTableId)?,
+        );
 
         let mut versioning_guard = self.versioning.write().await;
         let new_sst_id_info = SstableIdInfo {

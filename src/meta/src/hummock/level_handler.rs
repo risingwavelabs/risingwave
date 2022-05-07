@@ -23,7 +23,7 @@ use risingwave_pb::hummock::SstableInfo;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SSTableInfo {
     pub key_range: KeyRange,
-    pub table_id: u64,
+    pub table_id: HummockSSTableId,
 }
 
 impl From<&SstableInfo> for SSTableInfo {

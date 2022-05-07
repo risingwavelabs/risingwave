@@ -94,7 +94,7 @@ impl SharedBufferUploader {
         loop {
             match self.run_inner().await {
                 Ok(()) => return Ok(()),
-                Err(e) => error!("error raised in shared buffer uploader: {}", e),
+                Err(e) => error!("error raised in shared buffer uploader: {:?}", e),
             }
         }
     }
@@ -169,6 +169,7 @@ impl SharedBufferUploader {
             Arc::new(mem_compactor_ctx),
             batches.clone(),
             self.stats.clone(),
+            false,
         )
         .await?;
 
