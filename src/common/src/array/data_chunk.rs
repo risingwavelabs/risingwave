@@ -746,23 +746,22 @@ mod tests {
             }
 
             let total_size = num_chunks * chunk_size;
-            let (head_remainder_size, remainder_chunk_size, mut chunk_sizes) = if chunk_size > 0
-                && total_size > 0
-            {
-                if head_chunk_size >= total_size {
-                    (0, 0, vec![total_size])
+            let (head_remainder_size, remainder_chunk_size, mut chunk_sizes) =
+                if chunk_size > 0 && total_size > 0 {
+                    if head_chunk_size >= total_size {
+                        (0, 0, vec![total_size])
+                    } else {
+                        let head_remainder_size =
+                            (chunk_size - head_chunk_size % chunk_size) % chunk_size;
+                        (
+                            head_remainder_size,
+                            (total_size - head_remainder_size - head_chunk_size) / chunk_size,
+                            vec![head_chunk_size],
+                        )
+                    }
                 } else {
-                    let head_remainder_size =
-                        (chunk_size - head_chunk_size % chunk_size) % chunk_size;
-                    (
-                        head_remainder_size,
-                        (total_size - head_remainder_size - head_chunk_size) / chunk_size,
-                        vec![head_chunk_size],
-                    )
-                }
-            } else {
-                (0, 0, vec![])
-            };
+                    (0, 0, vec![])
+                };
             if head_remainder_size > 0 {
                 chunk_sizes.push(head_remainder_size);
             }
