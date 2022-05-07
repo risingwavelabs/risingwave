@@ -106,7 +106,7 @@ impl ConflictDetector {
     }
 
     /// Archives an epoch. An archived epoch cannot be written anymore.
-    pub fn archive_epoch(&self, epoch: HummockEpoch , is_first : bool) {
+    pub fn archive_epoch(&self, epoch: HummockEpoch, is_first: bool) {
         assert!(
             self.epoch_set.insert(epoch),
             "epoch has been archived: epoch is {}",
@@ -114,7 +114,7 @@ impl ConflictDetector {
         );
         self.epoch_history.remove(&epoch);
 
-        if is_first{
+        if is_first {
             self.epoch_set.retain(|x| x > &epoch);
             self.set_watermark(epoch);
         }
@@ -195,7 +195,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233,true);
+        detector.archive_epoch(233, true);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -220,7 +220,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233,true);
+        detector.archive_epoch(233, true);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -245,7 +245,7 @@ mod test {
             233,
         );
         assert!(!detector.epoch_history.get(&233).unwrap().is_empty());
-        detector.archive_epoch(233,true);
+        detector.archive_epoch(233, true);
         assert!(detector.epoch_history.get(&233).is_none());
     }
 
@@ -262,7 +262,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233,true);
+        detector.archive_epoch(233, true);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -275,15 +275,15 @@ mod test {
     }
 
     #[test]
-    fn test_write_without_ord(){
+    fn test_write_without_ord() {
         let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
                 HummockValue::Delete(Default::default()),
             ))
-                .collect_vec()
-                .as_slice(),
+            .collect_vec()
+            .as_slice(),
             1,
         );
         detector.check_conflict_and_track_write_batch(
@@ -291,37 +291,37 @@ mod test {
                 Bytes::from("key2"),
                 HummockValue::Delete(Default::default()),
             ))
-                .collect_vec()
-                .as_slice(),
+            .collect_vec()
+            .as_slice(),
             2,
         );
-        detector.archive_epoch(2,false);
+        detector.archive_epoch(2, false);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key4"),
                 HummockValue::Delete(Default::default()),
             ))
-                .collect_vec()
-                .as_slice(),
+            .collect_vec()
+            .as_slice(),
             1,
         );
-        detector.archive_epoch(1,true);
-        assert_eq!(1,detector.epoch_watermark);
-        detector.archive_epoch(3,true);
-        assert_eq!(3,detector.epoch_watermark);
+        detector.archive_epoch(1, true);
+        assert_eq!(1, detector.epoch_watermark);
+        detector.archive_epoch(3, true);
+        assert_eq!(3, detector.epoch_watermark);
     }
 
     #[test]
     #[should_panic]
-    fn test_write_confilct_without_ord(){
+    fn test_write_confilct_without_ord() {
         let detector = ConflictDetector::default();
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
                 HummockValue::Delete(Default::default()),
             ))
-                .collect_vec()
-                .as_slice(),
+            .collect_vec()
+            .as_slice(),
             1,
         );
         detector.check_conflict_and_track_write_batch(
@@ -329,19 +329,19 @@ mod test {
                 Bytes::from("key2"),
                 HummockValue::Delete(Default::default()),
             ))
-                .collect_vec()
-                .as_slice(),
+            .collect_vec()
+            .as_slice(),
             2,
         );
-        detector.archive_epoch(2,false);
+        detector.archive_epoch(2, false);
 
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key4"),
                 HummockValue::Delete(Default::default()),
             ))
-                .collect_vec()
-                .as_slice(),
+            .collect_vec()
+            .as_slice(),
             2,
         );
     }
