@@ -202,7 +202,7 @@ impl HummockStorage {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_with_vnode_set<'a>(
+    pub async fn get_with_vnode_set<'a>(
         &'a self,
         key: &'a [u8],
         epoch: u64,
