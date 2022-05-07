@@ -129,8 +129,8 @@ impl<S: StateStore> StateTable<S> {
 pub struct StateTableRowIter<'a, S: StateStore> {
     mem_table_iter: Peekable<MemTableIter<'a>>,
     cell_based_streaming_iter: CellBasedTableStreamingIter<S>,
-    /// The result of the last cell_based_streaming_iter next is saved， which can avoid being
-    /// discarded
+    /// The result of the last cell_based_streaming_iter next is saved, which can avoid being
+    /// discarded.
     cell_based_item: Option<(Vec<u8>, Row)>,
     order_types: Vec<OrderType>,
 }
@@ -145,7 +145,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         epoch: u64,
     ) -> StorageResult<StateTableRowIter<'a, S>> {
         let cell_based_streaming_iter =
-            CellBasedTableStreamingIter::new(&keyspace, table_descs, epoch).await?;
+            CellBasedTableStreamingIter::new(&keyspace, &table_descs, epoch).await?;
         let state_table_iter = Self {
             mem_table_iter,
             cell_based_streaming_iter,
