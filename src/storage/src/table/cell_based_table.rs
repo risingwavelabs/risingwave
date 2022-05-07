@@ -289,17 +289,11 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
-    pub async fn short_term_iter(
+    pub async fn streaming_iter(
         &self,
         epoch: u64,
-    ) -> StorageResult<CellBasedTableShortTermIter<S>> {
-        CellBasedTableShortTermIter::new(
-            &self.keyspace,
-            self.column_descs.clone(),
-            epoch,
-            self.stats.clone(),
-        )
-        .await
+    ) -> StorageResult<CellBasedTableStreamingIter<S>> {
+        CellBasedTableStreamingIter::new(&self.keyspace, self.column_descs.clone(), epoch).await
     }
 
     pub fn schema(&self) -> &Schema {
@@ -471,34 +465,30 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     }
 }
 
-pub struct CellBasedTableShortTermIter<S: StateStore> {
+/// "`CellBasedTableStreamingIter`" used for streaming executor, and will not wait epoch
+pub struct CellBasedTableStreamingIter<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
-    /// Statistics
-    _stats: Arc<StateStoreMetrics>,
 }
 
-impl<S: StateStore> CellBasedTableShortTermIter<S> {
+impl<S: StateStore> CellBasedTableStreamingIter<S> {
     pub async fn new(
         keyspace: &Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
-        _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
-        keyspace.state_store().wait_epoch(epoch).await?;
-
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
         let iter = keyspace.iter(epoch).await?;
         let iter = Self {
             iter,
             cell_based_row_deserializer,
-            _stats,
         };
         Ok(iter)
     }
 
+    /// return a row with its pk
     pub async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {

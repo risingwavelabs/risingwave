@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#![allow(dead_code)]
 use std::cmp::Ordering;
 use std::collections::btree_map::Iter;
 use std::iter::Peekable;
@@ -23,7 +22,7 @@ use risingwave_common::error::RwError;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use super::cell_based_table::{CellBasedTable, CellBasedTableShortTermIter};
+use super::cell_based_table::{CellBasedTable, CellBasedTableStreamingIter};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
@@ -120,18 +119,20 @@ impl<S: StateStore> StateTable<S> {
             mem_table_iter,
             self.order_types.clone(),
             epoch,
-            Arc::new(StateStoreMetrics::unused()),
         )
         .await
     }
 }
 
+/// `StateTableRowIter` is able to read the just written data (uncommited data).
+/// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`
 pub struct StateTableRowIter<'a, S: StateStore> {
     mem_table_iter: Peekable<MemTableIter<'a>>,
-    cell_based_iter: CellBasedTableShortTermIter<S>,
-    cell_basde_item: Option<(Vec<u8>, Row)>,
+    cell_based_streaming_iter: CellBasedTableStreamingIter<S>,
+    /// The result of the last cell_based_streaming_iter next is saved， which can avoid being
+    /// discarded
+    cell_based_item: Option<(Vec<u8>, Row)>,
     order_types: Vec<OrderType>,
-    keyspace: Keyspace<S>,
 }
 type MemTableIter<'a> = Iter<'a, Row, RowOp>;
 
@@ -142,16 +143,14 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         mem_table_iter: Peekable<MemTableIter<'a>>,
         order_types: Vec<OrderType>,
         epoch: u64,
-        stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<StateTableRowIter<'a, S>> {
-        let cell_based_iter =
-            CellBasedTableShortTermIter::new(&keyspace, table_descs, epoch, stats).await?;
+        let cell_based_streaming_iter =
+            CellBasedTableStreamingIter::new(&keyspace, table_descs, epoch).await?;
         let state_table_iter = Self {
             mem_table_iter,
-            cell_based_iter,
-            cell_basde_item: None,
+            cell_based_streaming_iter,
+            cell_based_item: None,
             order_types,
-            keyspace,
         };
 
         Ok(state_table_iter)
@@ -159,12 +158,12 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
         let cell_based_item;
-        match &self.cell_basde_item {
-            Some(last_cell_based_item) => {
-                cell_based_item = Some(last_cell_based_item.clone());
-                self.cell_basde_item = self.cell_based_iter.next().await?;
+        match &self.cell_based_item {
+            Some(remained_cell_based_item) => {
+                cell_based_item = Some(remained_cell_based_item.clone());
+                self.cell_based_item = self.cell_based_streaming_iter.next().await?;
             }
-            None => cell_based_item = self.cell_based_iter.next().await?,
+            None => cell_based_item = self.cell_based_streaming_iter.next().await?,
         }
 
         let mut mem_table_iter_next_flag = false;
@@ -185,8 +184,6 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 }
             }
             (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
-                println!("cell_based_pk: {:?}", cell_based_pk);
-                println!("mem_table_pk: {:?}", mem_table_pk);
                 let pk_serializer = OrderedRowSerializer::new(self.order_types.clone());
                 let mem_table_pk_bytes = serialize_pk(mem_table_pk, &pk_serializer).map_err(err)?;
                 match cell_based_pk.cmp(&mem_table_pk_bytes) {
@@ -204,7 +201,9 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                         }
                     }
                     Ordering::Greater => {
-                        self.cell_basde_item = Some((cell_based_pk, cell_based_row));
+                        // mem_table_item will be return, while cell_based_item need to be saved and
+                        // will be used in following next()
+                        self.cell_based_item = Some((cell_based_pk, cell_based_row));
                         mem_table_iter_next_flag = true;
                         match mem_table_row_op {
                             RowOp::Insert(row) => res = Some(row.clone()),
