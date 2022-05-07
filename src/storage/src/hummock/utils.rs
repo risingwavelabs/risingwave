@@ -86,9 +86,7 @@ pub fn bitmap_overlap(pattern: &VNodeBitmap, sst_bitmaps: &Vec<VNodeBitmap>) -> 
     {
         let text = &sst_bitmaps[pos];
         let pattern_maplen = pattern.get_maplen();
-        if pattern_maplen != text.get_maplen() {
-            panic!();
-        }
+        assert_eq!(pattern_maplen, text.get_maplen());
         for i in 0..pattern_maplen as usize {
             if (pattern.get_bitmap()[i] & text.get_bitmap()[i]) != 0 {
                 return true;
