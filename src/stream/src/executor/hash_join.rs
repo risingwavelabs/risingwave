@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::RowExpression;
@@ -28,6 +28,7 @@ use super::error::StreamExecutorError;
 use super::managed_state::join::*;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
+use crate::executor::PROCESSING_WINDOW_SIZE;
 
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
@@ -284,16 +285,30 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         for msg in aligned_stream {
             match msg? {
                 AlignedMessage::Left(chunk) => {
-                    yield self
-                        .eq_join_oneside::<{ SideType::Left }>(chunk)
-                        .await
-                        .map_err(StreamExecutorError::hash_join_error)?;
+                    #[for_await]
+                    for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
+                        self.epoch,
+                        &mut self.side_l,
+                        &mut self.side_r,
+                        &self.output_data_types,
+                        &mut self.cond,
+                        chunk,
+                    ) {
+                        yield chunk.map_err(StreamExecutorError::hash_join_error)?;
+                    }
                 }
                 AlignedMessage::Right(chunk) => {
-                    yield self
-                        .eq_join_oneside::<{ SideType::Right }>(chunk)
-                        .await
-                        .map_err(StreamExecutorError::hash_join_error)?;
+                    #[for_await]
+                    for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
+                        self.epoch,
+                        &mut self.side_l,
+                        &mut self.side_r,
+                        &self.output_data_types,
+                        &mut self.cond,
+                        chunk,
+                    ) {
+                        yield chunk.map_err(StreamExecutorError::hash_join_error)?;
+                    }
                 }
                 AlignedMessage::Barrier(barrier) => {
                     self.flush_data()
@@ -366,11 +381,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         })
     }
 
-    async fn eq_join_oneside<const SIDE: SideTypePrimitive>(
-        &mut self,
+    #[try_stream(ok = Message, error = RwError)]
+    async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
+        epoch: u64,
+        mut side_l: &'a mut JoinSide<K, S>,
+        mut side_r: &'a mut JoinSide<K, S>,
+        output_data_types: &'a [DataType],
+        cond: &'a mut Option<RowExpression>,
         chunk: StreamChunk,
-    ) -> Result<Message> {
-        let epoch = self.epoch;
+    ) {
         let chunk = chunk.compact()?;
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -384,18 +403,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         };
 
         let (side_update, side_match) = if SIDE == SideType::Left {
-            (&mut self.side_l, &mut self.side_r)
+            (&mut side_l, &mut side_r)
         } else {
-            (&mut self.side_r, &mut self.side_l)
+            (&mut side_r, &mut side_l)
         };
 
-        // TODO: find a better capacity number, the actual array length
-        // is likely to be larger than the current capacity
-        let capacity = data_chunk.capacity();
-
         let mut stream_chunk_builder = StreamChunkBuilder::new(
-            capacity,
-            &self.output_data_types,
+            PROCESSING_WINDOW_SIZE,
+            output_data_types,
             side_update.start_pos,
             side_match.start_pos,
         )?;
@@ -423,9 +438,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             );
                             let mut cond_match = true;
                             // if there are non-equi expressions
-                            if let Some(ref mut cond) = self.cond {
+                            if let Some(ref mut cond) = cond {
                                 cond_match = Self::bool_from_array_ref(
-                                    cond.eval(&new_row, &self.output_data_types)?,
+                                    cond.eval(&new_row, output_data_types)?,
                                 );
                             }
                             if cond_match {
@@ -434,26 +449,34 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     // if the matched_row does not have any current matches
                                     stream_chunk_builder
                                         .append_row_matched(Op::UpdateDelete, &matched_row.row)?;
-                                    stream_chunk_builder.append_row(
+                                    if let Some(chunk) = stream_chunk_builder.append_row(
                                         Op::UpdateInsert,
                                         &row,
                                         &matched_row.row,
-                                    )?;
+                                    )? {
+                                        yield Message::Chunk(chunk);
+                                    }
                                 } else {
                                     // concat with the matched_row and append the new row
                                     // FIXME: we always use `Op::Delete` here to avoid violating
                                     // the assumption for U+ after U-.
-                                    stream_chunk_builder.append_row(
+                                    if let Some(chunk) = stream_chunk_builder.append_row(
                                         Op::Insert,
                                         &row,
                                         &matched_row.row,
-                                    )?;
+                                    )? {
+                                        yield Message::Chunk(chunk);
+                                    }
                                 }
                                 matched_row.inc_degree();
                             } else {
                                 // not matched
                                 if outer_side_keep(T, SIDE) {
-                                    stream_chunk_builder.append_row_update(*op, &row)?;
+                                    if let Some(chunk) =
+                                        stream_chunk_builder.append_row_update(*op, &row)?
+                                    {
+                                        yield Message::Chunk(chunk);
+                                    }
                                 }
                             }
                         }
@@ -474,9 +497,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                                 let mut cond_match = true;
                                 // if there are non-equi expressions
-                                if let Some(ref mut cond) = self.cond {
+                                if let Some(ref mut cond) = cond {
                                     cond_match = Self::bool_from_array_ref(
-                                        cond.eval(&new_row, &self.output_data_types)?,
+                                        cond.eval(&new_row, output_data_types)?,
                                     );
                                 }
                                 if cond_match {
@@ -487,25 +510,35 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                             &row,
                                             &matched_row.row,
                                         )?;
-                                        stream_chunk_builder.append_row_matched(
-                                            Op::UpdateInsert,
-                                            &matched_row.row,
-                                        )?;
+                                        if let Some(chunk) = stream_chunk_builder
+                                            .append_row_matched(
+                                                Op::UpdateInsert,
+                                                &matched_row.row,
+                                            )?
+                                        {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     } else {
                                         // concat with the matched_row and append the new row
                                         // FIXME: we always use `Op::Delete` here to avoid violating
                                         // the assumption for U+ after U-.
-                                        stream_chunk_builder.append_row(
+                                        if let Some(chunk) = stream_chunk_builder.append_row(
                                             Op::Delete,
                                             &row,
                                             &matched_row.row,
-                                        )?;
+                                        )? {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     }
                                     matched_row.dec_degree();
                                 } else {
                                     // not matched
                                     if outer_side_keep(T, SIDE) {
-                                        stream_chunk_builder.append_row_update(*op, &row)?;
+                                        if let Some(chunk) =
+                                            stream_chunk_builder.append_row_update(*op, &row)?
+                                        {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     }
                                 }
                             }
@@ -530,14 +563,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 };
                 // if it's outer join and the side needs maintained.
                 if outer_side_keep(T, SIDE) {
-                    stream_chunk_builder.append_row_update(*op, &row)?;
+                    if let Some(chunk) = stream_chunk_builder.append_row_update(*op, &row)? {
+                        yield Message::Chunk(chunk);
+                    }
                 }
             }
         }
 
-        let new_chunk = stream_chunk_builder.finish()?;
-
-        Ok(Message::Chunk(new_chunk))
+        if let Some(chunk) = stream_chunk_builder.take()? {
+            yield Message::Chunk(chunk);
+        }
     }
 }
 
