@@ -225,6 +225,14 @@ impl LogicalJoin {
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
         Self::new(self.left.clone(), self.right.clone(), self.join_type, cond)
     }
+
+    pub fn is_left_join(&self) -> bool {
+        matches!(self.join_type(), JoinType::LeftSemi | JoinType::LeftAnti)
+    }
+
+    pub fn is_right_join(&self) -> bool {
+        matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti)
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -282,49 +290,58 @@ impl ColPrunable for LogicalJoin {
         let left_len = self.left.schema().fields.len();
 
         let total_len = self.left().schema().len() + self.right().schema().len();
-        let mut resized_required_cols = required_cols.clone();
-        resized_required_cols.grow(total_len);
+        let mut resized_required_cols = FixedBitSet::with_capacity(total_len);
 
-        let mut visitor = CollectInputRef::new(resized_required_cols);
+        required_cols.ones().for_each(|i| {
+            if self.is_right_join() {
+                resized_required_cols.insert(left_len + i);
+            } else {
+                resized_required_cols.insert(i);
+            }
+        });
+
+        let mut visitor = CollectInputRef::new(resized_required_cols.clone());
         self.on.visit_expr(&mut visitor);
-        let left_right_required_cols = visitor.collect();
+        let left_right_required_input_cols = visitor.collect();
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_input_cols);
         on = on.rewrite_expr(&mut mapping);
 
-        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
-        let mut right_required_cols =
+        let mut left_required_input_cols =
+            FixedBitSet::with_capacity(self.left.schema().fields().len());
+        let mut right_required_input_cols =
             FixedBitSet::with_capacity(self.right.schema().fields().len());
-        left_right_required_cols.ones().for_each(|i| {
+        left_right_required_input_cols.ones().for_each(|i| {
             if i < left_len {
-                left_required_cols.insert(i);
+                left_required_input_cols.insert(i);
             } else {
-                right_required_cols.insert(i - left_len);
+                right_required_input_cols.insert(i - left_len);
             }
         });
 
         let join = LogicalJoin::new(
-            self.left.prune_col(&left_required_cols),
-            self.right.prune_col(&right_required_cols),
+            self.left.prune_col(&left_required_input_cols),
+            self.right.prune_col(&right_required_input_cols),
             self.join_type,
             on,
         );
 
-        let internally_required_columns =
-            if matches!(self.join_type(), JoinType::LeftSemi | JoinType::LeftAnti) {
-                left_required_cols
-            } else if matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti) {
-                right_required_cols
-            } else {
-                left_right_required_cols
-            };
-        if required_cols == &internally_required_columns {
+        let required_input_cols_in_output = if self.is_left_join() {
+            left_required_input_cols
+        } else if self.is_right_join() {
+            right_required_input_cols
+        } else {
+            left_right_required_input_cols
+        };
+        if required_cols == &required_input_cols_in_output {
             join.into()
         } else {
+            let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
+            remaining_columns.extend(resized_required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols),
+                ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
         }
     }
@@ -544,6 +561,7 @@ mod tests {
             JoinType::LeftAnti,
             JoinType::RightAnti,
         ] {
+            println!("JOIN TYPE: {:?}", join_type);
             let join = LogicalJoin::new(
                 left.clone().into(),
                 right.clone().into(),
@@ -553,25 +571,20 @@ mod tests {
 
             // Perform the prune
             let mut required_cols = FixedBitSet::with_capacity(3);
-            required_cols.extend(vec![0, 1]);
+            required_cols.extend(vec![0]);
             // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has been wrapped in a projection
-            assert_eq!(
-                plan.to_string().split_whitespace().next(),
-                Some("LogicalProject")
-            );
+            plan.as_logical_project().unwrap();
 
+            println!("(ALL) JOIN TYPE: {:?}", join_type);
             // Perform the prune
             let mut required_cols = FixedBitSet::with_capacity(3);
             required_cols.extend(vec![0, 1, 2]);
             // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has not been wrapped in a projection
-            assert_eq!(
-                plan.to_string().split_whitespace().next(),
-                Some("LogicalJoin")
-            );
+            plan.as_logical_join().unwrap();
         }
     }
 
