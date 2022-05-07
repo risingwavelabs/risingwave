@@ -302,37 +302,37 @@ impl ColPrunable for LogicalJoin {
 
         let mut visitor = CollectInputRef::new(resized_required_cols.clone());
         self.on.visit_expr(&mut visitor);
-        let left_right_required_input_cols = visitor.collect();
+        let left_right_input_cols = visitor.collect();
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_input_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_input_cols);
         on = on.rewrite_expr(&mut mapping);
 
-        let mut left_required_input_cols =
+        let mut left_input_cols =
             FixedBitSet::with_capacity(self.left.schema().fields().len());
-        let mut right_required_input_cols =
+        let mut right_input_cols =
             FixedBitSet::with_capacity(self.right.schema().fields().len());
-        left_right_required_input_cols.ones().for_each(|i| {
+        left_right_input_cols.ones().for_each(|i| {
             if i < left_len {
-                left_required_input_cols.insert(i);
+                left_input_cols.insert(i);
             } else {
-                right_required_input_cols.insert(i - left_len);
+                right_input_cols.insert(i - left_len);
             }
         });
 
         let join = LogicalJoin::new(
-            self.left.prune_col(&left_required_input_cols),
-            self.right.prune_col(&right_required_input_cols),
+            self.left.prune_col(&left_input_cols),
+            self.right.prune_col(&right_input_cols),
             self.join_type,
             on,
         );
 
         let required_input_cols_in_output = if self.is_left_join() {
-            left_required_input_cols
+            left_input_cols
         } else if self.is_right_join() {
-            right_required_input_cols
+            right_input_cols
         } else {
-            left_right_required_input_cols.clone()
+            left_right_input_cols.clone()
         };
         if required_cols == &required_input_cols_in_output {
             join.into()
