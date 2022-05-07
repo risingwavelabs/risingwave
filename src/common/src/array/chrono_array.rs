@@ -12,186 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
-use std::mem::size_of;
-
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
-
-use crate::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
-};
-use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::Result;
-use crate::for_all_chrono_variants;
+use super::{PrimitiveArray, PrimitiveArrayBuilder};
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
-macro_rules! get_chrono_array {
-    ($( { $variant_name:ty, $chrono:ident, $array:ident, $builder:ident } ),*) => {
-        $(
-            #[derive(Debug)]
-            pub struct $array {
-                bitmap: Bitmap,
-                data: Vec<$variant_name>
-            }
+pub type NaiveDateArray = PrimitiveArray<NaiveDateWrapper>;
+pub type NaiveTimeArray = PrimitiveArray<NaiveTimeWrapper>;
+pub type NaiveDateTimeArray = PrimitiveArray<NaiveDateTimeWrapper>;
 
-            impl $array {
-                pub fn from_slice(data: &[Option<$variant_name>]) -> Result<Self> {
-                    let mut builder = <Self as Array>::Builder::new(data.len())?;
-                    for i in data {
-                        builder.append(*i)?;
-                    }
-                    builder.finish()
-                }
-            }
-
-            impl Array for $array {
-                type Builder = $builder;
-                type RefItem<'a> = $variant_name;
-                type OwnedItem = $variant_name;
-                type Iter<'a> = ArrayIterator<'a, Self>;
-
-                fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
-                    if !self.is_null(idx) {
-                        Some(self.data[idx])
-                    } else {
-                        None
-                    }
-                }
-
-                unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
-                    if !self.is_null_unchecked(idx) {
-                        Some(*self.data.get_unchecked(idx))
-                    } else {
-                        None
-                    }
-                }
-
-                fn len(&self) -> usize {
-                    self.data.len()
-                }
-
-                fn set_bitmap(&mut self, bitmap: Bitmap) {
-                    self.bitmap = bitmap;
-                }
-
-                fn iter(&self) -> Self::Iter<'_> {
-                    ArrayIterator::new(self)
-                }
-
-                fn to_protobuf(&self) -> ProstArray {
-                    let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<usize>());
-
-                    for v in self.iter() {
-                        v.map(|node| node.to_protobuf(&mut output_buffer));
-                    }
-
-                    let buffer = Buffer {
-                        compression: CompressionType::None as i32,
-                        body: output_buffer,
-                    };
-                    let null_bitmap = self.null_bitmap().to_protobuf();
-                    ProstArray {
-                        null_bitmap: Some(null_bitmap),
-                        values: vec![buffer],
-                        array_type: Self::get_array_type() as i32,
-                        struct_array_data: None,
-                        list_array_data: None,
-                    }
-                }
-
-                fn null_bitmap(&self) -> &Bitmap {
-                    &self.bitmap
-                }
-
-                fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-                    if !self.is_null(idx) {
-                        self.data[idx].hash(state);
-                    } else {
-                        NULL_VAL_FOR_HASH.hash(state);
-                    }
-                }
-
-                fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
-                    let array_builder = $builder::new(capacity)?;
-                    Ok(ArrayBuilderImpl::$chrono(array_builder))
-                }
-            }
-
-            #[derive(Debug)]
-            pub struct $builder {
-                bitmap: BitmapBuilder,
-                data: Vec<$variant_name>
-            }
-
-            impl ArrayBuilder for $builder {
-                type ArrayType = $array;
-
-                fn with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
-                    Ok(Self {
-                        bitmap: BitmapBuilder::with_capacity(capacity),
-                        data: Vec::with_capacity(capacity),
-                    })
-                }
-
-                fn append(&mut self, value: Option<$variant_name>) -> Result<()> {
-                    match value {
-                        Some(x) => {
-                            self.bitmap.append(true);
-                            self.data.push(x);
-                        }
-                        None => {
-                            self.bitmap.append(false);
-                            self.data.push(<$variant_name>::default())
-                        }
-                    }
-                    Ok(())
-                }
-
-                fn append_array(&mut self, other: &Self::ArrayType) -> Result<()> {
-                    for bit in other.bitmap.iter() {
-                        self.bitmap.append(bit);
-                    }
-                    self.data.extend_from_slice(&other.data);
-                    Ok(())
-                }
-
-                fn finish(mut self) -> Result<Self::ArrayType> {
-                    Ok(Self::ArrayType {
-                        bitmap: self.bitmap.finish(),
-                        data: self.data,
-                    })
-                }
-            }
-        )*
-    };
-}
-
-for_all_chrono_variants! { get_chrono_array }
-
-impl NaiveDateArray {
-    fn get_array_type() -> ArrayType {
-        ArrayType::Date
-    }
-}
-
-impl NaiveDateTimeArray {
-    fn get_array_type() -> ArrayType {
-        ArrayType::Timestamp
-    }
-}
-
-impl NaiveTimeArray {
-    fn get_array_type() -> ArrayType {
-        ArrayType::Time
-    }
-}
+pub type NaiveDateArrayBuilder = PrimitiveArrayBuilder<NaiveDateWrapper>;
+pub type NaiveTimeArrayBuilder = PrimitiveArrayBuilder<NaiveTimeWrapper>;
+pub type NaiveDateTimeArrayBuilder = PrimitiveArrayBuilder<NaiveDateTimeWrapper>;
 
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
 
     use super::*;
+    use crate::array::{Array, ArrayBuilder};
 
     #[test]
     fn test_naivedate_builder() {

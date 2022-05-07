@@ -10,11 +10,16 @@ make docker
 
 in the project root.
 
-To start a RisingWave playground, run
+To ensure you are using the latest version of RisingWave image,
 
 ```
 # Ensure risingwave image is of latest version
 docker pull ghcr.io/singularity-data/risingwave:latest
+```
+
+To start a RisingWave playground, run
+
+```
 # Start playground
 docker run -it ghcr.io/singularity-data/risingwave:latest
 ```
@@ -22,13 +27,11 @@ docker run -it ghcr.io/singularity-data/risingwave:latest
 To start a RisingWave cluster, run
 
 ```
-# Ensure risingwave image is of latest version
-docker pull ghcr.io/singularity-data/risingwave:latest
 # Start all components
 docker-compose up
 ```
 
-It will start a minio, a meta node, a compute node, a frontend, a compactor and a redpanda instance.
+It will start a minio, a meta node, a compute node, a frontend, a compactor, a prometheus and a redpanda instance.
 
 To clean all data, run:
 
