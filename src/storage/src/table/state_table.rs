@@ -23,7 +23,7 @@ use risingwave_common::error::RwError;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use super::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+use super::cell_based_table::{CellBasedTable, CellBasedTableShortTermIter};
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
@@ -128,7 +128,7 @@ impl<S: StateStore> StateTable<S> {
 
 pub struct StateTableRowIter<'a, S: StateStore> {
     mem_table_iter: Peekable<MemTableIter<'a>>,
-    cell_based_iter: CellBasedTableRowIter<S>,
+    cell_based_iter: CellBasedTableShortTermIter<S>,
     cell_basde_item: Option<(Vec<u8>, Row)>,
     order_types: Vec<OrderType>,
     keyspace: Keyspace<S>,
@@ -145,7 +145,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<StateTableRowIter<'a, S>> {
         let cell_based_iter =
-            CellBasedTableRowIter::new(keyspace.clone(), table_descs, epoch, stats).await?;
+            CellBasedTableShortTermIter::new(&keyspace, table_descs, epoch, stats).await?;
         let state_table_iter = Self {
             mem_table_iter,
             cell_based_iter,
@@ -162,9 +162,9 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         match &self.cell_basde_item {
             Some(last_cell_based_item) => {
                 cell_based_item = Some(last_cell_based_item.clone());
-                self.cell_basde_item = self.cell_based_iter.next_with_pk().await?;
+                self.cell_basde_item = self.cell_based_iter.next().await?;
             }
-            None => cell_based_item = self.cell_based_iter.next_with_pk().await?,
+            None => cell_based_item = self.cell_based_iter.next().await?,
         }
 
         let mut mem_table_iter_next_flag = false;
@@ -185,10 +185,11 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 }
             }
             (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
+                println!("cell_based_pk: {:?}", cell_based_pk);
+                println!("mem_table_pk: {:?}", mem_table_pk);
                 let pk_serializer = OrderedRowSerializer::new(self.order_types.clone());
                 let mem_table_pk_bytes = serialize_pk(mem_table_pk, &pk_serializer).map_err(err)?;
-                let mem_table_pk_with_prefix = self.keyspace.prefixed_key(mem_table_pk_bytes);
-                match cell_based_pk.cmp(&mem_table_pk_with_prefix) {
+                match cell_based_pk.cmp(&mem_table_pk_bytes) {
                     Ordering::Less => {
                         res = Some(cell_based_row);
                     }
