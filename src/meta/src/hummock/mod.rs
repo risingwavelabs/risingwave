@@ -13,9 +13,9 @@
 // limitations under the License.
 
 mod compaction;
-mod compaction_group;
 mod compaction_scheduler;
 mod compactor_manager;
+pub mod error;
 mod hummock_manager;
 #[cfg(test)]
 mod hummock_manager_tests;
@@ -26,6 +26,7 @@ pub mod mock_hummock_meta_client;
 mod model;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
+mod utils;
 mod vacuum;
 
 use std::sync::Arc;
@@ -41,8 +42,8 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
-use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::compaction_scheduler::CompactionSchedulerRef;
+use crate::hummock::utils::RetryableError;
 use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
 
@@ -97,18 +98,24 @@ where
                 }
             };
             compactor_manager.remove_compactor(worker_node.id);
+
+            // Retry only happens when meta store is undergoing failure.
             let retry_strategy = ExponentialBackoff::from_millis(10)
                 .max_delay(Duration::from_secs(60))
                 .map(jitter);
-            tokio_retry::Retry::spawn(retry_strategy, || async {
-                if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
-                    tracing::warn!("Failed to release_contexts {}. Will retry.", err);
-                    return Err(err);
-                }
-                Ok(())
-            })
+            tokio_retry::RetryIf::spawn(
+                retry_strategy,
+                || async {
+                    if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
+                        tracing::warn!("Failed to release_contexts {:?}. Will retry.", err);
+                        return Err(err);
+                    }
+                    Ok(())
+                },
+                RetryableError::default(),
+            )
             .await
-            .expect("Should retry until release_contexts succeeds");
+            .expect("release_contexts should always be retryable and eventually succeed.")
         }
     });
     (join_handle, shutdown_tx)
@@ -127,7 +134,7 @@ where
         let mut min_interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             min_interval.tick().await;
-            if request_sender.send(CompactionGroupId::new(0)).is_err() {
+            if request_sender.send(0.into()).is_err() {
                 tracing::info!("Stop periodic compaction trigger");
                 return;
             }

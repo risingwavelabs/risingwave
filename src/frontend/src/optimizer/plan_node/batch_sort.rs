@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::OrderByNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::Order;
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
@@ -66,5 +67,12 @@ impl ToBatchProst for BatchSort {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.base.order.to_protobuf(&self.base.schema);
         NodeBody::OrderBy(OrderByNode { column_orders })
+    }
+}
+
+impl ToLocalBatch for BatchSort {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local();
+        self.clone_with_input(new_input).into()
     }
 }

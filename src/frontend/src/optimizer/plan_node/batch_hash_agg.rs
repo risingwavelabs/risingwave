@@ -21,6 +21,7 @@ use risingwave_pb::batch_plan::HashAggNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::InputRefDisplay;
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -108,5 +109,12 @@ impl ToBatchProst for BatchHashAgg {
                 .map(|index| *index as u32)
                 .collect(),
         })
+    }
+}
+
+impl ToLocalBatch for BatchHashAgg {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local_with_order_required(Order::any());
+        self.clone_with_input(new_input).into()
     }
 }

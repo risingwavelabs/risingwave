@@ -148,11 +148,20 @@ message CompactTask {
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
   uint64 task_id = 5;
-  // compacion output will be added to [`target_level`] of LSM after compaction
+  // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool is_target_ultimate_and_leveling = 7;
   CompactMetrics metrics = 8;
   bool task_status = 9;
+  repeated CompactionGroup.PrefixPair prefix_pairs = 10;
+}
+
+message CompactionGroup {
+  message PrefixPair {
+    // key value with `prefix` belongs to compaction group `group_id`
+    uint64 group_id = 1;
+    bytes prefix = 2;
+  }
 }
 
 message LevelHandler {

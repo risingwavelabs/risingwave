@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::storage::MetaStore;
 
@@ -115,7 +115,7 @@ where
             }
             Err(err) => {
                 tracing::warn!(
-                    "Failed to get compact task for compactor {}. {}",
+                    "Failed to get compact task for compactor {}. {:#?}",
                     compactor.context_id(),
                     err
                 );
@@ -144,9 +144,13 @@ where
                     err
                 );
                 compact_task.task_status = false;
-                if let Err(err) = self.hummock_manager.report_compact_task(compact_task).await {
+                if let Err(err) = self
+                    .hummock_manager
+                    .report_compact_task(&compact_task)
+                    .await
+                {
                     tracing::warn!(
-                        "Failed to cancel compaction task for worker {}: {}",
+                        "Failed to cancel compaction task for worker {}: {:#?}",
                         compactor.context_id(),
                         err
                     );
@@ -170,7 +174,7 @@ where
     }
 
     fn reschedule_compaction_group(&self, compaction_group: CompactionGroupId) {
-        if let Err(err) = self.request_tx.send(compaction_group.clone()) {
+        if let Err(err) = self.request_tx.send(compaction_group) {
             tracing::warn!(
                 "Failed to schedule compaction_group {:?}: {}",
                 compaction_group,

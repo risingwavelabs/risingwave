@@ -68,6 +68,20 @@ pub trait ToBatch {
     }
 }
 
+/// Converts a batch physical plan to local plan for local execution.
+///
+/// This is quite similar to `ToBatch`, but different in several ways. For example it converts
+/// scan to exchange + scan.
+pub trait ToLocalBatch {
+    fn to_local(&self) -> PlanRef;
+
+    /// Convert the plan to batch local physical plan and satisfy the required Order
+    fn to_local_with_order_required(&self, required_order: &Order) -> PlanRef {
+        let ret = self.to_local();
+        required_order.enforce_if_not_satisfies(ret)
+    }
+}
+
 /// `ToDistributedBatch` allows to convert a batch physical plan to distributed batch plan, by
 /// insert exchange node, with an optional required order and distributed.
 ///
@@ -141,3 +155,18 @@ macro_rules! ban_to_distributed {
 }
 for_logical_plan_nodes! { ban_to_distributed }
 for_stream_plan_nodes! { ban_to_distributed }
+
+/// impl `ToLocalBatch`  for logical and streaming node.
+macro_rules! ban_to_local {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl ToLocalBatch for [<$convention $name>] {
+                fn to_local(&self) -> PlanRef {
+                    panic!("converting to distributed is only allowed on batch plan")
+                }
+            })*
+        }
+    }
+}
+for_logical_plan_nodes! { ban_to_local }
+for_stream_plan_nodes! { ban_to_local }
