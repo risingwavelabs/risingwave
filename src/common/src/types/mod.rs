@@ -142,6 +142,7 @@ impl DataType {
         })
     }
 
+    /// Transfer `scalar_type` to `data_type`.
     pub fn scalar_type_to_data_type(scalar: &ScalarImpl) -> Result<DataType> {
         let data_type = match &scalar {
             ScalarImpl::Int16(_) => DataType::Int16,
