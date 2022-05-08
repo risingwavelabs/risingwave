@@ -127,8 +127,6 @@ mod tests {
         generate_time_series_test_case(start_time, stop_time, one_minute_step).await;
         generate_time_series_test_case(start_time, stop_time, one_hour_step).await;
         generate_time_series_test_case(start_time, stop_time, one_day_step).await;
-        // generate_series_test_case(0, 9, 2).await;
-        // generate_series_test_case(0, (DEFAULT_CHUNK_BUFFER_SIZE * 2 + 3) as i32, 1).await;
     }
 
     async fn generate_time_series_test_case(start: NaiveDateTimeWrapper, stop: NaiveDateTimeWrapper, step: IntervalUnit) {
