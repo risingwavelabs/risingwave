@@ -16,8 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{
-    IntervalUnit,NaiveDateTimeWrapper};
+use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
 
 use super::{ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchGenerateSeries;
@@ -82,7 +81,7 @@ impl fmt::Display for LogicalGenerateSeries {
 // the leaf node don't need colprunable
 impl ColPrunable for LogicalGenerateSeries {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.into()
+        self.clone().into()
     }
 }
 

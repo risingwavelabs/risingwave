@@ -140,8 +140,8 @@ message GenerateInt32SeriesNode {
 }
 
 message GenerateTimeSeriesNode {
-  data.DataType start = 1;
-  data.DataType stop = 2;
+  string start = 1;
+  string stop = 2;
   data.IntervalUnit step = 3;
 }
 

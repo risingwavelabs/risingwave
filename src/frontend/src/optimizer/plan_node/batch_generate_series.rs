@@ -20,7 +20,6 @@ use risingwave_pb::batch_plan::GenerateTimeSeriesNode;
 use super::{
     LogicalGenerateSeries, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
@@ -66,8 +65,8 @@ impl ToDistributedBatch for BatchGenerateSeries {
 impl ToBatchProst for BatchGenerateSeries {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::GenerateTimeSeries(GenerateTimeSeriesNode {
-            start: Some(self.logical.start.to_protobuf()),
-            stop: Some(self.logical.stop.to_protobuf()),
+            start: self.logical.start.to_string(),
+            stop: self.logical.stop.to_string(),
             step: Some(self.logical.step.into()),
         })
     }
@@ -94,36 +93,22 @@ mod tests {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         // Values(1:I32)
         let plan = frontend
-            .to_batch_plan("values(1)")
+            .to_batch_plan(
+                "SELECT * FROM generate_series('2008-03-01 00:00:00',
+            '2008-03-04 12:00:00', interval '30' minute);",
+            )
             .await
             .unwrap()
             .to_batch_prost();
-        assert_eq!(
-            plan.get_node_body().unwrap().clone(),
-            NodeBody::Values(ValuesNode {
-                tuples: vec![ExprTuple {
-                    cells: vec![ExprNode {
-                        expr_type: ExprType::ConstantValue as i32,
-                        return_type: Some(DataType {
-                            type_name: TypeName::Int32 as i32,
-                            is_nullable: true,
-                            ..Default::default()
-                        }),
-                        rex_node: Some(RexNode::Constant(ConstantValue {
-                            body: 1_i32.to_be_bytes().to_vec()
-                        }))
-                    }]
-                }],
-                fields: vec![Field {
-                    data_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        is_nullable: true,
-                        ..Default::default()
-                    }),
-                    name: "".to_string(),
-                }],
-            })
-        );
+        dbg!(&plan);
+        // assert_eq!(
+        //     plan.get_node_body().unwrap().clone(),
+        //     NodeBody::GenerateTimeSeries(GenerateTimeSeriesNode {
+        //         start:
+        //         stop:
+
+        //     })
+        // );
     }
 }
 

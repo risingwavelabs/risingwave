@@ -16,6 +16,7 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
+use chrono::format::StrftimeItems;
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use crate::error::ErrorCode::{InternalError, IoError};
@@ -184,6 +185,18 @@ impl NaiveDateTimeWrapper {
         let secs = timestamp_micro / 1_000_000;
         let nsecs = (timestamp_micro % 1_000_000) as u32 * 1000;
         Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
+    }
+
+    pub fn parse_from_str(s: &str) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+        ))
+    }
+
+    pub fn to_string(&self) -> String {
+        let fmt = StrftimeItems::new("%Y-%m-%d %H:%M:%S");
+        format!("{}", self.0.format_with_items(fmt))
     }
 }
 

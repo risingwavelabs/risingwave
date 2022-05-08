@@ -34,10 +34,9 @@ impl Binder {
         self.push_context();
 
         // generate_series ( start timestamp, stop timestamp, step interval )
-        // step interval might be None
-        if args.len() < 2 || args.len() > 3 {
+        if args.len() != 3 {
             return Err(ErrorCode::BindError(
-                "the args of generate series funciton should be around 2 to 3".to_string(),
+                "the length of args of generate series funciton should be 3".to_string(),
             )
             .into());
         }

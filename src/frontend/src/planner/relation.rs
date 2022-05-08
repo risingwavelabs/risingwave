@@ -17,7 +17,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
@@ -95,29 +95,45 @@ impl Planner {
             DataType::Timestamp,
             "generate_series",
         )]);
-        let args = table_function.args.into_iter();
+        let mut args = table_function.args.into_iter();
+        let start;
+        let stop;
 
         let Some((ExprImpl::Literal(start_time), ExprImpl::Literal(stop_time),ExprImpl::Literal(step_interval))) = args.next_tuple() else {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
-        let Some(ScalarImpl::NaiveDateTime(start_time)) = *start_time.get_data() else {
+
+        if let Some(ScalarImpl::Utf8(start_time)) = &*start_time.get_data() {
+            dbg!(&start_time);
+            start = NaiveDateTimeWrapper::parse_from_str(&start_time)?;
+            dbg!(&start);
+        } else {
+            return Err(ErrorCode::BindError(
+                "Invalid arguments for Generate series function".to_string(),
+            )
+            .into());
+        };
+
+        if let Some(ScalarImpl::Utf8(stop_time)) = &*stop_time.get_data() {
+            dbg!(&stop_time);
+            stop = NaiveDateTimeWrapper::parse_from_str(&stop_time)?;
+            dbg!(&stop);
+        } else {
+            return Err(ErrorCode::BindError(
+                "Invalid arguments for Generate series functionn".to_string(),
+            )
+            .into());
+        };
+
+        let Some(ScalarImpl::Interval(step)) = *step_interval.get_data() else {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
-        let Some(ScalarImpl::NaiveDateTime(stop_time)) = *stop_time.get_data() else {
-            return Err(ErrorCode::BindError("Invalid arguments for Generate series functionn".to_string()).into());
-        };
-
-        let Some(ScalarImpl::Interval(step_interval)) = *step_interval.get_data() else {
-            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
-        };
-        dbg!(&start_time);
-        dbg!(&stop_time);
-        dbg!(&step_interval);
+        dbg!(&step);
         Ok(LogicalGenerateSeries::create(
-            start_time,
-            stop_time,
-            step_interval,
+            start,
+            stop,
+            step,
             schema,
             self.ctx(),
         ))
