@@ -31,7 +31,9 @@ mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+pub mod group_builder;
 mod utils;
+
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 
