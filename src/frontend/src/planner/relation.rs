@@ -104,9 +104,7 @@ impl Planner {
         };
 
         if let Some(ScalarImpl::Utf8(start_time)) = &*start_time.get_data() {
-            dbg!(&start_time);
-            start = NaiveDateTimeWrapper::parse_from_str(&start_time)?;
-            dbg!(&start);
+            start = NaiveDateTimeWrapper::parse_from_str(start_time)?;
         } else {
             return Err(ErrorCode::BindError(
                 "Invalid arguments for Generate series function".to_string(),
@@ -115,9 +113,7 @@ impl Planner {
         };
 
         if let Some(ScalarImpl::Utf8(stop_time)) = &*stop_time.get_data() {
-            dbg!(&stop_time);
-            stop = NaiveDateTimeWrapper::parse_from_str(&stop_time)?;
-            dbg!(&stop);
+            stop = NaiveDateTimeWrapper::parse_from_str(stop_time)?;
         } else {
             return Err(ErrorCode::BindError(
                 "Invalid arguments for Generate series functionn".to_string(),
@@ -129,7 +125,6 @@ impl Planner {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
-        dbg!(&step);
         Ok(LogicalGenerateSeries::create(
             start,
             stop,

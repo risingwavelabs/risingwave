@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::Field;
 use risingwave_common::error::ErrorCode;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
@@ -29,9 +31,7 @@ impl Binder {
         &mut self,
         args: Vec<FunctionArg>,
     ) -> Result<BoundGenerateSeriesFunction> {
-        let mut args = args.into_iter();
-
-        self.push_context();
+        let args = args.into_iter();
 
         // generate_series ( start timestamp, stop timestamp, step interval )
         if args.len() != 3 {
@@ -41,15 +41,23 @@ impl Binder {
             .into());
         }
         // Todo(d2lark) check 2 or 3 args are same type
+        let columns = [(
+            false,
+            Field {
+                data_type: DataType::Timestamp,
+                name: "generate_series".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+            },
+        )]
+        .into_iter();
 
-        self.pop_context();
+        self.bind_context(columns, "generate_series".to_string(), None)?;
 
         let exprs: Vec<_> = args
             .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()
             .try_collect()?;
-
-        dbg!(&exprs);
 
         Ok(BoundGenerateSeriesFunction { args: exprs })
     }

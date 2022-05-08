@@ -43,7 +43,6 @@ impl BatchGenerateSeries {
         BatchGenerateSeries { base, logical }
     }
 
-    /// Get a reference to the batch GenerateSeries's logical.
     #[must_use]
     pub fn logical(&self) -> &LogicalGenerateSeries {
         &self.logical
@@ -69,46 +68,6 @@ impl ToBatchProst for BatchGenerateSeries {
             stop: self.logical.stop.to_string(),
             step: Some(self.logical.step.into()),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::batch_plan::values_node::ExprTuple;
-    use risingwave_pb::batch_plan::ValuesNode;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::expr::expr_node::RexNode;
-    use risingwave_pb::expr::{ConstantValue, ExprNode};
-    use risingwave_pb::plan_common::Field;
-
-    use crate::expr::ExprType;
-    use crate::test_utils::LocalFrontend;
-    use crate::FrontendOpts;
-
-    #[tokio::test]
-    async fn test_generate_series_to_prost() {
-        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
-        // Values(1:I32)
-        let plan = frontend
-            .to_batch_plan(
-                "SELECT * FROM generate_series('2008-03-01 00:00:00',
-            '2008-03-04 12:00:00', interval '30' minute);",
-            )
-            .await
-            .unwrap()
-            .to_batch_prost();
-        dbg!(&plan);
-        // assert_eq!(
-        //     plan.get_node_body().unwrap().clone(),
-        //     NodeBody::GenerateTimeSeries(GenerateTimeSeriesNode {
-        //         start:
-        //         stop:
-
-        //     })
-        // );
     }
 }
 

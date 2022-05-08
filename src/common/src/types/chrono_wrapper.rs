@@ -16,8 +16,7 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
-use chrono::format::StrftimeItems;
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike,Duration};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
@@ -194,16 +193,11 @@ impl NaiveDateTimeWrapper {
         ))
     }
 
-    pub fn to_string(&self) -> String {
-        let fmt = StrftimeItems::new("%Y-%m-%d %H:%M:%S");
-        format!("{}", self.0.format_with_items(fmt))
-    }
-
-    pub fn sub(&self,rhs:NaiveDateTimeWrapper) -> Duration{
+    pub fn sub(&self, rhs: NaiveDateTimeWrapper) -> Duration {
         self.0 - rhs.0
     }
 
-    pub fn add(&self, duration:Duration) -> Self{
+    pub fn add(&self, duration: Duration) -> Self {
         NaiveDateTimeWrapper::new(self.0 + duration)
     }
 }

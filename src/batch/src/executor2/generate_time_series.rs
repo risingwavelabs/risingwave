@@ -14,16 +14,15 @@
 
 use std::sync::Arc;
 
-use chrono::Duration;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, NaiveDateTimeArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
+
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
@@ -79,7 +78,7 @@ impl GenerateSeriesTimeStampExecutor2 {
             let mut current_value = self.cur;
             for _ in 0..chunk_size {
                 builder.append(Some(current_value)).unwrap();
-                current_value = current_value.add(self.step.into()) ;
+                current_value = current_value.add(self.step.into());
             }
             self.cur = current_value;
 
@@ -129,7 +128,11 @@ mod tests {
         generate_time_series_test_case(start_time, stop_time, one_day_step).await;
     }
 
-    async fn generate_time_series_test_case(start: NaiveDateTimeWrapper, stop: NaiveDateTimeWrapper, step: IntervalUnit) {
+    async fn generate_time_series_test_case(
+        start: NaiveDateTimeWrapper,
+        stop: NaiveDateTimeWrapper,
+        step: IntervalUnit,
+    ) {
         let executor = Box::new(GenerateSeriesTimeStampExecutor2 {
             start,
             stop,
