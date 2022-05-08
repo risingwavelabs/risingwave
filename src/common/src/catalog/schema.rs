@@ -232,9 +232,27 @@ pub mod test_utils {
         int32_n::<2>()
     }
 
+    /// Create a util schema **for test only** with two int32 fields.
+    pub fn iis() -> Schema {
+        let mut schema = int32_n::<2>();
+        schema.fields.push(Field::unnamed(DataType::Struct {
+            fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+        }));
+        schema
+    }
+
     /// Create a util schema **for test only** with three int32 fields.
     pub fn iii() -> Schema {
         int32_n::<3>()
+    }
+
+    /// Create a util schema **for test only** with two int32 fields.
+    pub fn iiis() -> Schema {
+        let mut schema = int32_n::<3>();
+        schema.fields.push(Field::unnamed(DataType::Struct {
+            fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+        }));
+        schema
     }
 
     fn varchar_n<const N: usize>() -> Schema {
