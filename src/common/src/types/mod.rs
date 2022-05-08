@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{internal_error, ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
@@ -140,6 +140,42 @@ impl DataType {
             )?
             .into(),
         })
+    }
+
+    pub fn scalar_type_to_data_type(scalar: &ScalarImpl) -> Result<DataType> {
+        let data_type = match &scalar {
+            ScalarImpl::Int16(_) => DataType::Int16,
+            ScalarImpl::Int32(_) => DataType::Int32,
+            ScalarImpl::Int64(_) => DataType::Int64,
+            ScalarImpl::Float32(_) => DataType::Float32,
+            ScalarImpl::Float64(_) => DataType::Float64,
+            ScalarImpl::Utf8(_) => DataType::Varchar,
+            ScalarImpl::Bool(_) => DataType::Boolean,
+            ScalarImpl::Decimal(_) => DataType::Decimal,
+            ScalarImpl::Interval(_) => DataType::Interval,
+            ScalarImpl::NaiveDate(_) => DataType::Date,
+            ScalarImpl::NaiveDateTime(_) => DataType::Timestamp,
+            ScalarImpl::NaiveTime(_) => DataType::Time,
+            ScalarImpl::Struct(data) => {
+                let types = data
+                    .fields
+                    .iter()
+                    .map(|d| match d {
+                        None => Err(internal_error(
+                            "cannot get data type from None Datum".to_string(),
+                        )),
+                        Some(s) => DataType::scalar_type_to_data_type(s),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                DataType::Struct {
+                    fields: types.into(),
+                }
+            }
+            ScalarImpl::List(_) => {
+                todo!()
+            }
+        };
+        Ok(data_type)
     }
 
     fn prost_type_name(&self) -> TypeName {

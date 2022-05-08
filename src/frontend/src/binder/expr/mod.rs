@@ -104,11 +104,10 @@ impl Binder {
             } => self.bind_in_list(*expr, list, negated),
             Expr::Row(exprs) => {
                 let value = self.bind_row(&exprs)?;
+                let data_type = value.get_data_type()?;
                 Ok(ExprImpl::Literal(Box::new(Literal::new(
                     Some(value.to_scalar_value()),
-                    DataType::Struct {
-                        fields: vec![].into(),
-                    },
+                    data_type,
                 ))))
             }
             _ => Err(ErrorCode::NotImplemented(
