@@ -27,23 +27,17 @@ use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::compaction::{CompactionConfig, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
 
+const SCORE_BASE: u64 = 100;
+
 pub trait LevelSelector: Sync + Send {
-    fn select_level(
-        &self,
-        task_id: u64,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Box<dyn CompactionPicker>;
+    fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool;
 
     fn pick_compaction(
         &self,
         task_id: u64,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult> {
-        let picker = self.select_level(task_id, levels, level_handlers);
-        picker.pick_compaction(levels, level_handlers)
-    }
+    ) -> Option<SearchResult>;
 
     fn name(&self) -> &'static str;
 }
@@ -106,9 +100,10 @@ impl DynamicLevelSelector {
     }
 
     // TODO: calculate this scores in apply compact result.
-    // calculate base level and the base size of LSM tree build for current dataset. In other words,
-    //  `level_max_bytes` is our compaction goal which shall reach.
-    fn calculate_level_base_score(&self, levels: &[Level]) -> SelectContext {
+    /// `calculate_level_base_size` calculate base level and the base size of LSM tree build for
+    /// current dataset. In other words,  `level_max_bytes` is our compaction goal which shall
+    /// reach. This algorithm refers to the implementation in  `</>https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706</>`
+    fn calculate_level_base_size(&self, levels: &[Level]) -> SelectContext {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
         let mut ctx = SelectContext::default();
@@ -125,7 +120,7 @@ impl DynamicLevelSelector {
                 }
                 max_level_size = std::cmp::max(max_level_size, total_file_size);
             } else {
-                l0_size = max_level_size;
+                l0_size = total_file_size;
             }
         }
 
@@ -145,6 +140,10 @@ impl DynamicLevelSelector {
         for _ in first_non_empty_level..self.config.max_level {
             cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
+        println!(
+            "base_bytes_min: {}, base_bytes_max: {}, cur_level_size: {}",
+            base_bytes_min, base_bytes_max, cur_level_size
+        );
 
         let base_level_size = if cur_level_size <= base_bytes_min {
             // Case 1. If we make target size of last level to be max_level_size,
@@ -164,6 +163,10 @@ impl DynamicLevelSelector {
         let level_multiplier = self.config.max_bytes_for_level_multiplier as f64;
         let mut level_size = base_level_size;
         for i in ctx.base_level..=self.config.max_level {
+            // Don't set any level below base_bytes_max. Otherwise, the LSM can
+            // assume an hourglass shape where L1+ sizes are smaller than L0. This
+            // causes compaction scoring, which depends on level sizes, to favor L1+
+            // at the expense of L0, which may fill up and stall.
             ctx.level_max_bytes[i] = std::cmp::max(level_size, base_bytes_max);
             level_size = (level_size as f64 * level_multiplier) as u64;
         }
@@ -175,7 +178,7 @@ impl DynamicLevelSelector {
         levels: &[Level],
         handlers: &mut [LevelHandler],
     ) -> SelectContext {
-        let mut ctx = self.calculate_level_base_score(levels);
+        let mut ctx = self.calculate_level_base_size(levels);
 
         // The bottommost level can not be input level.
         for level in &levels[..self.config.max_level] {
@@ -199,17 +202,19 @@ impl DynamicLevelSelector {
                 // manager can trigger compaction jobs of other level but we add a base score
                 // `idle_file_count + 100` so that the manager can trigger L0
                 // compaction when the other levels are all balanced.
-                let score = idle_file_count * 100 / self.config.level0_trigger_number as u64
+                let score = idle_file_count * SCORE_BASE / self.config.level0_trigger_number as u64
                     + idle_file_count
-                    + 100;
+                    + SCORE_BASE;
                 let score = std::cmp::max(
-                    total_size * 100 / self.config.max_bytes_for_level_base,
+                    total_size * SCORE_BASE / self.config.max_bytes_for_level_base,
                     score,
                 );
                 ctx.score_levels.push((score, 0));
             } else {
-                ctx.score_levels
-                    .push((total_size * 100 / ctx.level_max_bytes[level_idx], level_idx));
+                ctx.score_levels.push((
+                    total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
+                    level_idx,
+                ));
             }
         }
 
@@ -220,14 +225,12 @@ impl DynamicLevelSelector {
 }
 
 impl LevelSelector for DynamicLevelSelector {
-    fn select_level(
-        &self,
-        task_id: u64,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Box<dyn CompactionPicker> {
+    fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool {
         let ctx = self.get_priority_levels(levels, level_handlers);
-        self.create_compaction_picker(ctx.score_levels[0].1, ctx.base_level, task_id)
+        ctx.score_levels
+            .first()
+            .map(|(score, _)| *score > SCORE_BASE)
+            .unwrap_or(false)
     }
 
     fn pick_compaction(
@@ -238,7 +241,7 @@ impl LevelSelector for DynamicLevelSelector {
     ) -> Option<SearchResult> {
         let ctx = self.get_priority_levels(levels, level_handlers);
         for (score, level_idx) in ctx.score_levels {
-            if score <= 100 {
+            if score <= SCORE_BASE {
                 return None;
             }
             let picker = self.create_compaction_picker(level_idx, ctx.base_level, task_id);
@@ -322,7 +325,7 @@ pub mod tests {
                 table_infos: generate_tables(10..15, 0..1000, 1, 200),
             },
         ];
-        let ctx = selector.calculate_level_base_score(&levels);
+        let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
         assert_eq!(ctx.level_max_bytes[2], 100);
         assert_eq!(ctx.level_max_bytes[3], 200);
@@ -331,7 +334,7 @@ pub mod tests {
         levels[4]
             .table_infos
             .append(&mut generate_tables(15..20, 2000..3000, 1, 400));
-        let ctx = selector.calculate_level_base_score(&levels);
+        let ctx = selector.calculate_level_base_size(&levels);
         // data size increase, so we need increase one level to place more data.
         assert_eq!(ctx.base_level, 1);
         assert_eq!(ctx.level_max_bytes[1], 100);
@@ -343,16 +346,15 @@ pub mod tests {
         levels[0]
             .table_infos
             .append(&mut generate_tables(20..26, 0..1000, 1, 100));
-        let ctx = selector.calculate_level_base_score(&levels);
-        assert_eq!(ctx.base_level, 1);
-        assert_eq!(ctx.level_max_bytes[1], 100);
-        assert_eq!(ctx.level_max_bytes[2], 120);
-        assert_eq!(ctx.level_max_bytes[3], 600);
-        assert_eq!(ctx.level_max_bytes[4], 3000);
+        let ctx = selector.calculate_level_base_size(&levels);
+        assert_eq!(ctx.base_level, 2);
+        assert_eq!(ctx.level_max_bytes[2], 600);
+        assert_eq!(ctx.level_max_bytes[3], 605);
+        assert_eq!(ctx.level_max_bytes[4], 3025);
 
         levels[0].table_infos.clear();
         levels[1].table_infos = generate_tables(26..32, 0..1000, 1, 100);
-        let ctx = selector.calculate_level_base_score(&levels);
+        let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 1);
         assert_eq!(ctx.level_max_bytes[1], 100);
         assert_eq!(ctx.level_max_bytes[2], 120);
