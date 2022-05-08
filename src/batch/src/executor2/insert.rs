@@ -194,13 +194,19 @@ mod tests {
         let source_manager = Arc::new(MemSourceManager::default());
         let store = MemoryStateStore::new();
 
+        // Make struct field
+        let struct_field = Field::unnamed(DataType::Struct {
+            fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+        });
+
         // Schema for mock executor.
-        let schema = schema_test_utils::iis();
+        let mut schema = schema_test_utils::ii();
+        schema.fields.push(struct_field.clone());
         let mut mock_executor = MockExecutor::new(schema.clone());
 
         // Schema of the table
-        let schema = schema_test_utils::iiis();
-
+        let mut schema = schema_test_utils::iii();
+        schema.fields.push(struct_field);
         let table_columns: Vec<_> = schema
             .fields
             .iter()
@@ -217,7 +223,7 @@ mod tests {
         let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
         let array = StructArray::from_slices(
-            &[true, false, false, false,false],
+            &[true, false, false, false, false],
             vec![
                 array! { I32Array, [Some(1),None,None,None,None] }.into(),
                 array! { I32Array, [Some(2),None,None,None,None] }.into(),
@@ -289,7 +295,7 @@ mod tests {
         );
 
         let array: ArrayImpl = StructArray::from_slices(
-            &[true, false, false, false,false],
+            &[true, false, false, false, false],
             vec![
                 array! { I32Array, [Some(1),None,None,None,None] }.into(),
                 array! { I32Array, [Some(2),None,None,None,None] }.into(),
@@ -297,11 +303,9 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-            .unwrap()
-            .into();
-        assert_eq!(*chunk.chunk.columns()[2]
-            .array(), array);
-
+        .unwrap()
+        .into();
+        assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
