@@ -37,11 +37,22 @@ impl Planner {
             mut select_items,
             group_by,
             mut having,
-            aliases,
+            mut aliases,
             distinct,
             ..
         }: BoundSelect,
+        extra_order_exprs: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
+        // Append expressions in ORDER BY.
+        if distinct && !extra_order_exprs.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "for SELECT DISTINCT, ORDER BY expressions must appear in select list".into(),
+            )
+            .into());
+        }
+        aliases.extend(vec![None; extra_order_exprs.len()]);
+        select_items.extend(extra_order_exprs);
+
         // Plan the FROM clause.
         let mut root = match from {
             None => self.create_dummy_values(),

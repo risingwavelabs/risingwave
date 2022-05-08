@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::storage::MetaStore;
 
@@ -174,7 +174,7 @@ where
     }
 
     fn reschedule_compaction_group(&self, compaction_group: CompactionGroupId) {
-        if let Err(err) = self.request_tx.send(compaction_group.clone()) {
+        if let Err(err) = self.request_tx.send(compaction_group) {
             tracing::warn!(
                 "Failed to schedule compaction_group {:?}: {}",
                 compaction_group,

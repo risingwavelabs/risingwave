@@ -21,6 +21,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
 };
@@ -961,9 +962,6 @@ where
         Ok(count as HummockRefCount)
     }
 
-    /// Get the `SSTable` ids which are guaranteed not to be included after `version_id`, thus they
-    /// can be deleted if all versions LE than `version_id` are not referenced.
-    #[cfg(test)]
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,
@@ -974,6 +972,42 @@ where
             .get(&version_id)
             .map(|s| s.id.clone())
             .unwrap_or_default())
+    }
+
+    pub async fn delete_will_not_be_used_ssts(
+        &self,
+        version_id: HummockVersionId,
+        ssts_in_use: &HashSet<HummockSSTableId>,
+    ) -> Result<()> {
+        let mut versioning_guard = self.versioning.write().await;
+        let versioning = versioning_guard.deref_mut();
+        let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
+        if let Some(ssts_to_delete) = stale_sstables.get_mut(&version_id) {
+            // Delete sstables that are stale in the view of `version_id` Version, and
+            // are Not referred by any other older Version.
+            // No newer version would use any stale sstables in the current Version.
+            let num_ssts_to_delete = ssts_to_delete.id.len();
+            for idx in (0..num_ssts_to_delete).rev() {
+                let sst_id = ssts_to_delete.id[idx];
+                if !ssts_in_use.contains(&sst_id) && let Some(mut sst_id_info) = sstable_id_infos.get_mut(&sst_id) {
+                    sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
+                    // We don't want to repetitively set the delete timestamp of these that have been set,
+                    // so we remove these ones.
+                    ssts_to_delete.id.swap_remove(idx);
+                }
+            }
+        }
+
+        commit_multi_var!(self, None, stale_sstables, sstable_id_infos)?;
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
     }
 
     /// Delete metadata of the given `version_id`
@@ -987,15 +1021,14 @@ where
         let pinned_versions_ref = &versioning.pinned_versions;
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
-        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
         hummock_versions.remove(&version_id);
         // Delete record in HummockTablesToDelete if any.
         if let Some(ssts_to_delete) = stale_sstables.get_mut(&version_id) {
-            // Delete tracked sstables.
-            for sst_id in &ssts_to_delete.id {
-                if let Some(mut sst_id_info) = sstable_id_infos.get_mut(sst_id) {
-                    sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
-                }
+            if !ssts_to_delete.id.is_empty() {
+                return Err(Error::InternalError(format!(
+                    "Version {} still has stale ssts undeleted:{:?}",
+                    version_id, ssts_to_delete.id
+                )));
             }
         }
         stale_sstables.remove(&version_id);
@@ -1007,13 +1040,7 @@ where
             );
         }
 
-        commit_multi_var!(
-            self,
-            None,
-            hummock_versions,
-            stale_sstables,
-            sstable_id_infos
-        )?;
+        commit_multi_var!(self, None, hummock_versions, stale_sstables)?;
 
         #[cfg(test)]
         {
@@ -1060,13 +1087,46 @@ where
         );
     }
 
-    pub async fn list_sstable_id_infos(&self) -> Result<Vec<SstableIdInfo>> {
+    /// When `version_id` is `None`, this function returns all the `SstableIdInfo` across all the
+    /// versions. With `version_id` being specified, this function returns all the
+    /// `SstableIdInfo` of `version_id` Version.
+    pub async fn list_sstable_id_infos(
+        &self,
+        version_id: Option<HummockVersionId>,
+    ) -> Result<Vec<SstableIdInfo>> {
         let versioning_guard = self.versioning.read().await;
-        Ok(versioning_guard
-            .sstable_id_infos
-            .values()
-            .cloned()
-            .collect_vec())
+        if version_id.is_none() {
+            Ok(versioning_guard
+                .sstable_id_infos
+                .values()
+                .cloned()
+                .collect_vec())
+        } else {
+            let version_id = version_id.unwrap();
+            let versioning = versioning_guard.hummock_versions.get(&version_id);
+            versioning
+                .map(|versioning| {
+                    versioning
+                        .levels
+                        .iter()
+                        .flat_map(|level| {
+                            level.table_infos.iter().map(|table_info| {
+                                versioning_guard
+                                    .sstable_id_infos
+                                    .get(&table_info.id)
+                                    .unwrap()
+                                    .clone()
+                            })
+                        })
+                        .collect_vec()
+                })
+                .ok_or_else(|| {
+                    Error::InternalError(format!(
+                        "list_sstable_id_infos cannot find version:{}",
+                        version_id
+                    ))
+                })
+        }
     }
 
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {

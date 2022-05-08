@@ -126,6 +126,8 @@ impl Compactor {
             is_target_ultimate_and_leveling: false,
             metrics: None,
             task_status: false,
+            // TODO: get compaction group info from meta
+            prefix_pairs: vec![],
         };
 
         let parallelism = compact_task.splits.len();
@@ -288,6 +290,7 @@ impl Compactor {
         };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
+        // TODO: use `GroupedSstableBuilder` with correct `KeyValueGroupingImpl`
         let mut builder = CapacitySplitTableBuilder::new(|| async {
             let table_id = self
                 .context
@@ -513,7 +516,7 @@ impl Compactor {
         watermark: Epoch,
     ) -> HummockResult<()>
     where
-        B: FnMut() -> F,
+        B: Copy + Fn() -> F,
         F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
     {
         if !kr.left.is_empty() {

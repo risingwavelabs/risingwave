@@ -122,7 +122,7 @@ impl IntervalUnit {
         writer.into_inner().to_vec()
     }
 
-    pub fn to_protobuf<T: Write>(&self, output: &mut T) -> Result<usize> {
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         {
             output.write_i32::<BigEndian>(self.months)?;
             output.write_i32::<BigEndian>(self.days)?;

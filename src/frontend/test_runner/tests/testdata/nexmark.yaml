@@ -206,7 +206,7 @@
         WHERE A.id = B.auction and B.dateTime between A.dateTime and A.expires
         GROUP BY A.id, A.seller
     ) AS Q;
-  planner_error: "Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function"
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - id: nexmark_q7
   before:
     - create_tables
