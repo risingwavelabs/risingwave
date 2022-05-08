@@ -156,6 +156,10 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
+
+    pub fn inner(&self) -> &T {
+        &self.0
+    }
 }
 
 impl<'a> FullKey<&'a [u8]> {
