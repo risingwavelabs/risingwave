@@ -32,7 +32,9 @@ mod stream_scan;
 mod top_n;
 mod trace;
 mod values;
+mod generate_time_series;
 
+pub use generate_time_series::*;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;

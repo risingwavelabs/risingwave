@@ -196,6 +196,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => NotImplementedBuilder,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
@@ -226,6 +227,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => NotImplementedBuilder,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))

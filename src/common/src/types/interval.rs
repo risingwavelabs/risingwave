@@ -22,7 +22,7 @@ use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-
+use chrono::Duration;
 use super::*;
 use crate::error::ErrorCode::IoError;
 
@@ -64,6 +64,10 @@ impl IntervalUnit {
 
     pub fn get_ms(&self) -> i64 {
         self.ms
+    }
+
+    pub fn get_total_ms(&self) -> i64{
+        self.ms + (self.days as i64)*24*3600*1000  + (self.months as i64)*30*24*3600*1000
     }
 
     #[must_use]
@@ -196,6 +200,13 @@ impl From<&'_ IntervalUnitProto> for IntervalUnit {
             days: p.days,
             ms: p.ms,
         }
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<Duration> for IntervalUnit {
+    fn into(self) -> Duration {
+        Duration::milliseconds(self.get_total_ms())
     }
 }
 
