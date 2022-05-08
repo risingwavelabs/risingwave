@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{internal_error, ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
@@ -156,21 +156,7 @@ impl DataType {
             ScalarImpl::NaiveDate(_) => DataType::Date,
             ScalarImpl::NaiveDateTime(_) => DataType::Timestamp,
             ScalarImpl::NaiveTime(_) => DataType::Time,
-            ScalarImpl::Struct(data) => {
-                let types = data
-                    .fields
-                    .iter()
-                    .map(|d| match d {
-                        None => Err(internal_error(
-                            "cannot get data type from None Datum".to_string(),
-                        )),
-                        Some(s) => DataType::scalar_type_to_data_type(s),
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                DataType::Struct {
-                    fields: types.into(),
-                }
-            }
+            ScalarImpl::Struct(data) => data.get_data_type()?,
             ScalarImpl::List(_) => {
                 todo!()
             }

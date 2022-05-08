@@ -271,7 +271,7 @@ impl StructArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct StructValue {
-    pub fields: Vec<Datum>,
+    fields: Vec<Datum>,
 }
 
 impl fmt::Display for StructValue {

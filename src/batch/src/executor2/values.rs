@@ -143,9 +143,12 @@ impl BoxedExecutor2Builder for ValuesExecutor2 {
 
 #[cfg(test)]
 mod tests {
+
     use futures::stream::StreamExt;
     use risingwave_common::array;
-    use risingwave_common::array::{I16Array, I32Array, I64Array};
+    use risingwave_common::array::{
+        ArrayImpl, I16Array, I32Array, I64Array, StructArray, StructValue,
+    };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
@@ -202,6 +205,59 @@ mod tests {
                 *result.column_at(2).array(),
                 array! {I64Array, [Some(3)]}.into()
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_struct_values_executor() {
+        let value = StructValue::new(vec![
+            Some(ScalarImpl::Int32(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int32(3)),
+        ]);
+        let exprs = vec![Box::new(LiteralExpression::new(
+            DataType::Struct {
+                fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+            },
+            Some(ScalarImpl::Struct(value)),
+        )) as BoxedExpression];
+
+        let fields = exprs
+            .iter() // for each column
+            .map(|col| Field::unnamed(col.return_type()))
+            .collect::<Vec<Field>>();
+
+        let values_executor = Box::new(ValuesExecutor2 {
+            rows: vec![exprs].into_iter(),
+            schema: Schema { fields },
+            identity: "ValuesExecutor2".to_string(),
+            chunk_size: 1024,
+        });
+
+        let fields = &values_executor.schema().fields;
+        assert_eq!(
+            fields[0].data_type,
+            DataType::Struct {
+                fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into()
+            }
+        );
+
+        let mut stream = values_executor.execute();
+        let result = stream.next().await.unwrap();
+
+        let array: ArrayImpl = StructArray::from_slices(
+            &[true],
+            vec![
+                array! { I32Array, [Some(1)] }.into(),
+                array! { I32Array, [Some(2)] }.into(),
+                array! { I32Array, [Some(3)] }.into(),
+            ],
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+        )
+        .unwrap()
+        .into();
+        if let Ok(result) = result {
+            assert_eq!(*result.column_at(0).array(), array);
         }
     }
 
