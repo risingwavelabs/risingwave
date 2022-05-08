@@ -227,7 +227,7 @@ export default class StreamPlanParser {
       }
       mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
     }
-    
+
     return mvTableIdToChainViewActorList;
   }
 
@@ -302,18 +302,18 @@ export default class StreamPlanParser {
     let rootNode;
     this.parsedActorMap.set(actorId, actor);
     if (actorProto.dispatcher && actorProto.dispatcher[0].type) {
-      let nodeBeforeDispatcher = this.parseNode(actor.actorId, actorProto.nodes, "2");
+      let nodeBeforeDispatcher = this.parseNode(actor.actorId, actorProto.nodes);
       rootNode = this.newDispatcher(actor.actorId, actorProto.dispatcher[0].type, actorProto.downstreamActorId);
       rootNode.nextNodes = [nodeBeforeDispatcher];
     } else {
-      rootNode = this.parseNode(actorId, actorProto.nodes, "1");
+      rootNode = this.parseNode(actorId, actorProto.nodes);
     }
     actor.rootNode = rootNode;
 
     return actor;
   }
 
-  parseNode(actorId, nodeProto, n) {
+  parseNode(actorId, nodeProto) {
     let id = getNodeId(nodeProto, actorId);
     if (this.parsedNodeMap.has(id)) {
       return this.parsedNodeMap.get(id);
@@ -323,7 +323,7 @@ export default class StreamPlanParser {
 
     if (nodeProto.input !== undefined) {
       for (let nextNodeProto of nodeProto.input) {
-        newNode.nextNodes.push(this.parseNode(actorId, nextNodeProto, "3"));
+        newNode.nextNodes.push(this.parseNode(actorId, nextNodeProto));
       }
     }
 
