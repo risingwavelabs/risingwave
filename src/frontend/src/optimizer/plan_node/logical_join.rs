@@ -308,10 +308,8 @@ impl ColPrunable for LogicalJoin {
         let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_input_cols);
         on = on.rewrite_expr(&mut mapping);
 
-        let mut left_input_cols =
-            FixedBitSet::with_capacity(self.left.schema().fields().len());
-        let mut right_input_cols =
-            FixedBitSet::with_capacity(self.right.schema().fields().len());
+        let mut left_input_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
+        let mut right_input_cols = FixedBitSet::with_capacity(self.right.schema().fields().len());
         left_right_input_cols.ones().for_each(|i| {
             if i < left_len {
                 left_input_cols.insert(i);
