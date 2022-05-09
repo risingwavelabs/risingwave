@@ -21,6 +21,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId,
     HummockVersionId,
@@ -36,7 +37,6 @@ use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::CompactStatus;
-use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{

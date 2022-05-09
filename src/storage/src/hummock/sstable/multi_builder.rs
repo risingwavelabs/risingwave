@@ -36,7 +36,7 @@ pub struct CapacitySplitTableBuilder<B> {
 
 impl<B, F> CapacitySplitTableBuilder<B>
 where
-    B: Fn() -> F,
+    B: Clone + Fn() -> F,
     F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
@@ -134,6 +134,7 @@ where
 mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
 
     use futures::executor::block_on;
     use itertools::Itertools;
@@ -146,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty() {
-        let next_id = AtomicU64::new(1001);
+        let next_id = Arc::new(AtomicU64::new(1001));
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let sstable_store = mock_sstable_store();
@@ -179,7 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lots_of_tables() {
-        let next_id = AtomicU64::new(1001);
+        let next_id = Arc::new(AtomicU64::new(1001));
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let sstable_store = mock_sstable_store();
@@ -229,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_seal() {
         let opt = default_builder_opt_for_test();
-        let next_id = AtomicU64::new(1001);
+        let next_id = Arc::new(AtomicU64::new(1001));
         let sstable_store = mock_sstable_store();
         let mut builder = CapacitySplitTableBuilder::new(move || {
             let sst_id = next_id.fetch_add(1, SeqCst);
@@ -283,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
         let opt = default_builder_opt_for_test();
-        let next_id = AtomicU64::new(1001);
+        let next_id = Arc::new(AtomicU64::new(1001));
         let sstable_store = mock_sstable_store();
         let mut builder = CapacitySplitTableBuilder::new(move || {
             let opt = opt.clone();

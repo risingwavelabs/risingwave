@@ -126,6 +126,8 @@ impl Compactor {
             is_target_ultimate_and_leveling: false,
             metrics: None,
             task_status: false,
+            // TODO: get compaction group info from meta
+            prefix_pairs: vec![],
         };
 
         let parallelism = compact_task.splits.len();
@@ -343,7 +345,7 @@ impl Compactor {
         mut builder: CapacitySplitTableBuilder<B>,
     ) -> HummockResult<CompactOutput>
     where
-        B: Fn() -> F,
+        B: Clone + Fn() -> F,
         F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
     {
         let split = self.compact_task.splits[split_index].clone();
@@ -557,7 +559,7 @@ impl Compactor {
         watermark: Epoch,
     ) -> HummockResult<()>
     where
-        B: Fn() -> F,
+        B: Clone + Fn() -> F,
         F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
     {
         if !kr.left.is_empty() {

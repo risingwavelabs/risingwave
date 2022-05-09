@@ -15,6 +15,7 @@
 mod version_cmp;
 pub use version_cmp::*;
 pub mod compact;
+pub mod compaction_group;
 pub mod key;
 pub mod key_range;
 

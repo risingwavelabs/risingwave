@@ -802,9 +802,10 @@ export class StreamChartHelper {
     }
     for (let actor of fragmentRepresentedActors) {
       for (let outputActorNode of actor.output) {
-        dagNodeMap.get(actor.actorId).nextNodes.push(
-          dagNodeMap.get(outputActorNode.actorId)
-        )
+        let outputDagNode = dagNodeMap.get(outputActorNode.actorId);
+        if(outputDagNode){ // the output actor node is in a represented actor
+          dagNodeMap.get(actor.actorId).nextNodes.push(outputDagNode)
+        }
       }
     }
     let actorDagNodes = [];

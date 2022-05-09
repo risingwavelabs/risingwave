@@ -62,7 +62,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // TODO(soundOfDestiny): re-enable the test case
     async fn test_compaction_same_key_not_split() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
