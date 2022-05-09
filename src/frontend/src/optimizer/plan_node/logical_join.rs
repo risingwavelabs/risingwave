@@ -526,7 +526,7 @@ mod tests {
 
     /// Semi join panicked previously at `prune_col`. Add test to prevent regression.
     #[tokio::test]
-    async fn test_semi_join_does_not_panic() {
+    async fn test_prune_semi_join() {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
