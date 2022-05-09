@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::BoxFuture;
-// future.boxed() requires importing this `FutureExt`, while `clippy` false-positively reports
-// it as unused.
-#[allow(unused_imports)]
-use futures::FutureExt;
+use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::VNodeBitmap;
@@ -24,29 +20,27 @@ use risingwave_pb::hummock::VNodeBitmap;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableBuilder, Sstable};
 
-pub type BoxedIdBuilderGenerator = Box<
-    dyn FnMut() -> BoxFuture<'static, HummockResult<(HummockSSTableId, SSTableBuilder)>>
-        + Send
-        + Sync,
->;
-
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
-pub struct CapacitySplitTableBuilder {
+pub struct CapacitySplitTableBuilder<B> {
     /// When creating a new [`SSTableBuilder`], caller use this closure to specify the id and
     /// options.
-    get_id_and_builder: BoxedIdBuilderGenerator,
+    get_id_and_builder: B,
 
     finished_ssts: Vec<(Sstable, Vec<VNodeBitmap>)>,
 
     current_builder: Option<(HummockSSTableId, SSTableBuilder)>,
 }
 
-impl CapacitySplitTableBuilder {
+impl<B, F> CapacitySplitTableBuilder<B>
+where
+    B: Fn() -> F,
+    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+{
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: BoxedIdBuilderGenerator) -> Self {
+    pub fn new(get_id_and_builder: B) -> Self {
         Self {
             get_id_and_builder,
             finished_ssts: Vec::new(),
@@ -106,7 +100,7 @@ impl CapacitySplitTableBuilder {
 
         // Initialize a new builder if there is no current builder
         let builder = if self.current_builder.is_none() {
-            let (id, builder) = (*self.get_id_and_builder)().await?;
+            let (id, builder) = (self.get_id_and_builder)().await?;
             &mut self.current_builder.insert((id, builder)).1
         } else {
             &mut self.current_builder.as_mut().unwrap().1
@@ -156,7 +150,7 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let sstable_store = mock_sstable_store();
-        let get_id_and_builder = Box::new(move || {
+        let get_id_and_builder = move || {
             let sst_id = next_id.fetch_add(1, SeqCst);
             let sstable_store = sstable_store.clone();
             async move {
@@ -177,8 +171,7 @@ mod tests {
                     ),
                 ))
             }
-            .boxed()
-        });
+        };
         let builder = CapacitySplitTableBuilder::new(get_id_and_builder);
         let results = block_on(builder.finish()).unwrap();
         assert!(results.is_empty());
@@ -190,7 +183,7 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let sstable_store = mock_sstable_store();
-        let get_id_and_builder = Box::new(move || {
+        let get_id_and_builder = move || {
             let sst_id = next_id.fetch_add(1, SeqCst);
             let sstable_store = sstable_store.clone();
             async move {
@@ -211,8 +204,7 @@ mod tests {
                     ),
                 ))
             }
-            .boxed()
-        });
+        };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
         for i in 0..table_capacity {
@@ -239,7 +231,7 @@ mod tests {
         let opt = default_builder_opt_for_test();
         let next_id = AtomicU64::new(1001);
         let sstable_store = mock_sstable_store();
-        let mut builder = CapacitySplitTableBuilder::new(Box::new(move || {
+        let mut builder = CapacitySplitTableBuilder::new(move || {
             let sst_id = next_id.fetch_add(1, SeqCst);
             let opt = opt.clone();
             let sstable_store = sstable_store.clone();
@@ -255,8 +247,7 @@ mod tests {
                     ),
                 ))
             }
-            .boxed()
-        }));
+        });
         let mut epoch = 100;
 
         macro_rules! add {
@@ -294,7 +285,7 @@ mod tests {
         let opt = default_builder_opt_for_test();
         let next_id = AtomicU64::new(1001);
         let sstable_store = mock_sstable_store();
-        let mut builder = CapacitySplitTableBuilder::new(Box::new(move || {
+        let mut builder = CapacitySplitTableBuilder::new(move || {
             let opt = opt.clone();
             let sst_id = next_id.fetch_add(1, SeqCst);
             let sstable_store = sstable_store.clone();
@@ -310,8 +301,7 @@ mod tests {
                     ),
                 ))
             }
-            .boxed()
-        }));
+        });
 
         builder
             .add_full_key(

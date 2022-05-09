@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -142,7 +143,7 @@ impl Compactor {
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
-                let builder = CapacitySplitTableBuilder::new(Box::new({
+                let builder = CapacitySplitTableBuilder::new({
                     let sstable_store = compactor.context.sstable_store.clone();
                     let meta_client = compactor.context.hummock_meta_client.clone();
                     let options = compactor.context.options.clone();
@@ -170,9 +171,8 @@ impl Compactor {
                             );
                             Ok((table_id, builder))
                         }
-                        .boxed()
                     }
-                }));
+                });
                 compactor
                     .compact_key_range(split_index, iter, builder)
                     .await
@@ -229,7 +229,7 @@ impl Compactor {
             let compactor = compactor.clone();
             compaction_futures.push(tokio::spawn(async move {
                 let merge_iter = compactor.build_sst_iter().await?;
-                let builder = CapacitySplitTableBuilder::new(Box::new({
+                let builder = CapacitySplitTableBuilder::new({
                     let sstable_store = compactor.context.sstable_store.clone();
                     let meta_client = compactor.context.hummock_meta_client.clone();
                     let options = compactor.context.options.clone();
@@ -254,7 +254,7 @@ impl Compactor {
                         }
                         .boxed()
                     }
-                }));
+                });
                 compactor
                     .compact_key_range(split_index, merge_iter, builder)
                     .await
@@ -336,12 +336,16 @@ impl Compactor {
 
     /// Compact the given key range and merge iterator.
     /// Upon a successful return, the built SSTs are already uploaded to object store.
-    async fn compact_key_range(
+    async fn compact_key_range<B, F>(
         &self,
         split_index: usize,
         iter: MergeIterator,
-        mut builder: CapacitySplitTableBuilder,
-    ) -> HummockResult<CompactOutput> {
+        mut builder: CapacitySplitTableBuilder<B>,
+    ) -> HummockResult<CompactOutput>
+    where
+        B: Fn() -> F,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
             left: Bytes::copy_from_slice(split.get_left()),
@@ -545,13 +549,17 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst(
-        sst_builder: &mut CapacitySplitTableBuilder,
+    async fn compact_and_build_sst<B, F>(
+        sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
         mut iter: MergeIterator,
         has_user_key_overlap: bool,
         watermark: Epoch,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<()>
+    where
+        B: Fn() -> F,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
         } else {
