@@ -592,7 +592,7 @@ mod tests {
                 inf: false,
             }),
             file_size: batches.len() as u64,
-            vnode_bitmap: vec![],
+            vnode_bitmaps: vec![],
         }
     }
 

@@ -119,7 +119,7 @@ where
     if let Some(vnode_set) = vnode_set {
         result_sst_ids = result_sst_ids
             .into_iter()
-            .filter(|info| bitmap_overlap(vnode_set, &info.vnode_bitmap))
+            .filter(|info| bitmap_overlap(vnode_set, &info.vnode_bitmaps))
             .collect();
     }
     result_sst_ids

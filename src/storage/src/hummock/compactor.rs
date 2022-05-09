@@ -128,6 +128,8 @@ impl Compactor {
             task_status: false,
             // TODO: get compaction group info from meta
             prefix_pairs: vec![],
+            // VNode mappings are not required when compacting shared buffer to L0
+            vnode_mappings: vec![],
         };
 
         let parallelism = compact_task.splits.len();
@@ -250,7 +252,7 @@ impl Compactor {
 
             self.compact_task
                 .sorted_output_ssts
-                .extend(sst.into_iter().map(|(sst, vnode_bitmap)| SstableInfo {
+                .extend(sst.into_iter().map(|(sst, vnode_bitmaps)| SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
@@ -258,7 +260,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
-                    vnode_bitmap,
+                    vnode_bitmaps,
                 }));
         }
 
@@ -326,7 +328,7 @@ impl Compactor {
         let mut ssts = Vec::new();
         ssts.reserve(builder.len());
         // TODO: decide upload concurrency
-        for (table_id, data, meta, vnode_bitmap) in builder.finish() {
+        for (table_id, data, meta, vnode_bitmaps) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
             let len = self
                 .context
@@ -343,7 +345,7 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
 
-            ssts.push((sst, vnode_bitmap));
+            ssts.push((sst, vnode_bitmaps));
         }
 
         Ok((split_index, ssts))
