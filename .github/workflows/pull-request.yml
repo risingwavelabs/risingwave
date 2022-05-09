@@ -249,14 +249,14 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node (legacy frontend)
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test batch 3-node (legacy frontend)
-        timeout-minutes: 3
+        timeout-minutes: 6
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
