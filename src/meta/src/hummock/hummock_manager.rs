@@ -550,8 +550,8 @@ where
         &self,
         assignee_context_id: HummockContextId,
     ) -> Result<Option<CompactTask>> {
-        let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
+        let start_time = Instant::now();
 
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
@@ -597,6 +597,7 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
+                tracing::debug!("get_compact_task cost time: {:?}", start_time.elapsed());
                 commit_multi_var!(
                     self,
                     Some(assignee_context_id),
@@ -629,8 +630,8 @@ where
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
-        let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
+        let start_time = Instant::now();
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
         let mut compact_task_assignment =
@@ -682,6 +683,10 @@ where
                     }
                 }
             }
+            tracing::info!(
+                "report compact task. cost time: {:?}",
+                start_time.elapsed()
+            );
 
             commit_multi_var!(
                 self,
