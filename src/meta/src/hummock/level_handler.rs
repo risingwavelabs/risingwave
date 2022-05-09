@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 #[derive(Clone, Debug, PartialEq)]
 pub struct SSTableInfo {
     pub key_range: KeyRange,
-    pub table_id: u64,
+    pub table_id: HummockSSTableId,
     pub file_size: u64,
     pub vnode_bitmap: Vec<VNodeBitmap>,
 }

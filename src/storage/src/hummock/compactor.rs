@@ -516,7 +516,7 @@ impl Compactor {
         watermark: Epoch,
     ) -> HummockResult<()>
     where
-        B: Copy + Fn() -> F,
+        B: Clone + Fn() -> F,
         F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
     {
         if !kr.left.is_empty() {
