@@ -274,7 +274,7 @@ mod tests {
                                     name: "country.address".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
-                                    list_item_type: None,
+                                    list_item: None,
                                 },
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
@@ -282,11 +282,11 @@ mod tests {
                                     name: "country.zipcode".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
-                                    list_item_type: None,
+                                    list_item: None,
                                 }
                             ],
                             type_name: ".test.Country".to_string(),
-                            list_item_type: None,
+                            list_item: None,
                         },
                         is_hidden: false
                     }

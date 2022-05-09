@@ -59,7 +59,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 name: field.name,
                 field_descs: vec![],
                 type_name: "".to_string(),
-                list_item_type: None,
+                list_item: None,
             })
             .collect_vec();
         Self {

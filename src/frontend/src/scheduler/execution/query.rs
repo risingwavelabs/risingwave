@@ -412,7 +412,7 @@ mod tests {
                         name: "a".to_string(),
                         type_name: String::new(),
                         field_descs: vec![],
-                        list_item_type: None,
+                        list_item: None,
                     },
                     ColumnDesc {
                         data_type: DataType::Float64,
@@ -420,7 +420,7 @@ mod tests {
                         name: "b".to_string(),
                         type_name: String::new(),
                         field_descs: vec![],
-                        list_item_type: None,
+                        list_item: None,
                     },
                 ],
                 distribution_keys: vec![],

@@ -103,7 +103,7 @@ impl StreamIndexScan {
                     name: column_name.clone(),
                     field_descs: vec![],
                     type_name: "".to_string(),
-                    list_item_type: None,
+                    list_item: None,
                 })
                 .collect(),
             distribution_keys: self

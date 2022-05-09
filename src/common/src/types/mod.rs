@@ -102,32 +102,12 @@ impl From<&ProstDataType> for DataType {
                 fields: Arc::new([]),
             },
             TypeName::List => {
-                // TODO(nanderstabel) : avoid code duplication
-                let list_item_type = match proto
-                    .get_list_item_type()
-                    .expect("missing list item type field")
-                {
-                    TypeName::Int16 => DataType::Int16,
-                    TypeName::Int32 => DataType::Int32,
-                    TypeName::Int64 => DataType::Int64,
-                    TypeName::Float => DataType::Float32,
-                    TypeName::Double => DataType::Float64,
-                    TypeName::Boolean => DataType::Boolean,
-                    // TODO(TaoWu): Java frontend still interprets CHAR as a separate type.
-                    // So to run e2e, we may return VARCHAR that mismatches with what Java frontend
-                    // expected. Fix this when Java frontend fully deprecated.
-                    TypeName::Varchar | TypeName::Char => DataType::Varchar,
-                    TypeName::Date => DataType::Date,
-                    TypeName::Time => DataType::Time,
-                    TypeName::Timestamp => DataType::Timestamp,
-                    TypeName::Timestampz => DataType::Timestampz,
-                    TypeName::Decimal => DataType::Decimal,
-                    TypeName::Interval => DataType::Interval,
-                    TypeName::Symbol => DataType::Varchar,
-                    _ => DataType::Int32,
-                };
+                // TODO(nanderstabel) : refactor
+                let list_item = proto
+                    .get_list_item()
+                    .expect("missing list item type field");
                 DataType::List {
-                    datatype: Box::new(list_item_type),
+                    datatype: Box::new(DataType::from(&(*list_item.to_owned()))),
                 }
             }
         }
@@ -157,7 +137,7 @@ impl DataType {
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
-                    datatype: datatype.to_owned(),
+                    datatype: datatype.clone(),
                 },
             )?
             .into(),
@@ -186,14 +166,15 @@ impl DataType {
 
     pub fn to_protobuf(&self) -> ProstDataType {
         // TODO(nanderstabel) : refactor
-        let list_item_type = match self {
-            DataType::List { datatype } => *datatype.clone(),
-            _ => DataType::Int16,
+        let list_item = match self {
+            DataType::List { datatype } => Some(Box::new((*datatype.clone()).to_protobuf())),
+            _ => None,
         };
+        println!("HERE1: {:?}", list_item);
         ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
-            list_item_type: list_item_type.prost_type_name() as i32,
+            list_item,
             ..Default::default()
         }
     }
