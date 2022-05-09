@@ -127,10 +127,14 @@ where
 
             // 2.2 Send the compaction task to the compactor.
             let send_task = async {
-                compactor
-                    .send_task(Some(compact_task.clone()), None)
-                    .await
-                    .is_ok()
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    compactor
+                        .send_task(Some(compact_task.clone()), None)
+                        .await
+                        .is_ok()
+                })
+                .await
+                .unwrap_or(false)
             };
             match self
                 .hummock_manager
