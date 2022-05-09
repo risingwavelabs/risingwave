@@ -17,6 +17,7 @@ use std::future::Future;
 
 use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::VNodeBitmap;
 
 use crate::hummock::multi_builder::CapacitySplitTableBuilder;
@@ -100,7 +101,7 @@ pub struct GroupedSstableBuilder<B> {
 impl<B, F> GroupedSstableBuilder<B>
 where
     B: Clone + Fn() -> F,
-    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
 {
     pub fn new(get_id_and_builder: B, grouping: KeyValueGroupingImpl) -> Self {
         Self {
