@@ -333,19 +333,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
-            JoinType::LeftSemi | JoinType::LeftAnti => {
-                input_l.schema().fields.clone()
-            }
-            JoinType::RightSemi | JoinType::RightAnti => {
-                input_r.schema().fields.clone()
-            }
-            _ => {
-                [
-                    input_l.schema().fields.clone(),
-                    input_r.schema().fields.clone(),
-                ]
-                .concat()
-            }
+            JoinType::LeftSemi | JoinType::LeftAnti => input_l.schema().fields.clone(),
+            JoinType::RightSemi | JoinType::RightAnti => input_r.schema().fields.clone(),
+            _ => [
+                input_l.schema().fields.clone(),
+                input_r.schema().fields.clone(),
+            ]
+            .concat(),
         };
 
         let output_data_types = schema_fields
@@ -1111,9 +1105,137 @@ mod tests {
         let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
 
-        // push the 3rd left chunk
+        // push the 4th right chunk
         // (tests that insertion occurs when there are no more matches)
         tx_r.push_chunk(chunk_r4);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 1 4"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_right_anti_join() {
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + 3 6",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I I
+             + 3 8
+             - 3 8",
+        );
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 4 8
+             + 6 9",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I  I
+             + 3 10
+             + 6 11
+             + 1 2
+             + 1 3",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I I
+             + 9 10",
+        );
+        let chunk_l3 = StreamChunk::from_pretty(
+            "  I I
+             - 1 2",
+        );
+        let chunk_l4 = StreamChunk::from_pretty(
+            "  I I
+             - 1 3",
+        );
+        let (mut tx_r, mut tx_l, mut hash_join) = create_executor::<{ JoinType::LeftAnti }>(false);
+
+        // push the init barrier for left and right
+        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 1 4
+                + 2 5
+                + 3 6",
+            )
+        );
+
+        // push the init barrier for left and right
+        tx_r.push_barrier(1, false);
+        tx_l.push_barrier(1, false);
+        hash_join.next().await.unwrap().unwrap();
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                 + 3 8
+                 - 3 8",
+            )
+        );
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                - 2 5"
+            )
+        );
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                - 3 6
+                - 1 4"
+            )
+        );
+
+        // push the 3rd right chunk (tests forward_exactly_once)
+        tx_r.push_chunk(chunk_r3);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 9 10"
+            )
+        );
+
+        // push the 3rd left chunk
+        // (tests that no change if there are still matches)
+        tx_l.push_chunk(chunk_l3);
+        let chunk = hash_join.next().await.unwrap().unwrap();
+        assert_eq!(chunk.into_chunk().unwrap(), StreamChunk::from_pretty("I I"));
+
+        // push the 4th left chunk
+        // (tests that insertion occurs when there are no more matches)
+        tx_l.push_chunk(chunk_l4);
         let chunk = hash_join.next().await.unwrap().unwrap();
         assert_eq!(
             chunk.into_chunk().unwrap(),
