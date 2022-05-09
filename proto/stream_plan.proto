@@ -73,12 +73,14 @@ message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated int32 distribution_keys = 2;
   repeated uint32 table_ids = 3;
+  bool append_only = 4;
 }
 
 message HashAggNode {
   repeated int32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated uint32 table_ids = 3;
+  bool append_only = 4;
 }
 
 message TopNNode {
@@ -238,6 +240,7 @@ message StreamNode {
     LookupUnionNode lookup_union = 117;
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
+    HashAggNode append_only_hash_agg = 120;
   }
   // The id for the operator.
   uint64 operator_id = 1;

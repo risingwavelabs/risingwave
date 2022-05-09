@@ -80,6 +80,9 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
+
+    /// Whether the stream is append only
+    append_only: bool,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -108,6 +111,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
+        append_only: bool,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -123,6 +127,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 keyspace,
                 agg_calls,
                 key_indices,
+                append_only,
             },
             _phantom: PhantomData,
         })
@@ -187,6 +192,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref input_schema,
             ref keyspace,
             ref schema,
+            append_only,
             ..
         }: &HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
@@ -256,6 +262,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code),
+                                append_only,
                             )
                             .await?,
                         ),
@@ -274,7 +281,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 {
                     let data = data.iter().map(|d| &**d).collect_vec();
                     agg_state
-                        .apply_batch(&ops, Some(&vis_map), &data, epoch)
+                        .apply_batch(&ops, Some(&vis_map), &data, epoch, append_only)
                         .await
                         .map_err(StreamExecutorError::agg_state_error)?;
                 }
@@ -454,6 +461,7 @@ mod tests {
         keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
+        append_only: bool,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -468,6 +476,7 @@ mod tests {
                 args.pk_indices,
                 args.executor_id,
                 args.key_indices,
+                args.append_only,
             )?))
         }
     }
@@ -479,6 +488,7 @@ mod tests {
         keyspace: Vec<Keyspace<impl StateStore>>,
         pk_indices: PkIndices,
         executor_id: u64,
+        append_only: bool,
     ) -> Box<dyn Executor> {
         let keys = key_indices
             .iter()
@@ -491,6 +501,7 @@ mod tests {
             keyspace,
             pk_indices,
             executor_id,
+            append_only,
         };
         let kind = calc_hash_key_kind(&keys);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args).unwrap()
@@ -509,8 +520,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_local_hash_aggregation_max_in_memory() {
-        test_local_hash_aggregation_max(create_in_memory_keyspace_agg(2)).await
+    async fn test_local_hash_aggregation_min_in_memory() {
+        test_local_hash_aggregation_min(create_in_memory_keyspace_agg(2)).await
+    }
+
+    #[tokio::test]
+    async fn test_local_hash_aggregation_min_append_only_in_memory() {
+        test_local_hash_aggregation_min_append_only(create_in_memory_keyspace_agg(2)).await
     }
 
     async fn test_local_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {
@@ -554,8 +570,15 @@ mod tests {
             },
         ];
 
-        let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+        let hash_agg = new_boxed_hash_agg_executor(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![],
+            1,
+            false,
+        );
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -645,6 +668,7 @@ mod tests {
             keyspace,
             vec![],
             1,
+            false,
         );
         let mut hash_agg = hash_agg.execute();
 
@@ -681,7 +705,7 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_max(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_local_hash_aggregation_min(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![
                 // group key column
@@ -724,8 +748,15 @@ mod tests {
             },
         ];
 
-        let hash_agg =
-            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+        let hash_agg = new_boxed_hash_agg_executor(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![],
+            1,
+            false,
+        );
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -755,6 +786,99 @@ mod tests {
                 -  2 1  2333
                 U- 1 2   233
                 U+ 1 1 23333"
+            )
+            .sorted_rows(),
+        );
+    }
+
+    async fn test_local_hash_aggregation_min_append_only(keyspace: Vec<Keyspace<impl StateStore>>) {
+        let schema = Schema {
+            fields: vec![
+                // group key column
+                Field::unnamed(DataType::Int64),
+                // data column to get minimum
+                Field::unnamed(DataType::Int64),
+                // primary key column
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I  I  I
+            + 2 5  1000
+            + 1 15 1001
+            + 1 8  1002
+            + 2 5  1003
+            + 2 10 1004
+            ",
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I  I  I
+            + 1 20 1005
+            + 1 1  1006
+            + 2 10 1007
+            + 2 20 1008
+            ",
+        ));
+        tx.push_barrier(3, false);
+
+        // This is local hash aggregation, so we add another row count state
+        let keys = vec![0];
+        let agg_calls = vec![
+            AggCall {
+                kind: AggKind::RowCount,
+                args: AggArgs::None,
+                return_type: DataType::Int64,
+            },
+            AggCall {
+                kind: AggKind::Min,
+                args: AggArgs::Unary(DataType::Int64, 1),
+                return_type: DataType::Int64,
+            },
+        ];
+
+        let hash_agg = new_boxed_hash_agg_executor(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![],
+            1,
+            true,
+        );
+        let mut hash_agg = hash_agg.execute();
+
+        // Consume the init barrier
+        hash_agg.next().await.unwrap().unwrap();
+        // Consume stream chunk
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap().sorted_rows(),
+            StreamChunk::from_pretty(
+                " I I    I
+                + 1 2 8
+                + 2 3 5"
+            )
+            .sorted_rows(),
+        );
+
+        assert_matches!(
+            hash_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap().sorted_rows(),
+            StreamChunk::from_pretty(
+                "  I I  I
+                U- 1 2 8
+                U+ 1 4 1
+                U- 2 3 5 
+                U+ 2 5 5
+                "
             )
             .sorted_rows(),
         );

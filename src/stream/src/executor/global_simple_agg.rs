@@ -67,6 +67,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+
+    /// Whether the stream is append-only
+    append_only: bool,
 }
 
 impl<S: StateStore> Executor for SimpleAggExecutor<S> {
@@ -95,6 +98,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
+        append_only: bool,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -112,9 +116,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             states: None,
             agg_calls,
             key_indices,
+            append_only,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn apply_chunk(
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
@@ -123,6 +129,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         keyspace: &[Keyspace<S>],
         chunk: StreamChunk,
         epoch: u64,
+        append_only: bool,
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -146,9 +153,16 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
         if states.is_none() {
-            let state =
-                generate_agg_state(None, agg_calls, keyspace, input_pk_data_types, epoch, None)
-                    .await?;
+            let state = generate_agg_state(
+                None,
+                agg_calls,
+                keyspace,
+                input_pk_data_types,
+                epoch,
+                None,
+                append_only,
+            )
+            .await?;
             *states = Some(state);
         }
         let states = states.as_mut().unwrap();
@@ -162,7 +176,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // 3. Apply batch to each of the state (per agg_call)
         for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch)
+                .apply_batch(&ops, visibility.as_ref(), data, epoch, append_only)
                 .await
                 .map_err(StreamExecutorError::agg_state_error)?;
         }
@@ -234,6 +248,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             mut states,
             agg_calls,
             key_indices: _,
+            append_only,
         } = self;
         let mut input = input.execute();
         let first_msg = input.next().await.unwrap()?;
@@ -256,6 +271,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                         &keyspace,
                         chunk,
                         epoch,
+                        append_only,
                     )
                     .await?;
                 }
@@ -346,8 +362,16 @@ mod tests {
         ];
 
         let simple_agg = Box::new(
-            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![], 1, vec![])
-                .unwrap(),
+            SimpleAggExecutor::new(
+                Box::new(source),
+                agg_calls,
+                keyspace,
+                vec![],
+                1,
+                vec![],
+                false,
+            )
+            .unwrap(),
         );
         let mut simple_agg = simple_agg.execute();
 

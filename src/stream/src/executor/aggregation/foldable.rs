@@ -256,6 +256,33 @@ where
         }
         Ok(())
     }
+
+    fn apply_batch_append_only_concrete(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        data: &I,
+    ) -> Result<()> {
+        match visibility {
+            None => {
+                for (op, data) in ops.iter().zip_eq(data.iter()) {
+                    assert_eq!(Op::Insert, *op);
+                    self.result = S::accumulate(self.result.as_ref(), data)?
+                }
+            }
+            Some(visibility) => {
+                for ((visible, op), data) in
+                    visibility.iter().zip_eq(ops.iter()).zip_eq(data.iter())
+                {
+                    assert_eq!(Op::Insert, *op);
+                    if visible {
+                        self.result = S::accumulate(self.result.as_ref(), data)?
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<R, I, S> StreamingAggFunction<R::Builder> for StreamingFoldAgg<R, I, S>
@@ -331,8 +358,13 @@ macro_rules! impl_fold_agg {
                 ops: Ops<'_>,
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
+                append_only: bool,
             ) -> Result<()> {
-                self.apply_batch_concrete(ops, visibility, data[0].into())
+                if append_only {
+                    self.apply_batch_append_only_concrete(ops, visibility, data[0].into())
+                } else {
+                    self.apply_batch_concrete(ops, visibility, data[0].into())
+                }
             }
 
             fn get_output(&self) -> Result<Datum> {
@@ -393,6 +425,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -401,6 +434,7 @@ mod tests {
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -413,6 +447,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -421,6 +456,7 @@ mod tests {
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -453,6 +489,7 @@ mod tests {
                 &ops,
                 None,
                 &[&ArrayImpl::Float64(F64Array::from_slice(&data).unwrap())],
+                false,
             )
             .unwrap();
             assert_eq!(
@@ -469,6 +506,7 @@ mod tests {
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-7);
@@ -477,6 +515,7 @@ mod tests {
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-8);
@@ -494,6 +533,7 @@ mod tests {
             &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [1, 2, 1, 2]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -502,6 +542,7 @@ mod tests {
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![false, true, false, true]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -514,6 +555,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
+            false,
         )
         .unwrap();
 
@@ -523,6 +565,7 @@ mod tests {
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).try_into().unwrap()),
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &1);
@@ -535,6 +578,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(1), Some(10), None, Some(5)]).into()],
+            false,
         )
         .unwrap();
 
@@ -544,6 +588,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(1), Some(10), Some(-1), Some(5)]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-1);
@@ -556,6 +601,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(F64Array, [Some(1.0), Some(10.0), None, Some(5.0)]).into()],
+            false,
         )
         .unwrap();
 
@@ -565,6 +611,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(F64Array, [Some(1.0), Some(10.0), Some(-1.0), Some(5.0)]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_float64(), &-1.0);
@@ -577,6 +624,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(10), Some(1), None, Some(5)]).into()],
+            false,
         )
         .unwrap();
 
@@ -586,6 +634,7 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(1), Some(10), Some(100), Some(5)]).into()],
+            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);

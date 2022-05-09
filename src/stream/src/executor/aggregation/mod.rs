@@ -69,6 +69,13 @@ pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         data: &A,
     ) -> Result<()>;
+
+    fn apply_batch_append_only_concrete(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        data: &A,
+    ) -> Result<()>;
 }
 
 /// `StreamingAggFunction` allows us to get output from a streaming state.
@@ -86,6 +93,7 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
+        append_only: bool,
     ) -> Result<()>;
 
     /// Get the output value
@@ -337,6 +345,7 @@ pub async fn generate_agg_state<S: StateStore>(
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
+    append_only: bool,
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -362,6 +371,7 @@ pub async fn generate_agg_state<S: StateStore>(
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
             key_hash_code.clone(),
+            append_only,
         )
         .await
         .map_err(StreamExecutorError::agg_state_error)?;

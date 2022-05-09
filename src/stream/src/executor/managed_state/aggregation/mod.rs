@@ -67,9 +67,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
+        append_only: bool,
     ) -> Result<()> {
         match self {
-            Self::Value(state) => state.apply_batch(ops, visibility, data).await,
+            Self::Value(state) => state.apply_batch(ops, visibility, data, append_only).await,
             Self::Table(state) => state.apply_batch(ops, visibility, data, epoch).await,
         }
     }
@@ -106,6 +107,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         pk_data_types: PkDataTypes,
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
+        append_only: bool,
     ) -> Result<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -113,18 +115,25 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     row_count.is_some(),
                     "should set row_count for value states other than AggKind::RowCount"
                 );
-                Ok(Self::Table(
-                    create_streaming_extreme_state(
-                        agg_call,
-                        keyspace,
-                        row_count.unwrap(),
-                        // TODO: estimate a good cache size instead of hard-coding
-                        Some(1024),
-                        pk_data_types,
-                        key_hash_code,
-                    )
-                    .await?,
-                ))
+
+                if append_only {
+                    Ok(Self::Value(
+                        ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                    ))
+                } else {
+                    Ok(Self::Table(
+                        create_streaming_extreme_state(
+                            agg_call,
+                            keyspace,
+                            row_count.unwrap(),
+                            // TODO: estimate a good cache size instead of hard-coding
+                            Some(1024),
+                            pk_data_types,
+                            key_hash_code,
+                        )
+                        .await?,
+                    ))
+                }
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`

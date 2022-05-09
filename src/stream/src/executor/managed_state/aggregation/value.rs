@@ -82,10 +82,11 @@ impl<S: StateStore> ManagedValueState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
+        append_only: bool,
     ) -> Result<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         self.is_dirty = true;
-        self.state.apply_batch(ops, visibility, data)
+        self.state.apply_batch(ops, visibility, data, append_only)
     }
 
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
@@ -150,6 +151,7 @@ mod tests {
                 &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None])
                     .unwrap()
                     .into()],
+                false,
             )
             .await
             .unwrap();
@@ -174,6 +176,62 @@ mod tests {
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Int64(3))
+        );
+    }
+
+    fn create_test_max_agg() -> AggCall {
+        AggCall {
+            kind: risingwave_expr::expr::AggKind::Max,
+            args: AggArgs::Unary(DataType::Int64, 0),
+            return_type: DataType::Int64,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_managed_value_state_append_only() {
+        let keyspace = create_in_memory_keyspace();
+        let mut managed_state =
+            ManagedValueState::new(create_test_max_agg(), keyspace.clone(), Some(0))
+                .await
+                .unwrap();
+        assert!(!managed_state.is_dirty());
+
+        let append_only = true;
+        // apply a batch and get the output
+        managed_state
+            .apply_batch(
+                &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+                None,
+                &[
+                    &I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None])
+                        .unwrap()
+                        .into(),
+                ],
+                append_only,
+            )
+            .await
+            .unwrap();
+        assert!(managed_state.is_dirty());
+
+        // flush to write batch and write to state store
+        let epoch: u64 = 0;
+        let mut write_batch = keyspace.state_store().start_write_batch();
+        managed_state.flush(&mut write_batch).unwrap();
+        write_batch.ingest(epoch).await.unwrap();
+
+        // get output
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Int64(2))
+        );
+
+        // reload the state and check the output
+        let mut managed_state = ManagedValueState::new(create_test_max_agg(), keyspace, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Int64(2))
         );
     }
 }

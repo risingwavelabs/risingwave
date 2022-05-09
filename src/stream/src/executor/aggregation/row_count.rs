@@ -68,22 +68,42 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         _data: &[&ArrayImpl],
+        append_only: bool,
     ) -> Result<()> {
-        match visibility {
-            None => {
-                for op in ops {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
-                        Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
+        if append_only {
+            match visibility {
+                None => {
+                    ops.iter().for_each(|op| {
+                        assert_eq!(Op::Insert, *op);
+                    });
+                    self.row_cnt += ops.len() as i64;
+                }
+                Some(visibility) => {
+                    for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
+                        assert_eq!(Op::Insert, *op);
+                        if visible {
+                            self.row_cnt += 1;
+                        }
                     }
                 }
             }
-            Some(visibility) => {
-                for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
-                    if visible {
+        } else {
+            match visibility {
+                None => {
+                    for op in ops {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
                             Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
+                        }
+                    }
+                }
+                Some(visibility) => {
+                    for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
+                        if visible {
+                            match op {
+                                Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
+                                Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
+                            }
                         }
                     }
                 }
@@ -117,19 +137,19 @@ mod tests {
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // insert one element to state
-        state.apply_batch(&[Op::Insert], None, &[]).unwrap();
+        state.apply_batch(&[Op::Insert], None, &[], false).unwrap();
 
         // should be one row
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &1);
 
         // delete one element from state
-        state.apply_batch(&[Op::Delete], None, &[]).unwrap();
+        state.apply_batch(&[Op::Delete], None, &[], false).unwrap();
 
         // should be 0 rows.
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // one more deletion, so we are having `-1` elements inside.
-        state.apply_batch(&[Op::Delete], None, &[]).unwrap();
+        state.apply_batch(&[Op::Delete], None, &[], false).unwrap();
 
         // should be the same as `TestState`'s output
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &-1);
@@ -140,6 +160,7 @@ mod tests {
                 &[Op::Delete, Op::Insert],
                 Some(&(vec![false, true]).try_into().unwrap()),
                 &[],
+                false,
             )
             .unwrap();
 
@@ -152,6 +173,7 @@ mod tests {
                 &[Op::Delete, Op::Insert],
                 Some(&(vec![true, false]).try_into().unwrap()),
                 &[],
+                false,
             )
             .unwrap();
 

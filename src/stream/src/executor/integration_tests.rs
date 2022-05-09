@@ -61,6 +61,7 @@ async fn test_merger_sum_aggr() {
             ],
             vec![],
             1,
+            false,
         )
         .unwrap();
         let (tx, rx) = channel(16);
@@ -131,6 +132,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         2,
         vec![],
+        false,
     )
     .unwrap();
 

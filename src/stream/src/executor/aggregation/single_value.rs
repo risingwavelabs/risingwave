@@ -146,11 +146,14 @@ impl<T: Array> StreamingSingleValueAgg<T> {
 macro_rules! impl_single_value_agg {
     ($array_type:ty, $result_variant:ident) => {
         impl StreamingAggStateImpl for StreamingSingleValueAgg<$array_type> {
+            /// Since `StreamingSingleValueAgg` is a temporary workaround for scalar subquery,
+            /// we don't optimize it for append-only stream.
             fn apply_batch(
                 &mut self,
                 ops: Ops<'_>,
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
+                _append_only: bool,
             ) -> Result<()> {
                 self.apply_batch_concrete(ops, visibility, data[0].into())
             }
@@ -202,6 +205,7 @@ mod tests {
                 &[Op::Insert],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["abc"]})],
+                false,
             )
             .unwrap();
 
@@ -216,6 +220,7 @@ mod tests {
                 &[Op::UpdateDelete],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["abc"]})],
+                false,
             )
             .unwrap();
 
@@ -227,6 +232,7 @@ mod tests {
                 &[Op::UpdateInsert],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["xyz"]})],
+                false,
             )
             .unwrap();
 
@@ -241,6 +247,7 @@ mod tests {
                 &[Op::UpdateInsert],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["opq"]})],
+                false,
             )
             .is_err());
     }

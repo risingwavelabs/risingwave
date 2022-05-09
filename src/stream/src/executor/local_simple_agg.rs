@@ -32,6 +32,7 @@ pub struct LocalSimpleAggExecutor {
     pub(super) input: Box<dyn Executor>,
     pub(super) info: ExecutorInfo,
     pub(super) agg_calls: Vec<AggCall>,
+    pub(super) append_only: bool,
 }
 
 impl Executor for LocalSimpleAggExecutor {
@@ -57,6 +58,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: &[AggCall],
         states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
+        append_only: bool,
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
         agg_calls
@@ -69,7 +71,7 @@ impl LocalSimpleAggExecutor {
                     .iter()
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
-                state.apply_batch(&ops, visibility.as_ref(), &cols[..])
+                state.apply_batch(&ops, visibility.as_ref(), &cols[..], append_only)
             })
             .map_err(StreamExecutorError::agg_state_error)?;
         Ok(())
@@ -81,6 +83,7 @@ impl LocalSimpleAggExecutor {
             input,
             info,
             agg_calls,
+            append_only,
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
@@ -102,7 +105,7 @@ impl LocalSimpleAggExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&agg_calls, &mut states, chunk)?;
+                    Self::apply_chunk(&agg_calls, &mut states, chunk, append_only)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -149,6 +152,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
+        append_only: bool,
     ) -> Result<Self> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
         let info = ExecutorInfo {
@@ -161,6 +165,7 @@ impl LocalSimpleAggExecutor {
             input,
             info,
             agg_calls,
+            append_only,
         })
     }
 }
@@ -200,6 +205,7 @@ mod tests {
             agg_calls,
             vec![],
             1,
+            false,
         )?);
         let mut simple_agg = simple_agg.execute();
 
@@ -264,6 +270,7 @@ mod tests {
             agg_calls,
             vec![],
             1,
+            false,
         )?);
         let mut simple_agg = simple_agg.execute();
 
