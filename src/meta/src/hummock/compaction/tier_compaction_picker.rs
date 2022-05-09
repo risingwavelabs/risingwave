@@ -242,7 +242,9 @@ impl TierCompactionPicker {
             }
 
             let mut target_level_ssts = TargetFilesInfo::default();
+            let mut select_info = self.overlap_strategy.create_overlap_info();
             let mut select_compaction_bytes = select_table.file_size;
+            select_info.update(&select_table);
             let mut select_level_ssts = vec![select_table];
             match self.pick_target_level_overlap_files(
                 &select_level_ssts,
@@ -263,21 +265,15 @@ impl TierCompactionPicker {
                     break;
                 }
 
+                if info.check_overlap(other) {
+                    break;
+                }
+
                 select_level_ssts.push(other.clone());
-                if !self
-                    .overlap_strategy
-                    .check_overlap_with_tables(
-                        &select_level.table_infos[0..idx],
-                        &select_level_ssts,
-                    )
-                    .is_empty()
-                    || !self
-                        .overlap_strategy
-                        .check_overlap_with_tables(
-                            &select_level_ssts,
-                            &select_level.table_infos[0..idx],
-                        )
-                        .is_empty()
+                select_info.update(other);
+                if select_level.table_infos[0..idx]
+                    .iter()
+                    .any(|table| select_info.check_overlap(table))
                 {
                     select_level_ssts.pop().unwrap();
                     break;
