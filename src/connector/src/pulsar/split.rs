@@ -16,7 +16,6 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-
 use crate::base::SplitMetaData;
 use crate::pulsar::topic::Topic;
 use crate::pulsar::PulsarEnumeratorOffset;
@@ -26,7 +25,6 @@ pub struct PulsarSplit {
     pub(crate) topic: Topic,
     pub(crate) start_offset: PulsarEnumeratorOffset,
 }
-
 
 impl SplitMetaData for PulsarSplit {
     fn id(&self) -> String {

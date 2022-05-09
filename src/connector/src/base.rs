@@ -25,7 +25,6 @@ use crate::kafka::source::KafkaSplitReader;
 use crate::kinesis::source::reader::KinesisSplitReader;
 use crate::kinesis::split::KinesisOffset;
 use crate::nexmark::source::reader::NexmarkSplitReader;
-use crate::pulsar::split::PulsarOffset;
 
 pub enum SourceOffset {
     Number(i64),
@@ -37,7 +36,7 @@ use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
 use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
 use crate::pulsar::source::reader::PulsarSplitReader;
-use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
+use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
 use crate::utils::AnyhowProperties;
 use crate::{kafka, kinesis, nexmark, pulsar, Properties};
 
@@ -109,15 +108,12 @@ impl From<SplitImpl> for ConnectorState {
                 },
             },
             SplitImpl::Pulsar(pulsar) => Self {
-                identifier: Bytes::from(pulsar.sub_topic),
+                identifier: Bytes::from(pulsar.topic.to_string()),
                 start_offset: match pulsar.start_offset {
-                    PulsarOffset::MessageID(id) => id.to_string(),
+                    PulsarEnumeratorOffset::MessageId(id) => id,
                     _ => "".to_string(),
                 },
-                end_offset: match pulsar.stop_offset {
-                    PulsarOffset::MessageID(id) => id.to_string(),
-                    _ => "".to_string(),
-                },
+                end_offset: "".to_string(),
             },
             SplitImpl::Nexmark(nex_mark) => Self {
                 identifier: Bytes::from(nex_mark.id()),
