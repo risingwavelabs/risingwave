@@ -301,7 +301,7 @@ impl ColPrunable for LogicalJoin {
             }
         });
 
-        let mut visitor = CollectInputRef::new(resized_required_cols.clone());
+        let mut visitor = CollectInputRef::new(resized_required_cols);
         self.on.visit_expr(&mut visitor);
         let left_right_input_cols = visitor.collect();
 
@@ -580,7 +580,7 @@ mod tests {
             let as_plan = plan.as_logical_project().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 1);
-            assert_eq!(as_plan.schema().fields()[0], fields[offset + 0]);
+            assert_eq!(as_plan.schema().fields()[0], fields[offset]);
 
             // Perform the prune
             let mut required_cols = FixedBitSet::with_capacity(3);
@@ -591,7 +591,7 @@ mod tests {
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 3);
-            assert_eq!(as_plan.schema().fields()[0], fields[offset + 0]);
+            assert_eq!(as_plan.schema().fields()[0], fields[offset]);
             assert_eq!(as_plan.schema().fields()[1], fields[offset + 1]);
             assert_eq!(as_plan.schema().fields()[2], fields[offset + 2]);
         }
