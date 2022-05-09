@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::Rule;
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::rule::BoxedRule;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -56,6 +57,8 @@ impl Rule for FilterJoinRule {
 
         let mut new_filter_predicate = filter.predicate().clone();
 
+        let join_type = self.simplify_outer(filter.predicate(), left_col_num, join_type);
+
         let (left_from_filter, right_from_filter, on) = self.push_down(
             &mut new_filter_predicate,
             left_col_num,
@@ -65,10 +68,7 @@ impl Rule for FilterJoinRule {
             self.can_push_on_from_filter(join_type),
         );
 
-        let mut new_on = join.on().clone();
-        if let Some(on) = on {
-            new_on = new_on.and(on);
-        }
+        let mut new_on = join.on().clone().and(on);
 
         let (left_from_on, right_from_on, on) = self.push_down(
             &mut new_on,
@@ -78,21 +78,16 @@ impl Rule for FilterJoinRule {
             self.can_push_right_from_on(join_type),
             false,
         );
-        assert!(on.is_none(), "On-clause should not be pushed to on-clause.");
+        assert!(
+            on.always_true(),
+            "On-clause should not be pushed to on-clause."
+        );
 
-        let left_predicate = left_from_filter.and_then(|c1| left_from_on.map(|c2| c1.and(c2)));
-        let right_predicate = right_from_filter.and_then(|c1| right_from_on.map(|c2| c1.and(c2)));
+        let left_predicate = left_from_filter.and(left_from_on);
+        let right_predicate = right_from_filter.and(right_from_on);
 
-        let new_left: PlanRef = if let Some(predicate) = left_predicate {
-            LogicalFilter::create(join.left(), predicate)
-        } else {
-            join.left()
-        };
-        let new_right: PlanRef = if let Some(predicate) = right_predicate {
-            LogicalFilter::create(join.right(), predicate)
-        } else {
-            join.right()
-        };
+        let new_left = LogicalFilter::create(join.left(), left_predicate);
+        let new_right = LogicalFilter::create(join.right(), right_predicate);
         let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
 
         Some(LogicalFilter::create(new_join.into(), new_filter_predicate))
@@ -116,18 +111,16 @@ impl FilterJoinRule {
         push_left: bool,
         push_right: bool,
         push_on: bool,
-    ) -> (Option<Condition>, Option<Condition>, Option<Condition>) {
+    ) -> (Condition, Condition, Condition) {
         let conjunctions = std::mem::take(&mut predicate.conjunctions);
-        let (left, right, mut others) =
+        let (mut left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
 
         let mut cannot_pushed = vec![];
 
-        let left = if push_left {
-            Some(left)
-        } else {
+        if !push_left {
             cannot_pushed.extend(left);
-            None
+            left = Condition::true_cond();
         };
 
         let right = if push_right {
@@ -135,20 +128,20 @@ impl FilterJoinRule {
                 left_col_num + right_col_num,
                 -(left_col_num as isize),
             );
-            Some(right.rewrite_expr(&mut mapping))
+            right.rewrite_expr(&mut mapping)
         } else {
             cannot_pushed.extend(right);
-            None
+            Condition::true_cond()
         };
 
         let on = if push_on {
             others
                 .conjunctions
                 .extend(std::mem::take(&mut cannot_pushed));
-            Some(others)
+            others
         } else {
             cannot_pushed.extend(others);
-            None
+            Condition::true_cond()
         };
 
         predicate.conjunctions = cannot_pushed;
@@ -189,6 +182,56 @@ impl FilterJoinRule {
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
         )
+    }
+
+    /// Try to simplify the outer join with the predicate on the top of the join
+    ///
+    /// now it is just a naive implementation for comparison expression, we can give a more general
+    /// implementation with constant folding in future
+    fn simplify_outer(
+        &self,
+        predicate: &Condition,
+        left_col_num: usize,
+        join_type: JoinType,
+    ) -> JoinType {
+        let (mut gen_null_in_left, mut gen_null_in_right) = match join_type {
+            JoinType::LeftOuter => (false, true),
+            JoinType::RightOuter => (true, false),
+            JoinType::FullOuter => (true, true),
+            _ => return join_type,
+        };
+
+        for expr in &predicate.conjunctions {
+            if let ExprImpl::FunctionCall(func) = expr {
+                match func.get_expr_type() {
+                    ExprType::Equal
+                    | ExprType::NotEqual
+                    | ExprType::LessThan
+                    | ExprType::LessThanOrEqual
+                    | ExprType::GreaterThan
+                    | ExprType::GreaterThanOrEqual => {
+                        for input in func.inputs() {
+                            if let ExprImpl::InputRef(input) = input {
+                                let idx = input.index;
+                                if idx < left_col_num {
+                                    gen_null_in_left = false;
+                                } else {
+                                    gen_null_in_right = false;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                };
+            }
+        }
+
+        match (gen_null_in_left, gen_null_in_right) {
+            (true, true) => JoinType::FullOuter,
+            (true, false) => JoinType::RightOuter,
+            (false, true) => JoinType::LeftOuter,
+            (false, false) => JoinType::Inner,
+        }
     }
 }
 
@@ -275,9 +318,9 @@ mod tests {
             false,
         );
 
-        assert_eq!(left_pushed.unwrap().conjunctions, vec![left.clone()]);
-        assert!(right_pushed.is_none());
-        assert!(on_pushed.is_none());
+        assert_eq!(left_pushed.conjunctions, vec![left.clone()]);
+        assert!(right_pushed.always_true());
+        assert!(on_pushed.always_true());
         if predicate_push_left.conjunctions[0] != other {
             assert_eq!(
                 predicate_push_left.conjunctions,
@@ -301,12 +344,9 @@ mod tests {
             false,
         );
 
-        assert!(left_pushed.is_none());
-        assert_eq!(
-            right_pushed.unwrap().conjunctions,
-            vec![right_shifted.clone()]
-        );
-        assert!(on_pushed.is_none());
+        assert!(left_pushed.always_true());
+        assert_eq!(right_pushed.conjunctions, vec![right_shifted.clone()]);
+        assert!(on_pushed.always_true());
         if predicate_push_right.conjunctions[0] != other {
             assert_eq!(
                 predicate_push_right.conjunctions,
@@ -330,9 +370,8 @@ mod tests {
             true,
         );
 
-        assert_eq!(left_pushed.unwrap().conjunctions, vec![left.clone()]);
-        assert!(right_pushed.is_none());
-        let on_pushed = on_pushed.unwrap();
+        assert_eq!(left_pushed.conjunctions, vec![left.clone()]);
+        assert!(right_pushed.always_true());
         if on_pushed.conjunctions[0] != other {
             assert_eq!(on_pushed.conjunctions, vec![right, other.clone()]);
         } else {
@@ -351,9 +390,9 @@ mod tests {
             true,
         );
 
-        assert_eq!(left_pushed.unwrap().conjunctions, vec![left]);
-        assert_eq!(right_pushed.unwrap().conjunctions, vec![right_shifted]);
-        assert_eq!(on_pushed.unwrap().conjunctions, vec![other]);
+        assert_eq!(left_pushed.conjunctions, vec![left]);
+        assert_eq!(right_pushed.conjunctions, vec![right_shifted]);
+        assert_eq!(on_pushed.conjunctions, vec![other]);
         assert_eq!(predicate_push_all.conjunctions, vec![]);
     }
 }

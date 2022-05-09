@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -20,16 +21,18 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::next_key;
 
+use super::mem_table::RowOp;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
-use crate::storage_value::StorageValue;
+use crate::storage_value::{StorageValue, ValueMeta};
 use crate::{Keyspace, StateStore};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
@@ -83,6 +86,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 .collect_vec(),
         );
         let column_ids = generate_column_id(&column_descs);
+
         Self {
             keyspace,
             schema,
@@ -183,29 +187,94 @@ impl<S: StateStore> CellBasedTable<S> {
         }
     }
 
-    pub async fn batch_write_rows(
+    async fn batch_write_rows_inner<const WITH_VALUE_META: bool>(
         &mut self,
-        rows: Vec<(Row, Option<Row>)>,
+        buffer: BTreeMap<Row, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
+        // stateful executors need to compute vnode.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        for (pk, cell_values) in rows {
-            let arrange_key_buf =
-                serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?;
-            let bytes = self
-                .cell_based_row_serializer
-                .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                .map_err(err)?;
-            for (key, value) in bytes {
-                match value {
-                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
-                    None => local.delete(key),
+        let ordered_row_serializer = self.pk_serializer.as_ref().unwrap();
+        let hash_builder = CRC32FastBuilder {};
+        for (pk, row_op) in buffer {
+            let arrange_key_buf = serialize_pk(&pk, ordered_row_serializer).map_err(err)?;
+
+            let value_meta = if WITH_VALUE_META {
+                // TODO: use distribution key instead of pk to hash vnode
+                let vnode = pk.hash_row(&hash_builder).to_vnode();
+                ValueMeta::with_vnode(vnode)
+            } else {
+                ValueMeta::default()
+            };
+
+            match row_op {
+                RowOp::Insert(row) => {
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, row, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, value) in bytes {
+                        local.put(key, StorageValue::new_put(value_meta, value))
+                    }
+                }
+                RowOp::Delete(old_row) => {
+                    // TODO(wcy-fdu): only serialize key on deletion
+                    let bytes = self
+                        .cell_based_row_serializer
+                        .serialize(&arrange_key_buf, old_row, &self.column_ids)
+                        .map_err(err)?;
+                    for (key, _) in bytes {
+                        local.delete_with_value_meta(key, value_meta);
+                    }
+                }
+                RowOp::Update((old_row, new_row)) => {
+                    let delete_bytes = self
+                        .cell_based_row_serializer
+                        .serialize_without_filter(&arrange_key_buf, old_row, &self.column_ids)
+                        .map_err(err)?;
+                    let insert_bytes = self
+                        .cell_based_row_serializer
+                        .serialize_without_filter(&arrange_key_buf, new_row, &self.column_ids)
+                        .map_err(err)?;
+                    for (delete, insert) in
+                        delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
+                    {
+                        match (delete, insert) {
+                            (Some((delete_pk, _)), None) => {
+                                local.delete_with_value_meta(delete_pk, value_meta);
+                            }
+                            (None, Some((insert_pk, insert_row))) => {
+                                local.put(insert_pk, StorageValue::new_put(value_meta, insert_row));
+                            }
+                            (None, None) => {}
+                            (Some((delete_pk, _)), Some((insert_pk, insert_row))) => {
+                                debug_assert_eq!(delete_pk, insert_pk);
+                                local.put(insert_pk, StorageValue::new_put(value_meta, insert_row));
+                            }
+                        }
+                    }
                 }
             }
         }
         batch.ingest(epoch).await?;
         Ok(())
+    }
+
+    pub async fn batch_write_rows_with_value_meta(
+        &mut self,
+        buffer: BTreeMap<Row, RowOp>,
+        epoch: u64,
+    ) -> StorageResult<()> {
+        self.batch_write_rows_inner::<true>(buffer, epoch).await
+    }
+
+    pub async fn batch_write_rows(
+        &mut self,
+        buffer: BTreeMap<Row, RowOp>,
+        epoch: u64,
+    ) -> StorageResult<()> {
+        self.batch_write_rows_inner::<false>(buffer, epoch).await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
@@ -227,6 +296,7 @@ impl<S: StateStore> CellBasedTable<S> {
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
 }
+
 // (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {

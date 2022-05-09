@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -21,11 +21,11 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::WorkerId;
+use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::manager::SourceId;
 use crate::model::MetadataModel;
 
@@ -143,7 +143,7 @@ impl TableFragments {
     }
 
     fn contains_chain(stream_node: &StreamNode) -> bool {
-        if let Some(Node::ChainNode(_)) = stream_node.node {
+        if let Some(NodeBody::Chain(_)) = stream_node.node_body {
             return true;
         }
 
@@ -157,7 +157,7 @@ impl TableFragments {
     }
 
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
-        if let Some(Node::SourceNode(s)) = stream_node.node.as_ref() {
+        if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
                 return Some(s.table_ref_id.as_ref().unwrap().table_id as SourceId);
             }
@@ -188,7 +188,7 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
-        if let Some(Node::ChainNode(chain)) = stream_node.node.as_ref() {
+        if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
             table_ids.insert(TableId::from(&chain.table_ref_id));
         }
 
@@ -208,11 +208,11 @@ impl TableFragments {
         table_ids
     }
 
-    /// Returns status of actors group by node id.
-    pub fn node_actors_status(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    /// Returns states of actors group by node id.
+    pub fn node_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.node_id as WorkerId;
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
@@ -224,7 +224,7 @@ impl TableFragments {
     pub fn node_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.node_id as WorkerId;
+            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
@@ -235,7 +235,10 @@ impl TableFragments {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id].node_id as WorkerId;
+                let node_id = self.actor_status[&actor.actor_id]
+                    .get_parallel_unit()
+                    .unwrap()
+                    .worker_node_id as WorkerId;
                 if !include_inactive
                     && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
                 {
@@ -250,12 +253,12 @@ impl TableFragments {
         actors
     }
 
-    pub fn node_source_actors_status(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    pub fn node_source_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         let source_actor_ids = self.source_actor_ids();
         for &actor_id in &source_actor_ids {
             let actor_status = &self.actor_status[&actor_id];
-            map.entry(actor_status.node_id as WorkerId)
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId)
                 .or_insert_with(Vec::new)
                 .push((actor_id, actor_status.state()));
         }
@@ -271,5 +274,99 @@ impl TableFragments {
             });
         });
         actor_map
+    }
+
+    pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
+        let sink_actor_ids = self.sink_actor_ids();
+        sink_actor_ids
+            .iter()
+            .map(|actor_id| {
+                (
+                    self.actor_status[actor_id].get_parallel_unit().unwrap().id,
+                    *actor_id,
+                )
+            })
+            .collect()
+    }
+
+    /// Generate toplogical order of fragments. If `index(a) < index(b)` in vec, then a is the
+    /// downstream of b.
+    pub fn generate_topological_order(&self) -> Vec<FragmentId> {
+        let mut actionable_fragment_id = VecDeque::new();
+
+        // If downstream_edges[x][y] exists, then there's an edge from x to y.
+        let mut downstream_edges: HashMap<u32, HashSet<u32>> = HashMap::new();
+
+        // Counts how many upstreams are there for a given fragment
+        let mut upstream_cnts: HashMap<u32, usize> = HashMap::new();
+
+        let mut result = vec![];
+
+        let mut actor_to_fragment_mapping = HashMap::new();
+
+        // Firstly, record actor -> fragment mapping
+        for (fragment_id, fragment) in &self.fragments {
+            for actor in &fragment.actors {
+                let ret = actor_to_fragment_mapping.insert(actor.actor_id, *fragment_id);
+                assert!(ret.is_none(), "duplicated actor id found");
+            }
+        }
+
+        // Then, generate the DAG of fragments
+        for (fragment_id, fragment) in &self.fragments {
+            for upstream_actor in &fragment.actors {
+                for dispatcher in &upstream_actor.dispatcher {
+                    for downstream_actor in &dispatcher.downstream_actor_id {
+                        let downstream_fragment_id =
+                            actor_to_fragment_mapping.get(downstream_actor).unwrap();
+
+                        let did_not_have = downstream_edges
+                            .entry(*fragment_id)
+                            .or_default()
+                            .insert(*downstream_fragment_id);
+
+                        if did_not_have {
+                            *upstream_cnts.entry(*downstream_fragment_id).or_default() += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Find actionable fragments
+        for fragment_id in self.fragments.keys() {
+            if upstream_cnts.get(fragment_id).is_none() {
+                actionable_fragment_id.push_back(*fragment_id);
+            }
+        }
+
+        // After that, we can generate topological order
+        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
+            result.push(fragment_id);
+
+            // Find if we can process more fragments
+            if let Some(downstreams) = downstream_edges.get(&fragment_id) {
+                for downstream_id in downstreams.iter() {
+                    let cnt = upstream_cnts
+                        .get_mut(downstream_id)
+                        .expect("the downstream should exist");
+
+                    *cnt -= 1;
+                    if *cnt == 0 {
+                        upstream_cnts.remove(downstream_id);
+                        actionable_fragment_id.push_back(*downstream_id);
+                    }
+                }
+            }
+        }
+
+        if !upstream_cnts.is_empty() {
+            // There are fragments that are not processed yet.
+            panic!("not a DAG");
+        }
+
+        assert_eq!(result.len(), self.fragments.len());
+
+        result
     }
 }

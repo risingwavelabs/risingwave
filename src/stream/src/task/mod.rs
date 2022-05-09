@@ -38,6 +38,7 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type ActorId = u32;
+pub type DispatcherId = u64;
 pub type UpDownActorIds = (ActorId, ActorId);
 
 /// Stores the information which may be modified from the data plane.
@@ -71,6 +72,14 @@ pub struct SharedContext {
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 }
 
+impl std::fmt::Debug for SharedContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedContext")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
+    }
+}
+
 impl SharedContext {
     pub fn new(addr: HostAddr) -> Self {
         Self {
@@ -95,11 +104,11 @@ impl SharedContext {
     }
 
     /// Create a notifier for Create MV DDL finish. When an executor/actor (essentially a
-    /// [`crate::executor_v2::ChainExecutor`]) finishes its DDL job, it can report that using this
+    /// [`crate::executor::ChainExecutor`]) finishes its DDL job, it can report that using this
     /// notifier. Note that a DDL of MV always corresponds to an epoch in our system.
     ///
     /// Creation of an MV may last for several epochs to finish.
-    /// Therefore, when the [`crate::executor_v2::ChainExecutor`] finds that the creation is
+    /// Therefore, when the [`crate::executor::ChainExecutor`] finds that the creation is
     /// finished, it will send the DDL epoch using this notifier, which can be collected by the
     /// barrier manager and reported to the meta service soon.
     pub fn register_finish_create_mview_notifier(
@@ -176,4 +185,16 @@ impl SharedContext {
     pub fn get_channel_pair_number(&self) -> u32 {
         self.lock_channel_map().len() as u32
     }
+}
+
+/// Generate a globally unique executor id. Useful when constructing per-actor keyspace
+pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((actor_id as u64) << 32) + operator_id
+}
+
+/// Generate a globally unique operator id. Useful when constructing per-fragment keyspace.
+pub fn unique_operator_id(fragment_id: u32, operator_id: u64) -> u64 {
+    assert!(operator_id <= u32::MAX as u64);
+    ((fragment_id as u64) << 32) + operator_id
 }

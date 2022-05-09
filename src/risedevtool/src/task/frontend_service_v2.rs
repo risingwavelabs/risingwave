@@ -39,6 +39,34 @@ impl FrontendServiceV2 {
             Ok(Command::new(Path::new(&prefix_bin).join("frontend-v2")))
         }
     }
+
+    /// Apply command args accroding to config
+    pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
+        cmd.arg("--host")
+            .arg(format!("{}:{}", config.listen_address, config.port));
+
+        let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
+        match provide_meta_node.len() {
+            0 => {
+                return Err(anyhow!(
+                    "Cannot configure node: no meta node found in this configuration."
+                ));
+            }
+            1 => {
+                let meta_node = &provide_meta_node[0];
+                cmd.arg("--meta-addr")
+                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
+            }
+            other_size => {
+                return Err(anyhow!(
+                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    other_size
+                ));
+            }
+        };
+
+        Ok(())
+    }
 }
 
 impl Task for FrontendServiceV2 {
@@ -49,29 +77,7 @@ impl Task for FrontendServiceV2 {
         let mut cmd = self.frontend_v2()?;
 
         cmd.env("RUST_BACKTRACE", "1");
-
-        cmd.arg("--host")
-            .arg(format!("{}:{}", self.config.address, self.config.port));
-
-        let provide_meta_node = self.config.provide_meta_node.as_ref().unwrap();
-        match provide_meta_node.len() {
-            0 => {
-                return Err(anyhow!(
-                    "Cannot start node: no meta node found in this configuration."
-                ));
-            }
-            1 => {
-                let meta_node = &provide_meta_node[0];
-                cmd.arg("--meta-addr")
-                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            }
-            other_size => {
-                return Err(anyhow!(
-                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
-                    other_size
-                ));
-            }
-        };
+        Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

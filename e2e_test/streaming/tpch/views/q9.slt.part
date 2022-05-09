@@ -1,4 +1,3 @@
-# TODO: Swap `lineitem` table with `supplier` to test join reorder (#1866).
 statement ok
 create materialized view tpch_q9 as
 select
@@ -13,8 +12,8 @@ from
       l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
     from
       part,
-      lineitem,
       supplier,
+      lineitem,
       partsupp,
       orders,
       nation

@@ -20,12 +20,11 @@ use itertools::Itertools;
 use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
-use super::stream_chunk_iter::RowRef;
 use crate::array::column::Column;
-use crate::array::{DataChunk, Row};
+use crate::array::{ArrayBuilderImpl, DataChunk, Row};
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::types::DataType;
+use crate::types::{DataType, NaiveDateTimeWrapper};
 use crate::util::hash_util::finalize_hashers;
 
 /// `Op` represents three operations in `StreamChunk`.
@@ -71,13 +70,12 @@ impl Op {
 pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
-    columns: Vec<Column>,
-    visibility: Option<Bitmap>,
-    cardinality: usize,
+
+    pub(super) data: DataChunk,
 }
 
 impl StreamChunk {
@@ -85,17 +83,9 @@ impl StreamChunk {
         for col in &columns {
             assert_eq!(col.array_ref().len(), ops.len());
         }
-        let cardinality = if let Some(bitmap) = &visibility {
-            bitmap.iter().map(|visible| visible as usize).sum()
-        } else {
-            ops.len()
-        };
-        StreamChunk {
-            ops,
-            columns,
-            visibility,
-            cardinality,
-        }
+
+        let data = DataChunk::new(columns, visibility);
+        StreamChunk { ops, data }
     }
 
     /// Build a `StreamChunk` from rows.
@@ -128,61 +118,54 @@ impl StreamChunk {
 
     /// `cardinality` return the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        self.cardinality
+        self.data.cardinality()
     }
 
     /// `capacity` return physical length of internals ops & columns
     pub fn capacity(&self) -> usize {
-        self.ops.len()
+        self.data.capacity()
     }
 
     pub fn columns(&self) -> &[Column] {
-        &self.columns
+        self.data.columns()
     }
 
     pub fn column_at(&self, index: usize) -> &Column {
-        &self.columns[index]
+        self.data.column_at(index)
     }
 
     /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Result<Self> {
-        match &self.visibility {
-            None => Ok(self),
-            Some(visibility) => {
-                let cardinality = visibility
-                    .iter()
-                    .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
-                let columns = self
-                    .columns
-                    .into_iter()
-                    .map(|col| {
-                        let array = col.array();
-                        array
-                            .compact(visibility, cardinality)
-                            .map(|array| Column::new(Arc::new(array)))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                let mut ops = Vec::with_capacity(cardinality);
-                for (op, visible) in self.ops.into_iter().zip_eq(visibility.iter()) {
-                    if visible {
-                        ops.push(op);
-                    }
-                }
-                Ok(StreamChunk::new(ops, columns, None))
+        if self.visibility().is_none() {
+            return Ok(self);
+        }
+
+        let (ops, columns, visibility) = self.into_inner();
+        let visibility = visibility.unwrap();
+
+        let cardinality = visibility
+            .iter()
+            .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
+        let columns = columns
+            .into_iter()
+            .map(|col| {
+                let array = col.array();
+                array
+                    .compact(&visibility, cardinality)
+                    .map(|array| Column::new(Arc::new(array)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut new_ops = Vec::with_capacity(cardinality);
+        for (op, visible) in ops.into_iter().zip_eq(visibility.iter()) {
+            if visible {
+                new_ops.push(op);
             }
         }
+        Ok(StreamChunk::new(new_ops, columns, None))
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
-        let (ops, columns, visibility) = self.into_inner();
-
-        let builder = DataChunk::builder().columns(columns);
-        let data_chunk = if let Some(vis) = visibility {
-            builder.visibility(vis).build()
-        } else {
-            builder.build()
-        };
-        (data_chunk, ops)
+        (self.data, self.ops)
     }
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
@@ -191,21 +174,15 @@ impl StreamChunk {
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-            cardinality: _,
-        } = self;
-
-        (ops, columns, visibility)
+        let (columns, visibility) = self.data.into_parts();
+        (self.ops, columns, visibility)
     }
 
     pub fn to_protobuf(&self) -> ProstStreamChunk {
         ProstStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
-            columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+            columns: self.columns().iter().map(|col| col.to_protobuf()).collect(),
         }
     }
 
@@ -227,7 +204,7 @@ impl StreamChunk {
     }
 
     pub fn visibility(&self) -> &Option<Bitmap> {
-        &self.visibility
+        self.data.visibility()
     }
 
     pub fn get_hash_values<H: BuildHasher>(
@@ -238,37 +215,10 @@ impl StreamChunk {
         let mut states = vec![];
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for key in keys {
-            let array = self.columns[*key].array();
+            let array = self.columns()[*key].array();
             array.hash_vec(&mut states[..]);
         }
         Ok(finalize_hashers(&mut states[..]))
-    }
-
-    /// Random access a tuple in a stream chunk. Return in a row format.
-    ///
-    /// # Arguments
-    /// * `pos` - Index of look up tuple
-    /// * `RowRef` - Reference of data tuple
-    /// * bool - whether this tuple is visible
-    pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
-        let row = self.row_at_unchecked_vis(pos);
-        let vis = match self.visibility.as_ref() {
-            Some(bitmap) => bitmap.is_set(pos)?,
-            None => true,
-        };
-        Ok((row, vis))
-    }
-
-    /// Random access a tuple in a data chunk. Return in a row format.
-    /// Note that this function do not return whether the row is visible.
-    /// # Arguments
-    /// * `pos` - Index of look up tuple
-    fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
-        assert!(pos < self.capacity());
-        RowRef {
-            chunk: self,
-            idx: pos,
-        }
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
@@ -277,10 +227,10 @@ impl StreamChunk {
 
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
-        for row in self.rows() {
-            let mut cells = Vec::with_capacity(row.size() + 1);
+        for (op, row_ref) in self.rows() {
+            let mut cells = Vec::with_capacity(row_ref.size() + 1);
             cells.push(
-                Cell::new(match row.op() {
+                Cell::new(match op {
                     Op::Insert => "+",
                     Op::Delete => "-",
                     Op::UpdateDelete => "U-",
@@ -288,7 +238,7 @@ impl StreamChunk {
                 })
                 .set_alignment(CellAlignment::Right),
             );
-            for datum in row.values() {
+            for datum in row_ref.values() {
                 let str = match datum {
                     None => "".to_owned(), // NULL
                     Some(scalar) => scalar.to_string(),
@@ -298,6 +248,16 @@ impl StreamChunk {
             table.add_row(cells);
         }
         table.to_string()
+    }
+
+    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// the chunk contains column `[a, b, c]`, then the output will be
+    /// `[c, b, a]`.
+    pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
+        Self {
+            ops: self.ops,
+            data: self.data.reorder_columns(column_mapping),
+        }
     }
 }
 
@@ -310,6 +270,138 @@ impl fmt::Debug for StreamChunk {
             self.capacity(),
             self.to_pretty_string()
         )
+    }
+}
+
+/// Test utilities for [`StreamChunk`].
+pub trait StreamChunkTestExt {
+    fn from_pretty(s: &str) -> Self;
+}
+
+impl StreamChunkTestExt for StreamChunk {
+    /// Parse a chunk from string.
+    ///
+    /// # Format
+    ///
+    /// The first line is a header indicating the column types.
+    /// The following lines indicate rows within the chunk.
+    /// Each line starts with an operation followed by values.
+    /// NULL values are represented as `.`.
+    ///
+    /// # Example
+    /// ```
+    /// use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
+    /// use risingwave_common::array::StreamChunk;
+    /// let chunk = StreamChunk::from_pretty(
+    ///     "  I I I I      // type chars
+    ///     U- 2 5 . .      // '.' means NULL
+    ///     U+ 2 5 2 6 D    // 'D' means deleted in visibility
+    ///     +  . . 4 8      // ^ comments are ignored
+    ///     -  . . 3 4",
+    /// );
+    /// //  ^ operations:
+    /// //     +: Insert
+    /// //     -: Delete
+    /// //    U+: UpdateInsert
+    /// //    U-: UpdateDelete
+    ///
+    /// // type chars:
+    /// //     I: i64
+    /// //     i: i32
+    /// //     F: f64
+    /// //     f: f32
+    /// //     T: str
+    /// //    TS: Timestamp
+    /// ```
+    fn from_pretty(s: &str) -> Self {
+        use crate::types::ScalarImpl;
+
+        let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
+        let mut ops = vec![];
+        // initialize array builders from the first line
+        let header = lines.next().unwrap().trim();
+        let mut array_builders = header
+            .split_ascii_whitespace()
+            .take_while(|c| *c != "//")
+            .map(|c| match c {
+                "I" => DataType::Int64,
+                "i" => DataType::Int32,
+                "F" => DataType::Float64,
+                "f" => DataType::Float32,
+                "TS" => DataType::Timestamp,
+                "T" => DataType::Varchar,
+                _ => todo!("unsupported type: {c:?}"),
+            })
+            .map(|ty| ty.create_array_builder(1))
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let mut visibility = vec![];
+        for mut line in lines {
+            line = line.trim();
+            let mut token = line.split_ascii_whitespace();
+            let op = match token.next().expect("missing operation") {
+                "+" => Op::Insert,
+                "-" => Op::Delete,
+                "U+" => Op::UpdateInsert,
+                "U-" => Op::UpdateDelete,
+                t => panic!("invalid op: {t:?}"),
+            };
+            ops.push(op);
+            // allow `zip` since `token` may longer than `array_builders`
+            #[allow(clippy::disallowed_methods)]
+            for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
+                let datum = match val_str {
+                    "." => None,
+                    s if matches!(builder, ArrayBuilderImpl::Int32(_)) => Some(ScalarImpl::Int32(
+                        s.parse()
+                            .map_err(|_| panic!("invalid int32: {s:?}"))
+                            .unwrap(),
+                    )),
+                    s if matches!(builder, ArrayBuilderImpl::Int64(_)) => Some(ScalarImpl::Int64(
+                        s.parse()
+                            .map_err(|_| panic!("invalid int64: {s:?}"))
+                            .unwrap(),
+                    )),
+                    s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
+                        Some(ScalarImpl::Float64(
+                            s.parse()
+                                .map_err(|_| panic!("invalid float64: {s:?}"))
+                                .unwrap(),
+                        ))
+                    }
+                    s if matches!(builder, ArrayBuilderImpl::NaiveDateTime(_)) => {
+                        Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                            s.parse()
+                                .map_err(|_| panic!("invalid datetime: {s:?}"))
+                                .unwrap(),
+                        )))
+                    }
+                    s if matches!(builder, ArrayBuilderImpl::Utf8(_)) => {
+                        Some(ScalarImpl::Utf8(s.into()))
+                    }
+                    _ => panic!("invalid data type"),
+                };
+                builder
+                    .append_datum(&datum)
+                    .expect("failed to append datum");
+            }
+            let visible = match token.next() {
+                None | Some("//") => true,
+                Some("D") => false,
+                Some(t) => panic!("invalid token: {t:?}"),
+            };
+            visibility.push(visible);
+        }
+        let columns = array_builders
+            .into_iter()
+            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
+            .collect();
+        let visibility = if visibility.iter().all(|b| *b) {
+            None
+        } else {
+            Some(Bitmap::try_from(visibility).unwrap())
+        };
+        StreamChunk::new(ops, columns, visibility)
     }
 }
 

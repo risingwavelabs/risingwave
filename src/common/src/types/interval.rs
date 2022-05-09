@@ -19,6 +19,7 @@ use std::ops::{Add, Sub};
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub};
+use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
@@ -121,7 +122,7 @@ impl IntervalUnit {
         writer.into_inner().to_vec()
     }
 
-    pub fn to_protobuf<T: Write>(&self, output: &mut T) -> Result<usize> {
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         {
             output.write_i32::<BigEndian>(self.months)?;
             output.write_i32::<BigEndian>(self.days)?;
@@ -174,6 +175,27 @@ impl IntervalUnit {
         check_unit(self.ms, rhs.ms)?;
 
         res
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<IntervalUnitProto> for IntervalUnit {
+    fn into(self) -> IntervalUnitProto {
+        IntervalUnitProto {
+            months: self.months,
+            days: self.days,
+            ms: self.ms,
+        }
+    }
+}
+
+impl From<&'_ IntervalUnitProto> for IntervalUnit {
+    fn from(p: &'_ IntervalUnitProto) -> Self {
+        Self {
+            months: p.months,
+            days: p.days,
+            ms: p.ms,
+        }
     }
 }
 

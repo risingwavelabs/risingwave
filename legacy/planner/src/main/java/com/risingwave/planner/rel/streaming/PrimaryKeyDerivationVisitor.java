@@ -356,33 +356,18 @@ public class PrimaryKeyDerivationVisitor
     var p = input.accept(this);
     var positionMap = p.info.getPositionMap();
     var oldPrimaryKeyIndices = p.info.getPrimaryKeyIndices();
-    var newPrimaryKeyIndices = new ArrayList<Integer>();
 
     var newFieldCollations = new ArrayList<RelFieldCollation>();
     for (var collation : sort.collation.getFieldCollations()) {
       var index = collation.getFieldIndex();
       var newIndex = positionMap.getOrDefault(index, index);
-      newPrimaryKeyIndices.add(newIndex);
       var newCollation = collation.withFieldIndex(newIndex);
       newFieldCollations.add(newCollation);
-    }
-    for (var oldPrimaryKeyIndex : oldPrimaryKeyIndices) {
-      boolean exist = false;
-      for (var existPrimaryKeyIndex : newPrimaryKeyIndices) {
-        if (oldPrimaryKeyIndex.equals(existPrimaryKeyIndex)) {
-          exist = true;
-          break;
-        }
-      }
-      if (!exist) {
-        newPrimaryKeyIndices.add(oldPrimaryKeyIndex);
-      }
     }
     var newCollation = RelCollations.of(newFieldCollations);
     LOGGER.debug("old collation:" + sort.collation);
     LOGGER.debug("new collation:" + newCollation);
-    LOGGER.debug("old primaryKeyIndices:" + oldPrimaryKeyIndices);
-    LOGGER.debug("new primaryKeyIndices:" + newPrimaryKeyIndices);
+    LOGGER.debug("primaryKeyIndices:" + oldPrimaryKeyIndices);
     var newSort =
         (RwStreamSort)
             sort.copy(
@@ -394,7 +379,7 @@ public class PrimaryKeyDerivationVisitor
     return new Result<>(
         newSort,
         new PrimaryKeyIndicesAndPositionMap(
-            ImmutableList.copyOf(newPrimaryKeyIndices), positionMap));
+            ImmutableList.copyOf(oldPrimaryKeyIndices), positionMap));
   }
 
   /**

@@ -1,0 +1,15 @@
+# -------------------------------------------------------------------------------------------------
+# Query1: Currency conversion
+# -------------------------------------------------------------------------------------------------
+# Convert each bid value from dollars to euros. Illustrates a simple transformation.
+# -------------------------------------------------------------------------------------------------
+
+statement ok
+CREATE MATERIALIZED VIEW nexmark_q1
+AS
+SELECT
+    auction,
+    bidder,
+    0.908 * price as price,
+    dateTime
+FROM bid;

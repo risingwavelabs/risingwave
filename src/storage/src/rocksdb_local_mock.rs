@@ -35,7 +35,7 @@ impl RocksDBStateStore {
 }
 
 impl StateStore for RocksDBStateStore {
-    type Iter<'a> = RocksDBStateStoreIter;
+    type Iter = RocksDBStateStoreIter;
 
     define_state_store_associated_type!();
 
@@ -56,12 +56,12 @@ impl StateStore for RocksDBStateStore {
         async move { unimplemented!() }
     }
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -93,7 +93,7 @@ impl StateStore for RocksDBStateStore {
         async move { unimplemented!() }
     }
 
-    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -125,7 +125,8 @@ impl RocksDBStateStoreIter {
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { unimplemented!() }

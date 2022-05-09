@@ -53,7 +53,8 @@ impl Task for EtcdService {
         }
 
         let mut cmd = Self::etcd()?;
-        let listen_urls = format!("http://{}:{}", self.config.address, self.config.port);
+        let listen_urls = format!("http://{}:{}", self.config.listen_address, self.config.port);
+        let advertise_urls = format!("http://{}:{}", self.config.address, self.config.port);
         let peer_urls = format!("http://{}:{}", self.config.address, self.config.peer_port);
 
         let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
@@ -64,11 +65,13 @@ impl Task for EtcdService {
             .arg("--listen-client-urls")
             .arg(&listen_urls)
             .arg("--advertise-client-urls")
-            .arg(&listen_urls)
+            .arg(&advertise_urls)
             .arg("--listen-peer-urls")
             .arg(&peer_urls)
             .arg("--name")
-            .arg("risedev-meta");
+            .arg("risedev-meta")
+            .arg("--max-txn-ops")
+            .arg("999999");
 
         if self.config.unsafe_no_fsync {
             cmd.arg("--unsafe-no-fsync");

@@ -12,33 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
-
+use futures::StreamExt;
+use futures_async_stream::try_stream;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc;
 
-use crate::executor::*;
-
-#[macro_export]
-
-/// `row_nonnull` builds a `Row` with concrete values.
-/// TODO: add macro row!, which requires a new trait `ToScalarValue`.
-macro_rules! row_nonnull {
-    [$( $value:expr ),*] => {
-        {
-            use risingwave_common::types::Scalar;
-            use risingwave_common::array::Row;
-            Row(vec![$(Some($value.to_scalar_value()), )*])
-        }
-    };
-}
+use super::error::StreamExecutorError;
+use super::{Barrier, Executor, Message, PkIndices, StreamChunk};
 
 pub struct MockSource {
     schema: Schema,
     pk_indices: PkIndices,
-    epoch: u64,
-    msgs: VecDeque<Message>,
+    rx: mpsc::UnboundedReceiver<Message>,
+
+    /// Whether to send a `Stop` barrier on stream finish.
+    stop_on_finish: bool,
+}
+
+/// A wrapper around `Sender<Message>`.
+pub struct MessageSender(mpsc::UnboundedSender<Message>);
+
+impl MessageSender {
+    #[allow(dead_code)]
+    pub fn push_chunk(&mut self, chunk: StreamChunk) {
+        self.0.send(Message::Chunk(chunk)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
+        let mut barrier = Barrier::new_test_barrier(epoch);
+        if stop {
+            barrier = barrier.with_stop();
+        }
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
 }
 
 impl std::fmt::Debug for MockSource {
@@ -51,157 +60,103 @@ impl std::fmt::Debug for MockSource {
 }
 
 impl MockSource {
-    pub fn new(schema: Schema, pk_indices: PkIndices) -> Self {
-        Self {
+    #[allow(dead_code)]
+    pub fn channel(schema: Schema, pk_indices: PkIndices) -> (MessageSender, Self) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let source = Self {
             schema,
             pk_indices,
-            epoch: 0,
-            msgs: VecDeque::default(),
-        }
+            rx,
+            stop_on_finish: true,
+        };
+        (MessageSender(tx), source)
     }
 
     #[allow(dead_code)]
     pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            epoch: 0,
-            msgs: msgs.into(),
+        let (tx, source) = Self::channel(schema, pk_indices);
+        for msg in msgs {
+            tx.0.send(msg).unwrap();
         }
+        source
     }
 
-    pub fn push_chunks(&mut self, chunks: impl Iterator<Item = StreamChunk>) {
-        self.msgs.extend(chunks.map(Message::Chunk));
-    }
-
-    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new_test_barrier(epoch);
-        if stop {
-            barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()));
-        }
-        self.msgs.push_back(Message::Barrier(barrier));
-    }
-}
-
-#[async_trait]
-impl Executor for MockSource {
-    async fn next(&mut self) -> Result<Message> {
-        self.epoch += 1;
-        match self.msgs.pop_front() {
-            Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(
-                Barrier::new_test_barrier(self.epoch)
-                    .with_mutation(Mutation::Stop(HashSet::default())),
-            )),
-        }
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &'static str {
-        "MockSource"
-    }
-
-    fn logical_operator_info(&self) -> &str {
-        self.identity()
-    }
-}
-
-/// This source takes message from users asynchronously
-pub struct MockAsyncSource {
-    schema: Schema,
-    pk_indices: PkIndices,
-    epoch: u64,
-    rx: UnboundedReceiver<Message>,
-}
-
-impl std::fmt::Debug for MockAsyncSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockAsyncSource")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .finish()
-    }
-}
-
-impl MockAsyncSource {
-    #[allow(dead_code)]
-    pub fn new(schema: Schema, rx: UnboundedReceiver<Message>) -> Self {
-        Self {
-            schema,
-            pk_indices: vec![],
-            rx,
-            epoch: 0,
-        }
-    }
-
-    pub fn with_pk_indices(
-        schema: Schema,
-        rx: UnboundedReceiver<Message>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            rx,
-            epoch: 0,
-        }
-    }
-
-    pub fn push_chunks(
-        tx: &mut UnboundedSender<Message>,
-        chunks: impl IntoIterator<Item = StreamChunk>,
-    ) {
+    pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
+        let (tx, source) = Self::channel(schema, pk_indices);
         for chunk in chunks {
-            tx.send(Message::Chunk(chunk)).expect("Receiver closed");
+            tx.0.send(Message::Chunk(chunk)).unwrap();
+        }
+        source
+    }
+
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn stop_on_finish(self, stop_on_finish: bool) -> Self {
+        Self {
+            stop_on_finish,
+            ..self
         }
     }
 
-    pub fn push_barrier(tx: &mut UnboundedSender<Message>, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new_test_barrier(epoch);
-        if stop {
-            barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()))
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self: Box<Self>) {
+        let mut epoch = 0;
+
+        while let Some(msg) = self.rx.recv().await {
+            epoch += 1;
+            yield msg;
         }
-        tx.send(Message::Barrier(barrier)).expect("Receiver closed");
+
+        if self.stop_on_finish {
+            yield Message::Barrier(Barrier::new_test_barrier(epoch).with_stop());
+        }
     }
 }
 
-#[async_trait]
-impl Executor for MockAsyncSource {
-    async fn next(&mut self) -> Result<Message> {
-        self.epoch += 1;
-        match self.rx.recv().await {
-            Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(
-                Barrier::new_test_barrier(self.epoch)
-                    .with_mutation(Mutation::Stop(HashSet::default())),
-            )),
-        }
+impl Executor for MockSource {
+    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {
         &self.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef {
         &self.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "MockAsyncSource"
-    }
-
-    fn logical_operator_info(&self) -> &str {
-        self.identity()
+    fn identity(&self) -> &str {
+        "MockSource"
     }
 }
 
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+}
+
+/// `row_nonnull` builds a `Row` with concrete values.
+/// TODO: add macro row!, which requires a new trait `ToScalarValue`.
+#[macro_export]
+macro_rules! row_nonnull {
+    [$( $value:expr ),*] => {
+        {
+            use risingwave_common::types::Scalar;
+            use risingwave_common::array::Row;
+            Row(vec![$(Some($value.to_scalar_value()), )*])
+        }
+    };
+}
+
+/// Create a vector of memory keyspace with len `num_ks`.
+pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateStore>> {
+    let mut returned_vec = vec![];
+    let mem_state = MemoryStateStore::new();
+    for idx in 0..num_ks {
+        returned_vec.push(Keyspace::table_root(
+            mem_state.clone(),
+            &TableId::new(idx as u32),
+        ));
+    }
+    returned_vec
 }

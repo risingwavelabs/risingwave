@@ -16,11 +16,12 @@ use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
+    UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{least_restrictive, Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -65,6 +66,9 @@ impl Binder {
             ))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
+            Expr::FieldIdentifier(field_expr, idents) => {
+                Ok(self.bind_single_field_column(*field_expr, &idents)?)
+            }
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_binary_op(*left, op, *right)?,
@@ -75,6 +79,11 @@ impl Binder {
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => self.bind_in_subquery(*expr, *subquery, negated),
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
@@ -88,6 +97,11 @@ impl Binder {
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::InList {
+                expr,
+                list,
+                negated,
+            } => self.bind_in_list(*expr, list, negated),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -97,25 +111,61 @@ impl Binder {
     }
 
     pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
-        Ok(FunctionCall::new_or_else(
+        let arg = self.bind_expr(expr)?;
+        let arg_type = arg.return_type();
+        Ok(FunctionCall::new(
             ExprType::Extract,
-            vec![
-                self.bind_string(field.to_string())?.into(),
-                self.bind_expr(expr)?,
-            ],
-            |inputs| {
-                ErrorCode::NotImplemented(
-                    format!(
-                        "function extract({} from {:?}) doesn't exist",
-                        field,
-                        inputs[1].return_type()
-                    ),
-                    112.into(),
-                )
-                .into()
-            },
-        )?
+            vec![self.bind_string(field.to_string())?.into(), arg],
+        )
+        .map_err(|_| {
+            ErrorCode::NotImplemented(
+                format!(
+                    "function extract({} from {:?}) doesn't exist",
+                    field, arg_type
+                ),
+                112.into(),
+            )
+        })?
         .into())
+    }
+
+    pub(super) fn bind_in_list(
+        &mut self,
+        expr: Expr,
+        list: Vec<Expr>,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let mut bound_expr_list = vec![self.bind_expr(expr)?];
+        for elem in list {
+            bound_expr_list.push(self.bind_expr(elem)?);
+        }
+        let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
+        if negated {
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
+                    .into(),
+            )
+        } else {
+            Ok(in_expr.into())
+        }
+    }
+
+    pub(super) fn bind_in_subquery(
+        &mut self,
+        expr: Expr,
+        subquery: Query,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let bound_expr = self.bind_expr(expr)?;
+        let bound_subquery = self.bind_subquery_expr(subquery, SubqueryKind::In(bound_expr))?;
+        if negated {
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![bound_subquery], DataType::Boolean)
+                    .into(),
+            )
+        } else {
+            Ok(bound_subquery)
+        }
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
@@ -134,16 +184,7 @@ impl Binder {
             }
         };
         let expr = self.bind_expr(expr)?;
-        let return_type = expr.return_type();
-        FunctionCall::new(func_type, vec![expr])
-            .ok_or_else(|| {
-                ErrorCode::NotImplemented(
-                    format!("unsupported unary expression {:?} {:?}", op, return_type),
-                    112.into(),
-                )
-                .into()
-            })
-            .map(|f| f.into())
+        FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
     }
 
     /// Directly returns the expression itself if it is a positive number.
@@ -174,11 +215,7 @@ impl Binder {
             }
             None => ExprType::Trim,
         };
-        Ok(FunctionCall::new_with_return_type(
-            func_type,
-            inputs,
-            DataType::Varchar,
-        ))
+        FunctionCall::new(func_type, inputs)
     }
 
     /// Bind `expr (not) between low and high`
@@ -195,41 +232,22 @@ impl Binder {
 
         let func_call = if negated {
             // negated = true: expr < low or expr > high
-            FunctionCall::new_with_return_type(
+            FunctionCall::new_unchecked(
                 ExprType::Or,
                 vec![
-                    FunctionCall::new_with_return_type(
-                        ExprType::LessThan,
-                        vec![expr.clone(), low],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new_with_return_type(
-                        ExprType::GreaterThan,
-                        vec![expr, high],
-                        DataType::Boolean,
-                    )
-                    .into(),
+                    FunctionCall::new(ExprType::LessThan, vec![expr.clone(), low])?.into(),
+                    FunctionCall::new(ExprType::GreaterThan, vec![expr, high])?.into(),
                 ],
                 DataType::Boolean,
             )
         } else {
             // negated = false: expr >= low and expr <= high
-            FunctionCall::new_with_return_type(
+            FunctionCall::new_unchecked(
                 ExprType::And,
                 vec![
-                    FunctionCall::new_with_return_type(
-                        ExprType::GreaterThanOrEqual,
-                        vec![expr.clone(), low],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new_with_return_type(
-                        ExprType::LessThanOrEqual,
-                        vec![expr, high],
-                        DataType::Boolean,
-                    )
-                    .into(),
+                    FunctionCall::new(ExprType::GreaterThanOrEqual, vec![expr.clone(), low])?
+                        .into(),
+                    FunctionCall::new(ExprType::LessThanOrEqual, vec![expr, high])?.into(),
                 ],
                 DataType::Boolean,
             )
@@ -251,14 +269,7 @@ impl Binder {
             .map(|expr| self.bind_expr(expr))
             .collect::<Result<_>>()?;
         let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
-        let mut return_type = results_expr.get(0).unwrap().return_type();
-        for i in 1..results_expr.len() {
-            return_type =
-                least_restrictive(return_type, results_expr.get(i).unwrap().return_type())?;
-        }
-        if let Some(expr) = &else_result_expr {
-            return_type = least_restrictive(return_type, expr.return_type())?;
-        }
+
         for (condition, result) in zip_eq(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
@@ -269,17 +280,12 @@ impl Binder {
                 None => condition,
             };
             inputs.push(self.bind_expr(condition)?);
-            // `cast_implicit` always ok because `return_type` is from `least_restrictive`.
-            inputs.push(result.cast_implicit(return_type.clone()).unwrap());
+            inputs.push(result);
         }
         if let Some(expr) = else_result_expr {
-            inputs.push(expr.cast_implicit(return_type.clone()).unwrap());
+            inputs.push(expr);
         }
-        Ok(FunctionCall::new_with_return_type(
-            ExprType::Case,
-            inputs,
-            return_type,
-        ))
+        FunctionCall::new(ExprType::Case, inputs)
     }
 
     pub(super) fn bind_is_operator(
@@ -288,9 +294,7 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
-        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
-            ErrorCode::NotImplemented(format!("{:?}", &func_type), None.into()).into()
-        })
+        FunctionCall::new(func_type, vec![expr])
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {

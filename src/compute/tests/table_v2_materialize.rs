@@ -14,11 +14,13 @@
 
 use std::sync::Arc;
 
+use futures::stream::StreamExt;
 use itertools::Itertools;
-use risingwave_batch::executor::monitor::BatchMetrics;
-use risingwave_batch::executor::{
-    CreateTableExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor,
+use risingwave_batch::executor::{CreateTableExecutor, Executor as BatchExecutor};
+use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
+use risingwave_batch::executor2::monitor::BatchMetrics;
+use risingwave_batch::executor2::{
+    DeleteExecutor2, Executor2, InsertExecutor2, RowSeqScanExecutor2,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -26,21 +28,19 @@ use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_pb::batch_plan::create_table_node::Info;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::plan::create_table_node::Info;
-use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
+use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 // use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
+use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, Message, PkIndices, SourceExecutor, StreamingMetrics,
-};
-use risingwave_stream::executor_v2::{
-    Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2,
+    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -93,7 +93,7 @@ async fn test_table_v2_materialize() -> Result<()> {
             .clone()
             .monitored(Arc::new(StateStoreMetrics::unused())),
     );
-    let source_manager = Arc::new(MemSourceManager::new());
+    let source_manager = Arc::new(MemSourceManager::default());
     let source_table_id = TableId::default();
     let table_columns = vec![
         // data
@@ -166,15 +166,15 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
-    let mut materialize = Box::new(MaterializeExecutorV2::new_from_v1(
+    let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
-        "MaterializeExecutor".to_string(),
-    ))
-    .v1();
+    )
+    .boxed()
+    .execute();
 
     // 1.
     // Test insertion
@@ -183,19 +183,18 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
     let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
-    let mut insert = InsertExecutor::new(
+    let insert_inner: Box<dyn BatchExecutor> =
+        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert = Box::new(InsertExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(insert_inner),
-        0,
+        Box::new(ExecutorWrapper::from(insert_inner)),
         false,
-    );
+    ));
 
     tokio::spawn(async move {
-        insert.open().await?;
-        insert.next().await?;
-        insert.close().await?;
+        let mut stream = insert.execute();
+        let _ = stream.next().await.unwrap()?;
         Ok::<_, RwError>(())
     });
 
@@ -219,19 +218,36 @@ async fn test_table_v2_materialize() -> Result<()> {
         Arc::new(StateStoreMetrics::unused()),
     );
 
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqExecutor".to_string(),
+        "RowSeqExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    assert!(scan.next().await?.is_none());
+    ));
+    let mut stream = scan.execute();
+    let result = stream.next().await;
+
+    assert!(result.is_none());
+    // Send a barrier to start materialized view
+    let curr_epoch = 1919;
+    barrier_tx
+        .send(Barrier::new_test_barrier(curr_epoch))
+        .unwrap();
+
+    assert!(matches!(
+        materialize.next().await.unwrap()?,
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: None,
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
 
     // Poll `Materialize`, should output the same insertion stream chunk
-    let message = materialize.next().await?;
+    let message = materialize.next().await.unwrap()?;
+    let mut col_row_ids = vec![];
     match message {
         Message::Chunk(c) => {
             let col_data = c.columns()[0].array_ref().as_float64();
@@ -239,8 +255,8 @@ async fn test_table_v2_materialize() -> Result<()> {
             assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
 
             let col_row_id = c.columns()[1].array_ref().as_int64();
-            assert_eq!(col_row_id.value_at(0).unwrap(), 0);
-            assert_eq!(col_row_id.value_at(1).unwrap(), 1);
+            col_row_ids.push(col_row_id.value_at(0).unwrap());
+            col_row_ids.push(col_row_id.value_at(1).unwrap());
         }
         Message::Barrier(_) => panic!(),
     }
@@ -248,11 +264,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Send a barrier and poll again, should write changes to storage
     let curr_epoch = 1919;
     barrier_tx
-        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch)))
+        .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -261,17 +277,19 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    let col_data = c.columns()[0].array_ref().as_float64();
+    ));
+
+    let mut stream = scan.execute();
+    let result = stream.next().await.unwrap().unwrap();
+
+    let col_data = result.columns()[0].array_ref().as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -283,43 +301,43 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv"
     let columns = vec![
         column_nonnull! { F64Array, [1.14] },
-        column_nonnull! { I64Array, [0] }, // row id column
+        column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let delete_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
-    let mut delete = DeleteExecutor::new(
+    let delete_inner: Box<dyn BatchExecutor> =
+        Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let delete = Box::new(DeleteExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(delete_inner),
-    );
+        Box::new(ExecutorWrapper::from(delete_inner)),
+    ));
 
     tokio::spawn(async move {
-        delete.open().await?;
-        delete.next().await?;
-        delete.close().await?;
+        let mut stream = delete.execute();
+        let _ = stream.next().await.unwrap()?;
         Ok::<_, RwError>(())
     });
 
     // Poll `Materialize`, should output the same deletion stream chunk
-    let message = materialize.next().await?;
+    let message = materialize.next().await.unwrap()?;
     match message {
         Message::Chunk(c) => {
             let col_data = c.columns()[0].array_ref().as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
 
             let col_row_id = c.columns()[1].array_ref().as_int64();
-            assert_eq!(col_row_id.value_at(0).unwrap(), 0);
+            assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
         }
         Message::Barrier(_) => panic!(),
     }
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .send(Message::Barrier(Barrier::new_test_barrier(curr_epoch + 1)))
+        .send(Barrier::new_test_barrier(curr_epoch + 1))
         .unwrap();
 
     assert!(matches!(
-        materialize.next().await?,
+        materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
             mutation: None,
@@ -328,17 +346,18 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to see the deletion now!
-    let mut scan = RowSeqScanExecutor::new(
+    let scan = Box::new(RowSeqScanExecutor2::new(
         table.clone(),
         1024,
         true,
-        "RowSeqScanExecutor".to_string(),
+        "RowSeqScanExecutor2".to_string(),
         u64::MAX,
         Arc::new(BatchMetrics::unused()),
-    );
-    scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    let col_data = c.columns()[0].array_ref().as_float64();
+    ));
+
+    let mut stream = scan.execute();
+    let result = stream.next().await.unwrap().unwrap();
+    let col_data = result.columns()[0].array_ref().as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 

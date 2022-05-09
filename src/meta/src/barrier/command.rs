@@ -17,15 +17,16 @@ use std::collections::{HashMap, HashSet};
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
+use risingwave_pb::data::{AddMutation, DispatcherMutation, NothingMutation, StopMutation};
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -58,7 +59,7 @@ pub enum Command {
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
-        dispatches: HashMap<ActorId, Vec<ActorInfo>>,
+        dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
     },
 }
 
@@ -88,8 +89,8 @@ pub struct CommandContext<'a, S> {
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
     pub info: &'a BarrierActorInfo,
 
-    pub prev_epoch: u64,
-    pub curr_epoch: u64,
+    pub prev_epoch: &'a Epoch,
+    pub curr_epoch: &'a Epoch,
 
     command: Command,
 }
@@ -99,8 +100,8 @@ impl<'a, S> CommandContext<'a, S> {
         fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
-        prev_epoch: u64,
-        curr_epoch: u64,
+        prev_epoch: &'a Epoch,
+        curr_epoch: &'a Epoch,
         command: Command,
     ) -> Self {
         Self {
@@ -129,18 +130,17 @@ where
             }
 
             Command::CreateMaterializedView { dispatches, .. } => {
-                let actors = dispatches
+                let mutations = dispatches
                     .iter()
-                    .map(|(&up_actor_id, down_actor_infos)| {
-                        (
-                            up_actor_id,
-                            Actors {
-                                info: down_actor_infos.to_vec(),
-                            },
-                        )
-                    })
+                    .map(
+                        |(&(up_actor_id, dispatcher_id), down_actor_infos)| DispatcherMutation {
+                            actor_id: up_actor_id,
+                            dispatcher_id,
+                            info: down_actor_infos.to_vec(),
+                        },
+                    )
                     .collect();
-                Mutation::Add(AddMutation { actors })
+                Mutation::Add(AddMutation { mutations })
             }
         };
 
@@ -199,8 +199,8 @@ where
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
-                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(upstream_actor_id, downstream_actor_infos)| {
+                        .filter(|((upstream_actor_id, _), _)| actors.contains(upstream_actor_id))
+                        .map(|((upstream_actor_id, _), downstream_actor_infos)| {
                             (
                                 *upstream_actor_id,
                                 downstream_actor_infos

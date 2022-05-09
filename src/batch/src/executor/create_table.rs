@@ -15,9 +15,9 @@
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_pb::plan::create_table_node::Info;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ColumnDesc as ColumnDescProto;
+use risingwave_pb::batch_plan::create_table_node::Info;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::ColumnDesc as ColumnDescProto;
 use risingwave_source::SourceManagerRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -85,7 +85,7 @@ impl Executor for CreateTableExecutor {
                 info!("Create table id:{}", &self.table_id.table_id());
 
                 self.source_manager
-                    .create_table_source_v2(&self.table_id, table_columns)?;
+                    .create_table_source(&self.table_id, table_columns)?;
             }
             Info::MaterializedView(info) => {
                 if info.associated_table_ref_id.is_some() {

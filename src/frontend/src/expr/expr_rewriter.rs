@@ -34,15 +34,15 @@ pub trait ExprRewriter {
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+        FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let (func_type, inputs) = agg_call.decompose();
+        let (func_type, inputs, distinct) = agg_call.decompose();
         let inputs = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        AggCall::new(func_type, inputs).unwrap().into()
+        AggCall::new(func_type, inputs, distinct).unwrap().into()
     }
     fn rewrite_literal(&mut self, literal: Literal) -> ExprImpl {
         literal.into()

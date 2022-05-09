@@ -21,6 +21,7 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
+use super::{VirtualNode, VIRTUAL_NODE_COUNT};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
 };
@@ -41,7 +42,7 @@ use crate::util::hash_util::CRC32FastBuilder;
 /// encoded in certain format of ("abc", 1).
 
 /// A wrapper for u64 hash result.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct HashCode(pub u64);
 
 impl From<u64> for HashCode {
@@ -53,6 +54,10 @@ impl From<u64> for HashCode {
 impl HashCode {
     pub fn hash_code(&self) -> u64 {
         self.0
+    }
+
+    pub fn to_vnode(self) -> VirtualNode {
+        (self.0 % VIRTUAL_NODE_COUNT as u64) as u16
     }
 }
 
@@ -368,7 +373,7 @@ impl HashKeySerDe<'_> for NaiveDateWrapper {
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
         let days = i32::from_ne_bytes(value[0..4].try_into().unwrap());
-        NaiveDateWrapper::new_with_days(days).unwrap()
+        NaiveDateWrapper::with_days(days).unwrap()
     }
 }
 
@@ -387,7 +392,7 @@ impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
         let value = Self::read_fixed_size_bytes::<R, 12>(source);
         let secs = i64::from_ne_bytes(value[0..8].try_into().unwrap());
         let nsecs = u32::from_ne_bytes(value[8..12].try_into().unwrap());
-        NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs).unwrap()
+        NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs).unwrap()
     }
 }
 
@@ -406,7 +411,7 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
-        NaiveTimeWrapper::new_with_secs_nano(secs, nano).unwrap()
+        NaiveTimeWrapper::with_secs_nano(secs, nano).unwrap()
     }
 }
 

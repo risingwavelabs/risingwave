@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{internal_error, Result, ToRwResult};
+use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::StreamSourceState;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{
+    ActorMapping, DispatcherType, ParallelUnitMapping, StreamNode, StreamSourceState,
+};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -33,9 +35,9 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, WorkerId};
+use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -45,16 +47,19 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
-    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
+    /// Dependent table ids
+    pub dependent_table_ids: HashSet<TableId>,
     /// Temporary source info used during `create_materialized_source`
     pub affiliated_source: Option<Source>,
-    /// Memo for assigning upstream actors to parallelized chain node.
-    pub chain_upstream_assignment: HashMap<FragmentId, Vec<ActorId>>,
-
+    /// Consistent hash mapping, used in hash dispatcher.
+    pub hash_mapping: Vec<ParallelUnitId>,
+    /// Table id offset get from meta id generator. Used to calculate global unique table id.
+    pub table_id_offset: u32,
     /// TODO: remove this when we deprecate Java frontend.
     pub is_legacy_frontend: bool,
 }
@@ -101,6 +106,168 @@ where
         })
     }
 
+    async fn resolve_chain_node(
+        &self,
+        table_fragments: &mut TableFragments,
+        dependent_table_ids: &HashSet<TableId>,
+        hash_mapping: &Vec<ParallelUnitId>,
+        dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
+        locations: &ScheduledLocations,
+    ) -> Result<()> {
+        // The closure environment. Used to simulate recursive closure.
+        struct Env<'a> {
+            hash_mapping: &'a Vec<ParallelUnitId>,
+
+            /// Records what's the correspoding actor of each parallel unit of one table.
+            upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
+            /// Records what's the actors on each worker of one table.
+            tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
+            /// Schedule information of all actors.
+            locations: &'a ScheduledLocations,
+
+            dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
+            upstream_node_actors: &'a mut HashMap<WorkerId, Vec<ActorId>>,
+        }
+
+        impl Env<'_> {
+            fn resolve_chain_node_inner(
+                &mut self,
+                stream_node: &mut StreamNode,
+                actor_id: ActorId,
+                same_worker_node_as_upstream: bool,
+            ) -> Result<()> {
+                let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
+                        // If node is not chain node, recursively deal with input nodes
+                        for input in &mut stream_node.input {
+                            self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream)?;
+                        }
+                        return Ok(());
+                };
+                // If node is chain node, we insert upstream ids into chain's input (merge)
+
+                // get upstream table id
+                let table_id = TableId::from(&chain.table_ref_id);
+
+                let (upstream_actor_id, parallel_unit_id) = {
+                    // 1. use table id to get upstream parallel_unit -> actor_id mapping
+                    let upstream_parallel_actor_mapping =
+                        self.upstream_parallel_unit_info.get(&table_id).unwrap();
+                    // 2. use our actor id to get parallel unit id of the chain actor
+                    let parallel_unit_id =
+                        self.locations.actor_locations.get(&actor_id).unwrap().id;
+                    // 3. and use chain actor's parallel unit id to get the corresponding upstream
+                    // actor id
+                    (
+                        *upstream_parallel_actor_mapping
+                            .get(&parallel_unit_id)
+                            .unwrap(),
+                        parallel_unit_id,
+                    )
+                };
+
+                // The current implementation already ensures chain and upstream are on the same
+                // worker node. So we do a sanity check here, in case that the logic get changed but
+                // `same_worker_node` constraint is not satisfied.
+                if same_worker_node_as_upstream {
+                    // Parallel unit id is a globally unique id across all worker nodes. It can be
+                    // seen as something like CPU core id. Therefore, we verify that actor's unit id
+                    // == upstream's unit id.
+
+                    let actor_parallel_unit_id =
+                        self.locations.actor_locations.get(&actor_id).unwrap().id;
+
+                    assert_eq!(
+                        *self
+                            .upstream_parallel_unit_info
+                            .get(&table_id)
+                            .unwrap()
+                            .get(&actor_parallel_unit_id)
+                            .unwrap(),
+                        upstream_actor_id
+                    );
+                }
+
+                // fill upstream node-actor info for later use
+                let upstream_table_node_actors = self.tables_node_actors.get(&table_id).unwrap();
+
+                let chain_upstream_node_actors = upstream_table_node_actors
+                    .iter()
+                    .flat_map(|(node_id, actor_ids)| {
+                        actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                    })
+                    .filter(|(_, actor_id)| upstream_actor_id == *actor_id)
+                    .into_group_map();
+                for (node_id, actor_ids) in chain_upstream_node_actors {
+                    self.upstream_node_actors
+                        .entry(node_id)
+                        .or_default()
+                        .extend(actor_ids.iter());
+                }
+
+                // deal with merge and batch query node, setting upstream infos.
+                let merge_stream_node = &mut stream_node.input[0];
+                if let Some(NodeBody::Merge(ref mut merge)) = merge_stream_node.node_body {
+                    merge.upstream_actor_id.push(upstream_actor_id);
+                } else {
+                    unreachable!("chain's input[0] should always be merge");
+                }
+                let batch_stream_node = &mut stream_node.input[1];
+                if let Some(NodeBody::BatchPlan(ref mut batch_query)) = batch_stream_node.node_body
+                {
+                    let (original_indices, data) = compress_data(self.hash_mapping);
+                    batch_query.hash_mapping = Some(ParallelUnitMapping {
+                        original_indices,
+                        data,
+                    });
+                    batch_query.parallel_unit_id = parallel_unit_id;
+                } else {
+                    unreachable!("chain's input[1] should always be batch query");
+                }
+
+                // finally, we should also build dispatcher infos here.
+                self.dispatches
+                    .entry((upstream_actor_id, 0))
+                    .or_default()
+                    .push(actor_id);
+
+                Ok(())
+            }
+        }
+
+        let upstream_parallel_unit_info = &self
+            .fragment_manager
+            .get_sink_parallel_unit_ids(dependent_table_ids)
+            .await?;
+
+        let tables_node_actors = &self
+            .fragment_manager
+            .get_tables_node_actors(dependent_table_ids)
+            .await?;
+
+        let mut env = Env {
+            hash_mapping,
+            upstream_parallel_unit_info,
+            tables_node_actors,
+            locations,
+            dispatches,
+            upstream_node_actors,
+        };
+
+        for fragment in table_fragments.fragments.values_mut() {
+            for actor in &mut fragment.actors {
+                if let Some(ref mut stream_node) = actor.nodes {
+                    env.resolve_chain_node_inner(
+                        stream_node,
+                        actor.actor_id,
+                        actor.same_worker_node_as_upstream,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Create materialized view, it works as follows:
     /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
@@ -114,7 +281,16 @@ where
     pub async fn create_materialized_view(
         &self,
         mut table_fragments: TableFragments,
-        ctx: CreateMaterializedViewContext,
+        CreateMaterializedViewContext {
+            mut dispatches,
+            mut upstream_node_actors,
+            table_sink_map,
+            dependent_table_ids,
+            affiliated_source,
+            hash_mapping,
+            table_id_offset: _,
+            is_legacy_frontend,
+        }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
             .cluster_manager
@@ -124,17 +300,96 @@ where
             )
             .await;
         if nodes.is_empty() {
-            return Err(InternalError("no available node exist".to_string()).into());
+            return Err(internal_error("no available compute node in the cluster"));
         }
 
         let mut locations = ScheduledLocations::new();
         locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
-        for fragment in table_fragments.fragments() {
+        let topological_order = table_fragments.generate_topological_order();
+
+        // Schedule each fragment(actors) to nodes.
+        for fragment_id in topological_order {
+            let fragment = table_fragments.fragments.get(&fragment_id).unwrap();
             self.scheduler
                 .schedule(fragment.clone(), &mut locations)
                 .await?;
         }
+
+        // resolve chain node infos, including:
+        // 1. insert upstream actor id in merge node
+        // 2. insert parallel unit id in batch query node
+        // note: this only works for Rust frontend.
+        if !is_legacy_frontend {
+            self.resolve_chain_node(
+                &mut table_fragments,
+                &dependent_table_ids,
+                &hash_mapping,
+                &mut dispatches,
+                &mut upstream_node_actors,
+                &locations,
+            )
+            .await?;
+        }
+
+        // Verify whether all same_as_upstream constraints are satisfied.
+        //
+        // Currently, the scheduler (when there's no scale-in or scale-out) will always schedule
+        // chain node on the same node as upstreams. However, this constraint will easily be broken
+        // if parallel units are not aligned between upstream nodes.
+
+        // Fill hash dispatcher's mapping with scheduled locations.
+        table_fragments
+            .fragments
+            .iter_mut()
+            .for_each(|(_, fragment)| {
+                fragment.actors.iter_mut().for_each(|actor| {
+                    actor.dispatcher.iter_mut().for_each(|dispatcher| {
+                        if dispatcher.get_type().unwrap() == DispatcherType::Hash {
+                            let downstream_actors = &dispatcher.downstream_actor_id;
+
+                            // Theoretically, a hash dispatcher should have
+                            // `self.hash_parallel_count` as the number
+                            // of its downstream actors. However,
+                            // since the frontend optimizer is still WIP, there
+                            // exists some unoptimized situation where a hash
+                            // dispatcher has ONLY ONE downstream actor, which
+                            // makes it behave like a simple dispatcher. As an
+                            // expedient, we specially compute the consistent hash mapping here. The
+                            // `if` branch could be removed after the optimizer
+                            // has been fully implemented.
+                            let streaming_hash_mapping = if downstream_actors.len() == 1 {
+                                vec![downstream_actors[0]; hash_mapping.len()]
+                            } else {
+                                // extract "parallel unit -> downstream actor" mapping from
+                                // locations.
+                                let parallel_unit_actor_map = downstream_actors
+                                    .iter()
+                                    .map(|actor_id| {
+                                        (
+                                            locations.actor_locations.get(actor_id).unwrap().id,
+                                            *actor_id,
+                                        )
+                                    })
+                                    .collect::<HashMap<_, _>>();
+
+                                hash_mapping
+                                    .iter()
+                                    .map(|parallel_unit_id| {
+                                        parallel_unit_actor_map[parallel_unit_id]
+                                    })
+                                    .collect_vec()
+                            };
+
+                            let (original_indices, data) = compress_data(&streaming_hash_mapping);
+                            dispatcher.hash_mapping = Some(ActorMapping {
+                                original_indices,
+                                data,
+                            });
+                        }
+                    });
+                })
+            });
 
         let actor_info = locations
             .actor_locations
@@ -143,7 +398,7 @@ where
                 (
                     actor_id,
                     ActorStatus {
-                        node_id: parallel_unit.worker_node_id,
+                        parallel_unit: Some(parallel_unit.clone()),
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -177,7 +432,7 @@ where
 
         let split_assignment = self
             .source_manager
-            .schedule_split_for_actors(source_actors_group_by_fragment, ctx.affiliated_source)
+            .schedule_split_for_actors(source_actors_group_by_fragment, affiliated_source)
             .await?;
 
         // patch source actors with splits
@@ -188,7 +443,7 @@ where
                     node = node.input.first_mut().unwrap();
                 }
 
-                if let Some(Node::SourceNode(s)) = node.node.as_mut() {
+                if let Some(NodeBody::Source(s)) = node.node_body.as_mut() {
                     log::debug!(
                         "patching source node #{} with splits {:?}",
                         actor_id,
@@ -200,7 +455,7 @@ where
                             split_type: splits.first().unwrap().get_type(),
                             stream_source_splits: splits
                                 .iter()
-                                .map(|split| split.to_string().unwrap().as_bytes().to_vec())
+                                .map(|split| split.to_json_bytes().to_vec())
                                 .collect(),
                         });
                     }
@@ -212,7 +467,7 @@ where
         // includes such information. It contains: 1. actors in the current create
         // materialized view request. 2. all upstream actors.
         let mut actor_infos_to_broadcast = locations.actor_infos();
-        actor_infos_to_broadcast.extend(ctx.upstream_node_actors.iter().flat_map(
+        actor_infos_to_broadcast.extend(upstream_node_actors.iter().flat_map(
             |(node_id, upstreams)| {
                 upstreams.iter().map(|up_id| ActorInfo {
                     actor_id: *up_id,
@@ -225,8 +480,7 @@ where
 
         let node_actors = locations.node_actors();
 
-        let dispatches = ctx
-            .dispatches
+        let dispatches = dispatches
             .iter()
             .map(|(up_id, down_ids)| {
                 (
@@ -244,8 +498,12 @@ where
             })
             .collect::<HashMap<_, _>>();
 
-        let mut node_hanging_channels = ctx
-            .upstream_node_actors
+        let up_id_to_down_info = dispatches
+            .iter()
+            .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info.clone()))
+            .collect::<HashMap<_, _>>();
+
+        let mut node_hanging_channels = upstream_node_actors
             .iter()
             .map(|(node_id, up_ids)| {
                 (
@@ -253,7 +511,7 @@ where
                     up_ids
                         .iter()
                         .flat_map(|up_id| {
-                            dispatches
+                            up_id_to_down_info
                                 .get(up_id)
                                 .expect("expected dispatches info")
                                 .iter()
@@ -348,7 +606,7 @@ where
         self.barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
-                table_sink_map: ctx.table_sink_map,
+                table_sink_map,
                 dispatches,
             })
             .await?;
@@ -395,7 +653,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
-    use risingwave_pb::plan::TableRefId;
+    use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
@@ -614,7 +872,6 @@ mod tests {
         async fn stop(self) {
             for shutdown_tx in self.shutdown_txs {
                 shutdown_tx.send(()).unwrap();
-                tokio::time::sleep(Duration::from_millis(150)).await;
             }
             for join_handle in self.join_handles {
                 join_handle.await.unwrap();
@@ -637,8 +894,8 @@ mod tests {
                 actor_id: i,
                 // A dummy node to avoid panic.
                 nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node: Some(
-                        risingwave_pb::stream_plan::stream_node::Node::MaterializeNode(
+                    node_body: Some(
+                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
                             risingwave_pb::stream_plan::MaterializeNode {
                                 table_ref_id: Some(table_ref_id.clone()),
                                 ..Default::default()

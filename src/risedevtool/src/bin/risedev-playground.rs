@@ -20,20 +20,19 @@ use std::fmt::Write;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    AwsS3Config, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService,
-    ExecuteContext, FrontendService, FrontendServiceV2, GrafanaService, JaegerService,
-    KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task,
-    ZooKeeperService, RISEDEV_SESSION_NAME,
+    preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander,
+    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, FrontendServiceV2,
+    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
+    ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -123,11 +122,13 @@ fn task_main(
             ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
             ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
+            ServiceConfig::RedPanda(_) => None,
         };
 
         if let Some(x) = listen_info {
@@ -198,7 +199,7 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
-                    c.address, c.port, c.dashboard_address, c.dashboard_port
+                    c.address, c.port, c.address, c.dashboard_port
                 ));
             }
             ServiceConfig::Frontend(c) => {
@@ -236,6 +237,16 @@ fn task_main(
                         .blue()
                         .bold()
                 )?;
+            }
+            ServiceConfig::Compactor(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = CompactorService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("compactor {}:{}", c.address, c.port));
             }
             ServiceConfig::Grafana(c) => {
                 let mut ctx =
@@ -290,17 +301,20 @@ fn task_main(
                 let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("zookeeper http://{}:{}/", c.address, c.port));
+                    .set_message(format!("zookeeper {}:{}", c.address, c.port));
             }
             ServiceConfig::Kafka(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = KafkaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task = risedev::KafkaReadyCheckTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("kafka http://{}:{}/", c.address, c.port));
+                    .set_message(format!("kafka {}:{}", c.address, c.port));
+            }
+            ServiceConfig::RedPanda(_) => {
+                return Err(anyhow!("redpanda is only supported in RiseDev compose."));
             }
         }
 
@@ -310,73 +324,6 @@ fn task_main(
     }
 
     Ok((stat, log_buffer))
-}
-
-fn preflight_check_proxy() -> Result<()> {
-    if env::var("http_proxy").is_ok()
-        || env::var("https_proxy").is_ok()
-        || env::var("HTTP_PROXY").is_ok()
-        || env::var("HTTPS_PROXY").is_ok()
-        || env::var("all_proxy").is_ok()
-        || env::var("ALL_PROXY").is_ok()
-    {
-        if let Ok(x) = env::var("no_proxy") && x.contains("127.0.0.1") && x.contains("::1") {
-            println!(
-                "[{}] {} - You are using proxies for all RisingWave components. Please make sure that `no_proxy` is set for all worker nodes within the cluster.",
-                style("risedev-preflight-check").bold(),
-                style("INFO").green().bold()
-            );
-        } else {
-            println!(
-                "[{}] {} - `no_proxy` is not set correctly, which might cause failure in RiseDev and RisingWave. Consider {}.",
-                style("risedev-preflight-check").bold(),
-                style("WARN").yellow().bold(),
-                style("`export no_proxy=localhost,127.0.0.1,::1`").blue().bold()
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn preflight_check_ulimit() -> Result<()> {
-    let ulimit = Command::new("sh")
-        .args(["-c", "ulimit -n"])
-        .output()?
-        .stdout;
-    let ulimit = String::from_utf8(ulimit)?;
-    let ulimit: usize = ulimit.trim().parse()?;
-    if ulimit < 8192 {
-        println!(
-            "[{}] {} - ulimit for file handler is too low (currently {}). If you meet too many open files error, considering changing the ulimit.",
-            style("risedev-preflight-check").bold(),
-            style("WARN").yellow().bold(),
-            ulimit
-        );
-    }
-    Ok(())
-}
-
-fn preflight_check() -> Result<()> {
-    if let Err(e) = preflight_check_proxy() {
-        println!(
-            "[{}] {} - failed to run proxy preflight check: {}",
-            style("risedev-preflight-check").bold(),
-            style("WARN").yellow().bold(),
-            e
-        );
-    }
-
-    if let Err(e) = preflight_check_ulimit() {
-        println!(
-            "[{}] {} - failed to run ulimit preflight check: {}",
-            style("risedev-preflight-check").bold(),
-            style("WARN").yellow().bold(),
-            e
-        );
-    }
-
-    Ok(())
 }
 
 fn main() -> Result<()> {

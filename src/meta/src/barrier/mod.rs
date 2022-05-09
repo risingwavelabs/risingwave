@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -38,7 +39,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv};
 use crate::model::BarrierManagerState;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -172,10 +173,13 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make interval configurable.
-        // TODO: when tracing is on, warn the developer on this short interval.
-        let interval = Duration::from_millis(100);
         let enable_recovery = env.opts.enable_recovery;
+        let interval = env.opts.checkpoint_interval;
+        tracing::info!(
+            "Starting barrier manager with: interval={:?}, enable_recovery={}",
+            interval,
+            enable_recovery
+        );
 
         Self {
             interval,
@@ -203,28 +207,28 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
-        let mut min_interval = tokio::time::interval(self.interval);
-        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut unfinished = UnfinishedNotifiers::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = self.env.epoch_generator().generate().into_inner();
+            let new_epoch = Epoch::now();
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
             let (new_epoch, actors_to_finish, finished_create_mviews) =
                 self.recovery(state.prev_epoch, None).await;
-            unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+            unfinished.add(new_epoch.0, actors_to_finish, vec![]);
             for finished in finished_create_mviews {
                 unfinished.finish_actors(finished.epoch, once(finished.actor_id));
             }
-            state.prev_epoch = new_epoch.into_inner();
+            state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
         }
 
+        let mut min_interval = tokio::time::interval(self.interval);
+        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -241,14 +245,23 @@ where
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
-            let new_epoch = self.env.epoch_generator().generate().into_inner();
+            // When there's no actors exist in the cluster, we don't need to send the barrier. This
+            // is an advance optimization. Besides if another barrier comes immediately,
+            // it may send a same epoch and fail the epoch check.
+            if info.nothing_to_do() {
+                let mut notifiers = notifiers;
+                notifiers.iter_mut().for_each(Notifier::notify_to_send);
+                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                continue;
+            }
+            let new_epoch = Epoch::now();
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_clients_ref(),
                 &info,
-                state.prev_epoch,
-                new_epoch,
+                &state.prev_epoch,
+                &new_epoch,
                 command.clone(),
             );
 
@@ -261,7 +274,7 @@ where
 
                     // Then try to finish the barrier for Create MVs.
                     let actors_to_finish = command_ctx.actors_to_finish();
-                    unfinished.add(new_epoch, actors_to_finish, notifiers);
+                    unfinished.add(new_epoch.0, actors_to_finish, notifiers);
                     for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
                         unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                     }
@@ -277,12 +290,12 @@ where
                         let (new_epoch, actors_to_finish, finished_create_mviews) =
                             self.recovery(state.prev_epoch, Some(command)).await;
                         unfinished = UnfinishedNotifiers::default();
-                        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+                        unfinished.add(new_epoch.0, actors_to_finish, vec![]);
                         for finished in finished_create_mviews {
                             unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                         }
 
-                        state.prev_epoch = new_epoch.into_inner();
+                        state.prev_epoch = new_epoch;
                     } else {
                         panic!("failed to execute barrier: {:?}", e);
                     }
@@ -303,19 +316,19 @@ where
         // Wait for all barriers collected
         let result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
-        if command_context.prev_epoch != INVALID_EPOCH {
+        if command_context.prev_epoch.0 != INVALID_EPOCH {
             match result {
                 Ok(_) => {
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
                     self.hummock_manager
-                        .commit_epoch(command_context.prev_epoch)
+                        .commit_epoch(command_context.prev_epoch.0)
                         .await?;
                 }
                 Err(_) => {
                     self.hummock_manager
-                        .abort_epoch(command_context.prev_epoch)
+                        .abort_epoch(command_context.prev_epoch.0)
                         .await?;
                 }
             };
@@ -349,8 +362,8 @@ where
                 let request_id = Uuid::new_v4().to_string();
                 let barrier = Barrier {
                     epoch: Some(risingwave_pb::data::Epoch {
-                        curr: command_context.curr_epoch,
-                        prev: command_context.prev_epoch,
+                        curr: command_context.curr_epoch.0,
+                        prev: command_context.prev_epoch.0,
                     }),
                     mutation: Some(mutation),
                     // TODO(chi): add distributed tracing
@@ -397,12 +410,7 @@ where
             .await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
-}
 
-impl<S> GlobalBarrierManager<S>
-where
-    S: MetaStore,
-{
     async fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
         self.scheduled_barriers
             .push((command, once(notifier).collect()))

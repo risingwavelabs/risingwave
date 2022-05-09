@@ -14,14 +14,15 @@
 
 use std::fmt;
 
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ProjectNode;
 
 use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -103,8 +104,15 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(Expr::to_protobuf)
+            .map(Expr::to_expr_proto)
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
+    }
+}
+
+impl ToLocalBatch for BatchProject {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local_with_order_required(Order::any());
+        self.clone_with_input(new_input).into()
     }
 }

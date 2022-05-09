@@ -1,18 +1,18 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.9", default-features = false }
-aws-sdk-s3 = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.39"
-aws-smithy-types = "0.39"
-aws-types = { version = "0.9", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.10", default-features = false }
+aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.40"
+aws-smithy-types = "0.40"
+aws-types = { version = "0.10", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -49,6 +49,7 @@ risingwave_rpc_client = { path = "../rpc_client" }
 # ], optional = true }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
+spin = "0.9"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
@@ -75,7 +76,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 # rocksdb-local = ["rocksdb"]
@@ -87,3 +88,11 @@ name = "bench_block_iter"
 harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
+
+[[bench]]
+name = "bench_lru_cache"
+harness = false
+
+[[bench]]
+name = "bench_merge_iter"
+harness = false

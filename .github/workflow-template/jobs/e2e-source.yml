@@ -40,6 +40,23 @@ jobs:
       # - name: Setup kafka cluster
       #   run: ./scripts/source/prepare_source.sh
 
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          profile: minimal
+
+      - name: Cache Cargo home # cargo-make need this info to accelerate prepare process
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ env.CACHE_KEY_SUFFIX }}-e2e
+
       - name: Download sqllogictest
         run: |
           wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
@@ -95,8 +112,8 @@ jobs:
 
       - name: Prepare RiseDev playground
         run: |
-          ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
+          ~/cargo-make/makers link-all-in-one-binaries
 
       # --- Tests ---
       #
@@ -122,6 +139,14 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
+
+      - name: e2e test w/ Rust frontend ci-3node, source with kafka
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-start ci-kafka
+          ./scripts/source/prepare_ci_kafka.sh
+          sqllogictest -p 4566 './e2e_test/source/**/*.slt'
 
       # --- Post Tasks ---
       - name: Dump last 100 lines of logs on failure

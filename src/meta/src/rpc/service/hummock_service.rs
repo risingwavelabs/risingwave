@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::error::{tonic_err, ErrorCode};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -69,7 +70,7 @@ where
                 status: None,
                 pinned_version: Some(pinned_version),
             })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -84,7 +85,7 @@ where
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -102,7 +103,7 @@ where
                 status: None,
                 version: Some(version),
             })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -116,12 +117,15 @@ where
                 status: None,
             })),
             Some(compact_task) => {
-                let result = self.hummock_manager.report_compact_task(compact_task).await;
+                let result = self
+                    .hummock_manager
+                    .report_compact_task(&compact_task)
+                    .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
                         status: None,
                     })),
-                    Err(e) => Err(e.to_grpc_status()),
+                    Err(e) => Err(tonic_err(e)),
                 }
             }
         }
@@ -141,7 +145,7 @@ where
                 status: None,
                 snapshot: Some(hummock_snapshot),
             })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -155,7 +159,7 @@ where
             .unpin_snapshot(req.context_id, req.snapshots)
             .await
         {
-            return Err(e.to_grpc_status());
+            return Err(tonic_err(e));
         }
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
@@ -168,7 +172,7 @@ where
         let result = self.hummock_manager.commit_epoch(req.epoch).await;
         match result {
             Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -180,7 +184,7 @@ where
         let result = self.hummock_manager.abort_epoch(req.epoch).await;
         match result {
             Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -194,7 +198,7 @@ where
                 status: None,
                 table_id,
             })),
-            Err(e) => Err(e.to_grpc_status()),
+            Err(e) => Err(tonic_err(e)),
         }
     }
 
@@ -202,9 +206,16 @@ where
         &self,
         request: Request<SubscribeCompactTasksRequest>,
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let rx = self
-            .compactor_manager
-            .add_compactor(request.into_inner().context_id);
+        let context_id = request.into_inner().context_id;
+        // check_context and add_compactor as a whole is not atomic, but compactor_manager will
+        // remove invalid compactor eventually.
+        if !self.hummock_manager.check_context(context_id).await {
+            return Err(tonic_err(ErrorCode::MetaError(format!(
+                "invalid hummock context {}",
+                context_id
+            ))));
+        }
+        let rx = self.compactor_manager.add_compactor(context_id);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
@@ -216,7 +227,7 @@ where
             self.vacuum_trigger
                 .report_vacuum_task(vacuum_task)
                 .await
-                .map_err(|e| e.to_grpc_status())?;
+                .map_err(tonic_err)?;
         }
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }

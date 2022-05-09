@@ -15,91 +15,141 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::{mpsc, oneshot};
+use tracing::error;
 
-use crate::error::StorageResult;
+use super::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-#[derive(Debug)]
-pub struct SyncItem {
-    /// Epoch to sync. None means syncing all epochs.
-    pub(super) epoch: Option<u64>,
-    /// Notifier to notify on sync finishes
-    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<u64>>>,
-}
+pub(crate) type UploadTaskId = u64;
+pub(crate) type UploadTaskPayload = Vec<SharedBufferBatch>;
+pub(crate) type UploadTaskResult =
+    BTreeMap<(HummockEpoch, UploadTaskId), HummockResult<Vec<SstableInfo>>>;
 
 #[derive(Debug)]
-pub enum SharedBufferUploaderItem {
-    Batch(SharedBufferBatch),
-    Sync(SyncItem),
-    Reset(u64),
+pub struct UploadTask {
+    pub(crate) id: UploadTaskId,
+    pub(crate) epoch: HummockEpoch,
+    pub(crate) payload: UploadTaskPayload,
+}
+
+impl UploadTask {
+    pub fn new(id: UploadTaskId, epoch: HummockEpoch, payload: UploadTaskPayload) -> Self {
+        Self { id, epoch, payload }
+    }
+}
+
+pub struct UploadItem {
+    pub(crate) tasks: Vec<UploadTask>,
+    pub(crate) notifier: oneshot::Sender<UploadTaskResult>,
+}
+
+impl UploadItem {
+    pub fn new(tasks: Vec<UploadTask>, notifier: oneshot::Sender<UploadTaskResult>) -> Self {
+        Self { tasks, notifier }
+    }
 }
 
 pub struct SharedBufferUploader {
-    /// Batches to upload grouped by epoch
-    batches_to_upload: BTreeMap<u64, Vec<SharedBufferBatch>>,
-    local_version_manager: Arc<LocalVersionManager>,
     options: Arc<StorageConfig>,
-
-    /// Statistics.
-    // TODO: separate `HummockStats` from `StateStoreMetrics`.
-    stats: Arc<StateStoreMetrics>,
-    hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_store: SstableStoreRef,
-
-    /// For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to true
-    /// in `StorageConfig`
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
-    uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+    uploader_rx: mpsc::UnboundedReceiver<UploadItem>,
+
+    sstable_store: SstableStoreRef,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl SharedBufferUploader {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
-        local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+        uploader_rx: mpsc::UnboundedReceiver<UploadItem>,
+        stats: Arc<StateStoreMetrics>,
+        write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> Self {
         Self {
-            batches_to_upload: BTreeMap::new(),
-            options: options.clone(),
-            local_version_manager,
-
-            stats,
-            hummock_meta_client,
-            sstable_store,
-            write_conflict_detector: if options.write_conflict_detection_enabled {
-                Some(Arc::new(ConflictDetector::new()))
-            } else {
-                None
-            },
+            options,
+            write_conflict_detector,
             uploader_rx,
+            sstable_store,
+            hummock_meta_client,
+            stats,
         }
     }
 
-    /// Uploads buffer batches to S3.
-    async fn sync(&mut self, epoch: u64) -> HummockResult<u64> {
-        if let Some(detector) = &self.write_conflict_detector {
-            detector.archive_epoch(epoch);
+    pub async fn run(&mut self) -> HummockResult<()> {
+        loop {
+            match self.run_inner().await {
+                Ok(()) => return Ok(()),
+                Err(e) => error!("error raised in shared buffer uploader: {:?}", e),
+            }
+        }
+    }
+}
+
+impl SharedBufferUploader {
+    async fn run_inner(&mut self) -> HummockResult<()> {
+        while let Some(item) = self.uploader_rx.recv().await {
+            let mut task_results = BTreeMap::new();
+            let mut failed = false;
+            for UploadTask {
+                id: task_id,
+                epoch,
+                payload,
+            } in item.tasks
+            {
+                // If a previous task failed, this task will also fail
+                if failed {
+                    task_results.insert(
+                        (epoch, task_id),
+                        Err(HummockError::shared_buffer_error(
+                            "failed due to previous failure",
+                        )),
+                    );
+                } else {
+                    match self.flush(epoch, &payload).await {
+                        Ok(tables) => {
+                            task_results.insert((epoch, task_id), Ok(tables));
+                        }
+                        Err(e) => {
+                            failed = true;
+                            task_results.insert((epoch, task_id), Err(e));
+                        }
+                    }
+                };
+            }
+            item.notifier
+                .send(task_results)
+                .map_err(|_| HummockError::shared_buffer_error("failed to send result"))?;
+        }
+        Ok(())
+    }
+
+    async fn flush(
+        &mut self,
+        epoch: HummockEpoch,
+        batches: &Vec<SharedBufferBatch>,
+    ) -> HummockResult<Vec<SstableInfo>> {
+        if batches.is_empty() {
+            return Ok(vec![]);
         }
 
-        let buffers = match self.batches_to_upload.remove(&epoch) {
-            Some(m) => m,
-            None => return Ok(0),
-        };
-
-        let sync_size: u64 = buffers.iter().map(|batch| batch.size).sum();
+        if let Some(detector) = &self.write_conflict_detector {
+            for batch in batches {
+                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
+            }
+        }
 
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
@@ -112,96 +162,31 @@ impl SharedBufferUploader {
 
         let tables = Compactor::compact_shared_buffer(
             Arc::new(mem_compactor_ctx),
-            buffers,
+            batches,
             self.stats.clone(),
         )
         .await?;
 
+        let uploaded_sst_info: Vec<SstableInfo> = tables
+            .into_iter()
+            .map(|(sst, vnode_bitmap)| SstableInfo {
+                id: sst.id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: sst.meta.smallest_key.clone(),
+                    right: sst.meta.largest_key.clone(),
+                    inf: false,
+                }),
+                file_size: sst.meta.estimated_size as u64,
+                vnode_bitmap,
+            })
+            .collect();
+
         // Add all tables at once.
-        let version = self
-            .hummock_meta_client
-            .add_tables(
-                epoch,
-                tables
-                    .iter()
-                    .map(|sst| SstableInfo {
-                        id: sst.id,
-                        key_range: Some(risingwave_pb::hummock::KeyRange {
-                            left: sst.meta.smallest_key.clone(),
-                            right: sst.meta.largest_key.clone(),
-                            inf: false,
-                        }),
-                    })
-                    .collect(),
-            )
+        self.hummock_meta_client
+            .add_tables(epoch, uploaded_sst_info.clone())
             .await
             .map_err(HummockError::meta_error)?;
 
-        // Ensure the added data is available locally
-        self.local_version_manager.try_set_version(version);
-
-        Ok(sync_size)
-    }
-
-    async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
-        match item {
-            SharedBufferUploaderItem::Batch(m) => {
-                if let Some(detector) = &self.write_conflict_detector {
-                    detector.check_conflict_and_track_write_batch(&m.inner, m.epoch);
-                }
-
-                self.batches_to_upload
-                    .entry(m.epoch())
-                    .or_insert(Vec::new())
-                    .push(m);
-                Ok(())
-            }
-            SharedBufferUploaderItem::Sync(sync_item) => {
-                let res = match sync_item.epoch {
-                    Some(e) => {
-                        // Sync a specific epoch
-                        self.sync(e).await
-                    }
-                    None => {
-                        // Sync all epochs
-                        let epochs = self.batches_to_upload.keys().copied().collect_vec();
-                        let mut res = Ok(0);
-                        let mut size_total: u64 = 0;
-
-                        for e in epochs {
-                            res = self.sync(e).await;
-                            if res.is_err() {
-                                break;
-                            }
-                            size_total += res.unwrap();
-                            res = Ok(size_total);
-                        }
-                        res
-                    }
-                };
-
-                if let Some(tx) = sync_item.notifier {
-                    tx.send(res).map_err(|_| {
-                        HummockError::shared_buffer_error(
-                            "Failed to notify shared buffer sync because of send drop",
-                        )
-                    })?;
-                }
-                Ok(())
-            }
-            SharedBufferUploaderItem::Reset(epoch) => {
-                self.batches_to_upload.remove(&epoch);
-                Ok(())
-            }
-        }
-    }
-
-    pub async fn run(mut self) -> StorageResult<()> {
-        while let Some(m) = self.uploader_rx.recv().await {
-            if let Err(e) = self.handle(m).await {
-                return Err(e);
-            }
-        }
-        Ok(())
+        Ok(uploaded_sst_info)
     }
 }

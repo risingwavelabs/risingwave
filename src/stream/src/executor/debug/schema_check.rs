@@ -12,35 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
+use std::sync::Arc;
 
-use async_trait::async_trait;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::for_all_variants;
 use tracing::event;
 
-use crate::executor::{Executor, Message};
+use crate::executor::error::StreamExecutorError;
+use crate::executor::{ExecutorInfo, Message, MessageStream};
 
-/// [`SchemaCheckExecutor`] checks the passing stream chunk against the expected schema.
-///
-/// Note that currently this only checks the physical type (variant name).
-#[derive(Debug)]
-pub struct SchemaCheckExecutor {
-    /// The input of the current executor.
-    input: Box<dyn Executor>,
-}
-
-impl SchemaCheckExecutor {
-    pub fn new(input: Box<dyn Executor>) -> Self {
-        Self { input }
-    }
-}
-
-#[async_trait]
-impl super::DebugExecutor for SchemaCheckExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        let message = self.input.next().await?;
+/// Streams wrapped by `schema_check` will check the passing stream chunk against the expected
+/// schema.
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
+    #[for_await]
+    for message in input {
+        let message = message?;
 
         if let Message::Chunk(chunk) = &message {
             event!(
@@ -51,13 +39,13 @@ impl super::DebugExecutor for SchemaCheckExecutor {
                     .iter()
                     .map(|col| col.array_ref().get_ident())
                     .collect_vec(),
-                self.schema().fields()
+                info.schema.fields()
             );
 
             for (i, pair) in chunk
                 .columns()
                 .iter()
-                .zip_longest(self.schema().fields())
+                .zip_longest(info.schema.fields())
                 .enumerate()
             {
                 let array = pair.as_ref().left().map(|c| c.array_ref());
@@ -74,7 +62,7 @@ impl super::DebugExecutor for SchemaCheckExecutor {
                         match (array, &builder) {
                             $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
                             _ => panic!("schema check failed on {}: column {} should be {:?}, while stream chunk gives {:?}",
-                                                    self.input.logical_operator_info(), i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
+                                        info.identity, i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
                         }
                     };
                 }
@@ -83,39 +71,25 @@ impl super::DebugExecutor for SchemaCheckExecutor {
             }
         }
 
-        Ok(message)
-    }
-
-    fn input(&self) -> &dyn Executor {
-        self.input.as_ref()
-    }
-
-    fn input_mut(&mut self) -> &mut dyn Executor {
-        self.input.as_mut()
+        yield message;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
+    use futures::{pin_mut, StreamExt};
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
+    use crate::executor::Executor;
 
     #[tokio::test]
     async fn test_schema_ok() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { F64Array, [200.0, 14.0, 300.0] },
-            ],
-            None,
-        );
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -123,26 +97,25 @@ mod tests {
             ],
         };
 
-        let mut source = MockSource::new(schema, vec![1]);
-        source.push_chunks([chunk].into_iter());
-        source.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![1]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I     F
+            + 100 200.0
+            +  10  14.0
+            +   4 300.0",
+        ));
+        tx.push_barrier(1, false);
 
-        let mut checked = SchemaCheckExecutor::new(Box::new(source));
-        assert_matches!(checked.next().await.unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap(), Message::Barrier(_));
+        let checked = schema_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(_));
     }
 
     #[should_panic]
     #[tokio::test]
     async fn test_schema_bad() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                column_nonnull! { I64Array, [100, 10, 4] },
-                column_nonnull! { I64Array, [200, 14, 300] },
-            ],
-            None,
-        );
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -150,11 +123,17 @@ mod tests {
             ],
         };
 
-        let mut source = MockSource::new(schema, vec![1]);
-        source.push_chunks([chunk].into_iter());
-        source.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel(schema, vec![1]);
+        tx.push_chunk(StreamChunk::from_pretty(
+            "   I   I
+            + 100 200
+            +  10  14
+            +   4 300",
+        ));
+        tx.push_barrier(1, false);
 
-        let mut checked = SchemaCheckExecutor::new(Box::new(source));
-        checked.next().await.unwrap();
+        let checked = schema_check(source.info().into(), source.boxed().execute());
+        pin_mut!(checked);
+        checked.next().await.unwrap().unwrap();
     }
 }

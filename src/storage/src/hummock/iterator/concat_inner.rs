@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_pb::hummock::SstableInfo;
 
-use super::variants::*;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
+use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
 
-/// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
+/// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// The iterator of the current table.
     sstable_iter: Option<TI::SSTableIterator>,
@@ -32,7 +31,7 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     cur_idx: usize,
 
     /// All non-overlapping tables.
-    tables: Vec<Arc<Sstable>>,
+    tables: Vec<SstableInfo>,
 
     sstable_store: SstableStoreRef,
 }
@@ -40,8 +39,8 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
-    /// and arranged in descending order when it serves as a reverse iterator.
-    pub fn new(tables: Vec<Arc<Sstable>>, sstable_store: SstableStoreRef) -> Self {
+    /// and arranged in descending order when it serves as a backward iterator.
+    pub fn new(tables: Vec<SstableInfo>, sstable_store: SstableStoreRef) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
@@ -55,7 +54,8 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
         if idx >= self.tables.len() {
             self.sstable_iter = None;
         } else {
-            let mut sstable_iter = TI::new(self.tables[idx].clone(), self.sstable_store.clone());
+            let table = self.sstable_store.sstable(self.tables[idx].id).await?;
+            let mut sstable_iter = TI::new(table, self.sstable_store.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {
@@ -71,6 +71,8 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
 
 #[async_trait]
 impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+    type Direction = <TI::SSTableIterator as HummockIterator>::Direction;
+
     async fn next(&mut self) -> HummockResult<()> {
         let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
         sstable_iter.next().await?;
@@ -102,16 +104,21 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let table_idx = self
             .tables
-            .partition_point(|table| match TI::DIRECTION {
-                FORWARD => {
-                    let ord = VersionedComparator::compare_key(&table.meta.smallest_key, key);
+            .partition_point(|table| match Self::Direction::direction() {
+                DirectionEnum::Forward => {
+                    let ord = VersionedComparator::compare_key(
+                        &table.key_range.as_ref().unwrap().left,
+                        key,
+                    );
                     ord == Less || ord == Equal
                 }
-                BACKWARD => {
-                    let ord = VersionedComparator::compare_key(&table.meta.largest_key, key);
+                DirectionEnum::Backward => {
+                    let ord = VersionedComparator::compare_key(
+                        &table.key_range.as_ref().unwrap().right,
+                        key,
+                    );
                     ord == Greater || ord == Equal
                 }
-                _ => unreachable!(),
             })
             .saturating_sub(1); // considering the boundary of 0
 

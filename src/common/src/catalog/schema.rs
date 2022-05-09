@@ -15,11 +15,11 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan::Field as ProstField;
+use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::types::DataType;
 
 /// The field in the schema of the executor's return data
@@ -45,6 +45,24 @@ impl Field {
         ProstField {
             data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
+        }
+    }
+
+    /// Returns field and field index.
+    pub fn sub_field(&self, name: &String) -> Result<(Field, usize)> {
+        if let DataType::Struct { .. } = self.data_type {
+            for (index, field) in self.sub_fields.iter().enumerate() {
+                if field.name == *name {
+                    return Ok((field.clone(), index));
+                }
+            }
+            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
+        } else {
+            Err(ErrorCode::ItemNotFound(format!(
+                "Cannot get field from non nested column: {}",
+                self.name
+            ))
+            .into())
         }
     }
 }
@@ -80,6 +98,10 @@ impl Schema {
         Self { fields }
     }
 
+    pub fn names(&self) -> Vec<String> {
+        self.fields().iter().map(|f| f.name.clone()).collect()
+    }
+
     pub fn data_types(&self) -> Vec<DataType> {
         self.fields
             .iter()
@@ -89,6 +111,10 @@ impl Schema {
 
     pub fn fields(&self) -> &[Field] {
         &self.fields
+    }
+
+    pub fn into_fields(self) -> Vec<Field> {
+        self.fields
     }
 
     /// Create array builders for all fields in this schema.
@@ -179,6 +205,14 @@ impl Index<usize> for Schema {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.fields[index]
+    }
+}
+
+impl FromIterator<Field> for Schema {
+    fn from_iter<I: IntoIterator<Item = Field>>(iter: I) -> Self {
+        Schema {
+            fields: iter.into_iter().collect::<Vec<_>>(),
+        }
     }
 }
 

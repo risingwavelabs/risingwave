@@ -42,7 +42,7 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::QueryManager;
+use crate::scheduler::{HummockSnapshotManager, QueryManager};
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -125,7 +125,7 @@ pub struct FrontendEnv {
     meta_client: Arc<dyn FrontendMetaClient>,
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
-    worker_node_manager: Arc<WorkerNodeManager>,
+    worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
 }
 
@@ -144,12 +144,15 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let query_manager = QueryManager::new(worker_node_manager.clone());
+        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let query_manager =
+            QueryManager::new(worker_node_manager.clone(), hummock_snapshot_manager);
         Self {
+            meta_client,
             catalog_writer,
             catalog_reader,
             worker_node_manager,
-            meta_client: Arc::new(MockFrontendMetaClient {}),
             query_manager,
         }
     }
@@ -186,7 +189,14 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-        let query_manager = QueryManager::new(worker_node_manager.clone());
+
+        let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
+        let hummock_snapshot_manager =
+            Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+        let query_manager = QueryManager::new(
+            worker_node_manager.clone(),
+            hummock_snapshot_manager.clone(),
+        );
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
@@ -194,6 +204,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
+            hummock_snapshot_manager,
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
@@ -205,7 +216,7 @@ impl FrontendEnv {
                 catalog_reader,
                 catalog_writer,
                 worker_node_manager,
-                meta_client: Arc::new(FrontendMetaClientImpl(meta_client)),
+                meta_client: frontend_meta_client,
                 query_manager,
             },
             observer_join_handle,
@@ -380,38 +391,6 @@ impl Session for SessionImpl {
         Ok(rsp)
     }
 }
-
-// TODO: with a good MockMeta and then we can open the tests.
-// #[cfg(test)]
-// mod tests {
-
-//     #[tokio::test]
-//     async fn test_run_statement() {
-//         use std::ffi::OsString;
-
-//         use clap::StructOpt;
-//         use risingwave_meta::test_utils::LocalMeta;
-
-//         use super::*;
-
-//         let meta = LocalMeta::start(12008).await;
-//         let args: [OsString; 0] = []; // No argument.
-//         let mut opts = FrontendOpts::parse_from(args);
-//         opts.meta_addr = format!("http://{}", meta.meta_addr());
-//         let mgr = SessionManagerImpl::new(&opts).await.unwrap();
-//         // Check default database is created.
-//         assert!(mgr
-//             .env
-//             .catalog_manager
-//             .get_database(DEFAULT_DATABASE_NAME)
-//             .is_some());
-//         let session = mgr.connect();
-//         assert!(session.run_statement("select * from t").await.is_err());
-
-//         mgr.terminate();
-//         meta.stop().await;
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -33,32 +32,26 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use connector_source::ConnectorSource;
 use enum_as_inner::EnumAsInner;
-pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
-use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 pub use table_v2::*;
+
+use crate::connector_source::{ConnectorSource, ConnectorStreamReader};
 
 pub mod parser;
 
 pub mod connector_source;
-mod high_level_kafka;
 mod manager;
 
 mod common;
+mod row_id;
 mod table_v2;
 
+extern crate core;
 extern crate maplit;
-
-#[derive(Clone, Debug)]
-pub enum SourceConfig {
-    Kafka(HighLevelKafkaSourceConfig),
-    Connector(HashMap<String, String>),
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -71,50 +64,38 @@ pub enum SourceFormat {
 
 #[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
-    HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
     Connector(ConnectorSource),
 }
 
-#[async_trait]
-pub trait Source: Send + Sync + 'static {
-    type ReaderContext;
-    type BatchReader: BatchSourceReader;
-    type StreamReader: StreamSourceReader;
-
-    /// Create a batch reader
-    fn batch_reader(
-        &self,
-        context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::BatchReader>;
-
-    /// Create a stream reader
-    fn stream_reader(
-        &self,
-        context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::StreamReader>;
+#[allow(clippy::large_enum_variant)]
+pub enum SourceStreamReaderImpl {
+    TableV2(TableV2StreamReader),
+    Connector(ConnectorStreamReader),
 }
 
 #[async_trait]
-pub trait BatchSourceReader: Send + Sync + 'static {
-    /// `open` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
+impl StreamSourceReader for SourceStreamReaderImpl {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
+        match self {
+            SourceStreamReaderImpl::TableV2(t) => t.next().await,
+            SourceStreamReaderImpl::Connector(c) => c.next().await,
+        }
+    }
+}
 
-    /// `next` returns a row or `None` immediately if there is no more result
-    async fn next(&mut self) -> Result<Option<DataChunk>>;
-
-    /// `close` is called to stop the reader
-    async fn close(&mut self) -> Result<()>;
+/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
+/// current design, one connector source can have multiple split reader. The keys are unique
+/// `split_id` and values are the latest offset for each split.
+#[derive(Clone, Debug)]
+pub struct StreamChunkWithState {
+    pub chunk: StreamChunk,
+    pub split_offset_mapping: Option<HashMap<String, String>>,
 }
 
 #[async_trait]
 pub trait StreamSourceReader: Send + Sync + 'static {
-    /// `init` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunk>;
+    async fn next(&mut self) -> Result<StreamChunkWithState>;
 }

@@ -15,51 +15,23 @@
 use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::channel;
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 
 use super::*;
-use crate::executor::test_utils::create_in_memory_keyspace;
-use crate::executor_v2::aggregation::{AggArgs, AggCall};
-use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{
-    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor,
-    SimpleAggExecutor,
+use crate::executor::aggregation::{AggArgs, AggCall};
+use crate::executor::dispatch::*;
+use crate::executor::receiver::ReceiverExecutor;
+use crate::executor::test_utils::create_in_memory_keyspace_agg;
+use crate::executor::{
+    Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor, SimpleAggExecutor,
 };
 use crate::task::SharedContext;
-
-pub struct MockConsumer {
-    input: Box<dyn Executor>,
-    data: Arc<Mutex<Vec<StreamChunk>>>,
-}
-impl std::fmt::Debug for MockConsumer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockConsumer")
-            .field("input", &self.input)
-            .finish()
-    }
-}
-
-impl MockConsumer {
-    pub fn new(input: Box<dyn Executor>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
-        Self { input, data }
-    }
-}
-
-#[async_trait]
-impl StreamConsumer for MockConsumer {
-    async fn next(&mut self) -> Result<Option<Barrier>> {
-        match self.input.next().await? {
-            Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
-            Message::Barrier(barrier) => return Ok(Some(barrier)),
-        }
-        Ok(None)
-    }
-}
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
@@ -71,35 +43,33 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = Box::new(ReceiverExecutor::new(schema, vec![], input_rx)).v1();
+        let input = ReceiverExecutor::new(schema, vec![], input_rx);
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = Box::new(
-            LocalSimpleAggExecutor::new_from_v1(
-                Box::new(input),
-                vec![
-                    AggCall {
-                        kind: AggKind::RowCount,
-                        args: AggArgs::None,
-                        return_type: DataType::Int64,
-                    },
-                    AggCall {
-                        kind: AggKind::Sum,
-                        args: AggArgs::Unary(DataType::Int64, 0),
-                        return_type: DataType::Int64,
-                    },
-                ],
-                vec![],
-                1,
-                "LocalSimpleAggExecutor".to_string(),
-            )
-            .unwrap(),
+        let aggregator = LocalSimpleAggExecutor::new(
+            input.boxed(),
+            vec![
+                AggCall {
+                    kind: AggKind::RowCount,
+                    args: AggArgs::None,
+                    return_type: DataType::Int64,
+                },
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary(DataType::Int64, 0),
+                    return_type: DataType::Int64,
+                },
+            ],
+            vec![],
+            1,
         )
-        .v1();
+        .unwrap();
         let (tx, rx) = channel(16);
-        let consumer =
-            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
+        let consumer = SenderConsumer {
+            input: aggregator.boxed(),
+            channel: Box::new(LocalOutput::new(233, tx)),
+        };
         let context = SharedContext::for_test().into();
-        let actor = Actor::new(Box::new(consumer), 0, context);
+        let actor = Actor::new(consumer, 0, context);
         (actor, rx)
     };
 
@@ -126,61 +96,61 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
+    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
     let dispatcher = DispatchExecutor::new(
-        Box::new(receiver_op),
-        DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),
+        receiver_op,
+        vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
+            inputs, 0,
+        ))],
         0,
         ctx,
     );
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(Box::new(dispatcher), 0, context);
+    let actor = Actor::new(dispatcher, 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = Box::new(MergeExecutor::new(schema, vec![], 0, outputs)).v1();
+    let merger = MergeExecutor::new(schema, vec![], 0, outputs);
 
     // for global aggregator, we need to sum data and sum row count
-    let aggregator = Box::new(
-        SimpleAggExecutor::new_from_v1(
-            Box::new(merger),
-            vec![
-                AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataType::Int64, 0),
-                    return_type: DataType::Int64,
-                },
-                AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataType::Int64, 1),
-                    return_type: DataType::Int64,
-                },
-            ],
-            create_in_memory_keyspace(),
-            vec![],
-            2,
-            "SimpleAggExecutor".to_string(),
-            vec![],
-        )
-        .unwrap(),
+    let aggregator = SimpleAggExecutor::new(
+        merger.boxed(),
+        vec![
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary(DataType::Int64, 0),
+                return_type: DataType::Int64,
+            },
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary(DataType::Int64, 1),
+                return_type: DataType::Int64,
+            },
+        ],
+        create_in_memory_keyspace_agg(2),
+        vec![],
+        2,
+        vec![],
     )
-    .v1();
+    .unwrap();
 
-    let projection = Box::new(ProjectExecutor::new_from_v1(
-        Box::new(aggregator),
+    let projection = ProjectExecutor::new(
+        aggregator.boxed(),
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
-        "ProjectExecutor".to_string(),
-    ))
-    .v1();
+    );
+
     let items = Arc::new(Mutex::new(vec![]));
-    let consumer = MockConsumer::new(Box::new(projection), items.clone());
+    let consumer = MockConsumer {
+        input: projection.boxed(),
+        data: items.clone(),
+    };
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(Box::new(consumer), 0, context);
+    let actor = Actor::new(consumer, 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     let mut epoch = 1;
@@ -224,4 +194,55 @@ async fn test_merger_sum_aggr() {
     let data = items.lock().unwrap();
     let array = data.last().unwrap().column_at(0).array_ref().as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
+}
+
+struct MockConsumer {
+    input: BoxedExecutor,
+    data: Arc<Mutex<Vec<StreamChunk>>>,
+}
+
+impl StreamConsumer for MockConsumer {
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+
+    fn execute(self: Box<Self>) -> Self::BarrierStream {
+        let mut input = self.input.execute();
+        let data = self.data;
+        #[try_stream]
+        async move {
+            while let Some(item) = input.next().await {
+                match item? {
+                    Message::Chunk(chunk) => data.lock().unwrap().push(chunk),
+                    Message::Barrier(barrier) => yield barrier,
+                }
+            }
+        }
+    }
+}
+
+/// `SenderConsumer` consumes data from input executor and send it into a channel.
+pub struct SenderConsumer {
+    input: BoxedExecutor,
+    channel: Box<dyn Output>,
+}
+
+impl StreamConsumer for SenderConsumer {
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+
+    fn execute(self: Box<Self>) -> Self::BarrierStream {
+        let mut input = self.input.execute();
+        let mut channel = self.channel;
+        #[try_stream]
+        async move {
+            while let Some(item) = input.next().await {
+                let msg = item?;
+                let barrier = msg.as_barrier().cloned();
+
+                channel.send(msg).await?;
+
+                if let Some(barrier) = barrier {
+                    yield barrier;
+                }
+            }
+        }
+    }
 }

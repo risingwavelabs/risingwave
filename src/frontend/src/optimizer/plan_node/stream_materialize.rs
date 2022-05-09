@@ -17,20 +17,20 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::ColumnOrder;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::plan_common::ColumnOrder;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Distribution, Order};
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -99,12 +99,27 @@ impl StreamMaterialize {
     }
 
     /// Create a materialize node.
+    ///
+    /// When creating index, `is_index` should be true. Then, materialize will distribute keys
+    /// using order by columns, instead of pk.
     pub fn create(
         input: PlanRef,
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        is_index_on: Option<TableId>,
     ) -> Result<Self> {
+        // ensure the same pk will not shuffle to different node
+        let input = match input.distribution() {
+            Distribution::Single => input,
+            _ => Distribution::HashShard(if is_index_on.is_some() {
+                user_order_by.field_order.iter().map(|x| x.index).collect()
+            } else {
+                input.pk_indices().to_vec()
+            })
+            .enforce_if_not_satisfies(input, Order::any()),
+        };
+
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
@@ -115,7 +130,7 @@ impl StreamMaterialize {
             .iter()
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
-                column_desc: field.into(),
+                column_desc: ColumnDesc::from_field_without_column_id(field),
                 is_hidden: !user_cols.contains(i),
             })
             .collect_vec();
@@ -124,25 +139,27 @@ impl StreamMaterialize {
         // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
         ColumnCatalog::generate_increment_id(&mut columns);
 
-        let mut in_pk = FixedBitSet::with_capacity(schema.len());
-        let mut pk_desc = vec![];
+        let mut in_order = FixedBitSet::with_capacity(schema.len());
+        let mut order_desc = vec![];
+
         for field in &user_order_by.field_order {
             let idx = field.index;
-            pk_desc.push(OrderedColumnDesc {
+            order_desc.push(OrderedColumnDesc {
                 column_desc: columns[idx].column_desc.clone(),
                 order: field.direct.into(),
             });
-            in_pk.insert(idx);
+            in_order.insert(idx);
         }
-        for idx in pk_indices.clone() {
-            if in_pk.contains(idx) {
+
+        for &idx in pk_indices {
+            if in_order.contains(idx) {
                 continue;
             }
-            pk_desc.push(OrderedColumnDesc {
+            order_desc.push(OrderedColumnDesc {
                 column_desc: columns[idx].column_desc.clone(),
                 order: OrderType::Ascending,
             });
-            in_pk.insert(idx);
+            in_order.insert(idx);
         }
 
         let table = TableCatalog {
@@ -150,7 +167,10 @@ impl StreamMaterialize {
             associated_source_id: None,
             name: mv_name,
             columns,
-            pk_desc,
+            order_desc,
+            pks: pk_indices.clone(),
+            is_index_on,
+            distribution_keys: base.dist.dist_column_indices().to_vec(),
         };
 
         Ok(Self { base, input, table })
@@ -175,25 +195,39 @@ impl StreamMaterialize {
 
 impl fmt::Display for StreamMaterialize {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let column_names = self
-            .table()
+        let table = self.table();
+
+        let column_names = table
             .columns()
             .iter()
             .map(|c| c.name_with_hidden())
             .join(", ");
 
-        let pk_column_names = self
-            .table()
-            .pk_desc()
+        let pk_column_names = table
+            .pks
             .iter()
-            .map(|c| &c.column_desc.name)
+            .map(|&pk| &table.columns[pk].column_desc.name)
             .join(", ");
 
-        write!(
-            f,
-            "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
-            column_names, pk_column_names
-        )
+        let order_descs = table
+            .order_desc
+            .iter()
+            .map(|order| &order.column_desc.name)
+            .join(", ");
+
+        if pk_column_names != order_descs {
+            write!(
+                f,
+                "StreamMaterialize {{ columns: [{}], pk_columns: [{}], order_descs: [{}] }}",
+                column_names, pk_column_names, order_descs
+            )
+        } else {
+            write!(
+                f,
+                "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
+                column_names, pk_column_names
+            )
+        }
     }
 }
 
@@ -216,7 +250,7 @@ impl ToStreamProst for StreamMaterialize {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::MaterializeNode(MaterializeNode {
+        ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_ref_id: None,
@@ -229,7 +263,7 @@ impl ToStreamProst for StreamMaterialize {
                 .collect(),
             column_orders: self
                 .table()
-                .pk_desc()
+                .order_desc()
                 .iter()
                 .map(|col| {
                     let idx = self.col_id_to_idx(col.column_desc.column_id);

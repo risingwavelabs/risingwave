@@ -37,7 +37,7 @@ use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::plan::PlanNode as BatchPlanProst;
+use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
 use super::property::{Distribution, Order};
@@ -57,6 +57,7 @@ pub trait PlanNode:
     + ToStream
     + ToDistributedBatch
     + ToProst
+    + ToLocalBatch
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -169,8 +170,11 @@ impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto without identity and without
     /// operator id (for testing).
     pub fn to_stream_prost_auto_fields(&self, auto_fields: bool) -> StreamPlanProst {
-        if let Some(stream_scan) = self.as_stream_table_scan() {
-            return stream_scan.adhoc_to_stream_prost(auto_fields);
+        if let Some(stream_table_scan) = self.as_stream_table_scan() {
+            return stream_table_scan.adhoc_to_stream_prost(auto_fields);
+        }
+        if let Some(stream_index_scan) = self.as_stream_index_scan() {
+            return stream_index_scan.adhoc_to_stream_prost(auto_fields);
         }
 
         let node = Some(self.to_stream_prost_body());
@@ -187,10 +191,11 @@ impl dyn PlanNode {
             } else {
                 "".into()
             },
-            node,
+            node_body: node,
             operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
             pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
+            append_only: self.append_only(),
         }
     }
 }
@@ -214,17 +219,20 @@ mod batch_exchange;
 mod batch_filter;
 mod batch_hash_agg;
 mod batch_hash_join;
+mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
+mod batch_topn;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
 mod logical_delete;
 mod logical_filter;
+mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
 mod logical_limit;
@@ -233,32 +241,39 @@ mod logical_scan;
 mod logical_source;
 mod logical_topn;
 mod logical_values;
+mod stream_delta_join;
 mod stream_exchange;
 mod stream_filter;
 mod stream_hash_agg;
 mod stream_hash_join;
+mod stream_hop_window;
+mod stream_index_scan;
 mod stream_materialize;
 mod stream_project;
 mod stream_simple_agg;
 mod stream_source;
 mod stream_table_scan;
+mod stream_topn;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
+pub use batch_topn::BatchTopN;
 pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
+pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
@@ -267,15 +282,19 @@ pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
+pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
+pub use stream_hop_window::StreamHopWindow;
+pub use stream_index_scan::StreamIndexScan;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
@@ -296,62 +315,71 @@ macro_rules! for_all_plan_nodes {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Logical, Agg }
-            ,{ Logical, Apply }
-            ,{ Logical, Filter }
-            ,{ Logical, Project }
-            ,{ Logical, Scan }
-            ,{ Logical, Source }
-            ,{ Logical, Insert }
-            ,{ Logical, Delete }
-            ,{ Logical, Join }
-            ,{ Logical, Values }
-            ,{ Logical, Limit }
-            ,{ Logical, TopN }
-            // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
-            ,{ Batch, SimpleAgg }
-            ,{ Batch, HashAgg }
-            ,{ Batch, Project }
-            ,{ Batch, Filter }
-            ,{ Batch, Insert }
-            ,{ Batch, Delete }
-            ,{ Batch, SeqScan }
-            ,{ Batch, HashJoin }
-            ,{ Batch, Values }
-            ,{ Batch, Sort }
-            ,{ Batch, Exchange }
-            ,{ Batch, Limit }
-            ,{ Stream, Project }
-            ,{ Stream, Filter }
-            ,{ Stream, TableScan }
-            ,{ Stream, Source }
-            ,{ Stream, HashJoin }
-            ,{ Stream, Exchange }
-            ,{ Stream, HashAgg }
-            ,{ Stream, SimpleAgg }
-            ,{ Stream, Materialize }
+            , { Logical, Agg }
+            , { Logical, Apply }
+            , { Logical, Filter }
+            , { Logical, Project }
+            , { Logical, Scan }
+            , { Logical, Source }
+            , { Logical, Insert }
+            , { Logical, Delete }
+            , { Logical, Join }
+            , { Logical, Values }
+            , { Logical, Limit }
+            , { Logical, TopN }
+            , { Logical, HopWindow }
+            // , { Logical, Sort } we don't need a LogicalSort, just require the Order
+            , { Batch, SimpleAgg }
+            , { Batch, HashAgg }
+            , { Batch, Project }
+            , { Batch, Filter }
+            , { Batch, Insert }
+            , { Batch, Delete }
+            , { Batch, SeqScan }
+            , { Batch, HashJoin }
+            , { Batch, Values }
+            , { Batch, Sort }
+            , { Batch, Exchange }
+            , { Batch, Limit }
+            , { Batch, TopN }
+            , { Batch, HopWindow }
+            , { Stream, Project }
+            , { Stream, Filter }
+            , { Stream, TableScan }
+            , { Stream, Source }
+            , { Stream, HashJoin }
+            , { Stream, Exchange }
+            , { Stream, HashAgg }
+            , { Stream, SimpleAgg }
+            , { Stream, Materialize }
+            , { Stream, TopN }
+            , { Stream, HopWindow }
+            , { Stream, DeltaJoin }
+            , { Stream, IndexScan }
         }
     };
 }
+
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
 macro_rules! for_logical_plan_nodes {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Logical, Agg }
-            ,{ Logical, Apply }
-            ,{ Logical, Filter }
-            ,{ Logical, Project }
-            ,{ Logical, Scan }
-            ,{ Logical, Source }
-            ,{ Logical, Insert }
-            ,{ Logical, Delete }
-            ,{ Logical, Join }
-            ,{ Logical, Values }
-            ,{ Logical, Limit }
-            ,{ Logical, TopN }
-            // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
+            , { Logical, Agg }
+            , { Logical, Apply }
+            , { Logical, Filter }
+            , { Logical, Project }
+            , { Logical, Scan }
+            , { Logical, Source }
+            , { Logical, Insert }
+            , { Logical, Delete }
+            , { Logical, Join }
+            , { Logical, Values }
+            , { Logical, Limit }
+            , { Logical, TopN }
+            , { Logical, HopWindow }
+            // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
     };
@@ -363,18 +391,20 @@ macro_rules! for_batch_plan_nodes {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Batch, SimpleAgg }
-            ,{ Batch, HashAgg }
-            ,{ Batch, Project }
-            ,{ Batch, Filter }
-            ,{ Batch, SeqScan }
-            ,{ Batch, HashJoin }
-            ,{ Batch, Values }
-            ,{ Batch, Limit }
-            ,{ Batch, Sort }
-            ,{ Batch, Exchange }
-            ,{ Batch, Insert }
-            ,{ Batch, Delete }
+            , { Batch, SimpleAgg }
+            , { Batch, HashAgg }
+            , { Batch, Project }
+            , { Batch, Filter }
+            , { Batch, SeqScan }
+            , { Batch, HashJoin }
+            , { Batch, Values }
+            , { Batch, Limit }
+            , { Batch, Sort }
+            , { Batch, TopN }
+            , { Batch, Exchange }
+            , { Batch, Insert }
+            , { Batch, Delete }
+            , { Batch, HopWindow }
         }
     };
 }
@@ -385,15 +415,19 @@ macro_rules! for_stream_plan_nodes {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Stream, Project }
-            ,{ Stream, Filter }
-            ,{ Stream, HashJoin }
-            ,{ Stream, Exchange }
-            ,{ Stream, TableScan }
-            ,{ Stream, Source }
-            ,{ Stream, HashAgg }
-            ,{ Stream, SimpleAgg }
-            ,{ Stream, Materialize }
+            , { Stream, Project }
+            , { Stream, Filter }
+            , { Stream, HashJoin }
+            , { Stream, Exchange }
+            , { Stream, TableScan }
+            , { Stream, Source }
+            , { Stream, HashAgg }
+            , { Stream, SimpleAgg }
+            , { Stream, Materialize }
+            , { Stream, TopN }
+            , { Stream, HopWindow }
+            , { Stream, DeltaJoin }
+            , { Stream, IndexScan }
         }
     };
 }
@@ -422,6 +456,7 @@ macro_rules! enum_plan_node_type {
         }
     }
 }
+
 for_all_plan_nodes! { enum_plan_node_type }
 
 /// impl fn `plan_ref` for each node.

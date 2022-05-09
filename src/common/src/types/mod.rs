@@ -125,10 +125,14 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataType::Struct { .. } => {
-                todo!()
-            }
-            DataType::List { datatype } => ListArrayBuilder::new_with_meta(
+            DataType::Struct { fields } => StructArrayBuilder::with_meta(
+                capacity,
+                ArrayMeta::Struct {
+                    children: fields.clone(),
+                },
+            )?
+            .into(),
+            DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
                     datatype: datatype.to_owned(),
@@ -177,10 +181,10 @@ impl DataType {
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
             DataType::Decimal => DataSize::Fixed(16),
             DataType::Varchar => DataSize::Variable,
-            DataType::Date => DataSize::Fixed(size_of::<i32>()),
-            DataType::Time => DataSize::Fixed(size_of::<i64>()),
-            DataType::Timestamp => DataSize::Fixed(size_of::<i64>()),
-            DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
+            DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
+            DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
+            DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+            DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
             DataType::Interval => DataSize::Variable,
             DataType::Struct { .. } => DataSize::Variable,
             DataType::List { .. } => DataSize::Variable,
@@ -302,6 +306,11 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+/// Convert a [`Datum`] to a [`DatumRef`].
+pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
+    datum.as_ref().map(|d| d.as_scalar_ref_impl())
+}
+
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,
@@ -386,6 +395,8 @@ impl ToOwnedDatum for DatumRef<'_> {
 }
 
 /// `for_all_native_types` includes all native variants of our scalar types.
+///
+/// Specifically, it doesn't support u8/u16/u32/u64.
 #[macro_export]
 macro_rules! for_all_native_types {
     ($macro:ident $(, $x:tt)*) => {
@@ -528,7 +539,7 @@ impl std::hash::Hash for ScalarImpl {
             ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
                 match $self {
                     $( Self::$scalar_type(inner) => {
-                        inner.hash_wrapper(state);
+                        NativeType::hash_wrapper(inner, state);
                     }, )*
                     Self::Bool(b) => b.hash(state),
                     Self::Utf8(s) => s.hash(state),
@@ -646,16 +657,16 @@ impl ScalarImpl {
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
                 let (secs, nano) = de.deserialize_naivetime()?;
-                NaiveTimeWrapper::new_with_secs_nano(secs, nano)?
+                NaiveTimeWrapper::with_secs_nano(secs, nano)?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
                 let (secs, nsecs) = de.deserialize_naivedatetime()?;
-                NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs)?
+                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
             Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = de.deserialize_naivedate()?;
-                NaiveDateWrapper::new_with_days(days)?
+                NaiveDateWrapper::with_days(days)?
             }),
             _ => {
                 panic!("Type is unable to be deserialized.")

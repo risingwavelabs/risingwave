@@ -21,6 +21,8 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
+pub type CompactorManagerRef = Arc<CompactorManager>;
+
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<Result<SubscribeCompactTasksResponse>>,
@@ -92,9 +94,9 @@ impl CompactorManager {
 
     /// Gets next compactor to assign task.
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
+        // TODO pick a idle compactor instead of round-robin
         let mut guard = self.inner.write();
         if guard.compactors.is_empty() {
-            tracing::warn!("No compactor is available.");
             return None;
         }
         let compactor_index = guard.next_compactor % guard.compactors.len();
@@ -103,7 +105,6 @@ impl CompactorManager {
         Some(compactor)
     }
 
-    /// A new compactor is registered.
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
@@ -170,6 +171,7 @@ mod tests {
                 write: Some(TableSetStatistics::default()),
             }),
             task_status: false,
+            prefix_pairs: vec![],
         }
     }
 

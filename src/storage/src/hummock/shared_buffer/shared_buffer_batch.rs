@@ -12,48 +12,113 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::ops::Deref;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 
-use crate::hummock::iterator::variants::*;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::{
+    Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 use crate::storage_value::VALUE_META_SIZE;
 
-pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
+pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
-/// A write batch stored in the shared buffer.
-#[derive(Clone, Debug)]
-pub struct SharedBufferBatch {
-    pub(super) inner: Arc<[SharedBufferItem]>,
-    pub(super) epoch: HummockEpoch,
-    pub(super) size: u64,
+pub(crate) struct SharedBufferBatchInner {
+    payload: Vec<SharedBufferItem>,
+    size: usize,
+    buffer_size_tracker: Arc<AtomicUsize>,
 }
 
+impl Deref for SharedBufferBatchInner {
+    type Target = [SharedBufferItem];
+
+    fn deref(&self) -> &Self::Target {
+        self.payload.as_slice()
+    }
+}
+
+impl Drop for SharedBufferBatchInner {
+    fn drop(&mut self) {
+        self.buffer_size_tracker.fetch_sub(self.size, Relaxed);
+    }
+}
+
+impl Debug for SharedBufferBatchInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SharedBufferBatchInner {{ payload: {:?}, size: {} }}",
+            self.payload, self.size
+        )
+    }
+}
+
+impl PartialEq for SharedBufferBatchInner {
+    fn eq(&self, other: &Self) -> bool {
+        self.payload == other.payload
+    }
+}
+
+/// A write batch stored in the shared buffer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedBufferBatch {
+    inner: Arc<SharedBufferBatchInner>,
+    epoch: HummockEpoch,
+}
+
+/// `{ end key -> batch }`
+pub(crate) type IndexedSharedBufferBatches = BTreeMap<Vec<u8>, SharedBufferBatch>;
+
 impl SharedBufferBatch {
-    pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: HummockEpoch) -> Self {
+    pub fn new(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        buffer_size_tracker: Arc<AtomicUsize>,
+    ) -> Self {
+        let size: usize = Self::measure_batch_size(&sorted_items);
+        Self::new_with_size(sorted_items, epoch, size, buffer_size_tracker)
+    }
+
+    pub fn new_with_size(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        size: usize,
+        buffer_size_tracker: Arc<AtomicUsize>,
+    ) -> Self {
+        buffer_size_tracker.fetch_add(size, Relaxed);
+
+        Self {
+            inner: Arc::new(SharedBufferBatchInner {
+                payload: sorted_items,
+                size,
+                buffer_size_tracker,
+            }),
+            epoch,
+        }
+    }
+
+    pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {
         // size = Sum(length of full key + length of user value)
-        let size: u64 = sorted_items
+        batches
             .iter()
             .map(|(k, v)| {
-                let vsize = {
+                k.len() + {
                     match v {
                         HummockValue::Put(_, val) => VALUE_META_SIZE + val.len(),
                         HummockValue::Delete(_) => VALUE_META_SIZE,
                     }
-                };
-                (k.len() + vsize) as u64
+                }
             })
-            .sum();
-
-        Self {
-            inner: sorted_items.into(),
-            epoch,
-            size,
-        }
+            .sum()
     }
 
     pub fn get(&self, user_key: &[u8]) -> Option<HummockValue<Vec<u8>>> {
@@ -68,12 +133,16 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn iter(&self) -> SharedBufferBatchIterator<FORWARD> {
-        SharedBufferBatchIterator::<FORWARD>::new(self.inner.clone())
+    pub fn into_forward_iter(self) -> SharedBufferBatchIterator<Forward> {
+        SharedBufferBatchIterator::<Forward>::new(self.inner)
     }
 
-    pub fn reverse_iter(&self) -> SharedBufferBatchIterator<BACKWARD> {
-        SharedBufferBatchIterator::<BACKWARD>::new(self.inner.clone())
+    pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
+        SharedBufferBatchIterator::<Backward>::new(self.inner)
+    }
+
+    pub fn get_payload(&self) -> &[SharedBufferItem] {
+        &self.inner
     }
 
     #[allow(dead_code)]
@@ -97,34 +166,41 @@ impl SharedBufferBatch {
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
+
+    pub fn size(&self) -> usize {
+        self.inner.size
+    }
 }
 
-pub struct SharedBufferBatchIterator<const DIRECTION: usize> {
-    inner: Arc<[SharedBufferItem]>,
+pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
+    inner: Arc<SharedBufferBatchInner>,
     current_idx: usize,
+    _phantom: PhantomData<D>,
 }
 
-impl<const DIRECTION: usize> SharedBufferBatchIterator<DIRECTION> {
-    pub fn new(inner: Arc<[SharedBufferItem]>) -> Self {
+impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
+    pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
         Self {
             inner,
             current_idx: 0,
+            _phantom: Default::default(),
         }
     }
 
     fn current_item(&self) -> &SharedBufferItem {
         assert!(self.is_valid());
-        let idx = match DIRECTION {
-            FORWARD => self.current_idx,
-            BACKWARD => self.inner.len() - self.current_idx - 1,
-            _ => unreachable!(),
+        let idx = match D::direction() {
+            DirectionEnum::Forward => self.current_idx,
+            DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
         self.inner.get(idx).unwrap()
     }
 }
 
 #[async_trait]
-impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIRECTION> {
+impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<D> {
+    type Direction = D;
+
     async fn next(&mut self) -> HummockResult<()> {
         assert!(self.is_valid());
         self.current_idx += 1;
@@ -155,8 +231,8 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
             .inner
             .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
         let seek_key_epoch = key::get_epoch(key);
-        match DIRECTION {
-            FORWARD => {
+        match D::direction() {
+            DirectionEnum::Forward => {
                 match partition_point {
                     Ok(i) => {
                         self.current_idx = i;
@@ -171,7 +247,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
                     Err(i) => self.current_idx = i,
                 }
             }
-            BACKWARD => {
+            DirectionEnum::Backward => {
                 match partition_point {
                     Ok(i) => {
                         self.current_idx = self.inner.len() - i - 1;
@@ -189,7 +265,6 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
                     Err(i) => self.current_idx = self.inner.len() - i,
                 }
             }
-            _ => unreachable!(),
         }
 
         Ok(())
@@ -231,8 +306,12 @@ mod tests {
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch =
-            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
+        let buffer_size_tracker = Arc::new(AtomicUsize::new(0));
+        let shared_buffer_batch = SharedBufferBatch::new(
+            transform_shared_buffer(shared_buffer_items.clone()),
+            epoch,
+            buffer_size_tracker,
+        );
 
         // Sketch
         assert_eq!(shared_buffer_batch.start_key(), shared_buffer_items[0].0);
@@ -263,7 +342,7 @@ mod tests {
         );
 
         // Forward iterator
-        let mut iter = shared_buffer_batch.iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.rewind().await.unwrap();
         let mut output = vec![];
         while iter.is_valid() {
@@ -273,15 +352,15 @@ mod tests {
         assert_eq!(output, shared_buffer_items);
 
         // Backward iterator
-        let mut reverse_iter = shared_buffer_batch.reverse_iter();
-        reverse_iter.rewind().await.unwrap();
+        let mut backward_iter = shared_buffer_batch.clone().into_backward_iter();
+        backward_iter.rewind().await.unwrap();
         let mut output = vec![];
-        while reverse_iter.is_valid() {
+        while backward_iter.is_valid() {
             output.push((
-                reverse_iter.key().to_owned(),
-                reverse_iter.value().to_owned_value(),
+                backward_iter.key().to_owned(),
+                backward_iter.value().to_owned_value(),
             ));
-            reverse_iter.next().await.unwrap();
+            backward_iter.next().await.unwrap();
         }
         output.reverse();
         assert_eq!(output, shared_buffer_items);
@@ -304,11 +383,15 @@ mod tests {
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch =
-            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
+        let buffer_size_tracker = Arc::new(AtomicUsize::new(0));
+        let shared_buffer_batch = SharedBufferBatch::new(
+            transform_shared_buffer(shared_buffer_items.clone()),
+            epoch,
+            buffer_size_tracker,
+        );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return
-        let mut iter = shared_buffer_batch.iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(0, epoch))
             .await
             .unwrap();
@@ -321,14 +404,14 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to a key > the last key, expect no items to return
-        let mut iter = shared_buffer_batch.iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(4, epoch))
             .await
             .unwrap();
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with current epoch, expect last two items to return
-        let mut iter = shared_buffer_batch.iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch))
             .await
             .unwrap();
@@ -341,7 +424,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
-        let mut iter = shared_buffer_batch.iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch + 1))
             .await
             .unwrap();
@@ -354,7 +437,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with old epoch, expect last item to return
-        let mut iter = shared_buffer_batch.iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch - 1))
             .await
             .unwrap();
@@ -366,14 +449,14 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to a key < 1st key, expect no items to return
-        let mut iter = shared_buffer_batch.reverse_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(0, epoch))
             .await
             .unwrap();
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to a key > the last key, expect all items to return
-        let mut iter = shared_buffer_batch.reverse_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(4, epoch))
             .await
             .unwrap();
@@ -386,7 +469,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with current epoch, expect first two items to return
-        let mut iter = shared_buffer_batch.reverse_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch))
             .await
             .unwrap();
@@ -399,7 +482,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
-        let mut iter = shared_buffer_batch.reverse_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch + 1))
             .await
             .unwrap();
@@ -411,7 +494,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
-        let mut iter = shared_buffer_batch.reverse_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch - 1))
             .await
             .unwrap();

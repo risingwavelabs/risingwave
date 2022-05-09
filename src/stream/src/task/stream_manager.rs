@@ -13,33 +13,29 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
-use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_common::util::env_var::env_var_is_true;
-use risingwave_expr::expr::AggKind;
+use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::{expr, stream_plan, stream_service};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::{CollectResult, ComputeClientPool};
+use super::{unique_executor_id, unique_operator_id, CollectResult, ComputeClientPool};
+use crate::executor::dispatch::*;
+use crate::executor::merge::RemoteInput;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
-use crate::executor_v2::aggregation::{AggArgs, AggCall};
-use crate::executor_v2::merge::RemoteInput;
-use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
+use crate::from_proto::create_executor;
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -104,24 +100,24 @@ pub struct ExecutorParams {
     pub op_info: String,
 
     /// The input executor.
-    pub input: Vec<Box<dyn Executor>>,
+    pub input: Vec<BoxedExecutor>,
 
     /// Id of the actor.
     pub actor_id: ActorId,
+
     pub executor_stats: Arc<StreamingMetrics>,
 }
 
 impl Debug for ExecutorParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecutorParams")
-            .field("env", &"...")
             .field("pk_indices", &self.pk_indices)
             .field("executor_id", &self.executor_id)
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
-            .field("input", &self.input)
+            .field("input", &self.input.len())
             .field("actor_id", &self.actor_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -305,30 +301,6 @@ impl LocalStreamManager {
     }
 }
 
-pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> {
-    let args = {
-        let args = &agg_call_proto.get_args()[..];
-        match args {
-            [] => AggArgs::None,
-            [arg] => AggArgs::Unary(
-                DataType::from(arg.get_type()?),
-                arg.get_input()?.column_idx as usize,
-            ),
-            _ => {
-                return Err(RwError::from(ErrorCode::NotImplemented(
-                    "multiple aggregation args".to_string(),
-                    None.into(),
-                )))
-            }
-        }
-    };
-    Ok(AggCall {
-        kind: AggKind::try_from(agg_call_proto.get_type()?)?,
-        args,
-        return_type: DataType::from(agg_call_proto.get_return_type()?),
-    })
-}
-
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
     ids.iter()
         .map(|id| {
@@ -391,69 +363,66 @@ impl LocalStreamManagerCore {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
-        input: Box<dyn Executor>,
-        dispatcher: &stream_plan::Dispatcher,
+        input: BoxedExecutor,
+        dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
-    ) -> Result<Box<dyn StreamConsumer>> {
+    ) -> Result<impl StreamConsumer> {
         // create downstream receivers
-        let outputs = dispatcher
-            .downstream_actor_id
-            .iter()
-            .map(|down_id| {
-                let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                new_output(&self.context, downstream_addr, actor_id, down_id)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut dispatcher_impls = Vec::with_capacity(dispatchers.len());
 
-        use stream_plan::DispatcherType::*;
-        let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
-            Hash => {
-                assert!(!outputs.is_empty());
-                let column_indices = dispatcher
-                    .column_indices
-                    .iter()
-                    .map(|i| *i as usize)
-                    .collect();
-                let hash_mapping = dispatcher
-                    .hash_mapping
-                    .clone()
-                    .ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(
-                            "hash dispatcher doesn't have consistent hash mapping".to_string(),
-                        ))
-                    })?
-                    .hash_mapping;
-                Box::new(DispatchExecutor::new(
-                    input,
+        for dispatcher in dispatchers {
+            let outputs = dispatcher
+                .downstream_actor_id
+                .iter()
+                .map(|down_id| {
+                    let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
+                    new_output(&self.context, downstream_addr, actor_id, *down_id)
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            use stream_plan::DispatcherType::*;
+            let dispatcher_impl = match dispatcher.get_type()? {
+                Hash => {
+                    assert!(!outputs.is_empty());
+                    let column_indices = dispatcher
+                        .column_indices
+                        .iter()
+                        .map(|i| *i as usize)
+                        .collect();
+                    let compressed_mapping = dispatcher.get_hash_mapping()?;
+                    let hash_mapping = decompress_data(
+                        &compressed_mapping.original_indices,
+                        &compressed_mapping.data,
+                    );
+
                     DispatcherImpl::Hash(HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),
                         outputs,
                         column_indices,
                         hash_mapping,
-                    )),
-                    actor_id,
-                    self.context.clone(),
-                ))
-            }
-            Broadcast => Box::new(DispatchExecutor::new(
-                input,
-                DispatcherImpl::Broadcast(BroadcastDispatcher::new(outputs)),
-                actor_id,
-                self.context.clone(),
-            )),
-            Simple | NoShuffle => {
-                assert_eq!(outputs.len(), 1);
-                let output = outputs.into_iter().next().unwrap();
-                Box::new(DispatchExecutor::new(
-                    input,
-                    DispatcherImpl::Simple(SimpleDispatcher::new(output)),
-                    actor_id,
-                    self.context.clone(),
-                ))
-            }
-            Invalid => unreachable!(),
-        };
-        Ok(dispatcher)
+                        dispatcher.dispatcher_id,
+                    ))
+                }
+                Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
+                    outputs,
+                    dispatcher.dispatcher_id,
+                )),
+                Simple | NoShuffle => {
+                    assert_eq!(outputs.len(), 1);
+                    let output = outputs.into_iter().next().unwrap();
+                    DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
+                }
+                Invalid => unreachable!(),
+            };
+            dispatcher_impls.push(dispatcher_impl);
+        }
+
+        Ok(DispatchExecutor::new(
+            input,
+            dispatcher_impls,
+            actor_id,
+            self.context.clone(),
+        ))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -465,11 +434,11 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
-        let input: Vec<Box<dyn Executor>> = node
+        let input: Vec<_> = node
             .input
             .iter()
             .enumerate()
@@ -493,10 +462,8 @@ impl LocalStreamManagerCore {
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
-
-        assert!(node.get_operator_id() <= u32::MAX as u64);
-        let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
-        let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
+        let executor_id = unique_executor_id(actor_id, node.operator_id);
+        let operator_id = unique_operator_id(fragment_id, node.operator_id);
 
         let executor_params = ExecutorParams {
             env: env.clone(),
@@ -508,13 +475,14 @@ impl LocalStreamManagerCore {
             actor_id,
             executor_stats: self.streaming_metrics.clone(),
         };
-        let executor = create_executor(executor_params, self, node, store);
+
+        let executor = create_executor(executor_params, self, node, store)?;
         let executor = Self::wrap_executor_for_debug(
-            executor?,
+            executor,
             actor_id,
             input_pos,
             self.streaming_metrics.clone(),
-        )?;
+        );
         Ok(executor)
     }
 
@@ -525,74 +493,22 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<BoxedExecutor> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
         })
     }
 
     fn wrap_executor_for_debug(
-        mut executor: Box<dyn Executor>,
+        executor: BoxedExecutor,
         actor_id: ActorId,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
-    ) -> Result<Box<dyn Executor>> {
-        if !cfg!(debug_assertions) {
-            return Ok(executor);
-        }
-        let identity = executor.identity().to_string();
-
-        // Trace
-        executor = Box::new(TraceExecutor::new(
-            executor,
-            identity,
-            input_pos,
-            actor_id,
-            streaming_metrics,
-        ));
-        // Schema check
-        executor = Box::new(SchemaCheckExecutor::new(executor));
-        // Epoch check
-        executor = Box::new(EpochCheckExecutor::new(executor));
-        // Cache clear
-        if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
-            executor = Box::new(CacheClearExecutor::new(executor));
-        }
-        // Update check
-        executor = Box::new(UpdateCheckExecutor::new(executor));
-
-        Ok(executor)
-    }
-
-    pub fn create_merge_node(
-        &mut self,
-        params: ExecutorParams,
-        node: &stream_plan::MergeNode,
-    ) -> Result<Box<dyn Executor>> {
-        let upstreams = node.get_upstream_actor_id();
-        let fields = node.fields.iter().map(Field::from).collect();
-        let schema = Schema::new(fields);
-        let mut rxs = self.get_receive_message(params.actor_id, upstreams)?;
-
-        if upstreams.len() == 1 {
-            Ok(Box::new(
-                Box::new(ReceiverExecutor::new(
-                    schema,
-                    params.pk_indices,
-                    rxs.remove(0),
-                ))
-                .v1(),
-            ))
+    ) -> BoxedExecutor {
+        if cfg!(debug_assertions) {
+            DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
         } else {
-            Ok(Box::new(
-                Box::new(MergeExecutorV2::new(
-                    schema,
-                    params.pk_indices,
-                    params.actor_id,
-                    rxs,
-                ))
-                .v1(),
-            ))
+            executor
         }
     }
 
@@ -662,16 +578,7 @@ impl LocalStreamManagerCore {
             let executor =
                 self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
 
-            let dispatchers = actor.get_dispatcher();
-            assert_eq!(
-                dispatchers.len(),
-                1,
-                "compute node currently only supports single dispatcher"
-            );
-            let dispatcher = self.create_dispatcher(executor, &dispatchers[0], actor_id)?;
-
-            trace!("build actor: {:#?}", &dispatcher);
-
+            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());
             self.handles.insert(
                 actor_id,
@@ -749,12 +656,18 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
-        if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
+        if let NodeBody::Chain(_) = stream_node.node_body.as_ref().unwrap() {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
             let merge = try_match_expand!(
-                stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
-                Node::MergeNode,
+                stream_node
+                    .input
+                    .get(0)
+                    .unwrap()
+                    .node_body
+                    .as_ref()
+                    .unwrap(),
+                NodeBody::Merge,
                 "first input of chain node should be merge node"
             )?;
             for upstream_actor_id in &merge.upstream_actor_id {

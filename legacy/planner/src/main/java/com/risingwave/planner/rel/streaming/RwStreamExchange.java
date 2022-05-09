@@ -5,7 +5,7 @@ import static com.google.common.base.Verify.verify;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
-import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan_common.Field;
 import com.risingwave.proto.streaming.plan.DispatchStrategy;
 import com.risingwave.proto.streaming.plan.DispatcherType;
 import com.risingwave.proto.streaming.plan.ExchangeNode;
@@ -50,7 +50,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     var mergeNode = mergerBuilder.build();
 
     return StreamNode.newBuilder()
-        .setMergeNode(mergeNode)
+        .setMerge(mergeNode)
         .addAllPkIndices(primaryKeyIndices)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
@@ -75,7 +75,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     exchangeBuilder.setStrategy(dispatcherBuilder);
 
     return StreamNode.newBuilder()
-        .setExchangeNode(exchangeBuilder)
+        .setExchange(exchangeBuilder)
         .addAllPkIndices(primaryKeyIndices)
         .addAllFields(this.getFields())
         .build();

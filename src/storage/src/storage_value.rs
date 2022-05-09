@@ -40,7 +40,7 @@ impl From<ValueMeta> for Bytes {
 }
 
 impl ValueMeta {
-    pub fn new_with_vnode(vnode: VirtualNode) -> Self {
+    pub fn with_vnode(vnode: VirtualNode) -> Self {
         Self { vnode }
     }
 

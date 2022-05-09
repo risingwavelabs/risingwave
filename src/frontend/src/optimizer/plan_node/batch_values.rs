@@ -14,12 +14,13 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::values_node::ExprTuple;
-use risingwave_pb::plan::ValuesNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::values_node::ExprTuple;
+use risingwave_pb::batch_plan::ValuesNode;
 
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -84,20 +85,21 @@ impl ToBatchProst for BatchValues {
 }
 
 fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
-    let cells = row.iter().map(Expr::to_protobuf).collect();
+    let cells = row.iter().map(Expr::to_expr_proto).collect();
     ExprTuple { cells }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use risingwave_pb::batch_plan::plan_node::NodeBody;
+    use risingwave_pb::batch_plan::values_node::ExprTuple;
+    use risingwave_pb::batch_plan::ValuesNode;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::{ConstantValue, ExprNode};
-    use risingwave_pb::plan::plan_node::NodeBody;
-    use risingwave_pb::plan::values_node::ExprTuple;
-    use risingwave_pb::plan::{Field, ValuesNode};
+    use risingwave_pb::plan_common::Field;
 
     use crate::expr::ExprType;
     use crate::test_utils::LocalFrontend;
@@ -138,5 +140,11 @@ mod tests {
                 }],
             })
         );
+    }
+}
+
+impl ToLocalBatch for BatchValues {
+    fn to_local(&self) -> PlanRef {
+        Self::with_dist(self.logical().clone(), Distribution::Single).into()
     }
 }

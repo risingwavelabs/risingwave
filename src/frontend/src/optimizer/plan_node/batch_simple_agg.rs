@@ -14,11 +14,12 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::SortAggNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -85,5 +86,12 @@ impl ToBatchProst for BatchSimpleAgg {
             // We treat simple agg as a special sort agg without group keys.
             group_keys: vec![],
         })
+    }
+}
+
+impl ToLocalBatch for BatchSimpleAgg {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local_with_order_required(Order::any());
+        self.clone_with_input(new_input).into()
     }
 }

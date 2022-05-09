@@ -15,6 +15,7 @@
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
+use risingwave_pb::hummock::VNodeBitmap;
 
 use super::SstableMeta;
 use crate::hummock::value::HummockValue;
@@ -41,7 +42,7 @@ pub struct CapacitySplitTableBuilder<B> {
 
 impl<B, F> CapacitySplitTableBuilder<B>
 where
-    B: FnMut() -> F,
+    B: Copy + Fn() -> F,
     F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
@@ -123,12 +124,12 @@ where
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta)> {
+    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta, Vec<VNodeBitmap>)> {
         self.builders
             .into_iter()
             .map(|b| {
-                let (data, meta) = b.builder.finish();
-                (b.id, data, meta)
+                let (data, meta, vnode_bitmap) = b.builder.finish();
+                (b.id, data, meta, vnode_bitmap)
             })
             .collect()
     }

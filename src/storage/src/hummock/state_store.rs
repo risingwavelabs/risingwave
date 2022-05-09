@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::{key_with_epoch, user_key, FullKey};
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
-    BoxedHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator,
-    ReverseConcatIterator, ReverseMergeIterator, ReverseUserIterator, UserIterator,
+    BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
+    BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
 };
-use super::utils::{range_overlap, validate_epoch, validate_table_key_range};
-use super::{HummockStorage, ReverseSSTableIterator, SSTableIterator};
+use super::utils::{validate_epoch, validate_table_key_range};
+use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
 use crate::error::StorageResult;
+use crate::hummock::iterator::BoxedBackwardHummockIterator;
+use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -38,110 +39,146 @@ impl HummockStorage {
         &self,
         key_range: R,
         epoch: u64,
-        reversed: bool,
-    ) -> StorageResult<HummockStateStoreIter<'_>>
+        backward: bool,
+    ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        let version = self.local_version_manager.get_version()?;
-        // Check epoch validity
-        validate_epoch(version.safe_epoch(), epoch)?;
-        let levels = version.levels();
-        validate_table_key_range(&levels)?;
+        // if `backward` is true, use `overlapped_backward_sstable_iters`, otherwise use
+        // `overlapped_forward_sstable_iters`
+        let mut overlapped_forward_iters = vec![];
+        let mut overlapped_backward_iters = vec![];
 
-        // Filter out tables that overlap with given `key_range`
-        let mut overlapped_sstable_iters = vec![];
-        for level in &levels {
-            let table_ids = level
-                .table_infos
-                .iter()
-                .filter(|info| {
-                    let table_range = info.key_range.as_ref().unwrap();
-                    let table_start = user_key(table_range.left.as_slice());
-                    let table_end = user_key(table_range.right.as_slice());
-                    range_overlap(&key_range, table_start, table_end, reversed)
-                })
-                .map(|info| info.id)
-                .collect_vec();
-            if table_ids.is_empty() {
-                continue;
+        let (uncommitted_ssts, pinned_version) = {
+            let read_version = self.local_version_manager.read_version(epoch);
+
+            // Check epoch validity
+            validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+            let levels = read_version.pinned_version.levels();
+            validate_table_key_range(levels)?;
+
+            // Generate shared buffer iterators
+            for shared_buffer in read_version.shared_buffer {
+                for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
+                    if backward {
+                        overlapped_backward_iters
+                            .push(Box::new(batch.into_backward_iter())
+                                as BoxedBackwardHummockIterator)
+                    } else {
+                        overlapped_forward_iters
+                        .push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator)
+                    }
+                }
             }
 
-            let tables = self.sstable_store.sstables(&table_ids).await?;
+            (read_version.uncommitted_ssts, read_version.pinned_version)
+        };
+
+        // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
+        // `key_range`
+        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward);
+        for table_info in table_infos.into_iter().rev() {
+            let table = self.sstable_store.sstable(table_info.id).await?;
+            if backward {
+                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
+                    table,
+                    self.sstable_store(),
+                )) as BoxedBackwardHummockIterator);
+            } else {
+                overlapped_forward_iters
+                    .push(Box::new(SSTableIterator::new(table, self.sstable_store()))
+                        as BoxedForwardHummockIterator);
+            };
+        }
+
+        // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
+        // `key_range`
+        for level in pinned_version.levels() {
             match level.level_type() {
                 LevelType::Overlapping => {
-                    for table in tables.into_iter().rev() {
-                        let iter: BoxedHummockIterator = if reversed {
-                            Box::new(ReverseSSTableIterator::new(table, self.sstable_store()))
+                    let table_infos =
+                        prune_ssts(level.get_table_infos().iter(), &key_range, backward);
+                    if table_infos.is_empty() {
+                        continue;
+                    }
+
+                    for table_info in table_infos.into_iter().rev() {
+                        let table = self.sstable_store.sstable(table_info.id).await?;
+                        if backward {
+                            overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
+                                table,
+                                self.sstable_store(),
+                            ))
+                                as BoxedBackwardHummockIterator);
                         } else {
-                            Box::new(SSTableIterator::new(table, self.sstable_store()))
+                            overlapped_forward_iters.push(Box::new(SSTableIterator::new(
+                                table,
+                                self.sstable_store(),
+                            ))
+                                as BoxedForwardHummockIterator);
                         };
-                        overlapped_sstable_iters.push(iter);
                     }
                 }
                 LevelType::Nonoverlapping => {
-                    let iter: BoxedHummockIterator = if reversed {
-                        Box::new(ReverseConcatIterator::new(
-                            tables.into_iter().rev().collect(),
+                    if level.get_table_infos().is_empty() {
+                        continue;
+                    }
+
+                    let start_table_idx = match key_range.start_bound() {
+                        Included(key) | Excluded(key) => search_sst_idx(level, key),
+                        _ => 0,
+                    };
+                    let end_table_idx = match key_range.end_bound() {
+                        Included(key) | Excluded(key) => search_sst_idx(level, key),
+                        _ => level.table_infos.len().saturating_sub(1),
+                    };
+                    assert!(
+                        start_table_idx < level.table_infos.len()
+                            && end_table_idx < level.table_infos.len()
+                    );
+                    let table_infos = &level.get_table_infos()[start_table_idx..=end_table_idx];
+
+                    if backward {
+                        overlapped_backward_iters.push(Box::new(BackwardConcatIterator::new(
+                            table_infos.iter().rev().cloned().collect(),
                             self.sstable_store(),
                         ))
+                            as BoxedBackwardHummockIterator);
                     } else {
-                        Box::new(ConcatIterator::new(tables, self.sstable_store()))
+                        overlapped_forward_iters.push(Box::new(ConcatIterator::new(
+                            table_infos.iter().cloned().collect_vec(),
+                            self.sstable_store(),
+                        ))
+                            as BoxedForwardHummockIterator);
                     };
-                    overlapped_sstable_iters.push(iter);
                 }
             }
         }
-        let overlapped_sstable_iters = overlapped_sstable_iters;
+
+        assert!(
+            (backward && overlapped_forward_iters.is_empty())
+                || (!backward && overlapped_backward_iters.is_empty())
+        );
 
         self.stats
             .iter_merge_sstable_counts
-            .observe(overlapped_sstable_iters.len() as f64);
+            .observe((overlapped_forward_iters.len() + overlapped_backward_iters.len()) as f64);
 
-        let mut user_iterator = if reversed {
-            let reverse_merge_iterator = if version.max_committed_epoch() < epoch {
-                // Take shared buffers into consideration if the read epoch is above the max
-                // committed epoch
-                let epoch_range = (version.max_committed_epoch() + 1)..=epoch;
-                let overlapped_shared_buffer_iters = self
-                    .shared_buffer_manager
-                    .reverse_iters(&key_range, epoch_range)
-                    .into_iter()
-                    .map(|i| Box::new(i) as BoxedHummockIterator);
-                ReverseMergeIterator::new(
-                    overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
-                    self.stats.clone(),
-                )
-            } else {
-                ReverseMergeIterator::new(overlapped_sstable_iters, self.stats.clone())
-            };
-
-            DirectedUserIterator::Backward(ReverseUserIterator::new_with_epoch(
-                reverse_merge_iterator,
+        let mut user_iterator = if backward {
+            let backward_merge_iterator =
+                BackwardMergeIterator::new(overlapped_backward_iters, self.stats.clone());
+            DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
+                backward_merge_iterator,
                 (
                     key_range.end_bound().map(|b| b.as_ref().to_owned()),
                     key_range.start_bound().map(|b| b.as_ref().to_owned()),
                 ),
                 epoch,
-                Some(version),
+                Some(pinned_version),
             ))
         } else {
-            let merge_iterator = if version.max_committed_epoch() < epoch {
-                // Take shared buffers into consideration if the read epoch is above the max
-                // committed epoch
-                let overlapped_shared_buffer_iters = self
-                    .shared_buffer_manager
-                    .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
-                    .into_iter()
-                    .map(|i| Box::new(i) as BoxedHummockIterator);
-                MergeIterator::new(
-                    overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
-                    self.stats.clone(),
-                )
-            } else {
-                MergeIterator::new(overlapped_sstable_iters, self.stats.clone())
-            };
+            let merge_iterator = MergeIterator::new(overlapped_forward_iters, self.stats.clone());
 
             DirectedUserIterator::Forward(UserIterator::new(
                 merge_iterator,
@@ -150,7 +187,7 @@ impl HummockStorage {
                     key_range.end_bound().map(|b| b.as_ref().to_owned()),
                 ),
                 epoch,
-                Some(version),
+                Some(pinned_version),
             ))
         };
 
@@ -160,7 +197,7 @@ impl HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Iter<'a> = HummockStateStoreIter<'a>;
+    type Iter = HummockStateStoreIter;
 
     define_state_store_associated_type!();
 
@@ -172,42 +209,50 @@ impl StateStore for HummockStorage {
     /// failed due to other non-EOF errors.
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
-            let version = self.local_version_manager.get_version()?;
-            // check epoch validity
-            validate_epoch(version.safe_epoch(), epoch)?;
+            let (uncommitted_ssts, pinned_version) = {
+                let read_version = self.local_version_manager.read_version(epoch);
 
-            // Query shared buffer. Return the value without iterating SSTs if found
-            if version.max_committed_epoch() < epoch {
-                if let Some(v) = self
-                    .shared_buffer_manager
-                    .get(key, (version.max_committed_epoch() + 1)..=epoch)
-                {
-                    self.stats.get_shared_buffer_hit_counts.inc();
-                    return Ok(v.into_user_value().map(|v| v.into()));
+                // check epoch validity
+                validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+
+                // Query shared buffer. Return the value without iterating SSTs if found
+                for shared_buffer in read_version.shared_buffer {
+                    for batch in shared_buffer.get_overlap_batches(&(key..=key), false) {
+                        match batch.get(key) {
+                            Some(v) => {
+                                self.stats.get_shared_buffer_hit_counts.inc();
+                                return Ok(v.into_user_value().map(|v| v.into()));
+                            }
+                            None => continue,
+                        }
+                    }
                 }
-            }
-            let internal_key = key_with_epoch(key.to_vec(), epoch);
+
+                (read_version.uncommitted_ssts, read_version.pinned_version)
+            };
 
             let mut table_counts = 0;
-            for level in &version.levels() {
+            let internal_key = key_with_epoch(key.to_vec(), epoch);
+
+            // Query uploaded but uncommitted SSTs. Return the value if found.
+            let table_infos = prune_ssts(uncommitted_ssts.iter(), &(key..=key), false);
+            for table_info in table_infos.into_iter().rev() {
+                let table = self.sstable_store.sstable(table_info.id).await?;
+                table_counts += 1;
+                if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+                    return Ok(Some(v));
+                }
+            }
+
+            for level in pinned_version.levels() {
                 if level.table_infos.is_empty() {
                     continue;
                 }
                 match level.level_type() {
                     LevelType::Overlapping => {
-                        let table_infos = level
-                            .table_infos
-                            .iter()
-                            .filter(|info| {
-                                let table_range = info.key_range.as_ref().unwrap();
-                                let table_start = user_key(table_range.left.as_slice());
-                                let table_end = user_key(table_range.right.as_slice());
-                                table_start.le(key) && table_end.ge(key)
-                            })
-                            .map(|info| info.id)
-                            .collect_vec();
-                        let tables = self.sstable_store.sstables(&table_infos).await?;
-                        for table in tables.into_iter().rev() {
+                        let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key), false);
+                        for table_info in table_infos.into_iter().rev() {
+                            let table = self.sstable_store.sstable(table_info.id).await?;
                             table_counts += 1;
                             if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
                                 return Ok(Some(v));
@@ -215,28 +260,16 @@ impl StateStore for HummockStorage {
                         }
                     }
                     LevelType::Nonoverlapping => {
-                        let table_idx = level
-                            .table_infos
-                            .partition_point(|table| {
-                                let ord = VersionedComparator::compare_key(
-                                    user_key(&table.key_range.as_ref().unwrap().left),
-                                    key,
-                                );
-                                ord == Ordering::Less || ord == Ordering::Equal
-                            })
-                            .saturating_sub(1); // considering the boundary of 0
+                        let table_idx = search_sst_idx(level, key);
                         assert!(table_idx < level.table_infos.len());
                         table_counts += 1;
                         // Because we will keep multiple version of one in the same sst file, we
                         // do not find it in the next adjacent file.
-                        let tables = self
+                        let table = self
                             .sstable_store
-                            .sstables(&[level.table_infos[table_idx].id])
+                            .sstable(level.table_infos[table_idx].id)
                             .await?;
-                        if let Some(v) = self
-                            .get_from_table(tables.first().unwrap().clone(), &internal_key, key)
-                            .await?
-                        {
+                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
                             return Ok(Some(v));
                         }
                     }
@@ -263,18 +296,18 @@ impl StateStore for HummockStorage {
         async move { self.iter(key_range, epoch).await?.collect(limit).await }
     }
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.reverse_iter(key_range, epoch)
+            self.backward_iter(key_range, epoch)
                 .await?
                 .collect(limit)
                 .await
@@ -296,22 +329,17 @@ impl StateStore for HummockStorage {
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let batch = kv_pairs
-                .into_iter()
-                .map(|(key, value)| {
-                    (
-                        Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                        value.into(),
-                    )
-                })
-                .collect_vec();
-
-            let batch_size = self.shared_buffer_manager.write_batch(batch, epoch).await?;
+            let size = self
+                .local_version_manager
+                .write_shared_buffer(epoch, kv_pairs, false)
+                .await?;
 
             if !self.options.async_checkpoint_enabled {
-                self.shared_buffer_manager.sync(Some(epoch)).await?;
+                self.local_version_manager()
+                    .sync_shared_buffer(Some(epoch))
+                    .await?;
             }
-            Ok(batch_size)
+            Ok(size)
         }
     }
 
@@ -322,17 +350,9 @@ impl StateStore for HummockStorage {
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
-            let batch = kv_pairs
-                .into_iter()
-                .map(|(key, value)| {
-                    (
-                        Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                        value.into(),
-                    )
-                })
-                .collect_vec();
-            self.shared_buffer_manager
-                .replicate_remote_batch(batch, epoch)?;
+            self.local_version_manager
+                .write_shared_buffer(epoch, kv_pairs, true)
+                .await?;
 
             Ok(())
         }
@@ -348,9 +368,9 @@ impl StateStore for HummockStorage {
         self.iter_inner(key_range, epoch, false)
     }
 
-    /// Returns a reversed iterator that scans from the end key to the begin key
+    /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -364,18 +384,20 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
-            self.shared_buffer_manager.sync(epoch).await?;
+            self.local_version_manager()
+                .sync_shared_buffer(epoch)
+                .await?;
             Ok(())
         }
     }
 }
 
-pub struct HummockStateStoreIter<'a> {
-    inner: DirectedUserIterator<'a>,
+pub struct HummockStateStoreIter {
+    inner: DirectedUserIterator,
 }
 
-impl<'a> HummockStateStoreIter<'a> {
-    fn new(inner: DirectedUserIterator<'a>) -> Self {
+impl HummockStateStoreIter {
+    fn new(inner: DirectedUserIterator) -> Self {
         Self { inner }
     }
 
@@ -393,11 +415,12 @@ impl<'a> HummockStateStoreIter<'a> {
     }
 }
 
-impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
+impl StateStoreIter for HummockStateStoreIter {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'b> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self:'b;
+    type NextFuture<'a> =
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

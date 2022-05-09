@@ -20,7 +20,7 @@ import com.risingwave.planner.rel.streaming.*;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
-import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan_common.Field;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;

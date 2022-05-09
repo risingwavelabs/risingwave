@@ -12,43 +12,117 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 use crate::array::column::Column;
 use crate::array::{F32Array, I32Array, I64Array, Op, Row, StreamChunk};
 use crate::catalog::{Field, Schema};
-use crate::types::{DataType, Datum};
+use crate::types::{DataType, Datum, ScalarImpl};
 
 pub trait TestStreamChunk {
-    fn stream_chunk() -> StreamChunk;
+    fn stream_chunk(&self) -> StreamChunk;
 
-    fn cardinality() -> usize;
+    fn cardinality(&self) -> usize;
 
-    fn schema() -> Schema;
+    fn schema(&self) -> Schema;
 
-    fn pk_indices() -> Vec<usize> {
+    fn pk_indices(&self) -> Vec<usize> {
         unimplemented!()
     }
 
-    fn data_types() -> Vec<DataType> {
-        Self::schema().data_types()
+    fn data_types(&self) -> Vec<DataType> {
+        self.schema().data_types()
     }
 
-    fn op_at(idx: usize) -> Op;
+    fn op_at(&self, idx: usize) -> Op;
 
-    fn row_at(idx: usize) -> Row;
+    fn row_at(&self, idx: usize) -> Row;
 
-    fn row_with_op_at(idx: usize) -> (Op, Row) {
-        (Self::op_at(idx), Self::row_at(idx))
+    fn row_with_op_at(&self, idx: usize) -> (Op, Row) {
+        (self.op_at(idx), self.row_at(idx))
     }
 
-    fn value_at(row_idx: usize, col_idx: usize) -> Datum {
-        Self::row_at(row_idx)[col_idx].clone()
+    fn value_at(&self, row_idx: usize, col_idx: usize) -> Datum {
+        self.row_at(row_idx)[col_idx].clone()
+    }
+}
+
+pub struct BigStreamChunk(StreamChunk);
+
+impl BigStreamChunk {
+    #[allow(clippy::if_same_then_else)]
+    #[allow(clippy::needless_bool)]
+    pub fn new(capacity: usize) -> Self {
+        let ops = (0..capacity)
+            .map(|i| {
+                if i % 20 == 0 || i % 20 == 1 {
+                    Op::UpdateDelete
+                } else if i % 20 == 2 {
+                    Op::UpdateInsert
+                } else if i % 2 == 0 {
+                    Op::Insert
+                } else {
+                    Op::Delete
+                }
+            })
+            .collect();
+
+        let visibility = (0..capacity)
+            .map(|i| {
+                if i % 20 == 1 {
+                    false
+                } else if i % 20 == 10 {
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        let col = {
+            let array = I32Array::from_slice(
+                &std::iter::repeat(Some(114_514))
+                    .take(capacity)
+                    .collect_vec(),
+            )
+            .unwrap();
+            Column::from(array)
+        };
+
+        let chunk = StreamChunk::new(ops, vec![col], Some(visibility));
+
+        Self(chunk)
+    }
+}
+
+impl TestStreamChunk for BigStreamChunk {
+    fn stream_chunk(&self) -> StreamChunk {
+        self.0.clone()
+    }
+
+    fn cardinality(&self) -> usize {
+        self.0.cardinality()
+    }
+
+    fn schema(&self) -> Schema {
+        Schema::new(vec![Field::with_name(DataType::Int32, "v")])
+    }
+
+    fn op_at(&self, i: usize) -> Op {
+        self.0.ops()[i]
+    }
+
+    fn row_at(&self, _idx: usize) -> Row {
+        Row(vec![Some(ScalarImpl::Int32(114_514))])
     }
 }
 
 pub struct WhatEverStreamChunk;
 
 impl TestStreamChunk for WhatEverStreamChunk {
-    fn stream_chunk() -> StreamChunk {
+    fn stream_chunk(&self) -> StreamChunk {
         let ops = vec![
             Op::Insert,
             Op::Delete,
@@ -73,15 +147,15 @@ impl TestStreamChunk for WhatEverStreamChunk {
         StreamChunk::new(ops, cols, visibility)
     }
 
-    fn cardinality() -> usize {
+    fn cardinality(&self) -> usize {
         4
     }
 
-    fn pk_indices() -> Vec<usize> {
+    fn pk_indices(&self) -> Vec<usize> {
         vec![0]
     }
 
-    fn schema() -> Schema {
+    fn schema(&self) -> Schema {
         let field1 = Field::with_name(DataType::Int32, "pk");
         let field2 = Field::with_name(DataType::Float32, "v2");
         let field3 = Field::with_name(DataType::Int64, "v3");
@@ -89,7 +163,7 @@ impl TestStreamChunk for WhatEverStreamChunk {
         Schema::new(fields)
     }
 
-    fn op_at(idx: usize) -> Op {
+    fn op_at(&self, idx: usize) -> Op {
         match idx {
             0 => Op::Insert,
             1 => Op::Delete,
@@ -99,7 +173,7 @@ impl TestStreamChunk for WhatEverStreamChunk {
         }
     }
 
-    fn row_at(idx: usize) -> Row {
+    fn row_at(&self, idx: usize) -> Row {
         match idx {
             0 => Row(vec![
                 Some(1i32.into()),

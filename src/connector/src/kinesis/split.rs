@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::base::SourceSplit;
+use crate::base::SplitMetaData;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum KinesisOffset {
@@ -26,8 +27,6 @@ pub enum KinesisOffset {
     None,
 }
 
-pub const KINESIS_SPLIT_TYPE: &str = "kinesis";
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisSplit {
     pub(crate) shard_id: String,
@@ -35,21 +34,17 @@ pub struct KinesisSplit {
     pub(crate) end_position: KinesisOffset,
 }
 
-impl SourceSplit for KinesisSplit {
+impl SplitMetaData for KinesisSplit {
     fn id(&self) -> String {
         self.shard_id.to_string()
     }
 
-    fn to_string(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    fn to_json_bytes(&self) -> Bytes {
+        Bytes::from(serde_json::to_string(self).unwrap())
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
-    }
-
-    fn get_type(&self) -> String {
-        KINESIS_SPLIT_TYPE.to_string()
     }
 }
 

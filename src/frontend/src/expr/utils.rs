@@ -50,9 +50,15 @@ where
 /// (expr1 AND expr2 AND expr3) the function will return Vec[expr1, expr2, expr3].
 pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
-    // TODO: extract common factors from the conjunctions with OR expression.
-    // e.g: transform (a AND ((b AND c) OR (b AND d))) to (a AND b AND (c OR d))
     split_expr_by(expr, ExprType::And, &mut rets);
+    rets
+}
+
+/// Transform a bool expression to Disjunctive form. e.g. given expression is
+/// (expr1 OR expr2 OR expr3) the function will return Vec[expr1, expr2, expr3].
+pub fn to_disjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
+    let mut rets = vec![];
+    split_expr_by(expr, ExprType::Or, &mut rets);
     rets
 }
 
@@ -93,20 +99,74 @@ impl ExprRewriter for BooleanConstantFolding {
                 (rhs, lhs)
             }
         };
-        if contains_bool_constant {
-            match func_type {
-                Type::And => {
-                    let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
-                    return boolean_constant_fold_and(constant_lhs, rhs);
+        match func_type {
+            // unary functions
+            Type::Not => {
+                let input = inputs.first().unwrap();
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(!v);
                 }
-                Type::Or => {
-                    let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
-                    return boolean_constant_fold_or(constant_lhs, rhs);
-                }
-                _ => {}
             }
+            Type::IsFalse => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(false);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(!v);
+                }
+            }
+            Type::IsTrue => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(false);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(v);
+                }
+            }
+            Type::IsNull => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(true);
+                }
+            }
+            Type::IsNotTrue => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(true);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(!v);
+                }
+            }
+            Type::IsNotFalse => {
+                let input = inputs.first().unwrap();
+                if input.is_null() {
+                    return ExprImpl::literal_bool(true);
+                }
+                if let Some(v) = try_get_bool_constant(input) {
+                    return ExprImpl::literal_bool(v);
+                }
+            }
+            Type::IsNotNull => {
+                let input = inputs.first().unwrap();
+                if let ExprImpl::Literal(lit) = input {
+                    return ExprImpl::literal_bool(lit.get_data().is_some());
+                }
+            }
+            // binary functions
+            Type::And if contains_bool_constant => {
+                let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
+                return boolean_constant_fold_and(constant_lhs, rhs);
+            }
+            Type::Or if contains_bool_constant => {
+                let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
+                return boolean_constant_fold_or(constant_lhs, rhs);
+            }
+            _ => {}
         }
-        FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+        FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
 }
 
@@ -166,7 +226,7 @@ impl ExprRewriter for NotPushDown {
                 .into_iter()
                 .map(|expr| self.rewrite_expr(expr))
                 .collect();
-            FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+            FunctionCall::new_unchecked(func_type, inputs, ret).into()
         } else {
             // func_type == Type::Not here
 
@@ -211,7 +271,7 @@ impl ExprRewriter for NotPushDown {
                                 .unwrap()
                                 .into())
                         }
-                        _ => Err(FunctionCall::new_with_return_type(func_type, inputs, ret).into()),
+                        _ => Err(FunctionCall::new_unchecked(func_type, inputs, ret).into()),
                     }
                 }
                 _ => Err(input),
@@ -227,6 +287,51 @@ impl ExprRewriter for NotPushDown {
             }
         }
     }
+}
+
+pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
+    // For example, we assume that expr is (A & B & C & D) | (B & C & D) | (C & D & E)
+    let disjunctions: Vec<ExprImpl> = to_disjunctions(expr);
+
+    // if `expr` can not be divided into several disjunctions...
+    if disjunctions.len() == 1 {
+        return disjunctions;
+    }
+
+    // extract (A & B & C & D) | (B & C & D) | (C & D & E)
+    // into [[A, B, C, D], [B, C, D], [C, D, E]]
+    let mut disjunctions: Vec<Vec<_>> = disjunctions
+        .into_iter()
+        .map(|x| to_conjunctions(x).into_iter().collect())
+        .collect();
+    let (last, remaining) = disjunctions.split_last_mut().unwrap();
+    // now greatest_common_factor == [C, D]
+    let greatest_common_divider: Vec<_> = last
+        .drain_filter(|factor| remaining.iter().all(|expr| expr.contains(factor)))
+        .collect();
+    for disjunction in remaining {
+        // remove common factors
+        disjunction.retain(|factor| !greatest_common_divider.contains(factor));
+    }
+    // now disjunctions == [[A, B], [B], [E]]
+    let remaining = merge_expr_by_binary(
+        disjunctions.into_iter().map(|conjunction| {
+            merge_expr_by_binary(
+                conjunction.into_iter(),
+                ExprType::And,
+                ExprImpl::literal_bool(true),
+            )
+        }),
+        ExprType::Or,
+        ExprImpl::literal_bool(false),
+    );
+    // now remaining is (A & B) | (B) | (E)
+    // the result is C & D & ((A & B) | (B) | (E))
+    greatest_common_divider
+        .into_iter()
+        .chain(std::iter::once(remaining))
+        .map(fold_boolean_constant)
+        .collect()
 }
 
 /// give a expression, and check all columns in its `input_ref` expressions less than the input

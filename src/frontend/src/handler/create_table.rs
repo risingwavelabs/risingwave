@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan::ColumnCatalog;
+use risingwave_pb::plan_common::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use super::create_source::make_prost_source;
@@ -31,6 +31,7 @@ use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
 /// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.

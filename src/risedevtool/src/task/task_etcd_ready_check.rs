@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::Result;
-use isahc::Body;
 use serde::Deserialize;
 
 use crate::{EtcdConfig, ExecuteContext, Task};
@@ -40,8 +39,8 @@ impl Task for EtcdReadyCheckTask {
         ctx.pb.set_message("waiting for online...");
         let health_check_addr =
             format!("http://{}:{}/health", self.config.address, self.config.port);
-        let online_cb = |body: Body| -> bool {
-            let response: HealthResponse = serde_json::from_reader(body).unwrap();
+        let online_cb = |body: &str| -> bool {
+            let response: HealthResponse = serde_json::from_str(body).unwrap();
             response.health == "true"
         };
 

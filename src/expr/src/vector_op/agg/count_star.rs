@@ -22,6 +22,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 pub struct CountStar {
     return_type: DataType,
     result: usize,
+    reached_limit: bool,
 }
 
 impl CountStar {
@@ -29,6 +30,7 @@ impl CountStar {
         Self {
             return_type,
             result,
+            reached_limit: false,
         }
     }
 }
@@ -68,18 +70,42 @@ impl Aggregator for CountStar {
         // groups' sizes are simply distance between group start indices. The distance
         // between last element and `input.cardinality()` is the ongoing group that
         // may continue in following chunks.
-        let mut groups_iter = groups.get_starting_indices().iter();
+        //
+        // Since the number of groups in an output chunk is limited, if we reach the limit
+        // in the process of counting, we set the `reached_limit` flag and save the start
+        // index of previous group to `self.result`.
+        let mut groups_iter = groups.starting_indices().iter();
         if let Some(first) = groups_iter.next() {
-            builder.append(Some((self.result + first) as i64))?;
+            let first_count = {
+                if self.reached_limit {
+                    first - self.result
+                } else {
+                    first + self.result
+                }
+            };
+            builder.append(Some(first_count as i64))?;
+            let mut group_cnt = 1;
             let mut prev = first;
             for g in groups_iter {
                 builder.append(Some((g - prev) as i64))?;
                 prev = g;
+                group_cnt += 1;
+
+                // stop and save state if we reach limit
+                if groups.is_reach_limit(group_cnt) {
+                    self.reached_limit = true;
+                    self.result = *prev;
+                    break;
+                }
             }
-            self.result = input.cardinality() - prev;
+            if group_cnt == groups.len() {
+                self.reached_limit = false;
+                self.result = input.cardinality() - prev;
+            }
         } else {
             self.result += input.cardinality();
         }
+
         Ok(())
     }
 

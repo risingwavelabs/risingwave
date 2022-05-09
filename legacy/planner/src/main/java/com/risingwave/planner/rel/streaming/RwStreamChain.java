@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.streaming;
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan_common.Field;
 import com.risingwave.proto.streaming.plan.*;
 import com.risingwave.rpc.Messages;
 import java.util.List;
@@ -84,10 +84,10 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
     builder.addAllUpstreamFields(upstreamFields);
     ChainNode chainNode = builder.build();
     return StreamNode.newBuilder()
-        .setChainNode(chainNode)
+        .setChain(chainNode)
         .addInput(
             // Just a placeholder for operator id gen.
-            StreamNode.newBuilder().setMergeNode(MergeNode.newBuilder().build()).build())
+            StreamNode.newBuilder().setMerge(MergeNode.newBuilder().build()).build())
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .addAllPkIndices(primaryKeyIndices)
         .build();

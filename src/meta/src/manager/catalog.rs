@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table::Info as TableInfo;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::plan_common::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
 use super::NotificationManagerRef;
@@ -79,7 +79,7 @@ where
 
             // Notify frontends to create database.
             self.notification_manager
-                .notify_frontend(Operation::Add, &Info::Database(database))
+                .notify_frontend(Operation::Add, Info::Database(database))
                 .await;
 
             Ok(version)
@@ -101,7 +101,7 @@ where
 
             // Notify frontends to delete database.
             self.notification_manager
-                .notify_frontend(Operation::Delete, &Info::Database(database))
+                .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
             Ok(version)
@@ -127,7 +127,7 @@ where
 
             // Notify frontends to create schema.
             self.notification_manager
-                .notify_frontend(Operation::Add, &Info::Schema(schema))
+                .notify_frontend(Operation::Add, Info::Schema(schema))
                 .await;
 
             Ok(version)
@@ -150,7 +150,7 @@ where
 
             // Notify frontends to delete schema.
             self.notification_manager
-                .notify_frontend(Operation::Delete, &Info::Schema(schema))
+                .notify_frontend(Operation::Delete, Info::Schema(schema))
                 .await;
 
             Ok(version)
@@ -183,7 +183,7 @@ where
 
             // Notify frontends to create table.
             self.notification_manager
-                .notify_frontend(Operation::Add, &Info::Table(table))
+                .notify_frontend(Operation::Add, Info::Table(table))
                 .await;
 
             Ok(version)
@@ -233,7 +233,7 @@ where
 
                     // Notify frontends to delete table.
                     self.notification_manager
-                        .notify_frontend(Operation::Delete, &Info::Table(table))
+                        .notify_frontend(Operation::Delete, Info::Table(table))
                         .await;
 
                     Ok(version)

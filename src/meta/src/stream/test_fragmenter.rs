@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
@@ -24,9 +23,11 @@ use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan::{ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId};
+use risingwave_pb::plan_common::{
+    ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
+};
 use risingwave_pb::stream_plan::source_node::SourceType;
-use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode, ProjectNode,
     SimpleAggNode, SourceNode, StreamNode,
@@ -119,7 +120,7 @@ fn make_stream_node() -> StreamNode {
     let table_ref_id = make_table_ref_id(1);
     // table source node
     let source_node = StreamNode {
-        node: Some(Node::SourceNode(SourceNode {
+        node_body: Some(NodeBody::Source(SourceNode {
             table_ref_id: Some(table_ref_id),
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
@@ -131,7 +132,7 @@ fn make_stream_node() -> StreamNode {
 
     // exchange node
     let exchange_node = StreamNode {
-        node: Some(Node::ExchangeNode(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
@@ -146,6 +147,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
+        ..Default::default()
     };
 
     // filter node
@@ -153,7 +155,7 @@ fn make_stream_node() -> StreamNode {
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let filter_node = StreamNode {
-        node: Some(Node::FilterNode(FilterNode {
+        node_body: Some(NodeBody::Filter(FilterNode {
             search_condition: Some(ExprNode {
                 expr_type: GreaterThan as i32,
                 return_type: Some(DataType {
@@ -168,24 +170,27 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 2,
         identity: "FilterExecutor".to_string(),
+        ..Default::default()
     };
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
+        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
+            table_ids: vec![],
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
         pk_indices: vec![0, 1],
         operator_id: 3,
         identity: "GlobalSimpleAggExecutor".to_string(),
+        ..Default::default()
     };
 
     // exchange node
     let exchange_node_1 = StreamNode {
-        node: Some(Node::ExchangeNode(ExchangeNode {
+        node_body: Some(NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
@@ -196,19 +201,22 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
+        ..Default::default()
     };
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
+        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
+            table_ids: vec![],
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
         operator_id: 5,
         identity: "GlobalSimpleAggExecutor".to_string(),
+        ..Default::default()
     };
 
     // project node
@@ -216,7 +224,7 @@ fn make_stream_node() -> StreamNode {
         children: vec![make_inputref(0), make_inputref(1)],
     };
     let project_node = StreamNode {
-        node: Some(Node::ProjectNode(ProjectNode {
+        node_body: Some(NodeBody::Project(ProjectNode {
             select_list: vec![
                 ExprNode {
                     rex_node: Some(RexNode::FuncCall(function_call_1)),
@@ -235,13 +243,14 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![1, 2],
         operator_id: 6,
         identity: "ProjectExecutor".to_string(),
+        ..Default::default()
     };
 
     // mview node
     StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
-        node: Some(Node::MaterializeNode(MaterializeNode {
+        node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_ref_id: Some(make_table_ref_id(1)),
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],
@@ -251,6 +260,7 @@ fn make_stream_node() -> StreamNode {
         fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
+        ..Default::default()
     }
 }
 
@@ -259,16 +269,17 @@ async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
-    let fragmenter = StreamFragmenter::new(
+    let parallel_degree = 4;
+    let mut ctx = CreateMaterializedViewContext::default();
+    let graph = StreamFragmenter::generate_graph(
         env.id_gen_manager_ref(),
         fragment_manager,
-        hash_mapping,
+        parallel_degree,
         false,
-    );
-
-    let mut ctx = CreateMaterializedViewContext::default();
-    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
+        &stream_node,
+        &mut ctx,
+    )
+    .await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
@@ -308,8 +319,8 @@ async fn test_fragmenter() -> Result<()> {
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
-        match node.get_node().unwrap() {
-            Node::MergeNode(merge_node) => {
+        match node.get_node_body().unwrap() {
+            NodeBody::Merge(merge_node) => {
                 assert_eq!(
                     expected_upstream
                         .get(&actor.get_actor_id())
@@ -322,7 +333,7 @@ async fn test_fragmenter() -> Result<()> {
                         .collect::<HashSet<_>>(),
                 );
             }
-            Node::SourceNode(_) => {
+            NodeBody::Source(_) => {
                 // check nothing.
             }
             _ => {

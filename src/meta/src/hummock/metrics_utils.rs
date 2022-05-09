@@ -17,10 +17,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
+use prost::Message;
 use risingwave_pb::hummock::{CompactMetrics, HummockVersion, TableSetStatistics};
 
 use crate::hummock::compaction::CompactStatus;
-use crate::hummock::level_handler::LevelHandler;
 use crate::rpc::metrics::MetaMetrics;
 
 pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
@@ -32,24 +32,20 @@ pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersi
         .iter()
         .fold(0, |accum, elem| accum + elem.tables.len());
     metrics.uncommitted_sst_num.set(uncommitted_sst_num as i64);
+    metrics
+        .version_size
+        .set(current_version.encoded_len() as i64);
 }
 
-pub fn trigger_sst_stat(metrics: &MetaMetrics, compact_status: &CompactStatus) {
-    let reduce_compact_cnt =
-        |compacting_key_ranges: &Vec<(risingwave_hummock_sdk::key_range::KeyRange, u64, u64)>| {
-            compacting_key_ranges
-                .iter()
-                .fold(0, |accum, elem| accum + elem.2)
-        };
+pub fn trigger_sst_stat(
+    metrics: &MetaMetrics,
+    compact_status: &CompactStatus,
+    current_version: &HummockVersion,
+) {
+    let level_sst_cnt = |level_idx: usize| current_version.levels[level_idx].table_infos.len();
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-        let (sst_num, compact_cnt) = match level_handler {
-            LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-            }
-            LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-            }
-        };
+        let sst_num = level_sst_cnt(idx);
+        let compact_cnt = level_handler.get_pending_file_count();
         let level_label = String::from("L") + &idx.to_string();
         metrics
             .level_sst_num
@@ -82,14 +78,8 @@ pub fn trigger_sst_stat(metrics: &MetaMetrics, compact_status: &CompactStatus) {
             .is_ok()
     {
         for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-            let (sst_num, compact_cnt) = match level_handler {
-                LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-                LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-            };
+            let sst_num = level_sst_cnt(idx);
+            let compact_cnt = level_handler.get_pending_file_count();
             tracing::info!(
                 "Level {} has {} SSTs, {} of those are being compacted to bottom levels",
                 idx,

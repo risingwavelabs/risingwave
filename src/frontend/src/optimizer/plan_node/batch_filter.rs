@@ -14,12 +14,13 @@
 
 use std::fmt;
 
-use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::FilterNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::PlanBase;
+use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
+use crate::optimizer::property::Order;
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
@@ -75,7 +76,16 @@ impl ToDistributedBatch for BatchFilter {
 impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
-            search_condition: Some(ExprImpl::from(self.logical.predicate().clone()).to_protobuf()),
+            search_condition: Some(
+                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
+            ),
         })
+    }
+}
+
+impl ToLocalBatch for BatchFilter {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local_with_order_required(Order::any());
+        self.clone_with_input(new_input).into()
     }
 }

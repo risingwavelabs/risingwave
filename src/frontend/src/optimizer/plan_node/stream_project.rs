@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -68,8 +68,13 @@ impl_plan_tree_node_for_unary! {StreamProject}
 
 impl ToStreamProst for StreamProject {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        ProstStreamNode::ProjectNode(ProjectNode {
-            select_list: self.logical.exprs().iter().map(Expr::to_protobuf).collect(),
+        ProstStreamNode::Project(ProjectNode {
+            select_list: self
+                .logical
+                .exprs()
+                .iter()
+                .map(Expr::to_expr_proto)
+                .collect(),
         })
     }
 }

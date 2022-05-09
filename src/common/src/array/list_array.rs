@@ -26,7 +26,7 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of list array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -44,12 +44,12 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Result<Self> {
-        panic!("Must use new_with_meta.")
+        panic!("Must use with_meta.")
     }
 
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
-        Self::new_with_meta(
+        Self::with_meta(
             capacity,
             ArrayMeta::List {
                 // Default datatype
@@ -58,7 +58,7 @@ impl ArrayBuilder for ListArrayBuilder {
         )
     }
 
-    fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::List { datatype } = meta {
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
@@ -139,6 +139,14 @@ impl Array for ListArray {
         }
     }
 
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<ListRef<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(ListRef::Indexed { arr: self, idx })
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         self.len
     }
@@ -179,7 +187,7 @@ impl Array for ListArray {
     }
 
     fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
-        let array_builder = ListArrayBuilder::new_with_meta(
+        let array_builder = ListArrayBuilder::with_meta(
             capacity,
             ArrayMeta::List {
                 datatype: Box::new(self.value_type.clone()),
@@ -294,11 +302,7 @@ impl<'a> ListRef<'a> {
             ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
                 .map(|o| arr.value.value_at(o))
                 .collect(),
-            ListRef::ValueRef { val } => val
-                .values
-                .iter()
-                .map(|d| d.as_ref().map(|s| s.as_scalar_ref_impl()))
-                .collect::<Vec<DatumRef<'a>>>(),
+            ListRef::ValueRef { val } => val.values.iter().map(to_datum_ref).collect(),
         }
     }
 }
@@ -420,7 +424,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::new_with_meta(
+        let mut builder = ListArrayBuilder::with_meta(
             4,
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
@@ -455,7 +459,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut builder = ListArrayBuilder::new_with_meta(
+        let mut builder = ListArrayBuilder::with_meta(
             4,
             ArrayMeta::List {
                 datatype: Box::new(DataType::Int32),
@@ -567,7 +571,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::new_with_meta(
+        let mut builder = ListArrayBuilder::with_meta(
             3,
             ArrayMeta::List {
                 datatype: Box::new(DataType::List {

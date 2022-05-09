@@ -16,8 +16,8 @@ use std::future::Future;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::exchange_info::DistributionMode as ShuffleDistributionMode;
-use risingwave_pb::plan::ExchangeInfo;
+use risingwave_pb::batch_plan::exchange_info::DistributionMode as ShuffleDistributionMode;
+use risingwave_pb::batch_plan::ExchangeInfo;
 
 use crate::task::broadcast_channel::{new_broadcast_channel, BroadcastReceiver, BroadcastSender};
 use crate::task::fifo_channel::{new_fifo_channel, FifoReceiver, FifoSender};

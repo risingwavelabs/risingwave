@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -44,12 +44,13 @@ impl Binder {
             };
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
-                return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
+                return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
+                    kind, inputs, f.distinct,
+                )?)));
             }
             let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
-                "like" => ExprType::Like,
                 "upper" => ExprType::Upper,
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
@@ -57,13 +58,14 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
-                "case" => ExprType::Case,
-                "is true" => ExprType::IsTrue,
-                "is not true" => ExprType::IsNotTrue,
-                "is false" => ExprType::IsFalse,
-                "is not false" => ExprType::IsNotFalse,
-                "is null" => ExprType::IsNull,
-                "is not null" => ExprType::IsNotNull,
+                "nullif" => {
+                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
+                    ExprType::Case
+                }
+                "coalesce" => {
+                    inputs = Self::check_coalesce_args(inputs)?;
+                    ExprType::Coalesce
+                }
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -76,10 +78,7 @@ impl Binder {
                     .into())
                 }
             };
-            Ok(FunctionCall::new_or_else(function_type, inputs, |args| {
-                Self::err_unsupported_func(&function_name, args)
-            })?
-            .into())
+            Ok(FunctionCall::new(function_type, inputs)?.into())
         } else {
             Err(ErrorCode::NotImplemented(
                 format!("unsupported function: {:?}", f.name),
@@ -89,16 +88,42 @@ impl Binder {
         }
     }
 
-    fn err_unsupported_func(function_name: &str, inputs: &[ExprImpl]) -> RwError {
-        let args = inputs
-            .iter()
-            .map(|i| format!("{:?}", i.return_type()))
-            .join(",");
-        ErrorCode::NotImplemented(
-            format!("function {}({}) doesn't exist", function_name, args),
-            112.into(),
-        )
-        .into()
+    /// Make sure inputs only have 2 value and rewrite the arguments.
+    /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
+    fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
+        } else {
+            let inputs = vec![
+                FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
+                Literal::new(None, inputs[0].return_type()).into(),
+                inputs[0].clone(),
+            ];
+            Ok(inputs)
+        }
+    }
+
+    /// Make sure inputs have more than 1 value and check the args have same `data_type`.
+    fn check_coalesce_args(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.is_empty() {
+            Err(ErrorCode::BindError(
+                "Coalesce function must contain at least 1 argument".to_string(),
+            )
+            .into())
+        } else {
+            let data_type = inputs[0].return_type();
+            for input in &inputs {
+                if data_type != input.return_type() {
+                    return Err(ErrorCode::BindError(format!(
+                        "Coalesce function cannot match types {:?} and {:?}",
+                        data_type,
+                        input.return_type()
+                    ))
+                    .into());
+                }
+            }
+            Ok(inputs)
+        }
     }
 
     /// Rewrite the arguments to be consistent with the `round` signature:

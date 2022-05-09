@@ -58,7 +58,7 @@ impl LogicalProject {
         }
     }
 
-    /// get the Mapping of columnIndex from input column index to out column index
+    /// get the Mapping of columnIndex from output column index to input column index
     fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
         let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
@@ -197,6 +197,10 @@ impl LogicalProject {
                     alias.as_ref().map(|alias| alias == &field.name).unwrap_or(true) &&
                     matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
                 })
+    }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>, PlanRef) {
+        (self.exprs, self.expr_alias, self.input)
     }
 }
 
