@@ -142,7 +142,7 @@ impl DataType {
         })
     }
 
-    /// Transfer `scalar_type` to `data_type`.
+    /// Transfer `datum_type` to `data_type`.
     pub fn datum_type_to_data_type(datum: &Datum) -> Result<DataType> {
         let scalar = match datum {
             Some(scalar) => scalar,

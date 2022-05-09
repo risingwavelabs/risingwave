@@ -82,7 +82,8 @@ impl Binder {
         })
     }
 
-    /// Bind row to `struct_value` for insert nested column.
+    /// Bind row to `struct_value` for nested column,
+    /// e.g. Row(1,2,(1,2,3)).
     /// Only accept value and row expr in row.
     pub fn bind_row(&mut self, exprs: &[Expr]) -> Result<StructValue> {
         let fields = exprs
