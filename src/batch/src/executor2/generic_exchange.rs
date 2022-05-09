@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use futures::future::select_all;
+use futures::stream::select_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -145,21 +145,12 @@ impl<CS: 'static + CreateSource> GenericExchangeExecutor2<CS> {
             sources.push(source);
         }
 
-        let mut handles = sources
-            .into_iter()
-            .map(data_chunk_stream)
-            .map(|stream| stream.into_future())
-            .collect_vec();
+        let mut stream =
+            select_all(sources.into_iter().map(data_chunk_stream).collect_vec()).boxed();
 
-        while !handles.is_empty() {
-            let ((result, from), _id, remainings) = select_all(handles).await;
-            handles = remainings;
-
-            if let Some(data_chunk) = result {
-                let data_chunk = data_chunk?;
-                handles.push(from.into_future());
-                yield data_chunk
-            }
+        while let Some(data_chunk) = stream.next().await {
+            let data_chunk = data_chunk?;
+            yield data_chunk
         }
     }
 }
@@ -186,10 +177,8 @@ mod tests {
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::DataType;
-    use tokio::time::{sleep, Duration};
 
     use super::*;
-
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
         #[derive(Debug, Clone)]
@@ -200,7 +189,6 @@ mod tests {
         #[async_trait::async_trait]
         impl ExchangeSource for FakeExchangeSource {
             async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-                sleep(Duration::from_secs(0.1 as u64)).await;
                 if let Some(chunk) = self.chunks.pop() {
                     Ok(chunk)
                 } else {
@@ -219,20 +207,20 @@ mod tests {
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let mut rng = rand::thread_rng();
-                let i = rng.gen_range(1..=10);
+                let i = rng.gen_range(1..=100000);
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(Arc::new(
-                        array_nonnull! { I32Array, [i, i, i] }.into(),
+                        array_nonnull! { I32Array, [i] }.into(),
                     ))])
                     .build();
-                let chunks = vec![Some(chunk); 3];
+                let chunks = vec![Some(chunk); 100];
 
                 Ok(Box::new(FakeExchangeSource { chunks }))
             }
         }
 
         let mut sources: Vec<ProstExchangeSource> = vec![];
-        for _ in 0..3 {
+        for _ in 0..2 {
             sources.push(ProstExchangeSource::default());
         }
 
@@ -251,16 +239,15 @@ mod tests {
         });
 
         let mut stream = executor.execute();
-        let mut first_batch: Vec<DataChunk> = vec![];
+        let mut chunks: Vec<DataChunk> = vec![];
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.unwrap();
-            // 3 source generate 3 different data_chunk per 0.1 second
-            // the first 3 data_chunk will contain left 6 data_chunk
-            if first_batch.len() < 4 {
-                first_batch.push(chunk);
-                continue;
+            chunks.push(chunk);
+            if chunks.len() == 100 {
+                chunks.dedup();
+                assert_ne!(chunks.len(), 1);
+                chunks.clear();
             }
-            assert!(first_batch.contains(&chunk));
         }
     }
 }
