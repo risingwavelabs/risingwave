@@ -131,7 +131,7 @@ where
     // TODO: remove this periodic trigger after #2121
     let request_sender = compaction_scheduler.request_sender();
     tokio::spawn(async move {
-        let mut min_interval = tokio::time::interval(Duration::from_secs(5));
+        let mut min_interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             min_interval.tick().await;
             if request_sender.send(0.into()).is_err() {
