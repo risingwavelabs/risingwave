@@ -348,7 +348,8 @@ impl LocalVersionManager {
                             shared_buffer.write().succeed_upload_task(task_id);
                         }
                         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-                            conflict_detector.archive_epoch(epoch);
+                            let first_epoch = guard.get_first_epoch();
+                            conflict_detector.archive_epoch(epoch, first_epoch);
                         }
                     }
                     Err(_) => {
