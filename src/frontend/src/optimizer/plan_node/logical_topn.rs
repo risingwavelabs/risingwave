@@ -15,12 +15,12 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::error::Result;
 
 use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
-use risingwave_common::error::Result;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -167,7 +167,7 @@ impl ToBatch for LogicalTopN {
 }
 
 impl ToStream for LogicalTopN {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::fmt;
-use risingwave_common::error::Result;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 

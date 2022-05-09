@@ -16,8 +16,8 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
-use risingwave_common::error::{Result,ErrorCode,RwError};
 
 use super::{
     ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
@@ -383,14 +383,14 @@ impl ToBatch for LogicalJoin {
             // todo!("nested loop join")
             Err(RwError::from(ErrorCode::NotImplemented(
                 "nested loop join".to_string(),
-                None.into())
-            ))
+                None.into(),
+            )))
         }
     }
 }
 
 impl ToStream for LogicalJoin {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
@@ -398,12 +398,10 @@ impl ToStream for LogicalJoin {
         );
         let left = self
             .left()
-            .to_stream_with_dist_required(
-                &Distribution::HashShard(predicate.left_eq_indexes()))?;
+            .to_stream_with_dist_required(&Distribution::HashShard(predicate.left_eq_indexes()))?;
         let right = self
             .right()
-            .to_stream_with_dist_required(
-                &Distribution::HashShard(predicate.right_eq_indexes()))?;
+            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()))?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
@@ -751,7 +749,7 @@ mod tests {
         );
 
         // Perform `to_batch`
-        let result = logical_join.to_batch();
+        let result = logical_join.to_batch().unwrap();
 
         // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
         let batch_filter = result.as_batch_filter().unwrap();

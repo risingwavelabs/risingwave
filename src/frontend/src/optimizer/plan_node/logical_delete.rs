@@ -100,7 +100,7 @@ impl ToBatch for LogicalDelete {
 }
 
 impl ToStream for LogicalDelete {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         unreachable!("delete should always be converted to batch plan");
     }
 

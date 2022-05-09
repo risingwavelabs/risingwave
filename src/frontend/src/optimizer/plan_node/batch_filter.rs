@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::fmt;
-use risingwave_common::error::Result;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
@@ -86,8 +86,7 @@ impl ToBatchProst for BatchFilter {
 
 impl ToLocalBatch for BatchFilter {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().
-            to_local_with_order_required(Order::any())?;
+        let new_input = self.input().to_local_with_order_required(Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

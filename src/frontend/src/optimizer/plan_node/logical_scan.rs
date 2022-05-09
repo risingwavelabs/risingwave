@@ -215,7 +215,7 @@ impl ToBatch for LogicalScan {
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         Ok(StreamTableScan::new(self.clone()).into())
     }
 

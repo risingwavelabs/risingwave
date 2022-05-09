@@ -17,7 +17,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result,RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{BatchValues, ColPrunable, PlanBase, PlanNode, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
@@ -92,19 +92,18 @@ impl ToBatch for LogicalValues {
 }
 
 impl ToStream for LogicalValues {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "Stream values executor is unimplemented!".to_string(),
-            None.into()
+            None.into(),
         )))
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "Stream values executor is unimplemented!".to_string(),
-            None.into()
+            None.into(),
         )))
-
     }
 }
 

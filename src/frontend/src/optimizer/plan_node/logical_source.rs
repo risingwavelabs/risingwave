@@ -18,15 +18,14 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result,RwError};
-
-use crate::catalog::source_catalog::SourceCatalog;
-use crate::session::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
     ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, StreamSource, ToBatch, ToStream,
 };
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::session::OptimizerContextRef;
+use crate::utils::ColIndexMapping;
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -95,13 +94,13 @@ impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "there is no batch source operator".to_string(),
-            None.into())
-        ))
+            None.into(),
+        )))
     }
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         Ok(StreamSource::new(self.clone()).into())
     }
 

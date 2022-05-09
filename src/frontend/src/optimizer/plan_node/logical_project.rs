@@ -299,14 +299,13 @@ impl ToStream for LogicalProject {
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }
 
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         self.to_stream_with_dist_required(Distribution::any())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
-        let (proj, out_col_change) = self.rewrite_with_input(
-            input.clone(), input_col_change);
+        let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let input_pk = input.pk_indices();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);

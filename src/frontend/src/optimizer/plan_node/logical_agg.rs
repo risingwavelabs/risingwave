@@ -504,7 +504,7 @@ impl ToBatch for LogicalAgg {
 }
 
 impl ToStream for LogicalAgg {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         if self.group_keys().is_empty() {
             Ok(StreamSimpleAgg::new(
                 self.clone_with_input(

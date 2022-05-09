@@ -20,9 +20,9 @@ use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
     ToBatch, ToStream,
 };
-use crate::risingwave_common::error::Result;
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
+use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -137,7 +137,7 @@ impl ToBatch for LogicalFilter {
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self) -> Result<PlanRef>{
+    fn to_stream(&self) -> Result<PlanRef> {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamFilter::new(new_logical).into())

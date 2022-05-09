@@ -14,9 +14,9 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
-use risingwave_common::error::Result;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -71,8 +71,7 @@ impl ToDistributedBatch for BatchTopN {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(),
-                                          &Distribution::Single)?;
+            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

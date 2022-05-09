@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::fmt;
-use risingwave_common::error::Result;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
@@ -94,8 +94,7 @@ impl ToDistributedBatch for BatchProject {
             .to_distributed_with_required(required_order, &input_required)?;
         let new_logical = self.logical.clone_with_input(new_input);
         let batch_plan = BatchProject::new(new_logical);
-        let batch_plan = required_order.
-            enforce_if_not_satisfies(batch_plan.into())?;
+        let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into())?;
         required_dist.enforce_if_not_satisfies(batch_plan, required_order)
     }
 }
@@ -114,8 +113,7 @@ impl ToBatchProst for BatchProject {
 
 impl ToLocalBatch for BatchProject {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().
-            to_local_with_order_required(Order::any())?;
+        let new_input = self.input().to_local_with_order_required(Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

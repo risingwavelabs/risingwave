@@ -15,14 +15,12 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-
 use risingwave_common::error::{ErrorCode, Result, RwError};
-
-use crate::utils::ColIndexMapping;
 
 use super::{
     BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
 };
+use crate::utils::ColIndexMapping;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
