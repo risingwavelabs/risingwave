@@ -20,10 +20,23 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use crate::KinesisProperties;
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::kinesis::*;
+use crate::{AnyhowProperties, Properties};
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
     client: kinesis_client,
+}
+
+impl KinesisSplitEnumerator {
+    pub async fn new(properties: &AnyhowProperties) -> Result<Self> {
+        let client = build_client(&Properties::from(properties)).await?;
+        let stream_name = properties.get(KINESIS_STREAM_NAME)?;
+        Ok(Self {
+            stream_name,
+            client,
+        })
+    }
 }
 
 #[async_trait]

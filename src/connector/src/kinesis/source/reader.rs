@@ -22,14 +22,13 @@ use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as kinesis_client;
 use aws_smithy_types::DateTime;
-use http::Uri;
 
 use crate::base::{SourceMessage, SplitReader};
-use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::{ConnectorStateV2, KinesisProperties};
+use crate::kinesis::{build_client, KINESIS_STREAM_NAME};
 
 pub struct KinesisSplitReader {
     client: kinesis_client,
@@ -117,19 +116,11 @@ impl KinesisSplitReader {
     where
         Self: Sized,
     {
-        let config = AwsConfigInfo::build(config)?;
-        let aws_config = config.load().await?;
-        let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
-        if let Some(endpoint) = &config.endpoint {
-            let uri = endpoint.clone().parse::<Uri>().unwrap();
-            builder =
-                builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
-        }
-        let client = kinesis_client::from_conf(builder.build());
+        let client = build_client(&config).await?;
 
         let mut split_reader = KinesisSplitReader {
             client,
-            stream_name: config.stream_name.clone(),
+            stream_name: config.get(KINESIS_STREAM_NAME)?,
             shard_id: String::from(""),
             latest_sequence_num: "".to_string(),
             shard_iter: None,
