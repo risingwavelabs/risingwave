@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use aws_sdk_kinesis::model::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
 
+use crate::KinesisProperties;
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 
@@ -64,6 +65,12 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 end_position: KinesisOffset::None,
             })
             .collect())
+    }
+}
+
+impl KinesisSplitEnumerator {
+    pub async fn new(props: KinesisProperties) -> anyhow::Result<Self>{
+        todo!();
     }
 }
 
