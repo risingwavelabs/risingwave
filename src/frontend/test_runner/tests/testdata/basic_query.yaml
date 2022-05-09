@@ -156,4 +156,4 @@
 - sql: |
     create table t (v1 int);
     select coalesce(1,'a') from t;
-  binder_error: 'Bind error: Coalesce function cannot match types Int32 and Varchar'
+  binder_error: 'Bind error: types Int32 and Varchar cannot be matched'
