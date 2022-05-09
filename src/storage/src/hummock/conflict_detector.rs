@@ -121,8 +121,8 @@ impl ConflictDetector {
         self.epoch_history.remove(&epoch);
         if let Some(first_epoch) = first_epoch {
             if first_epoch - 1 != self.get_epoch_watermark() {
-                self.epoch_set.retain(|x| x > &(first_epoch - 1));
                 self.set_watermark(first_epoch - 1);
+                self.epoch_set.retain(|x| x > &(first_epoch - 1));
             }
         }
     }
