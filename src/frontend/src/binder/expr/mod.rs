@@ -104,7 +104,14 @@ impl Binder {
             } => self.bind_in_list(*expr, list, negated),
             Expr::Row(exprs) => {
                 let value = self.bind_row(&exprs)?;
-                let data_type = value.get_data_type()?;
+                let data_type = DataType::Struct {
+                    fields: value
+                        .get_fields()
+                        .iter()
+                        .map(DataType::datum_type_to_data_type)
+                        .collect::<Result<Vec<_>>>()?
+                        .into(),
+                };
                 Ok(ExprImpl::Literal(Box::new(Literal::new(
                     Some(value.to_scalar_value()),
                     data_type,

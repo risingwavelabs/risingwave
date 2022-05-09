@@ -26,7 +26,7 @@ use super::{
 };
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::error::{internal_error, Result};
+use crate::error::Result;
 use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of struct array.
@@ -297,20 +297,8 @@ impl StructValue {
         Self { fields }
     }
 
-    pub fn get_data_type(&self) -> Result<DataType> {
-        let types = self
-            .fields
-            .iter()
-            .map(|d| match d {
-                None => Err(internal_error(
-                    "cannot get data type from None Datum".to_string(),
-                )),
-                Some(s) => DataType::scalar_type_to_data_type(s),
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(DataType::Struct {
-            fields: types.into(),
-        })
+    pub fn get_fields(&self) -> &[Datum] {
+        &self.fields
     }
 }
 
