@@ -18,6 +18,7 @@ use std::string::String;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
 
 use super::{
     BatchProject, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamProject,
@@ -275,15 +276,15 @@ impl ColPrunable for LogicalProject {
 }
 
 impl ToBatch for LogicalProject {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchProject::new(new_logical).into()
+        Ok(BatchProject::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalProject {
-    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
+    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> Result<PlanRef> {
         let input_required = match required_dist {
             Distribution::HashShard(_) => self
                 .o2i_col_mapping()
@@ -292,19 +293,20 @@ impl ToStream for LogicalProject {
             Distribution::AnyShard => Distribution::AnyShard,
             _ => Distribution::Any,
         };
-        let new_input = self.input().to_stream_with_dist_required(&input_required);
+        let new_input = self.input().to_stream_with_dist_required(&input_required)?;
         let new_logical = self.clone_with_input(new_input);
         let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }
 
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef>{
         self.to_stream_with_dist_required(Distribution::any())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
-        let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (proj, out_col_change) = self.rewrite_with_input(
+            input.clone(), input_col_change);
         let input_pk = input.pk_indices();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
@@ -324,7 +326,7 @@ impl ToStream for LogicalProject {
             .unzip();
         let proj = Self::new(input, exprs, expr_alias);
         // the added columns is at the end, so it will not change the exists column index
-        (proj.into(), out_col_change)
+        Ok((proj.into(), out_col_change))
     }
 }
 #[cfg(test)]

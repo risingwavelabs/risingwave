@@ -94,10 +94,10 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Ok(Planner::new(OptimizerContext::new(session).into())
+            Planner::new(OptimizerContext::new(session).into())
                 .plan(bound)
                 .unwrap()
-                .gen_batch_query_plan())
+                .gen_batch_query_plan()
         } else {
             unreachable!()
         }

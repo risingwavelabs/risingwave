@@ -92,19 +92,19 @@ impl ColPrunable for LogicalInsert {
 }
 
 impl ToBatch for LogicalInsert {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchInsert::new(new_logical).into()
+        Ok(BatchInsert::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalInsert {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef>{
         unreachable!("insert should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
         unreachable!("delete should always be converted to batch plan");
     }
 }

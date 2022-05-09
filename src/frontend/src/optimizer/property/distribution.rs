@@ -16,6 +16,7 @@ use risingwave_pb::batch_plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
+use risingwave_common::error::Result;
 
 use super::super::plan_node::*;
 use crate::optimizer::property::Order;
@@ -57,11 +58,11 @@ impl Distribution {
         }
     }
 
-    pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> Result<PlanRef> {
         if !plan.distribution().satisfies(self) {
-            self.enforce(plan, required_order)
+            Ok(self.enforce(plan, required_order))
         } else {
-            plan
+            Ok(plan)
         }
     }
 

@@ -17,6 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_common::error::{Result,ErrorCode,RwError};
 
 use super::{
     ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
@@ -349,15 +350,15 @@ impl ColPrunable for LogicalJoin {
 }
 
 impl ToBatch for LogicalJoin {
-    fn to_batch(&self) -> PlanRef {
+    fn to_batch(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
             self.on.clone(),
         );
 
-        let left = self.left().to_batch();
-        let right = self.right().to_batch();
+        let left = self.left().to_batch()?;
+        let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
@@ -373,19 +374,23 @@ impl ToBatch for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                BatchFilter::new(logical_filter).into()
+                Ok(BatchFilter::new(logical_filter).into())
             } else {
-                BatchHashJoin::new(logical_join, predicate).into()
+                Ok(BatchHashJoin::new(logical_join, predicate).into())
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            todo!("nested loop join")
+            // todo!("nested loop join")
+            Err(RwError::from(ErrorCode::NotImplemented(
+                "nested loop join".to_string(),
+                None.into())
+            ))
         }
     }
 }
 
 impl ToStream for LogicalJoin {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef>{
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
@@ -393,10 +398,12 @@ impl ToStream for LogicalJoin {
         );
         let left = self
             .left()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.left_eq_indexes()));
+            .to_stream_with_dist_required(
+                &Distribution::HashShard(predicate.left_eq_indexes()))?;
         let right = self
             .right()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()));
+            .to_stream_with_dist_required(
+                &Distribution::HashShard(predicate.right_eq_indexes()))?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
@@ -412,9 +419,9 @@ impl ToStream for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                StreamFilter::new(logical_filter).into()
+                Ok(StreamFilter::new(logical_filter).into())
             } else {
-                StreamHashJoin::new(logical_join, predicate).into()
+                Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
@@ -422,12 +429,12 @@ impl ToStream for LogicalJoin {
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (left, left_col_change) = self.left.logical_rewrite_for_stream();
-        let (right, right_col_change) = self.right.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (left, left_col_change) = self.left.logical_rewrite_for_stream()?;
+        let (right, right_col_change) = self.right.logical_rewrite_for_stream()?;
         let (join, out_col_change) =
             self.rewrite_with_left_right(left, left_col_change, right, right_col_change);
-        (join.into(), out_col_change)
+        Ok((join.into(), out_col_change))
     }
 }
 

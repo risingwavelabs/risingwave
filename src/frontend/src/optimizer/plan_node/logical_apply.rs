@@ -15,11 +15,14 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::utils::{ColIndexMapping, Condition};
+
+use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
@@ -113,17 +116,21 @@ impl ColPrunable for LogicalApply {
 }
 
 impl ToBatch for LogicalApply {
-    fn to_batch(&self) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn to_batch(&self) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalApply should be unnested".to_string()
+        )))
     }
 }
 
 impl ToStream for LogicalApply {
-    fn to_stream(&self) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn to_stream(&self) -> Result<PlanRef>{
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalApply should be unnested".to_string())))
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        panic!("LogicalApply should be unnested")
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalApply should be unnested".to_string())))
     }
 }

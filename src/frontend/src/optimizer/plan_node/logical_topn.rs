@@ -20,6 +20,7 @@ use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
+use risingwave_common::error::Result;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -148,35 +149,35 @@ impl ColPrunable for LogicalTopN {
 }
 
 impl ToBatch for LogicalTopN {
-    fn to_batch(&self) -> PlanRef {
+    fn to_batch(&self) -> Result<PlanRef> {
         self.to_batch_with_order_required(Order::any())
     }
 
-    fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         let ret = BatchTopN::new(new_logical).into();
 
         if self.topn_order().satisfies(required_order) {
-            ret
+            Ok(ret)
         } else {
-            required_order.enforce(ret)
+            Ok(required_order.enforce(ret))
         }
     }
 }
 
 impl ToStream for LogicalTopN {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef>{
         // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()
-            .to_stream_with_dist_required(&Distribution::Single);
-        StreamTopN::new(self.clone_with_input(input)).into()
+            .to_stream_with_dist_required(&Distribution::Single)?;
+        Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (top_n.into(), out_col_change)
+        Ok((top_n.into(), out_col_change))
     }
 }
