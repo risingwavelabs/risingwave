@@ -155,7 +155,7 @@ impl CompactStatus {
         }
     }
 
-    pub fn get_compact_task(&mut self, levels: Vec<Level>) -> Option<CompactTask> {
+    pub fn get_compact_task(&mut self, levels: &[Level]) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
@@ -207,10 +207,10 @@ impl CompactStatus {
         Some(compact_task)
     }
 
-    fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
+    fn pick_compaction(&mut self, levels: &[Level]) -> Option<SearchResult> {
         self.compaction_selector.pick_compaction(
             self.next_compact_task_id,
-            &levels,
+            levels,
             &mut self.level_handlers,
         )
     }

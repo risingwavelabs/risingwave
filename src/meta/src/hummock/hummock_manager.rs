@@ -571,7 +571,7 @@ where
                 .unwrap()
                 .clone()
         };
-        let compact_task = compact_status.get_compact_task(current_version.levels);
+        let compact_task = compact_status.get_compact_task(&current_version.levels);
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -602,6 +602,14 @@ where
                     compact_status,
                     compact_task_assignment
                 )?;
+                tracing::debug!(
+                    "pick up {} tables in level {} to compact, The number of total tables is {}",
+                    compact_task.input_ssts[0].table_infos.len(),
+                    compact_task.input_ssts[0].level_idx,
+                    current_version.levels[compact_task.input_ssts[0].level_idx as usize]
+                        .table_infos
+                        .len(),
+                );
                 Ok(Some(compact_task))
             }
         };

@@ -140,10 +140,6 @@ impl DynamicLevelSelector {
         for _ in first_non_empty_level..self.config.max_level {
             cur_level_size /= self.config.max_bytes_for_level_multiplier;
         }
-        println!(
-            "base_bytes_min: {}, base_bytes_max: {}, cur_level_size: {}",
-            base_bytes_min, base_bytes_max, cur_level_size
-        );
 
         let base_level_size = if cur_level_size <= base_bytes_min {
             // Case 1. If we make target size of last level to be max_level_size,

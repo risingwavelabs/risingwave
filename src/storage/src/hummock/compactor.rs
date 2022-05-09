@@ -182,7 +182,7 @@ impl Compactor {
 
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) {
+    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
         tracing::debug!(
             "Ready to handle compaction task: \n{}",
             compact_task_to_string(&compact_task)
@@ -225,6 +225,7 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         compactor.compact_done(output_ssts, compact_success).await;
+        compact_success
     }
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
@@ -433,6 +434,7 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(stream_retry_interval);
+            let mut max_succ_compaction_task_id = None;
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -482,7 +484,19 @@ impl Compactor {
                             vacuum_task,
                         })) => {
                             if let Some(compact_task) = compact_task {
-                                Compactor::compact(compactor_context.clone(), compact_task).await;
+                                // TODO: temporarily deduplicate compaction task. Remove after https://github.com/singularity-data/risingwave/pull/2375
+                                let task_id = compact_task.task_id;
+                                if let Some(max_succ_compaction_task_id) =
+                                    max_succ_compaction_task_id.as_ref()
+                                {
+                                    if *max_succ_compaction_task_id >= task_id {
+                                        continue;
+                                    }
+                                }
+                                if Compactor::compact(compactor_context.clone(), compact_task).await
+                                {
+                                    max_succ_compaction_task_id = Some(task_id);
+                                }
                             }
 
                             Compactor::try_vacuum(
