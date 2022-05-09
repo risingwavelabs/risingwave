@@ -37,7 +37,7 @@ pub struct CapacitySplitTableBuilder<B> {
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: Clone + Fn() -> F,
-    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B) -> Self {
