@@ -14,7 +14,10 @@
 
 use std::marker::PhantomData;
 
+use futures::future::select_all;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -51,7 +54,7 @@ pub struct GenericExchangeExecutor2<C> {
 pub trait CreateSource: Send {
     async fn create_source(
         env: BatchEnvironment,
-        value: &ProstExchangeSource,
+        prost_sources: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>>;
 }
@@ -62,26 +65,31 @@ pub struct DefaultCreateSource {}
 impl CreateSource for DefaultCreateSource {
     async fn create_source(
         env: BatchEnvironment,
-        value: &ProstExchangeSource,
+        prost_source: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
-        let peer_addr = value.get_host()?.into();
+        let peer_addr = prost_source.get_host()?.into();
+
         if is_local_address(env.server_address(), &peer_addr) {
-            trace!("Exchange locally [{:?}]", value.get_task_output_id());
-            return Ok(Box::new(LocalExchangeSource::create(
-                value.get_task_output_id()?.try_into()?,
+            trace!("Exchange locally [{:?}]", prost_source.get_task_output_id());
+
+            Ok(Box::new(LocalExchangeSource::create(
+                prost_source.get_task_output_id()?.try_into()?,
                 env,
                 task_id,
-            )?));
+            )?))
+        } else {
+            trace!(
+                "Exchange remotely from {} [{:?}]",
+                &peer_addr,
+                prost_source.get_task_output_id()
+            );
+
+            Ok(Box::new(
+                GrpcExchangeSource::create(peer_addr, prost_source.get_task_output_id()?.clone())
+                    .await?,
+            ))
         }
-        trace!(
-            "Exchange remotely from {} [{:?}]",
-            &peer_addr,
-            value.get_task_output_id()
-        );
-        Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, value.get_task_output_id()?.clone()).await?,
-        ))
     }
 }
 
@@ -128,60 +136,77 @@ impl<CS: 'static + CreateSource> Executor2 for GenericExchangeExecutor2<CS> {
 
 impl<CS: 'static + CreateSource> GenericExchangeExecutor2<CS> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        loop {
-            if self.source_idx >= self.sources.len() {
-                break;
-            }
-            if self.current_source.is_none() {
-                let proto_source = &self.sources[self.source_idx];
-                let source =
-                    CS::create_source(self.env.clone(), proto_source, self.task_id.clone()).await?;
-                self.current_source = Some(source);
-            }
-            let mut source = self.current_source.take().unwrap();
-            match source.take_data().await? {
-                None => {
-                    self.current_source = None;
-                    self.source_idx += 1;
-                }
-                Some(res) => {
-                    if res.cardinality() == 0 {
-                        debug!("Exchange source {:?} output empty chunk.", source);
-                        assert_ne!(res.cardinality(), 0);
-                    }
-                    self.current_source = Some(source);
-                    yield res;
-                }
+    async fn do_execute(self: Box<Self>) {
+        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
+
+        for prost_source in &self.sources {
+            let source =
+                CS::create_source(self.env.clone(), prost_source, self.task_id.clone()).await?;
+            sources.push(source);
+        }
+
+        let mut handles = sources
+            .into_iter()
+            .map(data_chunk_stream)
+            .map(|stream| stream.into_future())
+            .collect_vec();
+
+        while !handles.is_empty() {
+            let ((result, from), _id, remainings) = select_all(handles).await;
+            handles = remainings;
+
+            if let Some(data_chunk) = result {
+                let data_chunk = data_chunk?;
+                handles.push(from.into_future());
+                yield data_chunk
             }
         }
     }
 }
-
+#[try_stream(boxed, ok = DataChunk, error = RwError)]
+async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
+    loop {
+        if let Some(res) = source.take_data().await? {
+            if res.cardinality() == 0 {
+                debug!("Exchange source {:?} output empty chunk.", source);
+                assert_ne!(res.cardinality(), 0);
+            }
+            yield res;
+            continue;
+        }
+        break;
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
+    use rand::Rng;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::DataType;
+    use tokio::time::{sleep, Duration};
 
     use super::*;
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         struct FakeExchangeSource {
-            chunk: Option<DataChunk>,
+            chunks: Vec<Option<DataChunk>>,
         }
 
         #[async_trait::async_trait]
         impl ExchangeSource for FakeExchangeSource {
             async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-                let chunk = self.chunk.take();
-                Ok(chunk)
+                sleep(Duration::from_secs(0.1 as u64)).await;
+                if let Some(chunk) = self.chunks.pop() {
+                    Ok(chunk)
+                } else {
+                    Ok(None)
+                }
             }
         }
 
@@ -194,12 +219,16 @@ mod tests {
                 _: &ProstExchangeSource,
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
+                let mut rng = rand::thread_rng();
+                let i = rng.gen_range(1..=10);
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(Arc::new(
-                        array_nonnull! { I32Array, [3, 4, 4] }.into(),
+                        array_nonnull! { I32Array, [i, i, i] }.into(),
                     ))])
                     .build();
-                Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
+                let chunks = vec![Some(chunk); 3];
+
+                Ok(Box::new(FakeExchangeSource { chunks }))
             }
         }
 
@@ -222,14 +251,17 @@ mod tests {
             identity: "GenericExchangeExecutor2".to_string(),
         });
 
-        let mut chunks: usize = 0;
-
         let mut stream = executor.execute();
+        let mut first_batch: Vec<DataChunk> = vec![];
         while let Some(chunk) = stream.next().await {
-            let _ = chunk.unwrap();
-            chunks += 1;
+            let chunk = chunk.unwrap();
+            // 3 source generate 3 different data_chunk per 0.1 second
+            // the first 3 data_chunk will contain left 6 data_chunk
+            if first_batch.len() < 4 {
+                first_batch.push(chunk);
+                continue;
+            }
+            assert!(first_batch.contains(&chunk));
         }
-
-        assert_eq!(chunks, 3);
     }
 }
