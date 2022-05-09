@@ -287,7 +287,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
 
     #[inline]
     fn forward_if_not_matched(&mut self, op: Op, row: &RowRef) -> Result<()> {
-        // if it's outer join and the side needs maintained.
+        // if it's outer join or anti join and the side needs to be maintained.
         if (is_anti(T) && forward_exactly_once(T, SIDE)) || outer_side_keep(T, SIDE) {
             self.stream_chunk_builder.append_row_update(op, row)?;
         }
@@ -602,7 +602,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         for matched_row in matched_rows.values_mut(epoch).await {
                             if check_join_condition(&row, &matched_row.row)? {
                                 matched = true;
-                                matched_row.dec_degree();
+                                matched_row.dec_degree()?;
                                 if !forward_exactly_once(T, SIDE) {
                                     hashjoin_chunk_builder.append_on_delete(&row, matched_row)?;
                                 }
