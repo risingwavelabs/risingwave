@@ -304,8 +304,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
         let new_on = {
             let (mut left_map, _) = left_col_change.clone().into_parts();
             let (mut right_map, _) = right_col_change.clone().into_parts();
-            for i in &mut right_map {
-                *i = Some(i.unwrap() + left.schema().len());
+            for i in right_map.iter_mut().flatten() {
+                *i += left.schema().len();
             }
             left_map.append(&mut right_map);
             self.on()
@@ -361,7 +361,6 @@ impl ColPrunable for LogicalJoin {
                 }
             })
         };
-
         let (join, _) = self.rewrite_with_left_right(
             self.left.prune_col(&left_required_cols),
             ColIndexMapping::with_remaining_columns(
@@ -377,11 +376,14 @@ impl ColPrunable for LogicalJoin {
         if join_condition_required_cols.is_subset(&upstream_required_cols) {
             join.into()
         } else {
-            // TODO: map required_cols
+            let mapping =
+                ColIndexMapping::with_remaining_columns(&total_required_cols, self.schema().len());
+            let remaining_cols: Vec<_> =
+                required_cols.iter().map(|&idx| mapping.map(idx)).collect();
             let src_size = join.schema().len();
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(required_cols, src_size),
+                ColIndexMapping::with_remaining_columns(&remaining_cols, src_size),
             )
         }
     }

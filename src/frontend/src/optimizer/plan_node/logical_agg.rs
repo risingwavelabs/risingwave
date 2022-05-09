@@ -434,8 +434,21 @@ impl ColPrunable for LogicalAgg {
         };
         let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
-        let agg_call_required_cols =
-            FixedBitSet::with_capacity(self.input().schema().fields().len());
+        let agg_call_required_cols = {
+            let mut tmp = FixedBitSet::with_capacity(self.input().schema().fields().len());
+            required_cols
+                .iter()
+                .filter(|&&index| index >= self.group_keys.len())
+                .for_each(|&index| {
+                    tmp.extend(
+                        self.agg_calls()[index - self.group_keys().len()]
+                            .inputs
+                            .iter()
+                            .map(|x| x.index()),
+                    );
+                });
+            tmp
+        };
 
         let input_required_cols = {
             let mut tmp: FixedBitSet = upstream_required_cols.clone();

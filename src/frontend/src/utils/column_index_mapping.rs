@@ -143,9 +143,6 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
     pub fn with_remaining_columns(cols: &[usize], src_size: usize) -> Self {
-        if cols.is_empty() {
-            return Self::new(vec![]);
-        }
         let mut map = vec![None; src_size];
         for (tar, &src) in cols.iter().enumerate() {
             map[src] = Some(tar);
