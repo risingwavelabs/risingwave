@@ -19,8 +19,8 @@ use crate::assert_bytes_eq;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::test_utils::{
-    create_small_table_cache, default_builder_opt_for_test, gen_test_sstable_data, test_key_of,
-    test_value_of, TEST_KEYS_COUNT,
+    default_builder_opt_for_test, gen_test_sstable_data, test_key_of, test_value_of,
+    TEST_KEYS_COUNT,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{CachePolicy, SSTableIterator, Sstable};
@@ -42,7 +42,6 @@ async fn test_failpoint_table_read() {
         .await
         .unwrap();
 
-    let cache = create_small_table_cache();
     let mut sstable_iter = SSTableIterator::new(
         block_on(sstable_store.sstable(table.id)).unwrap(),
         sstable_store,
@@ -100,7 +99,6 @@ async fn test_failpoint_vacuum_and_metadata() {
         .await
         .unwrap();
 
-    let cache = create_small_table_cache();
     let mut sstable_iter = SSTableIterator::new(
         block_on(sstable_store.sstable(table.id)).unwrap(),
         sstable_store,

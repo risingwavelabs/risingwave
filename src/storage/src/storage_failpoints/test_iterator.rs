@@ -27,7 +27,7 @@ use crate::hummock::iterator::{
     BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
     HummockIterator, MergeIterator, UserIterator,
 };
-use crate::hummock::test_utils::{create_small_table_cache, default_builder_opt_for_test};
+use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::{BackwardSSTableIterator, SSTableIterator};
 use crate::monitor::StateStoreMetrics;
 
@@ -310,7 +310,6 @@ async fn test_failpoint_backward_user_read_err() {
         200,
     )
     .await;
-    let cache = create_small_table_cache();
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
         Box::new(BackwardSSTableIterator::new(
             block_on(sstable_store.sstable(table0.id)).unwrap(),
