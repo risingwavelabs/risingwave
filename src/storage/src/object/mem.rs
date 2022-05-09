@@ -103,6 +103,14 @@ impl InMemObjectStore {
     }
 }
 
+impl Drop for InMemObjectStore {
+    fn drop(&mut self) {
+        if let Some(sender) = self.compactor_shutdown_sender.lock().take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
 fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
     if block.offset + block.size > obj.len() {
         Err(ObjectError::internal("bad block offset and size"))

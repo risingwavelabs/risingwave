@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
@@ -92,8 +91,10 @@ impl StateStoreImpl {
         state_store_stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
         let store = match s {
-            hummock if hummock.starts_with("hummock") => {
-                let object_store = Arc::new(parse_object_store(hummock).await);
+            hummock if hummock.starts_with("hummock+") => {
+                let object_store = Arc::new(
+                    parse_object_store(hummock.strip_prefix("hummock+").unwrap(), true).await,
+                );
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store.clone(),
                     config.data_directory.to_string(),
@@ -108,7 +109,10 @@ impl StateStoreImpl {
                     state_store_stats.clone(),
                 )
                 .await?;
-                if let ObjectStoreImpl::Mem(ref in_mem_object_store) = object_store.deref() {
+
+                // in-mem and disk object store are local object store. Therefore, if we use them as
+                // remote object store, we should start a compactor locally.
+                if let ObjectStoreImpl::Mem(in_mem_object_store) = object_store.as_ref() {
                     tracing::info!("start a compactor for in-memory object store");
                     let (_, shutdown_sender) = Compactor::start_compactor(
                         config.clone(),
@@ -117,6 +121,15 @@ impl StateStoreImpl {
                         state_store_stats.clone(),
                     );
                     in_mem_object_store.set_compactor_shutdown_sender(shutdown_sender);
+                } else if let ObjectStoreImpl::Disk(disk_object_store) = object_store.as_ref() {
+                    tracing::info!("start a compactor for local disk object store");
+                    let (_, shutdown_sender) = Compactor::start_compactor(
+                        config.clone(),
+                        hummock_meta_client,
+                        sstable_store,
+                        state_store_stats.clone(),
+                    );
+                    disk_object_store.set_compactor_shutdown_sender(shutdown_sender);
                 }
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
