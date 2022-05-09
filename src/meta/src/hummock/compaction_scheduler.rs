@@ -103,7 +103,7 @@ where
                 return;
             }
             Err(err) => {
-                tracing::warn!("Failed to get compaction task for compactor {:#?}.", err);
+                tracing::warn!("Failed to get compaction task: {:#?}.", err);
                 return;
             }
         };
@@ -149,7 +149,7 @@ where
                 }
                 Err(err) => {
                     tracing::warn!(
-                        "Failed to assign compaction task to worker {}: {:#?}",
+                        "Failed to assign compaction task to compactor {}: {:#?}",
                         compactor.context_id(),
                         err
                     );
