@@ -66,7 +66,10 @@ async fn test_failpoint_concat_read_err() {
     assert!(result.is_err());
     let result = iter.seek(iterator_test_key_of(23).as_slice()).await;
     assert!(result.is_err());
+    fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
+    fail::cfg(mem_read_err, "return").unwrap();
+
     let mut i = 0;
     while iter.is_valid() {
         let key = iter.key();
@@ -118,7 +121,10 @@ async fn test_failpoint_backward_concat_read_err() {
     assert!(result.is_err());
     let result = iter.seek(iterator_test_key_of(3).as_slice()).await;
     assert!(result.is_err());
+    fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
+    fail::cfg(mem_read_err, "return").unwrap();
+
     let mut i = TEST_KEYS_COUNT * 2;
     while iter.is_valid() {
         i -= 1;

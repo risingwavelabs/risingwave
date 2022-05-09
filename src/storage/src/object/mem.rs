@@ -40,7 +40,6 @@ async fn insert_bytes(
         Err(ObjectError::internal("upload empty object"))
     } else {
         let mut guard = objects.lock().await;
-        assert!(!guard.contains_key(path), "object already exists: {}", path);
         guard.insert(path.to_string(), obj);
         Ok(())
     }

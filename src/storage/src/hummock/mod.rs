@@ -123,10 +123,12 @@ impl HummockStorage {
         internal_key: &[u8],
         key: &[u8],
     ) -> HummockResult<Option<Bytes>> {
-        if table.value().surely_not_have_user_key(key) {
+        // In failpoint test, we don't want the sst to be filtered out early.
+        if !fail::has_failpoints() && table.value().surely_not_have_user_key(key) {
             self.stats.bloom_filter_true_negative_counts.inc();
             return Ok(None);
         }
+
         // Might have the key, take it as might positive.
         self.stats.bloom_filter_might_positive_counts.inc();
         let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
