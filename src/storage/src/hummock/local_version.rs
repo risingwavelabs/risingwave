@@ -53,11 +53,11 @@ impl LocalVersion {
     }
 
     pub fn get_first_epoch(&self) -> Option<HummockEpoch> {
-        let epoch = match self.shared_buffer.first_key_value() {
-            Some((&epoch, _)) => Some(epoch),
-            None => None,
-        };
-        return epoch;
+        let epoch = self
+            .shared_buffer
+            .first_key_value()
+            .map(|(&epoch, _)| epoch);
+        epoch
     }
 
     pub fn iter_shared_buffer(
