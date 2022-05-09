@@ -63,7 +63,9 @@ impl JoinRow {
     }
 
     pub fn dec_degree(&mut self) -> u64 {
-        self.degree -= 1;
+        if self.degree > 0 {
+            self.degree -= 1;
+        }
         self.degree
     }
 
