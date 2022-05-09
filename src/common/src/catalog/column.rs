@@ -198,26 +198,18 @@ impl From<ProstColumnDesc> for ColumnDesc {
     // Since the prost DataType struct doesn't have field, so it need to be reinit when into
     // ColumnDesc
     fn from(prost: ProstColumnDesc) -> Self {
-        if let DataType::Struct { .. } = DataType::from(prost.column_type.as_ref().unwrap()) {
-            let descs: Vec<ColumnDesc> = prost
+        if let DataType::Struct { fields } = DataType::from(prost.column_type.as_ref().unwrap()) {
+            let field_descs: Vec<ColumnDesc> = prost
                 .field_descs
                 .into_iter()
                 .map(ColumnDesc::from)
                 .collect();
-            let date_type = DataType::Struct {
-                fields: descs
-                    .clone()
-                    .into_iter()
-                    .map(|c| c.data_type)
-                    .collect_vec()
-                    .into(),
-            };
             Self {
-                data_type: date_type,
+                data_type: DataType::Struct { fields },
                 column_id: ColumnId::new(prost.column_id),
                 name: prost.name,
                 type_name: prost.type_name,
-                field_descs: descs,
+                field_descs,
             }
         } else {
             Self {

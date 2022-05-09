@@ -16,6 +16,8 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::ColumnDesc;
 
+use crate::error::{internal_error, Result};
+
 pub trait ColumnDescTestExt {
     /// Create a [`ColumnDesc`] with the given name and type.
     ///
@@ -39,10 +41,19 @@ impl ColumnDescTestExt for ColumnDesc {
     }
 
     fn new_struct(name: &str, column_id: i32, type_name: &str, fields: Vec<ColumnDesc>) -> Self {
+        let field_type = fields
+            .iter()
+            .map(|f| match &f.column_type {
+                Some(data) => Ok(data.clone()),
+                None => Err(internal_error("column type cannot be None")),
+            })
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
         Self {
             column_type: Some(DataType {
                 type_name: TypeName::Struct as i32,
                 is_nullable: true,
+                field_type,
                 ..Default::default()
             }),
             column_id,
