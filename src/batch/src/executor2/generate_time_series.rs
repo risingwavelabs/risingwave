@@ -73,35 +73,29 @@ impl GenerateSeriesTimestampExecutor2 {
             start, stop, step, ..
         } = *self;
 
+        let interval_ms = step.get_total_ms();
+        let spread_ms = stop.sub(start).num_milliseconds();
+        let mut rest_rows = (spread_ms / interval_ms + 1) as usize;
         let mut cur = start;
 
         // Simulate a do-while loop.
-        while {
-            cur <= stop && {
-                let interval_ms = step.get_total_ms();
-                let spread_ms = stop.sub(cur).num_milliseconds();
-                let chunk_size =
-                    ((spread_ms / interval_ms + 1) as usize).min(DEFAULT_CHUNK_BUFFER_SIZE);
-                if chunk_size > 0 {
-                    let mut builder = NaiveDateTimeArrayBuilder::new(chunk_size)?;
+        while rest_rows > 0 {
+            let chunk_size = rest_rows.min(DEFAULT_CHUNK_BUFFER_SIZE);
+            let mut builder = NaiveDateTimeArrayBuilder::new(chunk_size)?;
 
-                    for _ in 0..chunk_size {
-                        builder.append(Some(cur))?;
-                        cur = cur.add(step.into());
-                    }
-
-                    let arr = builder.finish()?;
-                    let columns = vec![Column::new(Arc::new(arr.into()))];
-                    let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-
-                    yield chunk;
-
-                    true
-                } else {
-                    false
-                }
+            for _ in 0..chunk_size {
+                builder.append(Some(cur))?;
+                cur = cur.add(step.into());
             }
-        } {}
+
+            let arr = builder.finish()?;
+            let columns = vec![Column::new(Arc::new(arr.into()))];
+            let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+
+            yield chunk;
+
+            rest_rows -= chunk_size;
+        }
     }
 }
 
