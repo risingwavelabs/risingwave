@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use prost::Message;
@@ -550,6 +550,7 @@ where
         &self,
         assignee_context_id: HummockContextId,
     ) -> Result<Option<CompactTask>> {
+        let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
 
         let compaction = compaction_guard.deref_mut();
@@ -603,12 +604,13 @@ where
                     compact_task_assignment
                 )?;
                 tracing::debug!(
-                    "pick up {} tables in level {} to compact, The number of total tables is {}",
+                    "pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
                     current_version.levels[compact_task.input_ssts[0].level_idx as usize]
                         .table_infos
                         .len(),
+                    start_time.elapsed()
                 );
                 Ok(Some(compact_task))
             }
@@ -627,6 +629,7 @@ where
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+        let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
@@ -701,8 +704,9 @@ where
         }
 
         tracing::info!(
-            "Reported compact task. {}",
-            compact_task_to_string(compact_task)
+            "Reported compact task. {}. cost time: {:?}",
+            compact_task_to_string(compact_task),
+            start_time.elapsed(),
         );
 
         trigger_sst_stat(

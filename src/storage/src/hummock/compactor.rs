@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
@@ -187,6 +187,7 @@ impl Compactor {
             "Ready to handle compaction task: \n{}",
             compact_task_to_string(&compact_task)
         );
+        let start_time = Instant::now();
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
@@ -225,6 +226,11 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         compactor.compact_done(output_ssts, compact_success).await;
+        tracing::debug!(
+            "execute compaction task {} cost {:?}",
+            compact_task.task_id,
+            start_time.elapsed()
+        );
         compact_success
     }
 
