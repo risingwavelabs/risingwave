@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::executor::block_on;
 use risingwave_hummock_sdk::key::key_with_epoch;
 
 use crate::assert_bytes_eq;
@@ -43,7 +44,7 @@ async fn test_failpoint_table_read() {
 
     let cache = create_small_table_cache();
     let mut sstable_iter = SSTableIterator::new(
-        cache.insert(table.id, table.id, 1, Box::new(table.clone())),
+        block_on(sstable_store.sstable(table.id)).unwrap(),
         sstable_store,
     );
     sstable_iter.rewind().await.unwrap();
@@ -73,6 +74,7 @@ async fn test_failpoint_vacuum_and_metadata() {
     let mem_delete_err = "mem_delete_err";
     let sstable_store = mock_sstable_store();
     // when upload data is successful, but upload meta is fail and delete is fail
+
     fail::cfg_callback(metadata_upload_err, move || {
         fail::cfg(mem_upload_err, "return").unwrap();
         fail::cfg(mem_delete_err, "return").unwrap();
@@ -100,7 +102,7 @@ async fn test_failpoint_vacuum_and_metadata() {
 
     let cache = create_small_table_cache();
     let mut sstable_iter = SSTableIterator::new(
-        cache.insert(table.id, table.id, 1, Box::new(table.clone())),
+        block_on(sstable_store.sstable(table.id)).unwrap(),
         sstable_store,
     );
     let mut cnt = 0;

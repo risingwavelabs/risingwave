@@ -15,6 +15,7 @@
 use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
+use futures::executor::block_on;
 use risingwave_hummock_sdk::key::user_key;
 
 use crate::hummock::iterator::test_utils::{
@@ -160,13 +161,12 @@ async fn test_failpoint_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let cache = create_small_table_cache();
     let mut mi = MergeIterator::new(
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Forward>> {
                 Box::new(SSTableIterator::new(
-                    cache.insert(table.id, table.id, 1, Box::new(table.clone())),
+                    block_on(sstable_store.sstable(table.id)).unwrap(),
                     sstable_store.clone(),
                 ))
             }),
@@ -208,13 +208,12 @@ async fn test_failpoint_backward_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let cache = create_small_table_cache();
     let mut mi = BackwardMergeIterator::new(
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Backward>> {
                 Box::new(BackwardSSTableIterator::new(
-                    cache.insert(table.id, table.id, 1, Box::new(table.clone())),
+                    block_on(sstable_store.sstable(table.id)).unwrap(),
                     sstable_store.clone(),
                 ))
             }),
@@ -255,14 +254,13 @@ async fn test_failpoint_user_read_err() {
         200,
     )
     .await;
-    let cache = create_small_table_cache();
     let iters: Vec<BoxedForwardHummockIterator> = vec![
         Box::new(SSTableIterator::new(
-            cache.insert(table0.id, table0.id, 1, Box::new(table0.clone())),
+            block_on(sstable_store.sstable(table0.id)).unwrap(),
             sstable_store.clone(),
         )),
         Box::new(SSTableIterator::new(
-            cache.insert(table1.id, table1.id, 1, Box::new(table1.clone())),
+            block_on(sstable_store.sstable(table1.id)).unwrap(),
             sstable_store.clone(),
         )),
     ];
@@ -315,11 +313,11 @@ async fn test_failpoint_backward_user_read_err() {
     let cache = create_small_table_cache();
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
         Box::new(BackwardSSTableIterator::new(
-            cache.insert(table0.id, table0.id, 1, Box::new(table0.clone())),
+            block_on(sstable_store.sstable(table0.id)).unwrap(),
             sstable_store.clone(),
         )),
         Box::new(BackwardSSTableIterator::new(
-            cache.insert(table1.id, table1.id, 1, Box::new(table1.clone())),
+            block_on(sstable_store.sstable(table1.id)).unwrap(),
             sstable_store.clone(),
         )),
     ];
