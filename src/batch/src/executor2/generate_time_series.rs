@@ -30,7 +30,6 @@ pub struct GenerateSeriesTimestampExecutor2 {
     start: NaiveDateTimeWrapper,
     stop: NaiveDateTimeWrapper,
     step: IntervalUnit,
-    cur: NaiveDateTimeWrapper, // Current value in the series.
 
     schema: Schema,
     identity: String,
@@ -47,7 +46,6 @@ impl BoxedExecutor2Builder for GenerateSeriesTimestampExecutor2 {
             start: NaiveDateTimeWrapper::parse_from_str(node.get_start())?,
             stop: NaiveDateTimeWrapper::parse_from_str(node.get_stop())?,
             step: node.get_step()?.into(),
-            cur: NaiveDateTimeWrapper::parse_from_str(node.get_start())?,
             schema: Schema::new(vec![Field::unnamed(DataType::Timestamp)]),
             identity: source.plan_node().get_identity().clone(),
         }))
@@ -70,41 +68,40 @@ impl Executor2 for GenerateSeriesTimestampExecutor2 {
 
 impl GenerateSeriesTimestampExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        let mut chunk_size = self.next_chunk_size();
+    async fn do_execute(self: Box<Self>) {
+        let Self {
+            start, stop, step, ..
+        } = *self;
 
-        while chunk_size != 0 {
-            let mut builder = NaiveDateTimeArrayBuilder::new(chunk_size).unwrap();
-            let mut current_value = self.cur;
-            for _ in 0..chunk_size {
-                builder.append(Some(current_value)).unwrap();
-                current_value = current_value.add(self.step.into());
+        let mut cur = start;
+
+        // Simulate a do-while loop.
+        while {
+            cur <= stop && {
+                let interval_ms = step.get_total_ms();
+                let spread_ms = stop.sub(cur).num_milliseconds();
+                let chunk_size =
+                    ((spread_ms / interval_ms + 1) as usize).min(DEFAULT_CHUNK_BUFFER_SIZE);
+                if chunk_size > 0 {
+                    let mut builder = NaiveDateTimeArrayBuilder::new(chunk_size)?;
+
+                    for _ in 0..chunk_size {
+                        builder.append(Some(cur))?;
+                        cur = cur.add(step.into());
+                    }
+
+                    let arr = builder.finish()?;
+                    let columns = vec![Column::new(Arc::new(arr.into()))];
+                    let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+
+                    yield chunk;
+
+                    true
+                } else {
+                    false
+                }
             }
-            self.cur = current_value;
-
-            let arr = builder.finish()?;
-            let columns = vec![Column::new(Arc::new(arr.into()))];
-            let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-
-            yield chunk;
-
-            chunk_size = self.next_chunk_size();
-        }
-    }
-}
-
-impl GenerateSeriesTimestampExecutor2 {
-    fn next_chunk_size(&self) -> usize {
-        if self.cur > self.stop {
-            return 0;
-        }
-        let interval_ms = self.step.get_total_ms();
-        let spread_ms = self.stop.sub(self.cur).num_milliseconds();
-        let mut num = (spread_ms / interval_ms + 1) as usize;
-        if num > DEFAULT_CHUNK_BUFFER_SIZE {
-            num = DEFAULT_CHUNK_BUFFER_SIZE;
-        }
-        num
+        } {}
     }
 }
 
@@ -137,7 +134,6 @@ mod tests {
             start,
             stop,
             step,
-            cur: start,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesTimestampExecutor2".to_string(),
         });
