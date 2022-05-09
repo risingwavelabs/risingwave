@@ -71,8 +71,6 @@ pub struct SSTableBuilder {
     vnode_bitmaps: BTreeMap<u32, [u8; VNODE_BITMAP_LEN]>,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
-    /// Bitmap of value meta.
-    bitmap: [u8; VNODE_BITMAP_LEN],
     /// Last added full key.
     last_full_key: Bytes,
     key_count: usize,
@@ -87,7 +85,6 @@ impl SSTableBuilder {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             vnode_bitmaps: BTreeMap::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            bitmap: [0; VNODE_BITMAP_LEN],
             last_full_key: Bytes::default(),
             key_count: 0,
         }
@@ -130,8 +127,6 @@ impl SSTableBuilder {
         let user_key = user_key(full_key);
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));
 
-        self.bitmap[(value_meta >> 3) as usize] |= 1 << (value_meta & 0b111);
-
         if self.last_full_key.is_empty() {
             self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
         }
@@ -172,7 +167,6 @@ impl SSTableBuilder {
             } else {
                 vec![]
             },
-            bitmap: self.bitmap.to_vec(),
             estimated_size: self.buf.len() as u32,
             key_count: self.key_count as u32,
             smallest_key,
