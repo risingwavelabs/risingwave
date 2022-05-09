@@ -115,11 +115,14 @@ impl SSTableBuilder {
         // TODO: refine me
         let mut raw_value = BytesMut::default();
         let value_meta = value.encode(&mut raw_value) & ((1 << VNODE_BITS) - 1);
-        let table_id = get_table_id(full_key);
-        self.vnode_bitmaps
-            .entry(table_id)
-            .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
-            1 << (value_meta & 0b111);
+        if let Some(table_id) = get_table_id(full_key) {
+            // We use 8 bit of bitmap[x] to indicate existence of virtual node x*8..(x+1)*8,
+            // respectively
+            self.vnode_bitmaps
+                .entry(table_id)
+                .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
+                1 << (value_meta & 0b111);
+        }
         let raw_value = raw_value.freeze();
 
         block_builder.add(full_key, &raw_value);
