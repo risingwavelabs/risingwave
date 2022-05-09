@@ -26,7 +26,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-pub struct GenerateSeriesTimeStampExecutor2 {
+pub struct GenerateSeriesTimestampExecutor2 {
     start: NaiveDateTimeWrapper,
     stop: NaiveDateTimeWrapper,
     step: IntervalUnit,
@@ -36,7 +36,7 @@ pub struct GenerateSeriesTimeStampExecutor2 {
     identity: String,
 }
 
-impl BoxedExecutor2Builder for GenerateSeriesTimeStampExecutor2 {
+impl BoxedExecutor2Builder for GenerateSeriesTimestampExecutor2 {
     fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -54,7 +54,7 @@ impl BoxedExecutor2Builder for GenerateSeriesTimeStampExecutor2 {
     }
 }
 
-impl Executor2 for GenerateSeriesTimeStampExecutor2 {
+impl Executor2 for GenerateSeriesTimestampExecutor2 {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -68,7 +68,7 @@ impl Executor2 for GenerateSeriesTimeStampExecutor2 {
     }
 }
 
-impl GenerateSeriesTimeStampExecutor2 {
+impl GenerateSeriesTimestampExecutor2 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut chunk_size = self.next_chunk_size();
@@ -93,7 +93,7 @@ impl GenerateSeriesTimeStampExecutor2 {
     }
 }
 
-impl GenerateSeriesTimeStampExecutor2 {
+impl GenerateSeriesTimestampExecutor2 {
     fn next_chunk_size(&self) -> usize {
         if self.cur > self.stop {
             return 0;
@@ -133,13 +133,13 @@ mod tests {
         stop: NaiveDateTimeWrapper,
         step: IntervalUnit,
     ) {
-        let executor = Box::new(GenerateSeriesTimeStampExecutor2 {
+        let executor = Box::new(GenerateSeriesTimestampExecutor2 {
             start,
             stop,
             step,
             cur: start,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-            identity: "GenerateSeriesTimeStampExecutor2".to_string(),
+            identity: "GenerateSeriesTimestampExecutor2".to_string(),
         });
         let interval_ms = step.get_total_ms();
         let start_stop_spread_ms = stop.sub(start).num_milliseconds();
