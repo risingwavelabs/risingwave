@@ -83,16 +83,12 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
-    // FIXME: please note that the modification here is just a temporary fix for bug of LogicalJoin.
-    // Related issue is #1849.
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
-            JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::FullOuter
-            | JoinType::LeftSemi => left_len + right_len,
-            JoinType::LeftAnti => left_len,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                left_len + right_len
+            }
+            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
         }
     }
@@ -104,14 +100,11 @@ impl LogicalJoin {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::LeftSemi
-            | JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::FullOuter => {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::identity_or_none(left_len + right_len, left_len)
             }
-            JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
         }
     }
@@ -123,14 +116,10 @@ impl LogicalJoin {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::LeftSemi
-            | JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::FullOuter => {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
         }
     }
@@ -342,7 +331,7 @@ impl ColPrunable for LogicalJoin {
         } else if self.is_right_join() {
             right_input_cols
         } else {
-            left_right_input_cols.clone()
+            left_right_input_cols
         };
         if required_cols == &required_input_cols_in_output {
             join.into()
