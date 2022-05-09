@@ -54,7 +54,7 @@ pub struct GenericExchangeExecutor2<C> {
 pub trait CreateSource: Send {
     async fn create_source(
         env: BatchEnvironment,
-        prost_sources: &ProstExchangeSource,
+        prost_source: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>>;
 }
@@ -169,7 +169,6 @@ async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
-                assert_ne!(res.cardinality(), 0);
             }
             yield res;
             continue;
