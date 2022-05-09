@@ -572,10 +572,6 @@ where
                 .unwrap()
                 .clone()
         };
-        tracing::debug!(
-            "get_compact_task cost time on acquiring lock: {:?}",
-            start_time.elapsed()
-        );
         let compact_task = compact_status.get_compact_task(&current_version.levels);
         let ret = match compact_task {
             None => Ok(None),
@@ -587,7 +583,6 @@ where
                         context_id: assignee_context_id,
                     },
                 );
-                tracing::debug!("get_compact_task cost time: {:?}", start_time.elapsed());
                 compact_task.watermark = {
                     let versioning_guard = self.versioning.read().await;
                     let current_version_id = versioning_guard.current_version_id.id();
@@ -669,10 +664,6 @@ where
                     .id
                     .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
             }
-            tracing::info!(
-                "report compact task on acquiring lock. cost time: {:?}",
-                start_time.elapsed()
-            );
             let mut new_version = CompactStatus::apply_compact_result(compact_task, old_version);
             current_version_id.increase();
             new_version.id = current_version_id.id();
@@ -691,7 +682,6 @@ where
                     }
                 }
             }
-            tracing::info!("report compact task. cost time: {:?}", start_time.elapsed());
 
             commit_multi_var!(
                 self,
