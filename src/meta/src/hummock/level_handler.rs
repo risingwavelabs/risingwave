@@ -18,13 +18,14 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::level_handler::SstTask;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SSTableInfo {
     pub key_range: KeyRange,
-    pub table_id: u64,
+    pub table_id: HummockSSTableId,
     pub file_size: u64,
+    pub vnode_bitmap: Vec<VNodeBitmap>,
 }
 
 impl From<&SstableInfo> for SSTableInfo {
@@ -33,6 +34,7 @@ impl From<&SstableInfo> for SSTableInfo {
             key_range: sst.key_range.as_ref().unwrap().into(),
             table_id: sst.id,
             file_size: sst.file_size,
+            vnode_bitmap: sst.vnode_bitmap.clone(),
         }
     }
 }
@@ -43,6 +45,7 @@ impl From<SSTableInfo> for SstableInfo {
             key_range: Some(info.key_range.into()),
             id: info.table_id,
             file_size: info.file_size,
+            vnode_bitmap: info.vnode_bitmap,
         }
     }
 }
@@ -56,8 +59,6 @@ impl From<&SSTableInfo> for SstableInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
-    total_bytes: u64,
-    level_max_bytes: u64,
     compacting_files: HashMap<HummockSSTableId, u64>,
     pending_tasks: Vec<(u64, Vec<HummockSSTableId>)>,
 }
@@ -66,8 +67,6 @@ impl LevelHandler {
     pub fn new(level: u32) -> Self {
         Self {
             level,
-            total_bytes: 0,
-            level_max_bytes: 0,
             compacting_files: HashMap::default(),
             pending_tasks: vec![],
         }
@@ -137,8 +136,6 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
             pending_tasks,
             compacting_files,
             level: lh.level,
-            total_bytes: 0,
-            level_max_bytes: 0,
         }
     }
 }

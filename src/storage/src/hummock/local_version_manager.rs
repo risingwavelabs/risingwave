@@ -554,6 +554,7 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_hummock_sdk::HummockSSTableId;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
@@ -573,7 +574,7 @@ mod tests {
         )]
     }
 
-    fn gen_dummy_sst_info(id: u64, batches: Vec<SharedBufferBatch>) -> SstableInfo {
+    fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
         let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
         let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
         for batch in batches.iter().skip(1) {
@@ -592,6 +593,7 @@ mod tests {
                 inf: false,
             }),
             file_size: batches.len() as u64,
+            vnode_bitmap: vec![],
         }
     }
 

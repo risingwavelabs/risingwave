@@ -148,45 +148,69 @@ type ValueBytes = Vec<u8>;
 /// Serialize a row of data using cell-based serialization, and return corresponding vector of key
 /// and value. If all data of this row are null, there will be one cell of column id `-1` to
 /// represent a row of all null values.
+///
+/// The returned value is an iterator of `column_ids.len() + 1` length, where the first n items are
+/// serialization result of the `column_id` items correspondingly, and the last item is the sentinel
+/// cell.
+///
+/// If a cell is null, the corresponding position of that cell will be `None`. For example,
+///
+/// * Serialize [0, 1, 2] => [Some((pk, 0)), Some((pk, 1)), Some((pk, 2)), Some((pk, []))]
+/// * Serialize [null, null, null] => [None, None, None, Some((pk, []))]
 pub fn serialize_pk_and_row(
     pk_buf: &[u8],
-    row: &Option<Row>,
+    row: &Row,
     column_ids: &[ColumnId],
-) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
-    if let Some(values) = row.as_ref() {
-        assert_eq!(values.0.len(), column_ids.len());
-    }
-    let mut result = vec![];
+) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
+    let values = &row.0;
+    assert_eq!(values.len(), column_ids.len());
+    let mut result = Vec::with_capacity(column_ids.len() + 1);
+
     for (index, column_id) in column_ids.iter().enumerate() {
-        let key = serialize_pk_and_column_id(pk_buf, column_id)?;
-        match row {
-            Some(values) => match &values[index] {
-                None => {
-                    // This is when the datum is null. If all the datum in a row is null,
-                    // we serialize this null row specially by only using one cell encoding.
-                }
-                datum => {
-                    let value = serialize_cell(datum)?;
-                    result.push((key, Some(value)));
-                }
-            },
+        match &values[index] {
             None => {
-                // A `None` of row means deleting that row, while the a `None` of datum represents a
-                // null.
-                result.push((key, None));
+                // This is when the datum is null. If all the datum in a row is null,
+                // we serialize this null row specially by only using one cell encoding.
+                result.push(None);
+            }
+            datum => {
+                let key = serialize_pk_and_column_id(pk_buf, column_id)?;
+                let value = serialize_cell(datum)?;
+                result.push(Some((key, value)));
             }
         }
     }
 
     let key = serialize_pk_and_column_id(pk_buf, &SENTINEL_CELL_ID)?;
-    if row.is_none() {
-        result.push((key, None));
-    } else {
-        // Store zero bytes for the sentinel value.
-        result.push((key, Some(vec![])));
-    }
+    result.push(Some((key, vec![])));
 
     Ok(result)
+}
+
+/// Serialize function directly used by states, and will be deprecated in the future.
+pub fn serialize_pk_and_row_state(
+    pk_buf: &[u8],
+    row: &Option<Row>,
+    column_ids: &[ColumnId],
+) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
+    if let Some(values) = row.as_ref() {
+        let result = serialize_pk_and_row(pk_buf, values, column_ids)?
+            .into_iter()
+            .filter_map(|x| x.map(|(k, v)| (k, Some(v))))
+            .collect();
+        Ok(result)
+    } else {
+        let mut result = Vec::with_capacity(column_ids.len() + 1);
+        for column_id in column_ids.iter() {
+            let key = serialize_pk_and_column_id(pk_buf, column_id)?;
+            // A `None` of row means deleting that row, while the a `None` of datum
+            // represents a null.
+            result.push((key, None));
+        }
+        let key = serialize_pk_and_column_id(pk_buf, &SENTINEL_CELL_ID)?;
+        result.push((key, None));
+        Ok(result)
+    }
 }
 
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
@@ -197,7 +221,7 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u
 
 pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     use serde::Serialize;
-    let mut serializer = memcomparable::Serializer::new(vec![]);
+    let mut serializer = memcomparable::Serializer::new(Vec::with_capacity(4));
     column_id.get_id().serialize(&mut serializer)?;
     let buf = serializer.into_inner();
     debug_assert_eq!(buf.len(), 4);

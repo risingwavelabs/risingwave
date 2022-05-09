@@ -15,13 +15,18 @@
 use risingwave_common::error::Result;
 
 use crate::binder::BoundSetExpr;
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::PlanRef;
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_set_expr(&mut self, set_expr: BoundSetExpr) -> Result<PlanRef> {
+    pub(super) fn plan_set_expr(
+        &mut self,
+        set_expr: BoundSetExpr,
+        extra_order_exprs: Vec<ExprImpl>,
+    ) -> Result<PlanRef> {
         match set_expr {
-            BoundSetExpr::Select(s) => self.plan_select(*s),
+            BoundSetExpr::Select(s) => self.plan_select(*s, extra_order_exprs),
             BoundSetExpr::Values(v) => self.plan_values(*v),
         }
     }

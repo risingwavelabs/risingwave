@@ -15,15 +15,17 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::SplitImpl;
+use risingwave_connector::state::SourceStateHandler;
+use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -34,7 +36,7 @@ use super::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
-pub struct SourceExecutor {
+pub struct SourceExecutor<S: StateStore> {
     source_id: TableId,
     source_desc: SourceDesc,
 
@@ -55,14 +57,18 @@ pub struct SourceExecutor {
     stream_source_splits: Vec<SplitImpl>,
 
     source_identify: String,
+
+    split_state_store: SourceStateHandler<S>,
+    // store latest split to offset mapping
+    state_cache: Option<Vec<ConnectorState>>,
 }
 
-impl SourceExecutor {
+impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<S: StateStore>(
+    pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
-        _keyspace: Keyspace<S>,
+        keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -84,6 +90,8 @@ impl SourceExecutor {
             metrics: streaming_metrics,
             stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
+            split_state_store: SourceStateHandler::new(keyspace),
+            state_cache: None,
         })
     }
 
@@ -125,11 +133,11 @@ struct SourceReader {
 }
 
 impl SourceReader {
-    #[try_stream(ok = Message, error = RwError)]
+    #[try_stream(ok = StreamChunkWithState, error = RwError)]
     async fn stream_reader(mut stream_reader: Box<dyn StreamSourceReader>) {
         loop {
             match stream_reader.next().await {
-                Ok(chunk) => yield Message::Chunk(chunk),
+                Ok(chunk) => yield chunk,
                 Err(e) => {
                     // TODO: report this error to meta service to mark the actors failed.
                     error!("hang up stream reader due to polling error: {}", e);
@@ -155,20 +163,37 @@ impl SourceReader {
         )));
     }
 
-    fn into_stream(self) -> impl Stream<Item = Result<Message>> {
+    fn into_stream(
+        self,
+    ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
+        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
+        let stream_reader = Self::stream_reader(self.stream_reader);
         select_with_strategy(
-            Self::barrier_receiver(self.barrier_receiver),
-            Self::stream_reader(self.stream_reader),
+            barrier_receiver.map(Either::Left),
+            stream_reader.map(Either::Right),
             |_: &mut ()| PollNext::Left, // perfer barrier
         )
     }
 }
 
-impl SourceExecutor {
+impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver.recv().await.unwrap();
+
+        let epoch = barrier.epoch.prev;
+
+        let mut recover_state = ConnectorStateV2::Splits(self.stream_source_splits.clone());
+        if !self.stream_source_splits.is_empty() {
+            if let Ok(state) = self
+                .split_state_store
+                .try_recover_from_state_store(&self.stream_source_splits[0], epoch)
+                .await
+            {
+                recover_state = ConnectorStateV2::State(state);
+            }
+        }
 
         // todo: use epoch from msg to restore state from state store
         let stream_reader = match self.source_desc.source.as_ref() {
@@ -177,7 +202,7 @@ impl SourceExecutor {
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
             SourceImpl::Connector(c) => c
-                .stream_reader(self.stream_source_splits.clone(), self.column_ids.clone())
+                .stream_reader(recover_state, self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }
@@ -191,20 +216,86 @@ impl SourceExecutor {
 
         #[for_await]
         for msg in reader.into_stream() {
-            match msg.map_err(StreamExecutorError::source_error)? {
+            match msg {
                 // This branch will be preferred.
-                Message::Barrier(barrier) => yield Message::Barrier(barrier),
-                // If there's barrier, this branch will be deferred.
-                Message::Chunk(mut chunk) => {
+                Either::Left(barrier) => {
+                    match barrier.map_err(StreamExecutorError::source_error)? {
+                        Message::Barrier(barrier) => {
+                            let epoch = barrier.epoch.prev;
+                            if self.state_cache.is_some() {
+                                self.split_state_store
+                                    .take_snapshot(self.state_cache.clone().unwrap(), epoch)
+                                    .await
+                                    .map_err(|e| {
+                                        StreamExecutorError::source_error(RwError::from(
+                                            InternalError(e.to_string()),
+                                        ))
+                                    })?;
+                            }
+                            yield Message::Barrier(barrier)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                Either::Right(chunk_with_state) => {
+                    let chunk_with_state =
+                        chunk_with_state.map_err(StreamExecutorError::source_error)?;
+                    if chunk_with_state.split_offset_mapping.is_some() {
+                        self.state_cache = Some(ConnectorState::from_hashmap(
+                            chunk_with_state.split_offset_mapping.unwrap(),
+                        ));
+                    }
+                    let mut chunk = chunk_with_state.chunk;
+
                     if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                         chunk = self.refill_row_id_column(chunk);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(&[self.source_identify.as_str()])
-                        .inc_by(chunk.cardinality() as u64);
-                    yield Message::Chunk(chunk);
+                    let (data, ops) = chunk.into_parts();
+                    let mut chunks = DataChunk::rechunk(&[data], PROCESSING_WINDOW_SIZE)
+                        .unwrap()
+                        .into_iter();
+                    let mut ops_batch = ops.chunks(PROCESSING_WINDOW_SIZE);
+                    let mut next_chunk = None;
+                    let mut next_ops: Option<Vec<Op>> = None;
+                    loop {
+                        let (mut chunk, mut ops) = {
+                            if let Some(chunk) = std::mem::take(&mut next_chunk) {
+                                let ops = std::mem::take(&mut next_ops).unwrap();
+                                (chunk, ops.to_vec())
+                            } else if let Some(chunk) = chunks.next() {
+                                (chunk, ops_batch.next().unwrap().to_vec())
+                            } else {
+                                break;
+                            }
+                        };
+
+                        // There is paired `UpdateDelete` and `UpdateInsert` split by border, we
+                        // should re-chunk current stream chunk with next stream chunk
+                        if ops[ops.len() - 1] == Op::UpdateDelete {
+                            let pair_chunk = chunks.next().unwrap();
+                            let pair_ops = ops_batch.next().unwrap();
+                            assert!(pair_ops[0] == Op::UpdateInsert);
+
+                            let head_chunk_size = chunk.capacity() + 1;
+                            let mut new_chunks =
+                                DataChunk::rechunk_head(vec![chunk, pair_chunk], head_chunk_size)
+                                    .map_err(StreamExecutorError::eval_error)?;
+                            assert_eq!(new_chunks.len(), 2);
+
+                            chunk = std::mem::take(&mut new_chunks[0]);
+                            ops.push(pair_ops[0]);
+                            next_chunk = Some(std::mem::take(&mut new_chunks[1]));
+                            next_ops = Some(pair_ops[1..].to_vec());
+                        }
+
+                        let stream_chunk = StreamChunk::from_parts(ops, chunk);
+                        self.metrics
+                            .source_output_row_count
+                            .with_label_values(&[self.source_identify.as_str()])
+                            .inc_by(stream_chunk.cardinality() as u64);
+                        yield Message::Chunk(stream_chunk);
+                    }
                 }
             }
         }
@@ -212,7 +303,7 @@ impl SourceExecutor {
     }
 }
 
-impl Executor for SourceExecutor {
+impl<S: StateStore> Executor for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
@@ -230,7 +321,7 @@ impl Executor for SourceExecutor {
     }
 }
 
-impl Debug for SourceExecutor {
+impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SourceExecutor")
             .field("source_id", &self.source_id)

@@ -260,7 +260,7 @@ mod tests {
         let chunk = reader.next().await?;
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.chunk.columns()[0]
                 .array()
                 .as_int64()
                 .iter()
@@ -269,7 +269,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.chunk.columns()[1]
                 .array()
                 .as_int64()
                 .iter()

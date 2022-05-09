@@ -131,9 +131,13 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataType::Struct { .. } => {
-                todo!()
-            }
+            DataType::Struct { fields } => StructArrayBuilder::with_meta(
+                capacity,
+                ArrayMeta::Struct {
+                    children: fields.clone(),
+                },
+            )?
+            .into(),
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
@@ -404,6 +408,8 @@ impl ToOwnedDatum for DatumRef<'_> {
 }
 
 /// `for_all_native_types` includes all native variants of our scalar types.
+///
+/// Specifically, it doesn't support u8/u16/u32/u64.
 #[macro_export]
 macro_rules! for_all_native_types {
     ($macro:ident $(, $x:tt)*) => {
@@ -546,7 +552,7 @@ impl std::hash::Hash for ScalarImpl {
             ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
                 match $self {
                     $( Self::$scalar_type(inner) => {
-                        inner.hash_wrapper(state);
+                        NativeType::hash_wrapper(inner, state);
                     }, )*
                     Self::Bool(b) => b.hash(state),
                     Self::Utf8(s) => s.hash(state),

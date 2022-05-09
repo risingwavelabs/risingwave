@@ -22,6 +22,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -106,5 +107,12 @@ impl ToBatchProst for BatchProject {
             .map(Expr::to_expr_proto)
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
+    }
+}
+
+impl ToLocalBatch for BatchProject {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local_with_order_required(Order::any());
+        self.clone_with_input(new_input).into()
     }
 }

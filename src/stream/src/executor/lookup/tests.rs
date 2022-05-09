@@ -244,13 +244,12 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
 
     for (k, v) in store.scan::<_, Vec<u8>>(.., None, u64::MAX).await.unwrap() {
-        let mut deserializer = value_encoding::Deserializer::new(v);
         // Do not deserialize datum for SENTINEL_CELL_ID cuz the value length is 0.
         if deserialize_column_id(&k[k.len() - 4..]).unwrap() != SENTINEL_CELL_ID {
             println!(
                 "{:?} => {:?}",
                 k,
-                deserialize_cell(&mut deserializer, &DataType::Int64).unwrap()
+                deserialize_cell(v, &DataType::Int64).unwrap()
             );
         }
     }
