@@ -17,6 +17,7 @@ mod level_selector;
 mod overlap_strategy;
 mod tier_compaction_picker;
 
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -229,16 +230,18 @@ impl CompactStatus {
     ) -> HummockVersion {
         let mut new_version = based_hummock_version;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
+        let mut removed_table: HashSet<u64> = HashSet::default();
+        for input_level in &compact_task.input_ssts {
+            for table in &input_level.table_infos {
+                removed_table.insert(table.id);
+            }
+        }
         if compact_task.target_level == 0 {
             assert_eq!(compact_task.input_ssts[0].level_idx, 0);
             let mut new_table_infos = vec![];
             let mut find_remove_position = false;
             for (idx, table) in new_version.levels[0].table_infos.iter().enumerate() {
-                if compact_task.input_ssts[0]
-                    .table_infos
-                    .iter()
-                    .all(|stale| table.id != stale.id)
-                {
+                if !removed_table.contains(&table.id) {
                     new_table_infos.push(new_version.levels[0].table_infos[idx].clone());
                 } else if !find_remove_position {
                     new_table_infos.extend(compact_task.sorted_output_ssts.clone());
@@ -250,12 +253,7 @@ impl CompactStatus {
             for input_level in &compact_task.input_ssts {
                 new_version.levels[input_level.level_idx as usize]
                     .table_infos
-                    .retain(|sst| {
-                        input_level
-                            .table_infos
-                            .iter()
-                            .all(|stale| sst.id != stale.id)
-                    });
+                    .retain(|sst| !removed_table.contains(&sst.id));
             }
             new_version.levels[compact_task.target_level as usize]
                 .table_infos

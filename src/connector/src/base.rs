@@ -252,7 +252,7 @@ impl SplitImpl {
         match self {
             SplitImpl::Kafka(_) => KAFKA_SPLIT_TYPE,
             SplitImpl::Pulsar(_) => PULSAR_SPLIT_TYPE,
-            SplitImpl::Kinesis(_) => PULSAR_SPLIT_TYPE,
+            SplitImpl::Kinesis(_) => KINESIS_SPLIT_TYPE,
             SplitImpl::Nexmark(_) => NEXMARK_SPLIT_TYPE,
         }
         .to_string()
