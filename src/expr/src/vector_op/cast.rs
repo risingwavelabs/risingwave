@@ -213,21 +213,9 @@ pub fn bool_to_str(input: bool) -> Result<String> {
     }
 }
 
-macro_rules! integer_to_bool {
-    ($func_name:ident, $type:ty) => {
-        #[inline(always)]
-        pub fn $func_name(input: $type) -> Result<bool> {
-            match input {
-                0 => Ok(false),
-                _ => Ok(true),
-            }
-        }
-    };
+pub fn int32_to_bool(input: i32) -> Result<bool> {
+    Ok(input != 0)
 }
-
-integer_to_bool!(int16_to_bool, i16);
-integer_to_bool!(int32_to_bool, i32);
-integer_to_bool!(int64_to_bool, i64);
 
 #[cfg(test)]
 mod tests {
@@ -258,17 +246,8 @@ mod tests {
     #[test]
     fn integer_cast_to_bool() {
         use super::*;
-
-        assert_eq!(int16_to_bool(16).unwrap(), true);
         assert_eq!(int32_to_bool(32).unwrap(), true);
-        assert_eq!(int64_to_bool(64).unwrap(), true);
-
-        assert_eq!(int16_to_bool(-16).unwrap(), true);
         assert_eq!(int32_to_bool(-32).unwrap(), true);
-        assert_eq!(int64_to_bool(-64).unwrap(), true);
-
-        assert_eq!(int16_to_bool(0).unwrap(), false);
         assert_eq!(int32_to_bool(0).unwrap(), false);
-        assert_eq!(int64_to_bool(0).unwrap(), false);
     }
 }
