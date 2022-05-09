@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use prost::Message;
@@ -36,7 +36,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
-use crate::hummock::compaction::CompactStatus;
+use crate::hummock::compaction::{CompactStatus, CompactionConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
@@ -66,6 +66,7 @@ pub struct HummockManager<S: MetaStore> {
 
     /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<UnboundedSender<CompactionGroupId>>>,
+    config: Arc<CompactionConfig>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -156,6 +157,8 @@ where
             metrics,
             cluster_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
+            // TODO: load it from etcd or configuration file.
+            config: Arc::new(CompactionConfig::default()),
         };
 
         instance.load_meta_store_state().await?;
@@ -168,10 +171,12 @@ where
 
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
+        let config = self.config.clone();
         let mut compaction_guard = self.compaction.write().await;
+
         compaction_guard.compact_status = CompactStatus::get(self.env.meta_store())
             .await?
-            .unwrap_or_else(CompactStatus::new);
+            .unwrap_or_else(|| CompactStatus::new(config));
 
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())
@@ -193,24 +198,24 @@ where
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
-            let init_version = HummockVersion {
+            let mut init_version = HummockVersion {
                 id: versioning_guard.current_version_id.id(),
-                levels: vec![
-                    Level {
-                        level_idx: 0,
-                        level_type: LevelType::Overlapping as i32,
-                        table_infos: vec![],
-                    },
-                    Level {
-                        level_idx: 1,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: vec![],
-                    },
-                ],
+                levels: vec![Level {
+                    level_idx: 0,
+                    level_type: LevelType::Overlapping as i32,
+                    table_infos: vec![],
+                }],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
+            for l in 0..self.config.max_level {
+                init_version.levels.push(Level {
+                    level_idx: (l + 1) as u32,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: vec![],
+                });
+            }
             init_version.insert(self.env.meta_store()).await?;
             versioning_guard
                 .hummock_versions
@@ -546,6 +551,7 @@ where
         &self,
         assignee_context_id: HummockContextId,
     ) -> Result<Option<CompactTask>> {
+        let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
 
         let compaction = compaction_guard.deref_mut();
@@ -567,7 +573,7 @@ where
                 .unwrap()
                 .clone()
         };
-        let compact_task = compact_status.get_compact_task(current_version.levels);
+        let compact_task = compact_status.get_compact_task(&current_version.levels);
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -598,6 +604,15 @@ where
                     compact_status,
                     compact_task_assignment
                 )?;
+                tracing::debug!(
+                    "pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
+                    compact_task.input_ssts[0].table_infos.len(),
+                    compact_task.input_ssts[0].level_idx,
+                    current_version.levels[compact_task.input_ssts[0].level_idx as usize]
+                        .table_infos
+                        .len(),
+                    start_time.elapsed()
+                );
                 Ok(Some(compact_task))
             }
         };
@@ -616,6 +631,7 @@ where
     /// been processed previously.
     pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
         let mut compaction_guard = self.compaction.write().await;
+        let start_time = Instant::now();
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
         let mut compact_task_assignment =
@@ -689,8 +705,9 @@ where
         }
 
         tracing::info!(
-            "Reported compact task. {}",
-            compact_task_to_string(compact_task)
+            "Reported compact task. {}. cost time: {:?}",
+            compact_task_to_string(compact_task),
+            start_time.elapsed(),
         );
 
         trigger_sst_stat(
