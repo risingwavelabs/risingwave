@@ -195,8 +195,6 @@ impl ColumnDesc {
 }
 
 impl From<ProstColumnDesc> for ColumnDesc {
-    // Since the prost DataType struct doesn't have field, so it need to be reinit when into
-    // ColumnDesc
     fn from(prost: ProstColumnDesc) -> Self {
         if let DataType::Struct { fields } = DataType::from(prost.column_type.as_ref().unwrap()) {
             let field_descs: Vec<ColumnDesc> = prost
