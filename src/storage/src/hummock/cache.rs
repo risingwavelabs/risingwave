@@ -918,6 +918,8 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(new_entry);
+            assert!((*new_entry).is_in_cache());
+            assert!((*new_entry).is_in_lru());
 
             // assert old value unchanged.
             assert!(!old_entry.is_null());
@@ -925,6 +927,10 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(old_entry);
+            assert!(!(*old_entry).is_in_cache());
+            assert!(!(*old_entry).is_in_lru());
+            assert!((*new_entry).is_in_cache());
+            assert!((*new_entry).is_in_lru());
         }
     }
 
