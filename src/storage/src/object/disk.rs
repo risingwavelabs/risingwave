@@ -142,17 +142,20 @@ pub struct LocalDiskObjectStore {
 }
 
 impl LocalDiskObjectStore {
-    pub fn new(path_prefix: String) -> LocalDiskObjectStore {
+    pub fn new(path_prefix: &str) -> LocalDiskObjectStore {
         LocalDiskObjectStore {
-            path_prefix,
+            path_prefix: path_prefix.to_string(),
             compactor_shutdown_sender: parking_lot::Mutex::new(None),
         }
     }
 
-    pub fn new_file_path(&self, path: &str) -> PathBuf {
+    pub fn new_file_path(&self, path: &str) -> ObjectResult<PathBuf> {
+        if path.starts_with('/') {
+            return Err(ObjectError::internal("path should not start with /"));
+        };
         let mut ret = PathBuf::from(&self.path_prefix);
         ret.push(path);
-        ret
+        Ok(ret)
     }
 
     pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
@@ -172,7 +175,7 @@ impl Drop for LocalDiskObjectStore {
 impl ObjectStore for LocalDiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let mut file =
-            utils::open_file(self.new_file_path(path).as_path(), false, true, true).await?;
+            utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
         file.write_all(&obj).await.map_err(|e| {
             ObjectError::internal(format!("failed to write {}, err: {:?}", path, e))
         })?;
@@ -183,7 +186,7 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn get_upload_handle(&self, path: &str) -> ObjectResult<BoxedObjectUploader> {
-        let path = self.new_file_path(path);
+        let path = self.new_file_path(path)?;
         let file = utils::open_file(path.as_path(), false, true, true)
             .await
             .map_err(|e| {
@@ -194,7 +197,7 @@ impl ObjectStore for LocalDiskObjectStore {
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
         let mut file =
-            utils::open_file(self.new_file_path(path).as_path(), true, false, false).await?;
+            utils::open_file(self.new_file_path(path)?.as_path(), true, false, false).await?;
         match block_loc {
             Some(block_loc) => Ok(self.readv(path, vec![block_loc]).await?.pop().unwrap()),
             None => {
@@ -213,10 +216,10 @@ impl ObjectStore for LocalDiskObjectStore {
 
     async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
         let mut file =
-            utils::open_file(self.new_file_path(path).as_path(), true, false, false).await?;
+            utils::open_file(self.new_file_path(path)?.as_path(), true, false, false).await?;
         let metadata = utils::get_metadata(&file).await?;
         for block_loc in &block_locs {
-            if block_loc.offset + block_loc.size >= metadata.len() as usize {
+            if block_loc.offset + block_loc.size > metadata.len() as usize {
                 return Err(ObjectError::internal(format!(
                     "block location {:?} is out of bounds for file of len {}",
                     block_loc,
@@ -257,7 +260,8 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let file = utils::open_file(self.new_file_path(path).as_path(), true, false, false).await?;
+        let file =
+            utils::open_file(self.new_file_path(path)?.as_path(), true, false, false).await?;
         let metadata = utils::get_metadata(&file).await?;
         Ok(ObjectMetadata {
             total_size: metadata.len() as usize,
@@ -265,10 +269,238 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
-        let path = format!("{}{}", self.path_prefix, path);
-        tokio::fs::remove_file(&path).await.map_err(|e| {
-            ObjectError::internal(format!("failed to delete {}, err: {:?}", path, e))
-        })?;
+        tokio::fs::remove_file(self.new_file_path(path)?.as_path())
+            .await
+            .map_err(|e| {
+                ObjectError::internal(format!("failed to delete {}, err: {:?}", path, e))
+            })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::path::PathBuf;
+
+    use bytes::Bytes;
+    use itertools::Itertools;
+    use tempfile::TempDir;
+
+    use crate::object::disk::LocalDiskObjectStore;
+    use crate::object::{BlockLocation, ObjectStore};
+
+    fn gen_test_payload() -> Vec<u8> {
+        let mut ret = Vec::new();
+        for i in 0..100000 {
+            ret.extend(format!("{:05}", i).as_bytes());
+        }
+        ret
+    }
+
+    fn check_payload(payload: &[u8], path: &str) {
+        let mut file = OpenOptions::new().read(true).open(path).unwrap();
+        assert_eq!(payload.len(), file.metadata().unwrap().len() as usize);
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).unwrap();
+        assert_eq!(payload, &buf[..]);
+    }
+
+    #[tokio::test]
+    async fn test_simple_upload() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        let metadata = store.metadata("test.obj").await.unwrap();
+        assert_eq!(payload.len(), metadata.total_size);
+
+        let mut path = PathBuf::from(test_root_path);
+        path.push("test.obj");
+        check_payload(&payload, path.to_str().unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_multi_level_dir_upload() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("1/2/test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        let metadata = store.metadata("1/2/test.obj").await.unwrap();
+        assert_eq!(payload.len(), metadata.total_size);
+
+        let mut path = PathBuf::from(test_root_path);
+        path.push("1/2/test.obj");
+        check_payload(&payload, path.to_str().unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_read_all() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        let metadata = store.metadata("test.obj").await.unwrap();
+        assert_eq!(payload.len(), metadata.total_size);
+        let read_data = store.read("test.obj", None).await.unwrap();
+        assert_eq!(payload, &read_data[..]);
+    }
+
+    #[tokio::test]
+    async fn test_read_partial() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        let metadata = store.metadata("test.obj").await.unwrap();
+        assert_eq!(payload.len(), metadata.total_size);
+        let read_data = store
+            .read(
+                "test.obj",
+                Some(BlockLocation {
+                    offset: 10000,
+                    size: 1000,
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(&payload[10000..11000], &read_data[..]);
+    }
+
+    #[tokio::test]
+    async fn test_read_multi_block() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        let metadata = store.metadata("test.obj").await.unwrap();
+        assert_eq!(payload.len(), metadata.total_size);
+        let test_loc = vec![(0, 1000), (10000, 1000), (20000, 1000)];
+        let read_data = store
+            .readv(
+                "test.obj",
+                test_loc
+                    .iter()
+                    .map(|(offset, size)| BlockLocation {
+                        offset: *offset,
+                        size: *size,
+                    })
+                    .collect_vec(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(test_loc.len(), read_data.len());
+        for (i, (offset, size)) in test_loc.iter().enumerate() {
+            assert_eq!(&payload[*offset..(*offset + *size)], &read_data[i][..]);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        let mut path = PathBuf::from(test_root_path);
+        path.push("test.obj");
+        assert!(path.exists());
+        store.delete("test.obj").await.unwrap();
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_read_not_exists() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+
+        assert!(store.read("non-exist.obj", None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_read_out_of_range() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        store
+            .upload("test.obj", Bytes::from(payload.clone()))
+            .await
+            .unwrap();
+        assert_eq!(payload.len(), 500000);
+        assert!(store
+            .read(
+                "test.obj",
+                Some(BlockLocation {
+                    offset: 499999,
+                    size: 1,
+                })
+            )
+            .await
+            .is_ok());
+        assert!(store
+            .read(
+                "test.obj",
+                Some(BlockLocation {
+                    offset: 499999,
+                    size: 2,
+                })
+            )
+            .await
+            .is_err());
+        assert!(store
+            .readv(
+                "test.obj",
+                vec![
+                    BlockLocation {
+                        offset: 499999,
+                        size: 2,
+                    },
+                    BlockLocation {
+                        offset: 10000,
+                        size: 2,
+                    }
+                ]
+            )
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn test_invalid_path() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = LocalDiskObjectStore::new(test_root_path);
+        let payload = gen_test_payload();
+        // path is not allowed to be started with '/'
+        assert!(store
+            .upload("/test.obj", Bytes::from(payload))
+            .await
+            .is_err());
     }
 }

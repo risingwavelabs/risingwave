@@ -203,7 +203,7 @@ pub async fn parse_object_store(url: &str, is_remote: bool) -> ObjectStoreImpl {
             ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await)
         }
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(LocalDiskObjectStore::new(
-            disk.strip_prefix("disk://").unwrap().to_string(),
+            disk.strip_prefix("disk://").unwrap(),
         )),
         memory if memory.starts_with("memory") => {
             tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
