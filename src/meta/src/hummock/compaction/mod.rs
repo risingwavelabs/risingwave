@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compaction_picker;
+mod level_selector;
 mod overlap_strategy;
 mod tier_compaction_picker;
 
+use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use prost::Message;
@@ -26,8 +30,8 @@ use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockVersion, Level, TableSetStatistics,
 };
 
+use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
@@ -37,11 +41,47 @@ use crate::storage::{MetaStore, Transaction};
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024;
+const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 32;
 
-#[derive(Clone, PartialEq, Debug)]
+// decrease this configure when the generation of checkpoint barrier is not frequent.
+const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 16;
+
+const MAX_LEVEL: usize = 6;
+
 pub struct CompactStatus {
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,
+    compaction_selector: Box<dyn LevelSelector>,
+}
+
+impl Debug for CompactStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactStatus")
+            .field("level_handlers", &self.level_handlers)
+            .field("next_compact_task_id", &self.next_compact_task_id)
+            .field("compaction_selector", &self.compaction_selector.name())
+            .finish()
+    }
+}
+
+impl PartialEq for CompactStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.level_handlers.eq(&other.level_handlers)
+            && self.next_compact_task_id == other.next_compact_task_id
+            && self.compaction_selector.name() == other.compaction_selector.name()
+    }
+}
+
+impl Clone for CompactStatus {
+    fn clone(&self) -> Self {
+        Self {
+            level_handlers: self.level_handlers.clone(),
+            compaction_selector: Box::new(DynamicLevelSelector::default()),
+            next_compact_task_id: self.next_compact_task_id,
+        }
+    }
 }
 
 pub struct SearchResult {
@@ -50,12 +90,43 @@ pub struct SearchResult {
     split_ranges: Vec<KeyRange>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompactionConfig {
+    pub max_bytes_for_level_base: u64,
+    pub max_level: usize,
+    pub max_bytes_for_level_multiplier: u64,
+    pub max_compaction_bytes: u64,
+    pub level0_max_file_number: usize,
+    pub level0_trigger_number: usize,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE, // 1GB
+            max_bytes_for_level_multiplier: 10,
+            max_level: MAX_LEVEL,
+            max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
+            level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
+            level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
+        }
+    }
+}
+
 impl CompactStatus {
-    pub fn new() -> CompactStatus {
-        let vec_handler_having_l0 = vec![LevelHandler::new(0), LevelHandler::new(1)];
+    pub fn new(config: Arc<CompactionConfig>) -> CompactStatus {
+        let mut level_handlers = vec![];
+        for level in 0..=config.max_level {
+            level_handlers.push(LevelHandler::new(level as u32));
+        }
         CompactStatus {
-            level_handlers: vec_handler_having_l0,
+            level_handlers,
             next_compact_task_id: 1,
+            // TODO: create selector and overlap strategy by configure.
+            compaction_selector: Box::new(DynamicLevelSelector::new(
+                config,
+                Arc::new(RangeOverlapStrategy::default()),
+            )),
         }
     }
 
@@ -84,7 +155,7 @@ impl CompactStatus {
         }
     }
 
-    pub fn get_compact_task(&mut self, levels: Vec<Level>) -> Option<CompactTask> {
+    pub fn get_compact_task(&mut self, levels: &[Level]) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
@@ -136,13 +207,12 @@ impl CompactStatus {
         Some(compact_task)
     }
 
-    fn pick_compaction(&mut self, levels: Vec<Level>) -> Option<SearchResult> {
-        // only support compact L0 to L1 or L0 to L0
-        let picker = TierCompactionPicker::new(
+    fn pick_compaction(&mut self, levels: &[Level]) -> Option<SearchResult> {
+        self.compaction_selector.pick_compaction(
             self.next_compact_task_id,
-            Box::new(RangeOverlapStrategy::default()),
-        );
-        picker.pick_compaction(levels, &mut self.level_handlers)
+            levels,
+            &mut self.level_handlers,
+        )
     }
 
     /// Declares a task is either finished or canceled.
@@ -177,13 +247,15 @@ impl CompactStatus {
             }
             new_version.levels[compact_task.target_level as usize].table_infos = new_table_infos;
         } else {
-            for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
-                new_version.levels[idx].table_infos.retain(|sst| {
-                    input_level
-                        .table_infos
-                        .iter()
-                        .all(|stale| sst.id != stale.id)
-                });
+            for input_level in &compact_task.input_ssts {
+                new_version.levels[input_level.level_idx as usize]
+                    .table_infos
+                    .retain(|sst| {
+                        input_level
+                            .table_infos
+                            .iter()
+                            .all(|stale| sst.id != stale.id)
+                    });
             }
             new_version.levels[compact_task.target_level as usize]
                 .table_infos
@@ -221,7 +293,7 @@ impl Transactional for CompactStatus {
 
 impl Default for CompactStatus {
     fn default() -> Self {
-        Self::new()
+        Self::new(Arc::new(CompactionConfig::default()))
     }
 }
 
@@ -239,6 +311,7 @@ impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
         CompactStatus {
             level_handlers: status.level_handlers.iter().map_into().collect(),
             next_compact_task_id: status.next_compact_task_id,
+            compaction_selector: Box::new(DynamicLevelSelector::default()),
         }
     }
 }
@@ -249,8 +322,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_serde() -> Result<()> {
-        let mut origin = CompactStatus::new();
-        origin.next_compact_task_id = 4;
+        let origin = CompactStatus {
+            next_compact_task_id: 4,
+            ..Default::default()
+        };
         let ser = risingwave_pb::hummock::CompactStatus::from(&origin).encode_to_vec();
         let de = risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(ser));
         let de = (&de.unwrap()).into();
