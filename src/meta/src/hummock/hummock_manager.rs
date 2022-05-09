@@ -683,10 +683,7 @@ where
                     }
                 }
             }
-            tracing::info!(
-                "report compact task. cost time: {:?}",
-                start_time.elapsed()
-            );
+            tracing::info!("report compact task. cost time: {:?}", start_time.elapsed());
 
             commit_multi_var!(
                 self,
