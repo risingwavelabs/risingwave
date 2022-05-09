@@ -303,40 +303,41 @@ impl ColPrunable for LogicalJoin {
 
         let mut visitor = CollectInputRef::new(resized_required_cols);
         self.on.visit_expr(&mut visitor);
-        let left_right_input_cols = visitor.collect();
+        let left_right_required_cols = visitor.collect();
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_input_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
         on = on.rewrite_expr(&mut mapping);
 
-        let mut left_input_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
-        let mut right_input_cols = FixedBitSet::with_capacity(self.right.schema().fields().len());
-        left_right_input_cols.ones().for_each(|i| {
+        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
+        let mut right_required_cols =
+            FixedBitSet::with_capacity(self.right.schema().fields().len());
+        left_right_required_cols.ones().for_each(|i| {
             if i < left_len {
-                left_input_cols.insert(i);
+                left_required_cols.insert(i);
             } else {
-                right_input_cols.insert(i - left_len);
+                right_required_cols.insert(i - left_len);
             }
         });
 
         let join = LogicalJoin::new(
-            self.left.prune_col(&left_input_cols),
-            self.right.prune_col(&right_input_cols),
+            self.left.prune_col(&left_required_cols),
+            self.right.prune_col(&right_required_cols),
             self.join_type,
             on,
         );
 
-        let required_input_cols_in_output = if self.is_left_join() {
-            left_input_cols
+        let required_inputs_in_output = if self.is_left_join() {
+            left_required_cols
         } else if self.is_right_join() {
-            right_input_cols
+            right_required_cols
         } else {
-            left_right_input_cols
+            left_right_required_cols
         };
-        if required_cols == &required_input_cols_in_output {
+        if required_cols == &required_inputs_in_output {
             join.into()
         } else {
-            let mapping = ColIndexMapping::with_remaining_columns(&required_input_cols_in_output);
+            let mapping = ColIndexMapping::with_remaining_columns(&required_inputs_in_output);
             let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
             remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
