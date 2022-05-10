@@ -1551,8 +1551,7 @@ impl Parser {
         let data_type = self.parse_data_type()?;
         let sub_defs = {
             if DataType::Struct == data_type {
-                let (sub_defs, _) = self.parse_struct_columns()?;
-                sub_defs
+                self.parse_struct_columns()?
             } else {
                 vec![]
             }
@@ -1953,33 +1952,27 @@ impl Parser {
         Ok(data_type)
     }
 
-    pub fn parse_struct_columns(
-        &mut self,
-    ) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+    pub fn parse_struct_columns(&mut self) -> Result<Vec<ColumnDef>, ParserError> {
         let mut columns = vec![];
-        let mut constraints = vec![];
         if !self.consume_token(&Token::Lt) || self.consume_token(&Token::Gt) {
-            return Ok((columns, constraints));
+            return Ok(columns);
         }
 
         loop {
-            if let Some(constraint) = self.parse_optional_table_constraint()? {
-                constraints.push(constraint);
-            } else if let Token::Word(_) = self.peek_token() {
+            if let Token::Word(_) = self.peek_token() {
                 columns.push(self.parse_column_def()?);
             } else {
                 return self.expected("column name or constraint definition", self.peek_token());
             }
             let comma = self.consume_token(&Token::Comma);
             if self.consume_token(&Token::Gt) {
-                // allow a trailing comma, even though it's not in standard
                 break;
             } else if !comma {
                 return self.expected("',' or ')' after column definition", self.peek_token());
             }
         }
 
-        Ok((columns, constraints))
+        Ok(columns)
     }
 
     /// Parse a SQL datatype
