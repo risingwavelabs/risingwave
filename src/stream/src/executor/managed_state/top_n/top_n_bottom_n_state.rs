@@ -15,9 +15,9 @@
 #![allow(clippy::mutable_key_type)]
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
 use std::vec::Drain;
 
+use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;

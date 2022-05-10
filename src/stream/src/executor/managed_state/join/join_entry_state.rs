@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use madsim::collections::{btree_map, BTreeMap};
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;

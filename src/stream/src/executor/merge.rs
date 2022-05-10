@@ -198,7 +198,6 @@ impl MergeExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread::sleep;
@@ -208,6 +207,7 @@ mod tests {
     use futures::channel::mpsc::channel;
     use futures::SinkExt;
     use itertools::Itertools;
+    use madsim::collections::HashSet;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::data::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{

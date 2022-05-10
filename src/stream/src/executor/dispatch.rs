@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
@@ -22,6 +21,7 @@ use futures::channel::mpsc::Sender;
 use futures::{SinkExt, Stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
@@ -767,13 +767,13 @@ impl Dispatcher for SimpleDispatcher {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 
     use futures::channel::mpsc::channel;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
+    use madsim::collections::HashMap;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
