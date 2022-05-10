@@ -123,6 +123,7 @@ impl SharedBufferUploader {
                             task_results.insert((epoch, task_id), Ok(tables));
                         }
                         Err(e) => {
+                            error!("Failed to flush shared buffer: {:?}", e);
                             failed = true;
                             task_results.insert((epoch, task_id), Err(e));
                         }
@@ -169,7 +170,7 @@ impl SharedBufferUploader {
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
             .into_iter()
-            .map(|(sst, vnode_bitmap)| SstableInfo {
+            .map(|(sst, vnode_bitmaps)| SstableInfo {
                 id: sst.id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
                     left: sst.meta.smallest_key.clone(),
@@ -177,7 +178,7 @@ impl SharedBufferUploader {
                     inf: false,
                 }),
                 file_size: sst.meta.estimated_size as u64,
-                vnode_bitmap,
+                vnode_bitmaps,
             })
             .collect();
 

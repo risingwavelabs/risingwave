@@ -31,9 +31,9 @@ use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
-    CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
-    DropMaterializedViewRequest, DropMaterializedViewResponse, DropSourceRequest,
-    DropSourceResponse,
+    CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
+    DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
+    DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -217,6 +217,18 @@ impl MetaClient {
     pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
         let request = DropSourceRequest { source_id };
         let resp = self.inner.drop_source(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
+        let request = DropDatabaseRequest { database_id };
+        let resp = self.inner.drop_database(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_schema(&self, schema_id: u32) -> Result<CatalogVersion> {
+        let request = DropSchemaRequest { schema_id };
+        let resp = self.inner.drop_schema(request).await?;
         Ok(resp.version)
     }
 
@@ -465,6 +477,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
+            ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }

@@ -22,8 +22,8 @@ function generateNewNodeId() {
   return "g" + (++cnt);
 }
 
-function getNodeId(nodeProto) {
-  return nodeProto.operatorId === undefined ? generateNewNodeId() : "o" + nodeProto.operatorId;
+function getNodeId(nodeProto, actorId) {
+  return actorId + ":" + (nodeProto.operatorId === undefined ? generateNewNodeId() : "o" + nodeProto.operatorId);
 }
 
 class Node {
@@ -55,9 +55,9 @@ class StreamNode extends Node {
   }
 
   parseType(nodeProto) {
-    let typeReg = new RegExp('.+Node');
+    let types = new Set(["source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
     for (let [type, _] of Object.entries(nodeProto)) {
-      if (typeReg.test(type)) {
+      if (types.has(type)) {
         return type;
       }
     }
@@ -144,15 +144,27 @@ export default class StreamPlanParser {
       this.parsedActorList.push(actor);
     }
 
+    /** @type {Set<Actor>} */
     this.fragmentRepresentedActors = this._constructRepresentedActorList();
 
-    /**
-     * @type {Map<number, Array<number>}
-     */
+    /** @type {Map<number, Array<number>} */
     this.mvTableIdToSingleViewActorList = this._constructSingleViewMvList();
+    
+     /** @type {Map<number, Array<number>} */
     this.mvTableIdToChainViewActorList = this._constructChainViewMvList()
   }
-
+  
+  /**
+   * Randomly select a actor to represent its
+   * fragment, and append a property named `representedActorList`
+   * to store all the other actors in the same fragement.
+   * 
+   * Actors are degree of parallelism of a fragment, such that one of 
+   * the actor in a fragement can represent all the other actor in
+   * the same fragment. 
+   * 
+   * @returns A Set containing actors representing its fragment.
+   */
   _constructRepresentedActorList() {
     const fragmentId2actorList = new Map();
     let fragmentRepresentedActors = new Set();
@@ -164,10 +176,12 @@ export default class StreamPlanParser {
         fragmentId2actorList.get(actor.fragmentId).push(actor);
       }
     }
+
     for (let actor of fragmentRepresentedActors) {
-      actor.representedActorList = cloneDeep(fragmentId2actorList.get(actor.fragmentId)).sort(x => x.actorId);
+      actor.representedActorList = fragmentId2actorList.get(actor.fragmentId).sort(x => x.actorId);
       actor.representedWorkNodes = new Set();
       for (let representedActor of actor.representedActorList) {
+        representedActor.representedActorList = actor.representedActorList;
         actor.representedWorkNodes.add(representedActor.computeNodeAddress);
       }
     }
@@ -300,7 +314,7 @@ export default class StreamPlanParser {
   }
 
   parseNode(actorId, nodeProto) {
-    let id = getNodeId(nodeProto);
+    let id = getNodeId(nodeProto, actorId);
     if (this.parsedNodeMap.has(id)) {
       return this.parsedNodeMap.get(id);
     }
@@ -313,7 +327,7 @@ export default class StreamPlanParser {
       }
     }
 
-    if (newNode.type === "mergeNode" && newNode.typeInfo.upstreamActorId) {
+    if (newNode.type === "merge" && newNode.typeInfo.upstreamActorId) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorId) {
         if (!this.actorId2Proto.has(upStreamActorId)) {
           continue;
@@ -322,7 +336,7 @@ export default class StreamPlanParser {
       }
     }
 
-    if (newNode.type === "chainNode" && newNode.typeInfo.upstreamActorIds) {
+    if (newNode.type === "chain" && newNode.typeInfo.upstreamActorIds) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorIds) {
         if (!this.actorId2Proto.has(upStreamActorId)) {
           continue;
@@ -331,7 +345,7 @@ export default class StreamPlanParser {
       }
     }
     
-    if (newNode.type === "materializeNode") {
+    if (newNode.type === "materialize") {
       this.actorIdTomviewNodes.set(actorId, newNode);
     }
 

@@ -16,7 +16,7 @@ mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
@@ -26,7 +26,6 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::{Keyspace, StateStore};
-use serde::Serialize;
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
@@ -75,11 +74,12 @@ impl JoinRow {
         for v in &self.row.0 {
             vec.extend_from_slice(&serialize_cell(v)?)
         }
-        let mut serializer = memcomparable::Serializer::new(vec![]);
 
         // Serialize degree.
-        self.degree.serialize(&mut serializer)?;
-        vec.extend_from_slice(&serializer.into_inner());
+        let mut degree_buf: Vec<u8> = vec![];
+        degree_buf.put_u64_le(self.degree);
+        vec.extend_from_slice(&degree_buf);
+
         Ok(vec)
     }
 }

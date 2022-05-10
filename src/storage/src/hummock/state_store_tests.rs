@@ -14,19 +14,21 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_pb::hummock::VNodeBitmap;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+use crate::hummock::sstable::VNODE_BITMAP_LEN;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
-use crate::StateStore;
+use crate::store::StateStore;
 
 #[tokio::test]
 async fn test_basic() {
@@ -167,6 +169,83 @@ async fn test_basic() {
         .await
         .unwrap();
     assert!(value.is_none());
+}
+
+#[tokio::test]
+async fn test_vnode_filter() {
+    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let hummock_options = Arc::new(default_config_for_test());
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+    let storage = HummockStorage::with_default_stats(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+    .await
+    .unwrap();
+
+    let val = Bytes::from(&b"value"[..]);
+    let table_count = 2;
+    let mut batch = Vec::with_capacity(table_count);
+    for table_id in 0..table_count as u32 {
+        let mut key = BytesMut::from(&b"t"[..]);
+        key.put_u32(table_id);
+        batch.push((key.freeze(), StorageValue::new_default_put(val.clone())));
+    }
+
+    let epoch: u64 = 1;
+    storage.ingest_batch(batch, epoch).await.unwrap();
+    storage.sync(Some(epoch)).await.unwrap();
+    meta_client.commit_epoch(epoch).await.unwrap();
+
+    let value_with_dummy_filter = storage
+        .get_with_vnode_set(
+            &Bytes::from(&b"t\0\0\0\0"[..]),
+            epoch,
+            Some(VNodeBitmap {
+                table_id: 0,
+                maplen: VNODE_BITMAP_LEN as u32,
+                bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(value_with_dummy_filter.unwrap(), Bytes::from(&b"value"[..]));
+
+    let value_with_blockall_filter = storage
+        .get_with_vnode_set(
+            &Bytes::from(&b"t\0\0\0\0"[..]),
+            epoch,
+            Some(VNodeBitmap {
+                table_id: 0,
+                maplen: VNODE_BITMAP_LEN as u32,
+                bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(value_with_blockall_filter.is_none());
+
+    let value_with_mismatch_dummy_filter = storage
+        .get_with_vnode_set(
+            &Bytes::from(&b"t\0\0\0\0"[..]),
+            epoch,
+            Some(VNodeBitmap {
+                table_id: 5,
+                maplen: VNODE_BITMAP_LEN as u32,
+                bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(value_with_mismatch_dummy_filter.is_none());
 }
 
 #[tokio::test]
