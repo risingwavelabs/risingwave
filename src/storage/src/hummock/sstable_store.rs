@@ -142,6 +142,17 @@ impl SstableStore {
             Ok(Box::new(block))
         };
 
+        let disable_cache: fn() -> bool = || {
+            fail_point!("disable_block_cache", |_| true);
+            false
+        };
+
+        let policy = if disable_cache() {
+            CachePolicy::Disable
+        } else {
+            policy
+        };
+
         match policy {
             CachePolicy::Fill => {
                 self.block_cache

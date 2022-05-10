@@ -26,6 +26,7 @@ pub use builder::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
+use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
@@ -62,7 +63,11 @@ impl Sstable {
     }
 
     pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
-        if self.has_bloom_filter() {
+        let enable_bloom_filter: fn() -> bool = || {
+            fail_point!("disable_bloom_filter", |_| false);
+            true
+        };
+        if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = farmhash::fingerprint32(user_key);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             bloom.surely_not_have_hash(hash)
