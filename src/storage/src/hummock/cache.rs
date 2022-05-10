@@ -515,19 +515,22 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         }
         None
     }
+
+    // Clears the content of the cache.
+    // This method only works if no cache entries are referenced outside.
+    fn clear(&mut self) {
+        while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
+            let handle = self.lru.next;
+            unsafe {
+                self.erase((*handle).hash, (*handle).get_key());
+            }
+        }
+    }
 }
 
 impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
     fn drop(&mut self) {
-        // When the shard is dropped, all handles must be in lru, and therefore we only need to free
-        // the handles in lru.
-        while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
-            let handle = self.lru.next;
-            unsafe {
-                self.lru_remove(handle);
-                drop(Box::from_raw(handle));
-            }
-        }
+        self.clear();
     }
 }
 
@@ -663,6 +666,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
 
     fn shard(&self, hash: u64) -> usize {
         hash as usize % self.shards.len()
+    }
+
+    #[cfg(test)]
+    pub fn clear(&self) {
+        for shard in &self.shards {
+            let mut shard = shard.lock();
+            shard.clear();
+        }
     }
 }
 
@@ -912,6 +923,8 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(new_entry);
+            assert!((*new_entry).is_in_cache());
+            assert!((*new_entry).is_in_lru());
 
             // assert old value unchanged.
             assert!(!old_entry.is_null());
@@ -919,6 +932,10 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(old_entry);
+            assert!(!(*old_entry).is_in_cache());
+            assert!(!(*old_entry).is_in_lru());
+            assert!((*new_entry).is_in_cache());
+            assert!((*new_entry).is_in_lru());
         }
     }
 

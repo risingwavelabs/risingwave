@@ -31,7 +31,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashMappingManager, HashMappingManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
+    HashMappingManager, HashMappingManagerRef, IdCategory, LocalNotification, MetaSrvEnv, TableId,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -332,8 +332,27 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
+    /// Get default hash mapping, which uses all hash parallel units in the cluster.
     pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
         self.hash_mapping_manager.get_default_mapping().await
+    }
+
+    /// Get hash mapping for a specific relational state table. If the mapping does not exist yet,
+    /// then build one and return the mapping.
+    pub async fn get_table_hash_mapping(&self, table_id: &TableId) -> Result<Vec<ParallelUnitId>> {
+        match self.hash_mapping_manager.get_table_mapping(table_id).await {
+            Some(mapping) => Ok(mapping),
+            None => {
+                self.hash_mapping_manager
+                    .build_table_mapping(*table_id)
+                    .await?;
+                Ok(self
+                    .hash_mapping_manager
+                    .get_table_mapping(table_id)
+                    .await
+                    .unwrap())
+            }
+        }
     }
 
     async fn generate_cn_parallel_units(

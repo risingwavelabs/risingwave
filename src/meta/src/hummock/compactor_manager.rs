@@ -172,6 +172,7 @@ mod tests {
             }),
             task_status: false,
             prefix_pairs: vec![],
+            vnode_mappings: vec![],
         }
     }
 

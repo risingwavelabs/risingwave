@@ -130,4 +130,9 @@ impl BlockCache {
         block_idx.hash(&mut hasher);
         hasher.finish()
     }
+
+    #[cfg(test)]
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
 }

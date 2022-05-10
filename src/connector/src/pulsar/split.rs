@@ -17,34 +17,18 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum PulsarOffset {
-    MessageID(u64),
-    Timestamp(u64),
-    None,
-}
+use crate::pulsar::topic::Topic;
+use crate::pulsar::PulsarEnumeratorOffset;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PulsarSplit {
-    pub(crate) sub_topic: String,
-    pub(crate) start_offset: PulsarOffset,
-    pub(crate) stop_offset: PulsarOffset,
-}
-
-impl PulsarSplit {
-    pub fn new(sub_topic: String, start_offset: PulsarOffset, stop_offset: PulsarOffset) -> Self {
-        Self {
-            sub_topic,
-            start_offset,
-            stop_offset,
-        }
-    }
+    pub(crate) topic: Topic,
+    pub(crate) start_offset: PulsarEnumeratorOffset,
 }
 
 impl SplitMetaData for PulsarSplit {
     fn id(&self) -> String {
-        self.sub_topic.clone()
+        self.topic.to_string()
     }
 
     fn to_json_bytes(&self) -> Bytes {

@@ -44,7 +44,9 @@ use crate::hummock::model::{
     INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
+use crate::model::{
+    compressed_hash_mapping, MetadataModel, ValTransaction, VarTransaction, Worker,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
 
@@ -598,6 +600,29 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
+                let table_ids = compact_task
+                    .input_ssts
+                    .iter()
+                    .flat_map(|level| {
+                        level
+                            .table_infos
+                            .iter()
+                            .flat_map(|sst_info| {
+                                sst_info.vnode_bitmaps.iter().map(|bitmap| bitmap.table_id)
+                            })
+                            .collect_vec()
+                    })
+                    .collect::<HashSet<u32>>();
+                compact_task.vnode_mappings.reserve_exact(table_ids.len());
+                for table_id in table_ids {
+                    let vnode_mapping = self
+                        .cluster_manager
+                        .get_table_hash_mapping(&table_id)
+                        .await?;
+                    let compressed_mapping = compressed_hash_mapping(table_id, &vnode_mapping);
+                    compact_task.vnode_mappings.push(compressed_mapping);
+                }
+
                 commit_multi_var!(
                     self,
                     Some(assignee_context_id),
