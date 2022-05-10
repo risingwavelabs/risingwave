@@ -498,10 +498,7 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<()> {
-        match self.next_inner().await? {
-            Some(pk_and_row) => self.cell_based_item = Some(pk_and_row),
-            None => self.cell_based_item = None,
-        }
+        self.cell_based_item = self.next_inner().await?;
         Ok(())
     }
 

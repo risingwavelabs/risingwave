@@ -131,7 +131,7 @@ pub struct StateTableRowIter<'a, S: StateStore> {
     cell_based_streaming_iter: CellBasedTableStreamingIter<S>,
     /// The result of the last cell_based_streaming_iter next is saved, which can avoid being
     /// discarded.
-    order_types: Vec<OrderType>,
+    pk_serializer: OrderedRowSerializer,
 }
 type MemTableIter<'a> = Iter<'a, Row, RowOp>;
 
@@ -145,11 +145,11 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     ) -> StorageResult<StateTableRowIter<'a, S>> {
         let cell_based_streaming_iter =
             CellBasedTableStreamingIter::new(keyspace, table_descs, epoch).await?;
-        let order_types = order_types_vec.to_vec();
+        let pk_serializer = OrderedRowSerializer::new(order_types_vec.to_vec());
         let state_table_iter = Self {
             mem_table_iter,
             cell_based_streaming_iter,
-            order_types,
+            pk_serializer,
         };
 
         Ok(state_table_iter)
@@ -181,8 +181,8 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 }
             }
             (Some((cell_based_pk, cell_based_row)), Some((mem_table_pk, mem_table_row_op))) => {
-                let pk_serializer = OrderedRowSerializer::new(self.order_types.clone());
-                let mem_table_pk_bytes = serialize_pk(mem_table_pk, &pk_serializer).map_err(err)?;
+                let mem_table_pk_bytes =
+                    serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
                 match cell_based_pk.cmp(&mem_table_pk_bytes) {
                     Ordering::Less => {
                         res = Some(cell_based_row.clone());
@@ -206,7 +206,10 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                         match mem_table_row_op {
                             RowOp::Insert(row) => res = Some(row.clone()),
                             RowOp::Delete(_) => {}
-                            RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+                            RowOp::Update((old_row, new_row)) => {
+                                debug_assert!(old_row == cell_based_row);
+                                res = Some(new_row.clone());
+                            }
                         }
                     }
                 }
