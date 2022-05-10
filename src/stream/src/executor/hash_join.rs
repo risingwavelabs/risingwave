@@ -56,7 +56,7 @@ pub mod SideType {
     pub const Right: SideTypePrimitive = 1;
 }
 
-const fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+const fn is_outer_side(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
     join_type == JoinType::FullOuter
         || (join_type == JoinType::LeftOuter && side_type == SideType::Left)
         || (join_type == JoinType::RightOuter && side_type == SideType::Right)
@@ -77,7 +77,10 @@ const fn forward_exactly_once(join_type: JoinTypePrimitive, side_type: SideTypeP
             && side_type == SideType::Right)
 }
 
-const fn only_append_match(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+const fn only_forward_matched_side(
+    join_type: JoinTypePrimitive,
+    side_type: SideTypePrimitive,
+) -> bool {
     ((join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti)
         && side_type == SideType::Right)
         || ((join_type == JoinType::RightSemi || join_type == JoinType::RightAnti)
@@ -223,16 +226,16 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 }
 
 impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBuilder<T, SIDE> {
-    fn append_on_insert(&mut self, row: &RowRef, matched_row: &mut JoinRow) -> Result<()> {
+    fn with_match_on_insert(&mut self, row: &RowRef, matched_row: &mut JoinRow) -> Result<()> {
         // Left/Right Anti sides
         if is_anti(T) {
-            if matched_row.is_zero_degree() && only_append_match(T, SIDE) {
+            if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)?;
             }
         // Left/Right Semi sides
         } else if is_semi(T) {
-            if matched_row.is_zero_degree() && only_append_match(T, SIDE) {
+            if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)?;
             }
@@ -251,16 +254,16 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
         Ok(())
     }
 
-    fn append_on_delete(&mut self, row: &RowRef, matched_row: &mut JoinRow) -> Result<()> {
+    fn with_match_on_delete(&mut self, row: &RowRef, matched_row: &mut JoinRow) -> Result<()> {
         // Left/Right Anti sides
         if is_anti(T) {
-            if matched_row.is_zero_degree() && only_append_match(T, SIDE) {
+            if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Insert, &matched_row.row)?;
             }
         // Left/Right Semi sides
         } else if is_semi(T) {
-            if matched_row.is_zero_degree() && only_append_match(T, SIDE) {
+            if matched_row.is_zero_degree() && only_forward_matched_side(T, SIDE) {
                 self.stream_chunk_builder
                     .append_row_matched(Op::Delete, &matched_row.row)?;
             }
@@ -286,9 +289,18 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     }
 
     #[inline]
+    fn forward_exactly_once_if_matched(&mut self, op: Op, row: &RowRef) -> Result<()> {
+        // if it's a semi join and the side needs to be maintained.
+        if is_semi(T) && forward_exactly_once(T, SIDE) {
+            self.stream_chunk_builder.append_row_update(op, row)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     fn forward_if_not_matched(&mut self, op: Op, row: &RowRef) -> Result<()> {
         // if it's outer join or anti join and the side needs to be maintained.
-        if (is_anti(T) && forward_exactly_once(T, SIDE)) || outer_side_keep(T, SIDE) {
+        if (is_anti(T) && forward_exactly_once(T, SIDE)) || is_outer_side(T, SIDE) {
             self.stream_chunk_builder.append_row_update(op, row)?;
         }
         Ok(())
@@ -303,7 +315,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     #[inline]
     fn forward_outer(&mut self, op: Op, row: &RowRef) -> Result<()> {
         // if it's outer join and the side needs maintained.
-        if outer_side_keep(T, SIDE) {
+        if is_outer_side(T, SIDE) {
             self.stream_chunk_builder.append_row_update(op, row)?;
         }
         Ok(())
@@ -573,18 +585,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
-                                    hashjoin_chunk_builder.append_on_insert(&row, matched_row)?;
+                                    hashjoin_chunk_builder.with_match_on_insert(&row, matched_row)?;
                                 }
                                 matched_row.inc_degree();
-                            } else {
-                                hashjoin_chunk_builder.forward_outer(*op, &row)?;
                             }
                         }
-
-                        if forward_exactly_once(T, SIDE)
-                            && ((degree == 0 && is_anti(T)) || (degree > 0 && is_semi(T)))
-                        {
-                            hashjoin_chunk_builder.forward(*op, &row)?;
+                        if degree == 0 {
+                            hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?;
+                        } else {
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?;
                         }
                     } else {
                         hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?;
@@ -604,16 +613,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 matched = true;
                                 matched_row.dec_degree()?;
                                 if !forward_exactly_once(T, SIDE) {
-                                    hashjoin_chunk_builder.append_on_delete(&row, matched_row)?;
+                                    hashjoin_chunk_builder.with_match_on_delete(&row, matched_row)?;
                                 }
-                            } else {
-                                hashjoin_chunk_builder.forward_outer(*op, &row)?;
                             }
                         }
-                        if forward_exactly_once(T, SIDE)
-                            && ((!matched && is_anti(T)) || (matched && is_semi(T)))
-                        {
-                            hashjoin_chunk_builder.forward(*op, &row)?;
+                        if !matched {
+                            hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?;
+                        } else {
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?;
                         }
                     } else {
                         hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?;
