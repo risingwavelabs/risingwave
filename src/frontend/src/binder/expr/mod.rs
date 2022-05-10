@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use itertools::zip_eq;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
+    BinaryOperator, ColumnDef, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
     UnaryOperator,
 };
 
@@ -301,6 +302,20 @@ impl Binder {
         self.bind_expr(expr)?
             .cast_explicit(bind_data_type(&data_type)?)
     }
+}
+
+pub fn bind_column_desc(column_def: &ColumnDef, id: usize) -> Result<ColumnDesc> {
+    Ok(ColumnDesc {
+        data_type: bind_data_type(&column_def.data_type)?,
+        column_id: ColumnId::new((id + 1) as i32),
+        name: column_def.name.value.clone(),
+        field_descs: column_def
+            .sub_defs
+            .iter()
+            .map(|f| bind_column_desc(f, id))
+            .collect::<Result<Vec<_>>>()?,
+        type_name: "".to_string(),
+    })
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {

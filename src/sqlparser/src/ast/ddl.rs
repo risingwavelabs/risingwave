@@ -17,8 +17,6 @@
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::fmt;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -263,20 +261,6 @@ impl ColumnDef {
             options,
             sub_defs: vec![],
         }
-    }
-
-    pub fn to_column_desc(&self, id: i32) -> Result<ColumnDesc> {
-        Ok(ColumnDesc {
-            data_type: self.data_type.to_data_type()?,
-            column_id: ColumnId::new((id + 1) as i32),
-            name: self.name.value.clone(),
-            field_descs: self
-                .sub_defs
-                .iter()
-                .map(|f| f.to_column_desc(id))
-                .collect::<Result<Vec<_>>>()?,
-            type_name: "".to_string(),
-        })
     }
 }
 

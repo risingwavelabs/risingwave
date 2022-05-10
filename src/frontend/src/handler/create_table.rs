@@ -24,6 +24,7 @@ use risingwave_pb::plan_common::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use super::create_source::make_prost_source;
+use crate::binder::expr::bind_column_desc;
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
@@ -41,7 +42,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
             check_valid_column_name(&column.name.value)?;
-            column_descs.push(column.to_column_desc(i as i32)?);
+            column_descs.push(bind_column_desc(&column, i)?);
         }
         column_descs
     };

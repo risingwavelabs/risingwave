@@ -15,8 +15,6 @@ use alloc::boxed::Box;
 use core::fmt;
 use std::sync::Arc;
 
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType as Common_Data_Type;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -79,51 +77,6 @@ pub enum DataType {
     /// Arrays
     Array(Box<DataType>),
     Struct(Arc<[DataType]>),
-}
-
-impl DataType {
-    pub fn to_data_type(&self) -> Result<Common_Data_Type> {
-        let data_type = match self {
-            DataType::Boolean => Common_Data_Type::Boolean,
-            DataType::SmallInt(None) => Common_Data_Type::Int16,
-            DataType::Int(None) => Common_Data_Type::Int32,
-            DataType::BigInt(None) => Common_Data_Type::Int64,
-            DataType::Real | DataType::Float(Some(1..=24)) => Common_Data_Type::Float32,
-            DataType::Double | DataType::Float(Some(25..=53) | None) => Common_Data_Type::Float64,
-            DataType::Decimal(None, None) => Common_Data_Type::Decimal,
-            DataType::Varchar(_) => Common_Data_Type::Varchar,
-            DataType::Date => Common_Data_Type::Date,
-            DataType::Time(false) => Common_Data_Type::Time,
-            DataType::Timestamp(false) => Common_Data_Type::Timestamp,
-            DataType::Timestamp(true) => Common_Data_Type::Timestampz,
-            DataType::Interval => Common_Data_Type::Interval,
-            DataType::Array(datatype) => Common_Data_Type::List {
-                datatype: Box::new(datatype.to_data_type()?),
-            },
-            DataType::Char(..) => {
-                return Err(ErrorCode::NotImplemented(
-                    "CHAR is not supported, please use VARCHAR instead\n".to_string(),
-                    None.into(),
-                )
-                .into())
-            }
-            DataType::Struct(types) => Common_Data_Type::Struct {
-                fields: types
-                    .iter()
-                    .map(|d| d.to_data_type())
-                    .collect::<Result<Vec<_>>>()?
-                    .into(),
-            },
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported data type: {:?}", self),
-                    None.into(),
-                )
-                .into())
-            }
-        };
-        Ok(data_type)
-    }
 }
 
 impl fmt::Display for DataType {
