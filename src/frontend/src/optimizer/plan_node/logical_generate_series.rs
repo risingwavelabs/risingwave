@@ -49,7 +49,7 @@ impl LogicalGenerateSeries {
         }
     }
 
-    /// Create a [`LogicaGenerateSeries`] node. Used by planner.
+    /// Create a [`LogicalGenerateSeries`] node. Used by planner.
     pub fn create(
         start: NaiveDateTimeWrapper,
         stop: NaiveDateTimeWrapper,
