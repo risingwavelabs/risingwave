@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchExchange` imposes a particular distribution on its input
@@ -75,12 +76,18 @@ impl ToBatchProst for BatchExchange {
             })
         } else {
             NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                exchange_node: Some(ExchangeNode {
+                exchange: Some(ExchangeNode {
                     sources: vec![],
                     input_schema: self.base.schema.to_prost(),
                 }),
                 column_orders: self.base.order.to_protobuf(&self.base.schema),
             })
         }
+    }
+}
+
+impl ToLocalBatch for BatchExchange {
+    fn to_local(&self) -> PlanRef {
+        unreachable!()
     }
 }

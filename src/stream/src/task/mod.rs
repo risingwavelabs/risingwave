@@ -38,6 +38,7 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type ActorId = u32;
+pub type DispatcherId = u64;
 pub type UpDownActorIds = (ActorId, ActorId);
 
 /// Stores the information which may be modified from the data plane.
@@ -103,11 +104,11 @@ impl SharedContext {
     }
 
     /// Create a notifier for Create MV DDL finish. When an executor/actor (essentially a
-    /// [`crate::executor_v2::ChainExecutor`]) finishes its DDL job, it can report that using this
+    /// [`crate::executor::ChainExecutor`]) finishes its DDL job, it can report that using this
     /// notifier. Note that a DDL of MV always corresponds to an epoch in our system.
     ///
     /// Creation of an MV may last for several epochs to finish.
-    /// Therefore, when the [`crate::executor_v2::ChainExecutor`] finds that the creation is
+    /// Therefore, when the [`crate::executor::ChainExecutor`] finds that the creation is
     /// finished, it will send the DDL epoch using this notifier, which can be collected by the
     /// barrier manager and reported to the meta service soon.
     pub fn register_finish_create_mview_notifier(

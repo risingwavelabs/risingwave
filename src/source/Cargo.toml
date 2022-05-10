@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_source"
-version = "0.1.5"
+version = "0.1.6"
 
 [dependencies]
 anyhow = "1"
@@ -29,6 +29,7 @@ rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
+risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +44,7 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tonic = "0.7"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
 url = "2"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

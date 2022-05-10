@@ -60,3 +60,11 @@ Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you
 To apply the new test results.
 
 You may use the `before` key to include other testcases by `id`.
+
+## Run a single test
+
+```
+./risedev run-planner-test <yaml file name>
+./risedev run-planner-test tpch # Run tpch.yaml
+./risedev run-planner-test # Run all tests
+```

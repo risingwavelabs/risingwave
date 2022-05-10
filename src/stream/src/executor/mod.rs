@@ -14,87 +14,157 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::pin::Pin;
 use std::sync::Arc;
 
-pub use actor::Actor;
-pub use barrier_align::*;
-pub use batch_query::*;
-pub use chain::*;
-pub use dispatch::*;
-pub use filter::*;
-pub use global_simple_agg::*;
-pub use hash_agg::*;
-pub use local_simple_agg::*;
-pub use merge::*;
-pub use monitor::*;
-pub use mview::*;
-pub use project::*;
-pub use top_n::*;
-pub use top_n_appendonly::*;
-
-use crate::executor_v2::{
-    BoxedExecutor, Executor, HashJoinExecutorBuilder, HopWindowExecutorBuilder,
-    LookupExecutorBuilder, SourceExecutorBuilder, UnionExecutorBuilder,
+use enum_as_inner::EnumAsInner;
+use error::StreamExecutorResult;
+use futures::stream::BoxStream;
+use futures::Stream;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
+use risingwave_pb::common::ActorInfo;
+use risingwave_pb::data::barrier::Mutation as ProstMutation;
+use risingwave_pb::data::stream_message::StreamMessage;
+use risingwave_pb::data::{
+    AddMutation, Barrier as ProstBarrier, DispatcherMutation, Epoch as ProstEpoch, NothingMutation,
+    StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
-use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
+use smallvec::SmallVec;
+use tracing::trace_span;
+
+use crate::task::{ActorId, DispatcherId, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
+pub mod aggregation;
 mod barrier_align;
 mod batch_query;
 mod chain;
-mod dispatch;
+mod debug;
+pub mod dispatch;
+mod error;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
+pub mod hash_join;
+mod hop_window;
 mod local_simple_agg;
-pub(crate) mod managed_state;
-mod merge;
+mod lookup;
+mod lookup_union;
+mod managed_state;
+pub mod merge;
 pub mod monitor;
 mod mview;
 mod project;
+mod rearranged_chain;
+pub mod receiver;
+mod simple;
+mod source;
 mod top_n;
 mod top_n_appendonly;
+mod top_n_executor;
+mod union;
 
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
-use async_trait::async_trait;
-use enum_as_inner::EnumAsInner;
-use futures::Stream;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_pb::common::ActorInfo;
-use risingwave_pb::data::barrier::Mutation as ProstMutation;
-use risingwave_pb::data::stream_message::StreamMessage;
-use risingwave_pb::data::{
-    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
-    NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
-};
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_storage::StateStore;
-use smallvec::SmallVec;
-use tracing::trace_span;
+pub use actor::Actor;
+pub use batch_query::BatchQueryExecutor;
+pub use chain::ChainExecutor;
+pub use debug::DebugExecutor;
+pub use dispatch::DispatchExecutor;
+pub use filter::FilterExecutor;
+pub use global_simple_agg::SimpleAggExecutor;
+pub use hash_agg::HashAggExecutor;
+pub use hash_join::*;
+pub use hop_window::HopWindowExecutor;
+pub use local_simple_agg::LocalSimpleAggExecutor;
+pub use lookup::*;
+pub use lookup_union::LookupUnionExecutor;
+pub use merge::MergeExecutor;
+pub use mview::*;
+pub use project::ProjectExecutor;
+pub use rearranged_chain::RearrangedChainExecutor;
+use simple::{SimpleExecutor, SimpleExecutorWrapper};
+pub use source::*;
+pub use top_n::TopNExecutor;
+pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use union::UnionExecutor;
+
+pub type BoxedExecutor = Box<dyn Executor>;
+pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
+pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
+
+/// The maximum chunk length produced by executor at a time.
+const PROCESSING_WINDOW_SIZE: usize = 1024;
+
+/// Static information of an executor.
+#[derive(Debug, Default)]
+pub struct ExecutorInfo {
+    /// See [`Executor::schema`].
+    pub schema: Schema,
+
+    /// See [`Executor::pk_indices`].
+    pub pk_indices: PkIndices,
+
+    /// See [`Executor::identity`].
+    pub identity: String,
+}
+
+/// `Executor` supports handling of control messages.
+pub trait Executor: Send + 'static {
+    fn execute(self: Box<Self>) -> BoxedMessageStream;
+
+    /// Return the schema of the OUTPUT of the executor.
+    fn schema(&self) -> &Schema;
+
+    /// Return the primary key indices of the OUTPUT of the executor.
+    /// Schema is used by both OLAP and streaming, therefore
+    /// pk indices are maintained independently.
+    fn pk_indices(&self) -> PkIndicesRef;
+
+    /// Identity of the executor.
+    fn identity(&self) -> &str;
+
+    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
+        self.execute()
+    }
+
+    #[inline(always)]
+    fn info(&self) -> ExecutorInfo {
+        let schema = self.schema().to_owned();
+        let pk_indices = self.pk_indices().to_owned();
+        let identity = self.identity().to_owned();
+        ExecutorInfo {
+            schema,
+            pk_indices,
+            identity,
+        }
+    }
+
+    fn boxed(self) -> BoxedExecutor
+    where
+        Self: Sized + Send + 'static,
+    {
+        Box::new(self)
+    }
+}
 
 pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
-/// Boxed stream of [`StreamMessage`].
-pub type BoxedExecutorV1Stream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    UpdateOutputs(HashMap<ActorId, Vec<ActorInfo>>),
-    AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
+    UpdateOutputs(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
+    AddOutput(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -109,6 +179,7 @@ impl Epoch {
         Self { curr, prev }
     }
 
+    #[cfg(test)]
     pub fn inc(&self) -> Self {
         Self {
             curr: self.curr + 1,
@@ -225,29 +296,23 @@ impl Barrier {
                 })),
                 Some(Mutation::UpdateOutputs(updates)) => {
                     Some(ProstMutation::Update(UpdateMutation {
-                        actors: updates
+                        mutations: updates
                             .iter()
-                            .map(|(&f, actors)| {
-                                (
-                                    f,
-                                    MutationActors {
-                                        info: actors.clone(),
-                                    },
-                                )
+                            .map(|(&(actor_id, dispatcher_id), actors)| DispatcherMutation {
+                                actor_id,
+                                dispatcher_id,
+                                info: actors.clone(),
                             })
                             .collect(),
                     }))
                 }
                 Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(AddMutation {
-                    actors: adds
+                    mutations: adds
                         .iter()
-                        .map(|(&id, actors)| {
-                            (
-                                id,
-                                MutationActors {
-                                    info: actors.clone(),
-                                },
-                            )
+                        .map(|(&(actor_id, dispatcher_id), actors)| DispatcherMutation {
+                            actor_id,
+                            dispatcher_id,
+                            info: actors.clone(),
                         })
                         .collect(),
                 })),
@@ -265,19 +330,29 @@ impl Barrier {
             ProstMutation::Update(update) => Some(
                 Mutation::UpdateOutputs(
                     update
-                        .actors
+                        .mutations
                         .iter()
-                        .map(|(&f, actors)| (f, actors.get_info().clone()))
-                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
+                        .map(|mutation| {
+                            (
+                                (mutation.actor_id, mutation.dispatcher_id),
+                                mutation.get_info().clone(),
+                            )
+                        })
+                        .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
             ProstMutation::Add(adds) => Some(
                 Mutation::AddOutput(
-                    adds.actors
+                    adds.mutations
                         .iter()
-                        .map(|(&id, actors)| (id, actors.get_info().clone()))
-                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
+                        .map(|mutation| {
+                            (
+                                (mutation.actor_id, mutation.dispatcher_id),
+                                mutation.get_info().clone(),
+                            )
+                        })
+                        .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
@@ -295,7 +370,7 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug, EnumAsInner, PartialEq)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -355,88 +430,6 @@ impl Message {
     }
 }
 
-/// `Executor` supports handling of control messages.
-#[async_trait]
-pub trait ExecutorV1: Send + Debug + 'static {
-    async fn next(&mut self) -> Result<Message>;
-
-    /// Return the schema of the OUTPUT of the executor.
-    fn schema(&self) -> &Schema;
-
-    /// Return the primary key indices of the OUTPUT of the executor.
-    /// Schema is used by both OLAP and streaming, therefore
-    /// pk indices are maintained independently.
-    fn pk_indices(&self) -> PkIndicesRef;
-
-    fn pk_data_types(&self) -> PkDataTypes {
-        let schema = self.schema();
-        self.pk_indices()
-            .iter()
-            .map(|idx| schema.fields[*idx].data_type.clone())
-            .collect()
-    }
-
-    /// Identity string of the executor.
-    fn identity(&self) -> &str;
-
-    /// Logical Operator Information of the executor
-    fn logical_operator_info(&self) -> &str;
-
-    /// Clears the in-memory cache of the executor. It's no-op by default.
-    fn clear_cache(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn init(&mut self, _epoch: u64) -> Result<()> {
-        unreachable!()
-    }
-}
-
-#[derive(Debug)]
-pub enum ExecutorV1State {
-    /// Waiting for the first barrier
-    Init,
-    /// Can read from and write to storage
-    Active(u64),
-}
-
-impl ExecutorV1State {
-    pub fn epoch(&self) -> u64 {
-        match self {
-            ExecutorV1State::Init => panic!("Executor is not active when getting the epoch"),
-            ExecutorV1State::Active(epoch) => *epoch,
-        }
-    }
-}
-
-pub trait StatefulExecutorV1: ExecutorV1 {
-    fn executor_state(&self) -> &ExecutorV1State;
-
-    fn update_executor_state(&mut self, new_state: ExecutorV1State);
-
-    /// Try initializing the executor if not done.
-    /// Return:
-    /// - Some(Epoch) if the executor is successfully initialized
-    /// - None if the executor has been initialized
-    fn try_init_executor<'a>(
-        &'a mut self,
-        msg: impl TryInto<&'a Barrier, Error = ()>,
-    ) -> Option<Barrier> {
-        match self.executor_state() {
-            ExecutorV1State::Init => {
-                if let Ok(barrier) = msg.try_into() {
-                    // Move to Active state
-                    self.update_executor_state(ExecutorV1State::Active(barrier.epoch.curr));
-                    Some(barrier.clone())
-                } else {
-                    panic!("The first message the executor receives is not a barrier");
-                }
-            }
-            ExecutorV1State::Active(_) => None,
-        }
-    }
-}
-
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
@@ -458,79 +451,6 @@ pub fn pk_input_array_refs<'a>(
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())
         .collect()
-}
-
-pub trait ExecutorBuilder {
-    /// For compatibility.
-    fn new_boxed_executor_v1(
-        _executor_params: ExecutorParams,
-        _node: &stream_plan::StreamNode,
-        _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<Box<dyn ExecutorV1>> {
-        unimplemented!()
-    }
-
-    /// Create an executor. May directly override this function to create an executor v2, or it will
-    /// create an [`ExecutorV1`] and wrap it to v2.
-    fn new_boxed_executor(
-        executor_params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        Self::new_boxed_executor_v1(executor_params, node, store, stream).map(|e| e.v2().boxed())
-    }
-}
-
-#[macro_export]
-macro_rules! build_executor {
-    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
-        match $node.get_node().unwrap() {
-            $(
-                $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source,$node,$store,$stream)
-                },
-            )*
-            _ => Err(RwError::from(
-                ErrorCode::InternalError(format!(
-                    "unsupported node:{:?}",
-                    $node.get_node().unwrap()
-                )),
-            )),
-        }
-    }
-}
-
-pub fn create_executor(
-    executor_params: ExecutorParams,
-    stream: &mut LocalStreamManagerCore,
-    node: &stream_plan::StreamNode,
-    store: impl StateStore,
-) -> Result<BoxedExecutor> {
-    build_executor! {
-        executor_params,
-        node,
-        store,
-        stream,
-        Node::SourceNode => SourceExecutorBuilder,
-        Node::ProjectNode => ProjectExecutorBuilder,
-        Node::TopNNode => TopNExecutorBuilder,
-        Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
-        Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
-        Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
-        Node::HashAggNode => HashAggExecutorBuilder,
-        Node::HashJoinNode => HashJoinExecutorBuilder,
-        Node::HopWindowNode => HopWindowExecutorBuilder,
-        Node::ChainNode => ChainExecutorBuilder,
-        Node::BatchPlanNode => BatchQueryExecutorBuilder,
-        Node::MergeNode => MergeExecutorBuilder,
-        Node::MaterializeNode => MaterializeExecutorBuilder,
-        Node::FilterNode => FilterExecutorBuilder,
-        Node::ArrangeNode => ArrangeExecutorBuilder,
-        Node::LookupNode => LookupExecutorBuilder,
-        Node::UnionNode => UnionExecutorBuilder,
-    }
 }
 
 /// `StreamConsumer` is the last step in an actor.

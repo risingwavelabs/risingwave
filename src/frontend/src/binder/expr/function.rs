@@ -44,7 +44,9 @@ impl Binder {
             };
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
-                return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
+                return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
+                    kind, inputs, f.distinct,
+                )?)));
             }
             let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
@@ -56,6 +58,11 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "nullif" => {
+                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
+                    ExprType::Case
+                }
+                "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -75,6 +82,21 @@ impl Binder {
                 112.into(),
             )
             .into())
+        }
+    }
+
+    /// Make sure inputs only have 2 value and rewrite the arguments.
+    /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
+    fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
+        } else {
+            let inputs = vec![
+                FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
+                Literal::new(None, inputs[0].return_type()).into(),
+                inputs[0].clone(),
+            ];
+            Ok(inputs)
         }
     }
 

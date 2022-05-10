@@ -22,7 +22,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor_v2::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
+use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
 
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
@@ -53,9 +53,9 @@ impl<S: StateStore> ManagedValueState<S> {
             let raw_data = keyspace.value(epoch).await?;
 
             // Decode the Datum from the value.
-            if let Some(raw_data) = raw_data {
-                let mut deserializer = value_encoding::Deserializer::new(raw_data);
-                Some(deserialize_cell(&mut deserializer, &agg_call.return_type)?)
+            if let Some(mut raw_data) = raw_data {
+                // let mut deserializer = value_encoding::Deserializer::new(raw_data);
+                Some(deserialize_cell(&mut raw_data, &agg_call.return_type)?)
             } else {
                 None
             }
@@ -122,8 +122,8 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
+    use crate::executor::aggregation::AggArgs;
     use crate::executor::test_utils::create_in_memory_keyspace;
-    use crate::executor_v2::aggregation::AggArgs;
 
     fn create_test_count_state() -> AggCall {
         AggCall {

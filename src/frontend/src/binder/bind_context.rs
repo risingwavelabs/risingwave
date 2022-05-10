@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 
 #[derive(Debug, Clone)]
@@ -23,16 +23,16 @@ pub struct ColumnBinding {
     pub table_name: String,
     pub index: usize,
     pub is_hidden: bool,
-    pub desc: ColumnDesc,
+    pub field: Field,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, is_hidden: bool, desc: ColumnDesc) -> Self {
+    pub fn new(table_name: String, index: usize, is_hidden: bool, field: Field) -> Self {
         ColumnBinding {
             table_name,
             index,
             is_hidden,
-            desc,
+            field,
         }
     }
 }

@@ -82,15 +82,24 @@ where
         builder: &mut R::Builder,
         groups: &EqGroups,
     ) -> Result<()> {
-        let mut groups_iter = groups.get_starting_indices().iter().peekable();
+        let mut group_cnt = 0;
+        let mut groups_iter = groups.starting_indices().iter().peekable();
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for (i, v) in input.iter().enumerate() {
-            if groups_iter.peek() == Some(&&i) {
+        let chunk_offset = groups.chunk_offset();
+        for (i, v) in input.iter().skip(chunk_offset).enumerate() {
+            if groups_iter.peek() == Some(&&(i + chunk_offset)) {
                 groups_iter.next();
+                group_cnt += 1;
                 builder.append(cur)?;
                 cur = None;
             }
             cur = self.f.eval(cur, v)?;
+
+            // reset state and exit when reach limit
+            if groups.is_reach_limit(group_cnt) {
+                cur = None;
+                break;
+            }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())

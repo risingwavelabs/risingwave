@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{Source, StreamSourceReader};
+use crate::{StreamChunkWithState, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -103,9 +103,6 @@ impl TableSourceV2 {
     }
 }
 
-#[derive(Debug)]
-pub struct TableV2ReaderContext;
-
 // TODO: Currently batch read directly calls api from `ScannableTable` instead of using
 // `BatchReader`.
 #[derive(Debug)]
@@ -126,7 +123,7 @@ pub struct TableV2StreamReader {
 
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
         let (chunk, notifier) = self
             .rx
             .recv()
@@ -148,20 +145,16 @@ impl StreamSourceReader for TableV2StreamReader {
         // Notify about that we've taken the chunk.
         notifier.send(chunk.cardinality()).ok();
 
-        Ok(chunk)
+        Ok(StreamChunkWithState {
+            chunk,
+            split_offset_mapping: None,
+        })
     }
 }
 
-#[async_trait]
-impl Source for TableSourceV2 {
-    type ReaderContext = TableV2ReaderContext;
-    type StreamReader = TableV2StreamReader;
-
-    async fn stream_reader(
-        &self,
-        _context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::StreamReader> {
+impl TableSourceV2 {
+    /// Create a new stream reader.
+    pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> Result<TableV2StreamReader> {
         let column_indices = column_ids
             .into_iter()
             .map(|id| {
@@ -207,9 +200,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
         let source = Arc::new(new_source());
-        let mut reader = source
-            .stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])
-            .await?;
+        let mut reader = source.stream_reader(vec![ColumnId::from(0)]).await?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -230,7 +221,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

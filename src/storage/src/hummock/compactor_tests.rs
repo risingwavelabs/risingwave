@@ -71,7 +71,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // TODO(soundOfDestiny): re-enable the test case
     async fn test_compaction_same_key_not_split() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -115,15 +114,7 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task
-                .input_ssts
-                .first()
-                .unwrap()
-                .level
-                .as_ref()
-                .unwrap()
-                .table_infos
-                .len(),
+            compact_task.input_ssts.first().unwrap().table_infos.len(),
             kv_count
         );
 

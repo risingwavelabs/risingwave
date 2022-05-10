@@ -57,6 +57,8 @@ pub struct MetaMetrics {
     pub level_compact_write_sstn: IntCounterVec,
     /// num of compactions from each level to next level
     pub level_compact_frequency: IntCounterVec,
+    /// hummock version size
+    pub version_size: IntGauge,
 }
 
 impl MetaMetrics {
@@ -163,6 +165,9 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let version_size =
+            register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
+
         Self {
             registry,
 
@@ -180,6 +185,7 @@ impl MetaMetrics {
             level_compact_read_sstn_next,
             level_compact_write_sstn,
             level_compact_frequency,
+            version_size,
         }
     }
 

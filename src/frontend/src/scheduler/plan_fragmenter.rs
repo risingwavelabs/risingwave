@@ -422,7 +422,8 @@ mod tests {
             vec![0, 1],
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pk: vec![],
+                pks: vec![],
+                order_desc: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -439,6 +440,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
+                distribution_keys: vec![],
             }),
             vec![],
             ctx,

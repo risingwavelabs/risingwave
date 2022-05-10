@@ -1,16 +1,21 @@
-// Copyright 2022 Singularity Data
+//  Copyright 2022 Singularity Data
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//  http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+// Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+// This source code is licensed under both the GPLv2 (found in the
+// COPYING file in the root directory) and Apache 2.0 License
+// (found in the LICENSE.Apache file in the root directory).
 
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
@@ -454,13 +459,14 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         }
 
         // Keep the handle in lru list if it is still in the cache and the cache is not over-sized.
-        if (*h).is_in_cache() && self.usage.load(Ordering::Relaxed) <= self.capacity {
-            self.lru_insert(h);
-            return None;
+        if (*h).is_in_cache() {
+            if self.usage.load(Ordering::Relaxed) <= self.capacity {
+                self.lru_insert(h);
+                return None;
+            }
+            // Remove the handle from table.
+            self.table.remove((*h).hash, (*h).get_key());
         }
-
-        // Remove the handle from table.
-        self.table.remove((*h).hash, (*h).get_key());
 
         // Since the released handle was previously used externally, it must not be in LRU, and we
         // don't need to remove it from lru.
@@ -692,6 +698,7 @@ impl<K: LruKey, T: LruValue> Drop for CachableEntry<K, T> {
 mod tests {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
+    use std::sync::atomic::Ordering::Relaxed;
     use std::sync::Arc;
 
     use rand::rngs::SmallRng;
@@ -912,6 +919,62 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(old_entry);
+        }
+    }
+
+    #[test]
+    fn test_release_stale_value() {
+        unsafe {
+            let mut to_delete = vec![];
+            // The cache can only hold one handle
+            let mut cache = create_cache(1);
+            let insert_handle = cache.insert(
+                "key".to_string(),
+                0,
+                1,
+                "old_value".to_string(),
+                &mut to_delete,
+            );
+            cache.release(insert_handle);
+            let old_entry = cache.lookup(0, &"key".to_string());
+            assert!(!old_entry.is_null());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).refs, 1);
+
+            let insert_handle = cache.insert(
+                "key".to_string(),
+                0,
+                1,
+                "new_value".to_string(),
+                &mut to_delete,
+            );
+            assert!(!(*old_entry).is_in_cache());
+            let new_entry = cache.lookup(0, &"key".to_string());
+            assert!(!new_entry.is_null());
+            assert_eq!((*new_entry).get_value(), &"new_value".to_string());
+            assert_eq!((*new_entry).refs, 2);
+            cache.release(insert_handle);
+            assert_eq!((*new_entry).refs, 1);
+
+            // The handle for new and old value are both referenced.
+            assert_eq!(2, cache.usage.load(Relaxed));
+            assert_eq!(0, cache.lru_usage.load(Relaxed));
+
+            // Release the old handle, it will be cleared since the cache capacity is 1
+            cache.release(old_entry);
+            assert_eq!(1, cache.usage.load(Relaxed));
+            assert_eq!(0, cache.lru_usage.load(Relaxed));
+
+            let new_entry_again = cache.lookup(0, &"key".to_string());
+            assert!(!new_entry_again.is_null());
+            assert_eq!((*new_entry_again).get_value(), &"new_value".to_string());
+            assert_eq!((*new_entry_again).refs, 2);
+
+            cache.release(new_entry);
+            cache.release(new_entry_again);
+
+            assert_eq!(1, cache.usage.load(Relaxed));
+            assert_eq!(1, cache.lru_usage.load(Relaxed));
         }
     }
 

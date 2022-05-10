@@ -20,6 +20,7 @@ use risingwave_pb::batch_plan::ValuesNode;
 
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -139,5 +140,11 @@ mod tests {
                 }],
             })
         );
+    }
+}
+
+impl ToLocalBatch for BatchValues {
+    fn to_local(&self) -> PlanRef {
+        Self::with_dist(self.logical().clone(), Distribution::Single).into()
     }
 }

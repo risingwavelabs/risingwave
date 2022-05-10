@@ -22,19 +22,21 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::Properties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 use crate::connector_source::ConnectorSource;
+use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
 use crate::{SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
-const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
+const NEXMARK_SOURCE: &str = "nexmark";
 
 /// The local source manager on the compute node.
 pub trait SourceManager: Debug + Sync + Send {
@@ -75,14 +77,26 @@ pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
-    pub row_id_index: Option<usize>,
+
+    // The column index of row ID. By default it's 0, which means the first column is row ID.
+    // TODO: change to Option<usize> when pk supported in the future.
+    pub row_id_index: usize,
+    pub row_id_generator: Arc<Mutex<RowIdGenerator>>,
+}
+
+impl SourceDesc {
+    pub fn next_row_id(&self) -> RowId {
+        self.row_id_generator.as_ref().lock().next()
+    }
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
+    /// Located worker id.
+    worker_id: u32,
 }
 
 impl SourceManager for MemSourceManager {
@@ -124,11 +138,11 @@ impl SourceManager for MemSourceManager {
             "expected row_id_index >= 0, got {}",
             info.row_id_index
         );
-        let row_id_index = Some(info.row_id_index as usize);
+        let row_id_index = info.row_id_index as usize;
 
-        match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
+        match properties.get_connector_type()?.as_str() {
             // TODO support more connector here
-            KINESIS_SOURCE | KAFKA_SOURCE => {}
+            KINESIS_SOURCE | KAFKA_SOURCE | NEXMARK_SOURCE => {}
             other => {
                 return Err(RwError::from(ProtocolError(format!(
                     "source type {} not supported",
@@ -148,6 +162,10 @@ impl SourceManager for MemSourceManager {
             format,
             columns,
             row_id_index,
+            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
+                self.worker_id,
+                *UNIX_SINGULARITY_DATE_EPOCH,
+            ))),
         };
 
         let mut tables = self.get_sources()?;
@@ -178,7 +196,11 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
-            row_id_index: Some(0), // always use the first column as row_id
+            row_id_index: 0, // always use the first column as row_id
+            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
+                self.worker_id,
+                *UNIX_SINGULARITY_DATE_EPOCH,
+            ))),
         };
 
         sources.insert(*table_id, desc);
@@ -211,20 +233,15 @@ impl SourceManager for MemSourceManager {
 }
 
 impl MemSourceManager {
-    pub fn new() -> Self {
+    pub fn new(worker_id: u32) -> Self {
         MemSourceManager {
             sources: Mutex::new(HashMap::new()),
+            worker_id,
         }
     }
 
     fn get_sources(&self) -> Result<MutexGuard<HashMap<TableId, SourceDesc>>> {
         Ok(self.sources.lock())
-    }
-}
-
-impl Default for MemSourceManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -266,7 +283,7 @@ mod tests {
         };
         let source_id = TableId::default();
 
-        let mem_source_manager = MemSourceManager::new();
+        let mem_source_manager = MemSourceManager::default();
         let source = mem_source_manager.create_source(&source_id, info);
 
         assert!(source.is_ok());
@@ -300,7 +317,7 @@ mod tests {
 
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
-        let mem_source_manager = MemSourceManager::new();
+        let mem_source_manager = MemSourceManager::default();
         let res = mem_source_manager.create_table_source(&table_id, table_columns);
         assert!(res.is_ok());
 

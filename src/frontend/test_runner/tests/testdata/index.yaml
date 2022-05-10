@@ -3,13 +3,40 @@
     create table t2 (v3 int, v4 numeric, v5 bigint);
     create index t1_v1 on t1(v1);
     create index t2_v3 on t2(v3);
-    /* should generate delta join plan, and stream index scan (pk not correct for now) */
+    /* should generate delta join plan, and stream index scan */
     select * from t1, t2 where t1.v1 = t2.v3;
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, v5, _row_id#1(hidden)], pk_columns: [v1, _row_id#0, v3, _row_id#1] }
-      StreamExchange { dist: HashShard([0, 2, 3, 6]) }
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, v5, _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
+      StreamExchange { dist: HashShard([2, 6]) }
         StreamDeltaJoin { type: Inner, predicate: $0 = $3 }
-          StreamExchange { dist: HashShard([0]) }
-            StreamIndexScan { index: t1_v1, columns: [v1, v2, _row_id#0], pk_indices: [0, 2] }
-          StreamExchange { dist: HashShard([0]) }
-            StreamIndexScan { index: t2_v3, columns: [v3, v4, v5, _row_id#0], pk_indices: [0, 3] }
+          StreamIndexScan { index: t1_v1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+          StreamIndexScan { index: t2_v3, columns: [v3, v4, v5, _row_id#0], pk_indices: [3] }
+- id: index_slt
+  sql: |
+    create table iii_t1 (v1 int, v2 int);
+    create table iii_t2 (v3 int, v4 int);
+    create table iii_t3 (v5 int, v6 int);
+    create materialized view iii_mv1 as select * from iii_t1, iii_t2, iii_t3 where iii_t1.v1 = iii_t2.v3 and iii_t1.v1 = iii_t3.v5;
+    create index iii_index_1 on iii_t1(v1);
+    create index iii_index_2 on iii_t2(v3);
+- before:
+    - index_slt
+  sql: |
+    select * from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
+      StreamExchange { dist: HashShard([2, 5]) }
+        StreamDeltaJoin { type: Inner, predicate: $0 = $3 }
+          StreamIndexScan { index: iii_index_1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+          StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id#0], pk_indices: [2] }
+- before:
+    - index_slt
+  sql: |
+    select v4 from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
+  stream_plan: |
+    StreamMaterialize { columns: [v4, _row_id#0(hidden), _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
+      StreamExchange { dist: HashShard([1, 2]) }
+        StreamProject { exprs: [$3, $1, $4], expr_alias: [v4,  ,  ] }
+          StreamDeltaJoin { type: Inner, predicate: $0 = $2 }
+            StreamIndexScan { index: iii_index_1, columns: [v1, _row_id#0], pk_indices: [1] }
+            StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id#0], pk_indices: [2] }
