@@ -641,11 +641,7 @@ async fn test_hummock_manager_basic() {
 
     // test list_version_ids_asc
     assert_eq!(
-        hummock_manager
-            .list_version_ids_asc(None)
-            .await
-            .unwrap()
-            .len(),
+        hummock_manager.list_version_ids_asc().await.unwrap().len(),
         1
     );
 
@@ -659,7 +655,7 @@ async fn test_hummock_manager_basic() {
 
     // test list_version_ids_asc
     assert_eq!(
-        hummock_manager.list_version_ids_asc(None).await.unwrap(),
+        hummock_manager.list_version_ids_asc().await.unwrap(),
         vec![FIRST_VERSION_ID, FIRST_VERSION_ID + 1]
     );
 
@@ -725,7 +721,7 @@ async fn test_hummock_manager_basic() {
         .await
         .unwrap();
     assert_eq!(
-        hummock_manager.list_version_ids_asc(None).await.unwrap(),
+        hummock_manager.list_version_ids_asc().await.unwrap(),
         vec![FIRST_VERSION_ID + 1]
     );
 }

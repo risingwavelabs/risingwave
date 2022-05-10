@@ -68,15 +68,13 @@ where
     /// qualified to be deleted, then this version can be deleted.
     pub async fn vacuum_version_metadata(&self) -> risingwave_common::error::Result<u64> {
         let batch_size = 16usize;
-        let version_ids = self
-            .hummock_manager
-            .list_version_ids_asc(Some(batch_size))
-            .await?;
+        let mut vacuum_count: usize = 0;
+        let version_ids = self.hummock_manager.list_version_ids_asc().await?;
         if version_ids.is_empty() {
             return Ok(0);
         }
         let mut ssts_in_use = HashSet::new();
-        let mut versions_to_delete = vec![];
+        let mut versions_to_delete = Vec::with_capacity(batch_size);
         // Iterate version ids in ascending order. Skip the greatest version id.
         for version_id in version_ids.iter().take(version_ids.len() - 1) {
             let pin_count = self
@@ -99,13 +97,17 @@ where
                 if stale_ssts_left.is_empty() {
                     versions_to_delete.push(*version_id);
                 }
+                if versions_to_delete.len() >= batch_size {
+                    vacuum_count += versions_to_delete.len();
+                    // Delete version metadata
+                    self.hummock_manager
+                        .delete_versions(&versions_to_delete)
+                        .await?;
+                    versions_to_delete.clear();
+                }
             }
         }
-        // Delete version metadata
-        self.hummock_manager
-            .delete_versions(&versions_to_delete)
-            .await?;
-        Ok(versions_to_delete.len() as u64)
+        Ok(vacuum_count as u64)
     }
 
     /// Qualified SSTs and their metadata(aka `SstableIdInfo`) are deleted.
@@ -120,7 +122,6 @@ where
         &self,
         orphan_sst_retention_interval: Duration,
     ) -> risingwave_common::error::Result<Vec<HummockSSTableId>> {
-        let batch_size = 16usize;
         // Select SSTs to delete.
         let ssts_to_delete = {
             // 1. Retry the pending SSTs first.
@@ -153,47 +154,60 @@ where
                 self.pending_sst_ids.write().extend(ssts_to_delete.clone());
                 ssts_to_delete
             }
-        }
-        .into_iter()
-        .take(batch_size)
-        .collect_vec();
-
-        // 1. Pick a worker.
-        let compactor = match self.compactor_manager.next_compactor() {
-            None => {
-                tracing::warn!("No vacuum worker is available.");
-                return Ok(vec![]);
-            }
-            Some(compactor) => compactor,
         };
 
-        // 2. Send task.
-        match compactor
-            .send_task(
-                None,
-                Some(VacuumTask {
-                    // The SST id doesn't necessarily have a counterpart SST file in S3, but
-                    // it's OK trying to delete it.
-                    sstable_ids: ssts_to_delete.clone(),
-                }),
-            )
-            .await
-        {
-            Ok(_) => {
-                tracing::debug!(
-                    "Try to vacuum SSTs {:?} in worker {}.",
-                    ssts_to_delete,
-                    compactor.context_id()
-                );
-                Ok(ssts_to_delete)
-            }
-            Err(err) => {
-                tracing::warn!("Failed to send vacuum task. {}", err);
-                self.compactor_manager
-                    .remove_compactor(compactor.context_id());
-                Ok(vec![])
+        let mut batch_idx = 0;
+        let batch_size = 64usize;
+        let mut sent_batch = Vec::with_capacity(ssts_to_delete.len());
+        while batch_idx < ssts_to_delete.len() {
+            let delete_batch = ssts_to_delete
+                .iter()
+                .skip(batch_idx)
+                .take(batch_size)
+                .cloned()
+                .collect_vec();
+            // 1. Pick a worker.
+            let compactor = match self.compactor_manager.next_compactor() {
+                None => {
+                    tracing::warn!("No vacuum worker is available.");
+                    return Ok(vec![]);
+                }
+                Some(compactor) => compactor,
+            };
+
+            // 2. Send task.
+            match compactor
+                .send_task(
+                    None,
+                    Some(VacuumTask {
+                        // The SST id doesn't necessarily have a counterpart SST file in S3, but
+                        // it's OK trying to delete it.
+                        sstable_ids: delete_batch.clone(),
+                    }),
+                )
+                .await
+            {
+                Ok(_) => {
+                    tracing::debug!(
+                        "Try to vacuum SSTs {:?} in worker {}.",
+                        delete_batch,
+                        compactor.context_id()
+                    );
+                    batch_idx += batch_size;
+                    sent_batch.extend(delete_batch);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to send vacuum task to worker {}: {:#?}",
+                        compactor.context_id(),
+                        err
+                    );
+                    self.compactor_manager
+                        .remove_compactor(compactor.context_id());
+                }
             }
         }
+        Ok(sent_batch)
     }
 
     pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {

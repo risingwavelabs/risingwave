@@ -977,15 +977,11 @@ where
     }
 
     /// List version ids in ascending order.
-    pub async fn list_version_ids_asc(
-        &self,
-        limit: Option<usize>,
-    ) -> Result<Vec<HummockVersionId>> {
+    pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
         let versioning_guard = self.versioning.read().await;
         let version_ids = versioning_guard
             .hummock_versions
             .keys()
-            .take(limit.unwrap_or(usize::MAX))
             .cloned()
             .collect_vec();
         Ok(version_ids)

@@ -34,6 +34,7 @@ impl Compactor {
         compact_task: Option<CompactTask>,
         vacuum_task: Option<VacuumTask>,
     ) -> Result<()> {
+        // TODO: compactor node backpressure
         self.sender
             .send(Ok(SubscribeCompactTasksResponse {
                 compact_task,
