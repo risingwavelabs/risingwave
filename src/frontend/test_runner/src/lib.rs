@@ -274,8 +274,7 @@ impl TestCase {
                     create_mv::handle_create_mv(context, name, query).await?;
                 }
                 Statement::Drop(drop_statement) => {
-                    let table_object_name = ObjectName(vec![drop_statement.name]);
-                    drop_table::handle_drop_table(context, table_object_name).await?;
+                    drop_table::handle_drop_table(context, drop_statement.object_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
