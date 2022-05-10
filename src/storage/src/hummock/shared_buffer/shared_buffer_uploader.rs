@@ -123,6 +123,7 @@ impl SharedBufferUploader {
                             task_results.insert((epoch, task_id), Ok(tables));
                         }
                         Err(e) => {
+                            error!("Failed to flush shared buffer: {:?}", e);
                             failed = true;
                             task_results.insert((epoch, task_id), Err(e));
                         }
