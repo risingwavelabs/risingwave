@@ -163,7 +163,7 @@ where
         };
 
         let mut batch_idx = 0;
-        let batch_size = 64usize;
+        let batch_size = 32usize;
         let mut sent_batch = Vec::with_capacity(ssts_to_delete.len());
         while batch_idx < ssts_to_delete.len() {
             let delete_batch = ssts_to_delete
