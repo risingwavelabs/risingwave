@@ -196,27 +196,17 @@ impl ColumnDesc {
 
 impl From<ProstColumnDesc> for ColumnDesc {
     fn from(prost: ProstColumnDesc) -> Self {
-        if let DataType::Struct { fields } = DataType::from(prost.column_type.as_ref().unwrap()) {
-            let field_descs: Vec<ColumnDesc> = prost
-                .field_descs
-                .into_iter()
-                .map(ColumnDesc::from)
-                .collect();
-            Self {
-                data_type: DataType::Struct { fields },
-                column_id: ColumnId::new(prost.column_id),
-                name: prost.name,
-                type_name: prost.type_name,
-                field_descs,
-            }
-        } else {
-            Self {
-                data_type: DataType::from(prost.column_type.as_ref().unwrap()),
-                column_id: ColumnId::new(prost.column_id),
-                name: prost.name,
-                type_name: prost.type_name,
-                field_descs: vec![],
-            }
+        let field_descs: Vec<ColumnDesc> = prost
+            .field_descs
+            .into_iter()
+            .map(ColumnDesc::from)
+            .collect();
+        Self {
+            data_type: DataType::from(prost.column_type.as_ref().unwrap()),
+            column_id: ColumnId::new(prost.column_id),
+            name: prost.name,
+            type_name: prost.type_name,
+            field_descs,
         }
     }
 }
