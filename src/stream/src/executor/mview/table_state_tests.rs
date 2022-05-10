@@ -235,7 +235,6 @@ async fn test_multi_cell_based_table_iter() {
 #[tokio::test]
 async fn test_state_table_iter() {
     let state_store = MemoryStateStore::new();
-    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -309,11 +308,22 @@ async fn test_state_table_iter() {
 
     state
         .insert(
-            Row(vec![Some(5_i32.into()), Some(44_i32.into())]),
+            Row(vec![Some(6_i32.into()), Some(66_i32.into())]),
             Row(vec![
-                Some(5_i32.into()),
-                Some(55_i32.into()),
-                Some(555_i32.into()),
+                Some(6_i32.into()),
+                Some(66_i32.into()),
+                Some(666_i32.into()),
+            ]),
+        )
+        .unwrap();
+
+    state
+        .insert(
+            Row(vec![Some(9_i32.into()), Some(99_i32.into())]),
+            Row(vec![
+                Some(9_i32.into()),
+                Some(99_i32.into()),
+                Some(999_i32.into()),
             ]),
         )
         .unwrap();
@@ -322,8 +332,8 @@ async fn test_state_table_iter() {
 
     let epoch = u64::MAX;
 
-    // write [3, 33, 333], [4, 44, 444] into mem_table, and [3333, 3333, 3333], [5, 55, 555] exists
-    // in cell_based_table
+    // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
+    // [3333, 3333, 3333], [6, 66, 666], [9, 99, 999] exists in cell_based_table
     state
         .insert(
             Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
@@ -345,8 +355,39 @@ async fn test_state_table_iter() {
             ]),
         )
         .unwrap();
-    let mut iter = state.iter(epoch).await.unwrap();
 
+    state
+        .insert(
+            Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
+            Row(vec![
+                Some(5_i32.into()),
+                Some(55_i32.into()),
+                Some(555_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
+            Row(vec![Some(7_i32.into()), Some(77_i32.into())]),
+            Row(vec![
+                Some(7_i32.into()),
+                Some(77_i32.into()),
+                Some(777_i32.into()),
+            ]),
+        )
+        .unwrap();
+
+    state
+        .insert(
+            Row(vec![Some(8_i32.into()), Some(88_i32.into())]),
+            Row(vec![
+                Some(8_i32.into()),
+                Some(88_i32.into()),
+                Some(888_i32.into()),
+            ]),
+        )
+        .unwrap();
+    let mut iter = state.iter(epoch).await.unwrap();
     let res = iter.next().await.unwrap();
     assert!(res.is_some());
     assert_eq!(
@@ -365,7 +406,7 @@ async fn test_state_table_iter() {
         Row(vec![
             Some(3_i32.into()),
             Some(33_i32.into()),
-            Some(333.into())
+            Some(333_i32.into())
         ]),
         res.unwrap()
     );
@@ -376,7 +417,7 @@ async fn test_state_table_iter() {
         Row(vec![
             Some(4_i32.into()),
             Some(44_i32.into()),
-            Some(444.into())
+            Some(444_i32.into())
         ]),
         res.unwrap()
     );
@@ -388,7 +429,50 @@ async fn test_state_table_iter() {
         Row(vec![
             Some(5_i32.into()),
             Some(55_i32.into()),
-            Some(555.into())
+            Some(555_i32.into())
+        ]),
+        res.unwrap()
+    );
+    let res = iter.next().await.unwrap();
+
+    assert_eq!(
+        Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into())
+        ]),
+        res.unwrap()
+    );
+
+    let res = iter.next().await.unwrap();
+
+    assert_eq!(
+        Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777.into())
+        ]),
+        res.unwrap()
+    );
+
+    let res = iter.next().await.unwrap();
+
+    assert_eq!(
+        Row(vec![
+            Some(8_i32.into()),
+            Some(88_i32.into()),
+            Some(888_i32.into())
+        ]),
+        res.unwrap()
+    );
+
+    let res = iter.next().await.unwrap();
+
+    assert_eq!(
+        Row(vec![
+            Some(9_i32.into()),
+            Some(99_i32.into()),
+            Some(999_i32.into())
         ]),
         res.unwrap()
     );

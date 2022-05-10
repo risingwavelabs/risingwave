@@ -471,6 +471,7 @@ pub struct CellBasedTableStreamingIter<S: StateStore> {
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
+    pub cell_based_item: Option<(Vec<u8>, Row)>,
 }
 
 impl<S: StateStore> CellBasedTableStreamingIter<S> {
@@ -484,12 +485,28 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         let iter = Self {
             iter,
             cell_based_row_deserializer,
+            cell_based_item: None,
         };
         Ok(iter)
     }
 
+    pub async fn peek(&mut self) -> StorageResult<()> {
+        if self.cell_based_item.is_none() {
+            self.cell_based_item = self.next_inner().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn next(&mut self) -> StorageResult<()> {
+        match self.next_inner().await? {
+            Some(pk_and_row) => self.cell_based_item = Some(pk_and_row),
+            None => self.cell_based_item = None,
+        }
+        Ok(())
+    }
+
     /// return a row with its pk
-    pub async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
+    pub async fn next_inner(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
                 None => {

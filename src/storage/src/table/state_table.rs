@@ -131,7 +131,6 @@ pub struct StateTableRowIter<'a, S: StateStore> {
     cell_based_streaming_iter: CellBasedTableStreamingIter<S>,
     /// The result of the last cell_based_streaming_iter next is saved, which can avoid being
     /// discarded.
-    cell_based_item: Option<(Vec<u8>, Row)>,
     order_types: Vec<OrderType>,
 }
 type MemTableIter<'a> = Iter<'a, Row, RowOp>;
@@ -150,7 +149,6 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         let state_table_iter = Self {
             mem_table_iter,
             cell_based_streaming_iter,
-            cell_based_item: None,
             order_types,
         };
 
@@ -158,23 +156,26 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let cell_based_item;
-        match &self.cell_based_item {
-            Some(remained_cell_based_item) => {
-                cell_based_item = Some(remained_cell_based_item.clone());
-                self.cell_based_item = self.cell_based_streaming_iter.next().await?;
-            }
-            None => cell_based_item = self.cell_based_streaming_iter.next().await?,
-        }
+        // let cell_based_iter = self.cell_based_streaming_iter.do_next();
+        // // let cell_based_item = cell_based_iter.unwrap();
+        // let peekable_cell_based_iter = cell_based_iter.boxed().peekable();
+
+        // let c = peekable_cell_based_iter.next();
+
+        self.cell_based_streaming_iter.peek().await.map_err(err)?;
 
         let mut mem_table_iter_next_flag = false;
         let mut res = None;
-        match (cell_based_item, self.mem_table_iter.peek()) {
+        match (
+            self.cell_based_streaming_iter.cell_based_item.as_ref(),
+            self.mem_table_iter.peek(),
+        ) {
             (None, None) => {
-                return Ok(None);
+                res = None;
             }
             (Some((_, row)), None) => {
-                return Ok(Some(row));
+                res = Some(row.clone());
+                self.cell_based_streaming_iter.next().await.map_err(err)?;
             }
             (None, Some((_, row_op))) => {
                 mem_table_iter_next_flag = true;
@@ -189,10 +190,12 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 let mem_table_pk_bytes = serialize_pk(mem_table_pk, &pk_serializer).map_err(err)?;
                 match cell_based_pk.cmp(&mem_table_pk_bytes) {
                     Ordering::Less => {
-                        res = Some(cell_based_row);
+                        res = Some(cell_based_row.clone());
+                        self.cell_based_streaming_iter.next().await.map_err(err)?;
                     }
                     Ordering::Equal => {
                         mem_table_iter_next_flag = true;
+                        self.cell_based_streaming_iter.next().await.map_err(err)?;
                         match mem_table_row_op {
                             RowOp::Insert(row) => {
                                 res = Some(row.clone());
@@ -204,7 +207,6 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     Ordering::Greater => {
                         // mem_table_item will be return, while cell_based_item need to be saved and
                         // will be used in following next()
-                        self.cell_based_item = Some((cell_based_pk, cell_based_row));
                         mem_table_iter_next_flag = true;
                         match mem_table_row_op {
                             RowOp::Insert(row) => res = Some(row.clone()),
