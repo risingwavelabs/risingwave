@@ -13,6 +13,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 use core::fmt;
+use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType as Common_Data_Type;
@@ -77,7 +78,7 @@ pub enum DataType {
     Custom(ObjectName),
     /// Arrays
     Array(Box<DataType>),
-    Struct,
+    Struct(Arc<[DataType]>),
 }
 
 impl DataType {
@@ -106,6 +107,13 @@ impl DataType {
                 )
                 .into())
             }
+            DataType::Struct(types) => Common_Data_Type::Struct {
+                fields: types
+                    .iter()
+                    .map(|d| d.to_data_type())
+                    .collect::<Result<Vec<_>>>()?
+                    .into(),
+            },
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported data type: {:?}", self),
@@ -159,7 +167,7 @@ impl fmt::Display for DataType {
             DataType::Bytea => write!(f, "BYTEA"),
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
-            DataType::Struct => write!(f, "STRUCT"),
+            DataType::Struct(_) => write!(f, "STRUCT"),
         }
     }
 }

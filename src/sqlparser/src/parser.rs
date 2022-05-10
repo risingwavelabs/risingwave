@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use itertools::Itertools;
 use log::debug;
 
 use crate::ast::{ParseTo, *};
@@ -1549,11 +1550,20 @@ impl Parser {
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
         let name = self.parse_identifier()?;
         let data_type = self.parse_data_type()?;
-        let sub_defs = {
-            if DataType::Struct == data_type {
-                self.parse_struct_columns()?
+        let (data_type, sub_defs) = {
+            if let DataType::Struct(_) = data_type {
+                let defs: Vec<ColumnDef> = self.parse_struct_columns()?;
+                (
+                    DataType::Struct(
+                        defs.iter()
+                            .map(|d| d.data_type.clone())
+                            .collect_vec()
+                            .into(),
+                    ),
+                    defs,
+                )
             } else {
-                vec![]
+                (data_type, vec![])
             }
         };
 
@@ -2031,7 +2041,7 @@ impl Parser {
                         Ok(DataType::Text)
                     }
                 }
-                Keyword::STRUCT => Ok(DataType::Struct),
+                Keyword::STRUCT => Ok(DataType::Struct(vec![].into())),
                 Keyword::BYTEA => Ok(DataType::Bytea),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
                     let (precision, scale) = self.parse_optional_precision_scale()?;

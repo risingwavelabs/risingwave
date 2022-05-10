@@ -144,7 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
@@ -167,20 +167,24 @@ mod tests {
             .clone();
         assert_eq!(table.name(), "t");
 
-        let columns = table
-            .columns()
+        // Get all column descs
+        let mut columns = vec![];
+        for catalog in table.columns {
+            columns.append(&mut catalog.column_desc.flatten());
+        }
+        let columns = columns
             .iter()
-            .map(|col| (col.name(), col.data_type().clone()))
+            .map(|col| (col.name.as_str(), col.data_type.clone()))
             .collect::<HashMap<&str, DataType>>();
 
         let row_id_col_name = gen_row_id_column_name(0);
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
-            "v2" => DataType::Int32,
-            "v3" => DataType::Int64,
-            "v4" => DataType::Float64,
-            "v5" => DataType::Float64,
+            "v2" => DataType::Struct {fields:vec![DataType::Int64,DataType::Float64,DataType::Float64].into()},
+            "v2.v3" => DataType::Int64,
+            "v2.v4" => DataType::Float64,
+            "v2.v5" => DataType::Float64,
         };
 
         assert_eq!(columns, expected_columns);
