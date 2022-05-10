@@ -42,11 +42,6 @@ pub struct KinesisSplitReader {
 #[async_trait]
 impl SplitReader for KinesisSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        if self.assigned_split.is_none() {
-            return Err(anyhow::Error::msg(
-                "you should call `assign_split` before calling `next`".to_string(),
-            ));
-        }
         loop {
             let iter = match &self.shard_iter {
                 Some(_iter) => _iter,
@@ -174,6 +169,10 @@ impl KinesisSplitReader {
 
             split_reader.assigned_split = Some(split);
             split_reader.shard_iter = shard_iter;
+        } else if let ConnectorStateV2::Splits(s) = state {
+            
+        } else {
+            unreachable!()
         }
 
         Ok(split_reader)
