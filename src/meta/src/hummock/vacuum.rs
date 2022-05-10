@@ -67,12 +67,16 @@ where
     /// qualified to be deleted. If a version is not pinned and all of its stale ssts are
     /// qualified to be deleted, then this version can be deleted.
     pub async fn vacuum_version_metadata(&self) -> risingwave_common::error::Result<u64> {
-        let mut vacuum_count: u64 = 0;
-        let version_ids = self.hummock_manager.list_version_ids_asc().await?;
+        let batch_size = 16usize;
+        let version_ids = self
+            .hummock_manager
+            .list_version_ids_asc(Some(batch_size))
+            .await?;
         if version_ids.is_empty() {
             return Ok(0);
         }
         let mut ssts_in_use = HashSet::new();
+        let mut versions_to_delete = vec![];
         // Iterate version ids in ascending order. Skip the greatest version id.
         for version_id in version_ids.iter().take(version_ids.len() - 1) {
             let pin_count = self
@@ -91,16 +95,17 @@ where
                 self.hummock_manager
                     .delete_will_not_be_used_ssts(*version_id, &ssts_in_use)
                     .await?;
-                // Delete version metadata and mark SST as orphan (set meta_delete_timestamp).
-                // TODO delete in batch
                 let stale_ssts_left = self.hummock_manager.get_ssts_to_delete(*version_id).await?;
                 if stale_ssts_left.is_empty() {
-                    self.hummock_manager.delete_version(*version_id).await?;
-                    vacuum_count += 1;
+                    versions_to_delete.push(*version_id);
                 }
             }
         }
-        Ok(vacuum_count)
+        // Delete version metadata
+        self.hummock_manager
+            .delete_versions(&versions_to_delete)
+            .await?;
+        Ok(versions_to_delete.len() as u64)
     }
 
     /// Qualified SSTs and their metadata(aka `SstableIdInfo`) are deleted.
@@ -115,6 +120,7 @@ where
         &self,
         orphan_sst_retention_interval: Duration,
     ) -> risingwave_common::error::Result<Vec<HummockSSTableId>> {
+        let batch_size = 16usize;
         // Select SSTs to delete.
         let ssts_to_delete = {
             // 1. Retry the pending SSTs first.
@@ -147,7 +153,10 @@ where
                 self.pending_sst_ids.write().extend(ssts_to_delete.clone());
                 ssts_to_delete
             }
-        };
+        }
+        .into_iter()
+        .take(batch_size)
+        .collect_vec();
 
         // 1. Pick a worker.
         let compactor = match self.compactor_manager.next_compactor() {
