@@ -57,6 +57,7 @@ pub trait PlanNode:
     + ToStream
     + ToDistributedBatch
     + ToProst
+    + ToLocalBatch
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;

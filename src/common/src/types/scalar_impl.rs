@@ -141,30 +141,6 @@ impl Scalar for bool {
     }
 }
 
-impl ScalarPartialOrd for IntervalUnit {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for NaiveDateWrapper {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for NaiveTimeWrapper {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for NaiveDateTimeWrapper {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
 /// Implement `Scalar` and `ScalarRef` for `String`.
 /// `String` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for bool {

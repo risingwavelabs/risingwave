@@ -20,6 +20,7 @@ use risingwave_pb::batch_plan::HopWindowNode;
 use super::{
     LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
@@ -98,5 +99,12 @@ impl ToBatchProst for BatchHopWindow {
             window_slide: Some(self.logical.window_slide.into()),
             window_size: Some(self.logical.window_size.into()),
         })
+    }
+}
+
+impl ToLocalBatch for BatchHopWindow {
+    fn to_local(&self) -> PlanRef {
+        let new_input = self.input().to_local();
+        self.clone_with_input(new_input).into()
     }
 }
