@@ -614,7 +614,7 @@ where
             .await
         {
             self.fragment_manager
-                .cancel_create_table_fragments(table_id)
+                .cancel_create_table_fragments(&table_id)
                 .await?;
             return Err(err);
         }

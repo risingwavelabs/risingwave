@@ -120,17 +120,20 @@ where
     }
 
     /// Cancel creation of a new `TableFragments` and delete it from meta store.
-    pub async fn cancel_create_table_fragments(&self, table_id: TableId) -> Result<()> {
+    pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        map.remove(&table_id).ok_or_else(|| {
-            RwError::from(InternalError(format!(
+        match map.entry(*table_id) {
+            Entry::Occupied(o) => {
+                TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
+                o.remove();
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
                 "table_fragment not exist: id={}",
                 table_id
-            )))
-        })?;
-
-        Ok(())
+            )))),
+        }
     }
 
     /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,
