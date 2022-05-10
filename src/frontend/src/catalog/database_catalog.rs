@@ -57,6 +57,10 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(name)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.schema_by_name.is_empty()
+    }
+
     pub fn id(&self) -> DatabaseId {
         self.id
     }

@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
+use tracing::error;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
@@ -53,7 +54,9 @@ where
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
-        let iter = iter.await?;
+        let iter = iter
+            .await
+            .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
         let monitored = MonitoredStateStoreIter { inner: iter };
         Ok(monitored)
@@ -75,7 +78,11 @@ where
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
-            let value = self.inner.get(key, epoch).await?;
+            let value = self
+                .inner
+                .get(key, epoch)
+                .await
+                .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
 
             self.stats.get_key_size.observe(key.len() as _);
@@ -99,7 +106,11 @@ where
     {
         async move {
             let timer = self.stats.range_scan_duration.start_timer();
-            let result = self.inner.scan(key_range, limit, epoch).await?;
+            let result = self
+                .inner
+                .scan(key_range, limit, epoch)
+                .await
+                .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
 
             self.stats
@@ -122,7 +133,11 @@ where
     {
         async move {
             let timer = self.stats.range_backward_scan_duration.start_timer();
-            let result = self.inner.scan(key_range, limit, epoch).await?;
+            let result = self
+                .inner
+                .scan(key_range, limit, epoch)
+                .await
+                .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
 
             self.stats
@@ -147,7 +162,11 @@ where
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
             let timer = self.stats.write_batch_duration.start_timer();
-            let batch_size = self.inner.ingest_batch(kv_pairs, epoch).await?;
+            let batch_size = self
+                .inner
+                .ingest_batch(kv_pairs, epoch)
+                .await
+                .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
             timer.observe_duration();
 
             self.stats.write_batch_size.observe(batch_size as _);
@@ -175,13 +194,21 @@ where
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
-        async move { self.inner.wait_epoch(epoch).await }
+        async move {
+            self.inner
+                .wait_epoch(epoch)
+                .await
+                .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
+        }
     }
 
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            self.inner.sync(epoch).await?;
+            self.inner
+                .sync(epoch)
+                .await
+                .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
             Ok(())
         }
@@ -196,7 +223,12 @@ where
         kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
-        async move { self.inner.replicate_batch(kv_pairs, epoch).await }
+        async move {
+            self.inner
+                .replicate_batch(kv_pairs, epoch)
+                .await
+                .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
+        }
     }
 }
 
@@ -216,7 +248,11 @@ where
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let pair = self.inner.next().await?;
+            let pair = self
+                .inner
+                .next()
+                .await
+                .inspect_err(|e| error!("Failed in next: {:?}", e))?;
 
             Ok(pair)
         }
