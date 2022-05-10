@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,6 +21,7 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -31,10 +33,11 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
+use super::group_builder::KeyValueGroupingImpl::VirtualNode;
+use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
 use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
 };
-use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
 use super::{
@@ -138,6 +141,8 @@ impl Compactor {
         let mut compaction_futures = vec![];
         let compactor = Compactor::new(context, compact_task.clone());
 
+        let vnode2unit: Arc<HashMap<u32, Vec<u32>>> = Arc::new(HashMap::new());
+
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let iter = {
@@ -146,8 +151,11 @@ impl Compactor {
                 });
                 MergeIterator::new(iters, stats.clone())
             };
+            let vnode2unit = vnode2unit.clone();
             compaction_futures.push(tokio::spawn(async move {
-                compactor.compact_key_range(split_index, iter).await
+                compactor
+                    .compact_key_range(split_index, iter, vnode2unit)
+                    .await
             }));
         }
 
@@ -198,11 +206,27 @@ impl Compactor {
         let mut compaction_futures = vec![];
         let mut compactor = Compactor::new(context, compact_task.clone());
 
+        let vnode2unit: Arc<HashMap<u32, Vec<u32>>> = Arc::new(
+            compact_task
+                .vnode_mappings
+                .into_iter()
+                .map(|tar| {
+                    (
+                        tar.table_id,
+                        decompress_data(tar.get_original_indices(), tar.get_data()),
+                    )
+                })
+                .collect(),
+        );
+
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
+            let vnode2unit = vnode2unit.clone();
             compaction_futures.push(tokio::spawn(async move {
                 let merge_iter = compactor.build_sst_iter().await?;
-                compactor.compact_key_range(split_index, merge_iter).await
+                compactor
+                    .compact_key_range(split_index, merge_iter, vnode2unit)
+                    .await
             }));
         }
 
@@ -290,6 +314,7 @@ impl Compactor {
         &self,
         split_index: usize,
         iter: MergeIterator,
+        vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
     ) -> HummockResult<CompactOutput> {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
@@ -299,17 +324,19 @@ impl Compactor {
         };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
-        // TODO: use `GroupedSstableBuilder` with correct `KeyValueGroupingImpl`
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = self
-                .context
-                .hummock_meta_client
-                .get_new_table_id()
-                .await
-                .map_err(HummockError::meta_error)?;
-            let builder = HummockStorage::get_builder(&self.context.options);
-            Ok((table_id, builder))
-        });
+        let mut builder = GroupedSstableBuilder::new(
+            || async {
+                let table_id = self
+                    .context
+                    .hummock_meta_client
+                    .get_new_table_id()
+                    .await
+                    .map_err(HummockError::meta_error)?;
+                let builder = HummockStorage::get_builder(&self.context.options);
+                Ok((table_id, builder))
+            },
+            VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
+        );
 
         // Monitor time cost building shared buffer to SSTs.
         let build_l0_sst_timer = if self.context.is_share_buffer_compact {
@@ -531,7 +558,7 @@ impl Compactor {
     }
 
     async fn compact_and_build_sst<B, F>(
-        sst_builder: &mut CapacitySplitTableBuilder<B>,
+        sst_builder: &mut GroupedSstableBuilder<B>,
         kr: KeyRange,
         mut iter: MergeIterator,
         has_user_key_overlap: bool,
