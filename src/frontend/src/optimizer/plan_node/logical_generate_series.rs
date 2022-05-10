@@ -16,6 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
 
 use super::{ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
@@ -87,17 +88,24 @@ impl ColPrunable for LogicalGenerateSeries {
 }
 
 impl ToBatch for LogicalGenerateSeries {
-    fn to_batch(&self) -> PlanRef {
-        BatchGenerateSeries::new(self.clone()).into()
+    fn to_batch(&self) -> Result<PlanRef> {
+        Ok(BatchGenerateSeries::new(self.clone()).into())
     }
 }
 
 impl ToStream for LogicalGenerateSeries {
-    fn to_stream(&self) -> PlanRef {
-        unimplemented!("Stream GenerateSeries executor is unimplemented!")
+    fn to_stream(&self) -> Result<PlanRef> {
+        Err(
+            ErrorCode::NotImplemented("LogicalGenerateSeries::to_stream".to_string(), None.into())
+                .into(),
+        )
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
-        unimplemented!("Stream GenerateSeries executor is unimplemented!")
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+        Err(ErrorCode::NotImplemented(
+            "LogicalGenerateSeries::logical_rewrite_for_stream".to_string(),
+            None.into(),
+        )
+        .into())
     }
 }
