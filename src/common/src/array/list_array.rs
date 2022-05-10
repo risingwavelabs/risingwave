@@ -289,7 +289,7 @@ impl ListValue {
         Self { values }
     }
 
-    pub fn get_values(&self) -> &[Datum] {
+    pub fn values(&self) -> &[Datum] {
         &self.values
     }
 }

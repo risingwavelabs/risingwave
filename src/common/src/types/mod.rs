@@ -142,49 +142,6 @@ impl DataType {
         })
     }
 
-    /// Transfer `datum_type` to `data_type`.
-    pub fn datum_type_to_data_type(datum: &Datum) -> Result<DataType> {
-        let scalar = match datum {
-            Some(scalar) => scalar,
-            None => {
-                return Err(internal_error(
-                    "cannot get data type from None Datum".to_string(),
-                ));
-            }
-        };
-        let data_type = match &scalar {
-            ScalarImpl::Int16(_) => DataType::Int16,
-            ScalarImpl::Int32(_) => DataType::Int32,
-            ScalarImpl::Int64(_) => DataType::Int64,
-            ScalarImpl::Float32(_) => DataType::Float32,
-            ScalarImpl::Float64(_) => DataType::Float64,
-            ScalarImpl::Utf8(_) => DataType::Varchar,
-            ScalarImpl::Bool(_) => DataType::Boolean,
-            ScalarImpl::Decimal(_) => DataType::Decimal,
-            ScalarImpl::Interval(_) => DataType::Interval,
-            ScalarImpl::NaiveDate(_) => DataType::Date,
-            ScalarImpl::NaiveDateTime(_) => DataType::Timestamp,
-            ScalarImpl::NaiveTime(_) => DataType::Time,
-            ScalarImpl::Struct(data) => {
-                let types = data
-                    .get_fields()
-                    .iter()
-                    .map(DataType::datum_type_to_data_type)
-                    .collect::<Result<Vec<_>>>()?;
-                DataType::Struct {
-                    fields: types.into(),
-                }
-            }
-            ScalarImpl::List(data) => {
-                let data = data.get_values().get(0).ok_or_else(|| {
-                    internal_error("cannot get data type from empty list".to_string())
-                })?;
-                DataType::datum_type_to_data_type(data)?
-            }
-        };
-        Ok(data_type)
-    }
-
     fn prost_type_name(&self) -> TypeName {
         match self {
             DataType::Int16 => TypeName::Int16,
@@ -348,6 +305,15 @@ for_all_scalar_variants! { scalar_impl_enum }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
+
+pub fn get_data_type_from_datum(datum: &Datum) -> Result<DataType> {
+    match datum {
+        None => Err(internal_error(
+            "cannot get data type from None Datum".to_string(),
+        )),
+        Some(scalar) => scalar.data_type(),
+    }
+}
 
 /// Convert a [`Datum`] to a [`DatumRef`].
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {

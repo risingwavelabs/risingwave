@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use itertools::zip_eq;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
     UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -102,24 +102,10 @@ impl Binder {
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
-            Expr::Row(exprs) => {
-                let value = self.bind_row(&exprs)?;
-                let data_type = DataType::Struct {
-                    fields: value
-                        .get_fields()
-                        .iter()
-                        .map(DataType::datum_type_to_data_type)
-                        .collect::<Result<Vec<_>>>()?
-                        .into(),
-                };
-                Ok(ExprImpl::Literal(Box::new(Literal::new(
-                    Some(value.to_scalar_value()),
-                    data_type,
-                ))))
-            }
+            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
-                112.into(),
+                TrackingIssue::none(),
             )
             .into()),
         }

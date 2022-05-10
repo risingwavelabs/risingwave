@@ -276,7 +276,11 @@ pub struct StructValue {
 
 impl fmt::Display for StructValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.fields)
+        write!(
+            f,
+            "{{{}}}",
+            self.fields.iter().map(|f| format!("{:?}", f)).join(", ")
+        )
     }
 }
 
@@ -297,7 +301,7 @@ impl StructValue {
         Self { fields }
     }
 
-    pub fn get_fields(&self) -> &[Datum] {
+    pub fn fields(&self) -> &[Datum] {
         &self.fields
     }
 }
