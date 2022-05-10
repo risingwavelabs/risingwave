@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::array::StructValue;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{get_data_type_from_datum, DataType, Datum, Scalar};
 use risingwave_sqlparser::ast::{Expr, Values};
 
@@ -93,7 +93,7 @@ impl Binder {
                 Expr::Row(expr) => Ok(self.bind_row(expr)?.get_data().clone()),
                 _ => Err(ErrorCode::NotImplemented(
                     format!("unsupported expression {:?}", e),
-                    112.into(),
+                    TrackingIssue::none(),
                 )
                 .into()),
             })

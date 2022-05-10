@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::zip_eq;
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
@@ -105,7 +105,7 @@ impl Binder {
             Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
-                TrackingIssue::none(),
+                112.into(),
             )
             .into()),
         }
