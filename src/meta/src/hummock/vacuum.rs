@@ -99,13 +99,19 @@ where
                 }
                 if versions_to_delete.len() >= batch_size {
                     vacuum_count += versions_to_delete.len();
-                    // Delete version metadata
                     self.hummock_manager
                         .delete_versions(&versions_to_delete)
                         .await?;
                     versions_to_delete.clear();
                 }
             }
+        }
+        if !versions_to_delete.is_empty() {
+            vacuum_count += versions_to_delete.len();
+            self.hummock_manager
+                .delete_versions(&versions_to_delete)
+                .await?;
+            versions_to_delete.clear();
         }
         Ok(vacuum_count as u64)
     }
