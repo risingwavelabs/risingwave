@@ -307,21 +307,6 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     }
 
     #[inline]
-    fn forward(&mut self, op: Op, row: &RowRef) -> Result<()> {
-        self.stream_chunk_builder.append_row_update(op, row)?;
-        Ok(())
-    }
-
-    #[inline]
-    fn forward_outer(&mut self, op: Op, row: &RowRef) -> Result<()> {
-        // if it's outer join and the side needs maintained.
-        if is_outer_side(T, SIDE) {
-            self.stream_chunk_builder.append_row_update(op, row)?;
-        }
-        Ok(())
-    }
-
-    #[inline]
     fn finish(self) -> Result<StreamChunk> {
         self.stream_chunk_builder.finish()
     }
@@ -585,7 +570,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
-                                    hashjoin_chunk_builder.with_match_on_insert(&row, matched_row)?;
+                                    hashjoin_chunk_builder
+                                        .with_match_on_insert(&row, matched_row)?;
                                 }
                                 matched_row.inc_degree();
                             }
@@ -613,7 +599,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 matched = true;
                                 matched_row.dec_degree()?;
                                 if !forward_exactly_once(T, SIDE) {
-                                    hashjoin_chunk_builder.with_match_on_delete(&row, matched_row)?;
+                                    hashjoin_chunk_builder
+                                        .with_match_on_delete(&row, matched_row)?;
                                 }
                             }
                         }
@@ -1593,7 +1580,8 @@ mod tests {
             "  I I
              + 1 4
              + 2 5
-             + 3 6",
+             + 3 6
+             + 3 7",
         );
         let chunk_l2 = StreamChunk::from_pretty(
             "  I I
@@ -1627,7 +1615,8 @@ mod tests {
                 " I I I I
                 + 1 4 . .
                 + 2 5 . .
-                + 3 6 . ."
+                + 3 6 . .
+                + 3 7 . ."
             )
         );
 
@@ -1653,7 +1642,7 @@ mod tests {
                 U- 2 5 . .
                 U+ 2 5 2 6
                 +  . . 4 8
-                +  . . 3 4"
+                +  . . 3 4" // 3 4 should be forwarded only once
             )
         );
 
