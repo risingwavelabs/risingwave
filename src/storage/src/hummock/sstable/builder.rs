@@ -182,10 +182,10 @@ impl SSTableBuilder {
             } else {
                 self.vnode_bitmaps
                     .iter()
-                    .map(|(table_id, vnode_bitmap)| VNodeBitmap {
+                    .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
                         table_id: *table_id,
                         maplen: VNODE_BITMAP_LEN as u32,
-                        bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmap),
+                        bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
                     })
                     .collect()
             },
