@@ -192,12 +192,18 @@ impl Compactor {
 
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
+    pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
         tracing::info!(
             "Ready to handle compaction task: \n{}",
             compact_task_to_string(&compact_task)
         );
         let start_time = Instant::now();
+
+        compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
+            left: vec![],
+            right: vec![],
+            inf: false,
+        }];
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
