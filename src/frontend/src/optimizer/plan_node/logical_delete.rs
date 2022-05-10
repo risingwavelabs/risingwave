@@ -101,14 +101,10 @@ impl ToBatch for LogicalDelete {
 
 impl ToStream for LogicalDelete {
     fn to_stream(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::InternalError(
-            "delete should always be converted to batch plan".to_string(),
-        )))
+        unreachable!("delete should always be converted to batch plan");
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
-        Err(RwError::from(ErrorCode::InternalError(
-            "delete should always be converted to batch plan".to_string(),
-        )))
+        unreachable!("delete should always be converted to batch plan");
     }
 }

@@ -101,14 +101,10 @@ impl ToBatch for LogicalInsert {
 
 impl ToStream for LogicalInsert {
     fn to_stream(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::InternalError(
-            "insert should always be converted to batch plan".to_string(),
-        )))
+        unreachable!("insert should always be converted to batch plan");
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
-        Err(RwError::from(ErrorCode::InternalError(
-            "insert should always be converted to batch plan".to_string(),
-        )))
+        unreachable!("insert should always be converted to batch plan");
     }
 }

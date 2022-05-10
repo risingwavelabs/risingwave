@@ -63,10 +63,7 @@ impl_plan_tree_node_for_unary! {BatchExchange}
 
 impl ToDistributedBatch for BatchExchange {
     fn to_distributed(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "not implement yet".to_string(),
-            None.into(),
-        )))
+        unreachable!()
     }
 }
 
@@ -92,9 +89,6 @@ impl ToBatchProst for BatchExchange {
 
 impl ToLocalBatch for BatchExchange {
     fn to_local(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "not implement yet".to_string(),
-            None.into(),
-        )))
+        unreachable!()
     }
 }
