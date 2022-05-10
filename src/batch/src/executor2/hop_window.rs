@@ -220,3 +220,86 @@ impl HopWindowExecutor2 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::stream::StreamExt;
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
+
+    #[tokio::test]
+    async fn test_execute() {
+        let field1 = Field::unnamed(DataType::Int64);
+        let field2 = Field::unnamed(DataType::Int64);
+        let field3 = Field::with_name(DataType::Timestamp, "created_at");
+        let schema = Schema::new(vec![field1, field2, field3]);
+
+        let chunk = DataChunk::from_pretty(
+            &"I I TS
+            1 1 ^10:00:00
+            2 3 ^10:05:00
+            3 2 ^10:14:00
+            4 1 ^10:22:00
+            5 3 ^10:33:00
+            6 2 ^10:42:00
+            7 1 ^10:51:00
+            8 3 ^11:02:00"
+                .replace('^', "2022-2-2T"),
+        );
+
+        let mut mock_executor = MockExecutor::new(schema.clone());
+        mock_executor.add(chunk);
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let executor = Box::new(HopWindowExecutor2::new(
+            Box::new(mock_executor),
+            schema,
+            2,
+            window_slide,
+            window_size,
+            "test".to_string(),
+        ));
+
+        let mut stream = executor.execute();
+        // TODO: add more test infra to reduce the duplicated codes below.
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                &"I I TS        TS        TS
+                1 1 ^10:00:00 ^09:45:00 ^10:15:00
+                2 3 ^10:05:00 ^09:45:00 ^10:15:00
+                3 2 ^10:14:00 ^09:45:00 ^10:15:00
+                4 1 ^10:22:00 ^10:00:00 ^10:30:00
+                5 3 ^10:33:00 ^10:15:00 ^10:45:00
+                6 2 ^10:42:00 ^10:15:00 ^10:45:00
+                7 1 ^10:51:00 ^10:30:00 ^11:00:00
+                8 3 ^11:02:00 ^10:45:00 ^11:15:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                &"I I TS        TS        TS
+                1 1 ^10:00:00 ^10:00:00 ^10:30:00
+                2 3 ^10:05:00 ^10:00:00 ^10:30:00
+                3 2 ^10:14:00 ^10:00:00 ^10:30:00
+                4 1 ^10:22:00 ^10:15:00 ^10:45:00
+                5 3 ^10:33:00 ^10:30:00 ^11:00:00
+                6 2 ^10:42:00 ^10:30:00 ^11:00:00
+                7 1 ^10:51:00 ^10:45:00 ^11:15:00
+                8 3 ^11:02:00 ^11:00:00 ^11:30:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+    }
+}
