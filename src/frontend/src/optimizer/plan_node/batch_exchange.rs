@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
@@ -63,7 +63,10 @@ impl_plan_tree_node_for_unary! {BatchExchange}
 
 impl ToDistributedBatch for BatchExchange {
     fn to_distributed(&self) -> Result<PlanRef> {
-        unreachable!()
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "not implement yet".to_string(),
+            None.into(),
+        )))
     }
 }
 
@@ -89,6 +92,9 @@ impl ToBatchProst for BatchExchange {
 
 impl ToLocalBatch for BatchExchange {
     fn to_local(&self) -> Result<PlanRef> {
-        unreachable!()
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "not implement yet".to_string(),
+            None.into(),
+        )))
     }
 }
