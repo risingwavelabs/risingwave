@@ -4130,7 +4130,6 @@ dependencies = [
  "paste",
  "prometheus",
  "prost",
- "rand 0.8.5",
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",

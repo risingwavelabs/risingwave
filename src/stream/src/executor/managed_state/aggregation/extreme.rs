@@ -484,7 +484,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
 mod tests {
     use itertools::Itertools;
     use madsim::collections::{BTreeSet, HashSet};
-    use rand::prelude::*;
+    use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
