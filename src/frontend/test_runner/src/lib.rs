@@ -326,7 +326,7 @@ impl TestCase {
         }
 
         if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
-            let batch_plan = logical_plan.gen_batch_query_plan();
+            let batch_plan = logical_plan.gen_batch_query_plan()?;
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_plan.is_some() {
