@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
     BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
@@ -97,21 +98,24 @@ impl ColPrunable for LogicalLimit {
 }
 
 impl ToBatch for LogicalLimit {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchLimit::new(new_logical).into()
+        Ok(BatchLimit::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalLimit {
-    fn to_stream(&self) -> PlanRef {
-        panic!("there is no limit stream operator");
+    fn to_stream(&self) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "there is no limit stream operator".to_string(),
+            None.into(),
+        )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (filter.into(), out_col_change)
+        Ok((filter.into(), out_col_change))
     }
 }
