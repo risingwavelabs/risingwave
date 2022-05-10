@@ -502,7 +502,7 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         Ok(())
     }
 
-    /// return a row with its pk
+    /// return a row with its pk.
     async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
