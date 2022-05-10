@@ -603,13 +603,21 @@ where
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
-        self.barrier_manager
+        let table_id = table_fragments.table_id();
+        if let Err(err) = self
+            .barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
                 table_sink_map,
                 dispatches,
             })
-            .await?;
+            .await
+        {
+            self.fragment_manager
+                .cancel_create_table_fragments(&table_id)
+                .await?;
+            return Err(err);
+        }
 
         Ok(())
     }

@@ -38,6 +38,7 @@ use chrono::{Datelike, Timelike};
 pub use chrono_wrapper::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 pub use decimal::Decimal;
 pub use interval::*;
+use itertools::Itertools;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
@@ -98,11 +99,14 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
-            TypeName::Struct => DataType::Struct {
-                fields: Arc::new([]),
-            },
+            TypeName::Struct => {
+                let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
+                DataType::Struct {
+                    fields: fields.into(),
+                }
+            }
             TypeName::List => DataType::List {
-                datatype: Box::new(DataType::Int32),
+                datatype: Box::new((&proto.field_type[0]).into()),
             },
         }
     }
@@ -163,9 +167,21 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
+        let field_type = {
+            match self {
+                DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
+                DataType::List { datatype } => {
+                    vec![datatype.to_protobuf()]
+                }
+                _ => {
+                    vec![]
+                }
+            }
+        };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
+            field_type,
             ..Default::default()
         }
     }

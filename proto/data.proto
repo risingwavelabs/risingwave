@@ -69,6 +69,10 @@ message DataType {
   uint32 scale = 3;
   bool is_nullable = 4;
   IntervalType interval_type = 5;
+  // For struct type, it represents all the fields in the struct.
+  // For list type it only contains 1 element which is the inner item type of the List.
+  // For example, `ARRAY<INTEGER>` will be represented as `vec![DataType::Int32]`.
+  repeated DataType field_type = 6;
 }
 
 message StructArrayData {
