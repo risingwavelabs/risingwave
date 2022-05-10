@@ -25,7 +25,7 @@ pub struct SSTableInfo {
     pub key_range: KeyRange,
     pub table_id: HummockSSTableId,
     pub file_size: u64,
-    pub vnode_bitmap: Vec<VNodeBitmap>,
+    pub vnode_bitmaps: Vec<VNodeBitmap>,
 }
 
 impl From<&SstableInfo> for SSTableInfo {
@@ -34,7 +34,7 @@ impl From<&SstableInfo> for SSTableInfo {
             key_range: sst.key_range.as_ref().unwrap().into(),
             table_id: sst.id,
             file_size: sst.file_size,
-            vnode_bitmap: sst.vnode_bitmap.clone(),
+            vnode_bitmaps: sst.vnode_bitmaps.clone(),
         }
     }
 }
@@ -45,7 +45,7 @@ impl From<SSTableInfo> for SstableInfo {
             key_range: Some(info.key_range.into()),
             id: info.table_id,
             file_size: info.file_size,
-            vnode_bitmap: info.vnode_bitmap,
+            vnode_bitmaps: info.vnode_bitmaps,
         }
     }
 }

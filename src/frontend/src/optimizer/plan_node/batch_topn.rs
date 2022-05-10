@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
@@ -67,11 +68,11 @@ impl PlanTreeNodeUnary for BatchTopN {
 impl_plan_tree_node_for_unary! {BatchTopN}
 
 impl ToDistributedBatch for BatchTopN {
-    fn to_distributed(&self) -> PlanRef {
+    fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(), &Distribution::Single);
-        self.clone_with_input(new_input).into()
+            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -87,8 +88,8 @@ impl ToBatchProst for BatchTopN {
 }
 
 impl ToLocalBatch for BatchTopN {
-    fn to_local(&self) -> PlanRef {
-        let new_input = self.input().to_local();
-        self.clone_with_input(new_input).into()
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

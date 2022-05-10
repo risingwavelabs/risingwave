@@ -1386,6 +1386,8 @@ impl Parser {
             self.parse_create_index(true)
         } else if self.parse_keyword(Keyword::SCHEMA) {
             self.parse_create_schema()
+        } else if self.parse_keyword(Keyword::DATABASE) {
+            self.parse_create_database()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -1397,6 +1399,17 @@ impl Parser {
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
+        })
+    }
+
+    pub fn parse_create_database(&mut self) -> Result<Statement, ParserError> {
+        let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::CreateDatabase {
+            db_name,
+            if_not_exists,
+            location: None,
+            managed_location: None,
         })
     }
 

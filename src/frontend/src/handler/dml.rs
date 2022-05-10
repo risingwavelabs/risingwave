@@ -40,7 +40,7 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
         let plan = Planner::new(context.into())
             .plan(bound)?
-            .gen_batch_query_plan();
+            .gen_batch_query_plan()?;
 
         let pg_descs = plan.schema().fields().iter().map(to_pg_field).collect();
 

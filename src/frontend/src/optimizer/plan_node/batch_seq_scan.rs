@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
@@ -67,8 +68,8 @@ impl fmt::Display for BatchSeqScan {
 }
 
 impl ToDistributedBatch for BatchSeqScan {
-    fn to_distributed(&self) -> PlanRef {
-        Self::with_dist(self.logical.clone()).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        Ok(Self::with_dist(self.logical.clone()).into())
     }
 }
 
@@ -92,7 +93,7 @@ impl ToBatchProst for BatchSeqScan {
 }
 
 impl ToLocalBatch for BatchSeqScan {
-    fn to_local(&self) -> PlanRef {
+    fn to_local(&self) -> Result<PlanRef> {
         todo!()
     }
 }

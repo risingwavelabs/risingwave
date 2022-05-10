@@ -166,15 +166,15 @@ impl PlanRoot {
     /// Optimize and generate a batch query plan.
     /// Currently only used by test runner (Have distributed plan but not schedule yet).
     /// Will be removed after dist execution.
-    pub fn gen_batch_query_plan(&self) -> PlanRef {
+    pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order);
+        plan = plan.to_batch_with_order_required(&self.required_order)?;
 
         // Convert to distributed plan
-        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
+        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
@@ -192,15 +192,15 @@ impl PlanRoot {
             plan = BatchProject::new(LogicalProject::new(plan, exprs, expr_aliases)).into();
         }
 
-        plan
+        Ok(plan)
     }
 
     /// Generate create index or create materialize view plan.
-    fn gen_stream_plan(&mut self) -> PlanRef {
+    fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
-                let (plan, out_col_change) = plan.logical_rewrite_for_stream();
+                let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
                 self.required_dist = out_col_change
                     .rewrite_required_distribution(&self.required_dist)
                     .unwrap();
@@ -215,7 +215,7 @@ impl PlanRoot {
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
             _ => unreachable!(),
-        };
+        }?;
 
         // Rewrite joins with index to delta join
         let plan = {
@@ -224,12 +224,12 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
-        plan
+        Ok(plan)
     }
 
     /// Optimize and generate a create materialize view plan.
     pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan();
+        let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -245,7 +245,7 @@ impl PlanRoot {
         mv_name: String,
         index_on: TableId,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan();
+        let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
             mv_name,

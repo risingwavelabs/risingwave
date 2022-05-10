@@ -203,6 +203,7 @@ impl CompactStatus {
             task_status: false,
             // TODO: fill with compaction group info
             prefix_pairs: vec![],
+            vnode_mappings: vec![],
         };
         self.next_compact_task_id += 1;
         Some(compact_task)

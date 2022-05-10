@@ -27,7 +27,7 @@ pub trait BitSliceMut {
     fn set_bit(&mut self, idx: usize, val: bool);
 }
 
-impl<'a, T: AsRef<[u8]>> BitSlice for T {
+impl<T: AsRef<[u8]>> BitSlice for T {
     fn get_bit(&self, idx: usize) -> bool {
         let pos = idx / 8;
         let offset = idx % 8;
@@ -39,7 +39,7 @@ impl<'a, T: AsRef<[u8]>> BitSlice for T {
     }
 }
 
-impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
+impl<T: AsMut<[u8]>> BitSliceMut for T {
     fn set_bit(&mut self, idx: usize, val: bool) {
         let pos = idx / 8;
         let offset = idx % 8;

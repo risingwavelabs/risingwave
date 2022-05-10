@@ -129,8 +129,8 @@ where
         self.builders
             .into_iter()
             .map(|b| {
-                let (data, meta, vnode_bitmap) = b.builder.finish();
-                (b.id, data, meta, vnode_bitmap)
+                let (data, meta, vnode_bitmaps) = b.builder.finish();
+                (b.id, data, meta, vnode_bitmaps)
             })
             .collect()
     }
