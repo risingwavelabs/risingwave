@@ -28,7 +28,6 @@ use crate::hummock::value::HummockValue;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
-pub const SST_BITMAP_LIMIT: usize = 10;
 
 #[derive(Clone, Debug)]
 pub struct SSTableBuilderOptions {
@@ -177,18 +176,14 @@ impl SSTableBuilder {
         (
             self.buf.freeze(),
             meta,
-            if self.vnode_bitmaps.len() > SST_BITMAP_LIMIT {
-                vec![]
-            } else {
-                self.vnode_bitmaps
-                    .iter()
-                    .map(|(table_id, vnode_bitmap)| VNodeBitmap {
-                        table_id: *table_id,
-                        maplen: VNODE_BITMAP_LEN as u32,
-                        bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmap),
-                    })
-                    .collect()
-            },
+            self.vnode_bitmaps
+                .iter()
+                .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
+                    table_id: *table_id,
+                    maplen: VNODE_BITMAP_LEN as u32,
+                    bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
+                })
+                .collect(),
         )
     }
 

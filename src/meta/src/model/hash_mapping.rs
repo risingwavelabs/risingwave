@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::meta::ParallelUnitMapping;
+use risingwave_common::util::compress::{compress_data, decompress_data};
+use risingwave_pb::common::ParallelUnitMapping;
 
 use super::MetadataModel;
+use crate::cluster::ParallelUnitId;
+use crate::manager::TableId;
 
 /// Column family name for hash mapping.
 const HASH_MAPPING_CF_NAME: &str = "cf/hash_mapping";
@@ -39,5 +42,24 @@ impl MetadataModel for ParallelUnitMapping {
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
         Ok(self.table_id)
+    }
+}
+
+pub fn original_hash_mapping(compressed_mapping: &ParallelUnitMapping) -> Vec<ParallelUnitId> {
+    decompress_data(
+        &compressed_mapping.original_indices,
+        &compressed_mapping.data,
+    )
+}
+
+pub fn compressed_hash_mapping(
+    table_id: TableId,
+    hash_mapping: &[ParallelUnitId],
+) -> ParallelUnitMapping {
+    let (original_indices, compressed_data) = compress_data(hash_mapping);
+    ParallelUnitMapping {
+        table_id,
+        original_indices,
+        data: compressed_data,
     }
 }

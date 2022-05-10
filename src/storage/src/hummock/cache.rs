@@ -1,16 +1,21 @@
-// Copyright 2022 Singularity Data
+//  Copyright 2022 Singularity Data
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//  http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+//
+// Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
+// This source code is licensed under both the GPLv2 (found in the
+// COPYING file in the root directory) and Apache 2.0 License
+// (found in the LICENSE.Apache file in the root directory).
 
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
@@ -510,19 +515,22 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         }
         None
     }
+
+    // Clears the content of the cache.
+    // This method only works if no cache entries are referenced outside.
+    fn clear(&mut self) {
+        while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
+            let handle = self.lru.next;
+            unsafe {
+                self.erase((*handle).hash, (*handle).get_key());
+            }
+        }
+    }
 }
 
 impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
     fn drop(&mut self) {
-        // When the shard is dropped, all handles must be in lru, and therefore we only need to free
-        // the handles in lru.
-        while !std::ptr::eq(self.lru.next, self.lru.as_mut()) {
-            let handle = self.lru.next;
-            unsafe {
-                self.lru_remove(handle);
-                drop(Box::from_raw(handle));
-            }
-        }
+        self.clear();
     }
 }
 
@@ -658,6 +666,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
 
     fn shard(&self, hash: u64) -> usize {
         hash as usize % self.shards.len()
+    }
+
+    #[cfg(test)]
+    pub fn clear(&self) {
+        for shard in &self.shards {
+            let mut shard = shard.lock();
+            shard.clear();
+        }
     }
 }
 
@@ -907,6 +923,8 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(new_entry);
+            assert!((*new_entry).is_in_cache());
+            assert!((*new_entry).is_in_lru());
 
             // assert old value unchanged.
             assert!(!old_entry.is_null());
@@ -914,6 +932,10 @@ mod tests {
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(old_entry);
+            assert!(!(*old_entry).is_in_cache());
+            assert!(!(*old_entry).is_in_lru());
+            assert!((*new_entry).is_in_cache());
+            assert!((*new_entry).is_in_lru());
         }
     }
 

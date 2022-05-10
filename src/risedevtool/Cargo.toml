@@ -10,7 +10,7 @@ bytes = "1"
 clap = { version = "3", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
-enum-iterator = "0.7"
+enum-iterator = "0.8"
 indicatif = "0.16"
 isahc = "1"
 itertools = "0.10"
