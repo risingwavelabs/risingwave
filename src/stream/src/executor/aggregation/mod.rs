@@ -93,7 +93,6 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-        append_only: bool,
     ) -> Result<()>;
 
     /// Get the output value
@@ -104,6 +103,9 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 
     /// Reset to initial state
     fn reset(&mut self);
+
+    /// Whether the stream is append-only
+    fn is_append_only(&self) -> bool;
 }
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
@@ -123,10 +125,12 @@ pub fn create_streaming_agg_state(
     input_types: &[DataType],
     agg_type: &AggKind,
     return_type: &DataType,
+    append_only: bool,
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
-        ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
+        ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr,
+            [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
             match (
                 $agg_type_expr,
                 $input_type_expr,
@@ -135,14 +139,14 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::try_from(datum)?)
+                        Box::new(<$state_impl>::new_with_datum(datum, append_only)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
-                        Box::new(<$state_impl>::new())
+                        Box::new(<$state_impl>::new(append_only))
                     }
                 )*
                 (other_agg, other_input, other_return, _) => panic!(
-                    "streaming state not implemented: {:?} {:?} {:?}",
+                    "streaming agg state not implemented: {:?} {:?} {:?}",
                     other_agg, other_input, other_return
                 )
             }
@@ -257,15 +261,19 @@ pub fn create_streaming_agg_state(
                 // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
                 // final/global Count(*)
                 (AggKind::RowCount, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
+                    Box::new(StreamingRowCountAgg::with_row_cnt(datum, append_only))
                 }
-                (AggKind::RowCount, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
+                (AggKind::RowCount, DataType::Int64, None) => {
+                    Box::new(StreamingRowCountAgg::new(append_only))
+                }
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.
                 (AggKind::Count, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
+                    Box::new(StreamingRowCountAgg::with_row_cnt(datum, append_only))
                 }
-                (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
+                (AggKind::Count, DataType::Int64, None) => {
+                    Box::new(StreamingRowCountAgg::new(append_only))
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         "unsupported aggregate type".to_string(),
@@ -345,7 +353,6 @@ pub async fn generate_agg_state<S: StateStore>(
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
-    append_only: bool,
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -371,7 +378,6 @@ pub async fn generate_agg_state<S: StateStore>(
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
             key_hash_code.clone(),
-            append_only,
         )
         .await
         .map_err(StreamExecutorError::agg_state_error)?;

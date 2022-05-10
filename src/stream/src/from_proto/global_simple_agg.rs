@@ -33,7 +33,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(build_agg_call_from_prost)
+            .map(|agg_call| build_agg_call_from_prost(node.append_only, agg_call))
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
@@ -55,7 +55,6 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             params.pk_indices,
             params.executor_id,
             key_indices,
-            node.append_only,
         )?
         .boxed())
     }

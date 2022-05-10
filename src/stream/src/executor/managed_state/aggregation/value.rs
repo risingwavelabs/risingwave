@@ -69,6 +69,7 @@ impl<S: StateStore> ManagedValueState<S> {
                 agg_call.args.arg_types(),
                 &agg_call.kind,
                 &agg_call.return_type,
+                agg_call.append_only,
                 data,
             )?,
             is_dirty: false,
@@ -82,11 +83,10 @@ impl<S: StateStore> ManagedValueState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-        append_only: bool,
     ) -> Result<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         self.is_dirty = true;
-        self.state.apply_batch(ops, visibility, data, append_only)
+        self.state.apply_batch(ops, visibility, data)
     }
 
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
@@ -131,6 +131,7 @@ mod tests {
             kind: risingwave_expr::expr::AggKind::Count,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
+            append_only: false,
         }
     }
 
@@ -151,7 +152,6 @@ mod tests {
                 &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None])
                     .unwrap()
                     .into()],
-                false,
             )
             .await
             .unwrap();
@@ -179,11 +179,12 @@ mod tests {
         );
     }
 
-    fn create_test_max_agg() -> AggCall {
+    fn create_test_max_agg_append_only() -> AggCall {
         AggCall {
             kind: risingwave_expr::expr::AggKind::Max,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
+            append_only: true,
         }
     }
 
@@ -191,12 +192,11 @@ mod tests {
     async fn test_managed_value_state_append_only() {
         let keyspace = create_in_memory_keyspace();
         let mut managed_state =
-            ManagedValueState::new(create_test_max_agg(), keyspace.clone(), Some(0))
+            ManagedValueState::new(create_test_max_agg_append_only(), keyspace.clone(), Some(0))
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
 
-        let append_only = true;
         // apply a batch and get the output
         managed_state
             .apply_batch(
@@ -207,7 +207,6 @@ mod tests {
                         .unwrap()
                         .into(),
                 ],
-                append_only,
             )
             .await
             .unwrap();
@@ -226,9 +225,10 @@ mod tests {
         );
 
         // reload the state and check the output
-        let mut managed_state = ManagedValueState::new(create_test_max_agg(), keyspace, None)
-            .await
-            .unwrap();
+        let mut managed_state =
+            ManagedValueState::new(create_test_max_agg_append_only(), keyspace, None)
+                .await
+                .unwrap();
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Int64(2))

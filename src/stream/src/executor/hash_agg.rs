@@ -80,9 +80,6 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
-
-    /// Whether the stream is append only
-    append_only: bool,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -111,7 +108,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
-        append_only: bool,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -127,7 +123,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 keyspace,
                 agg_calls,
                 key_indices,
-                append_only,
             },
             _phantom: PhantomData,
         })
@@ -192,7 +187,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref input_schema,
             ref keyspace,
             ref schema,
-            append_only,
             ..
         }: &HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
@@ -262,7 +256,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code),
-                                append_only,
                             )
                             .await?,
                         ),
@@ -281,7 +274,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 {
                     let data = data.iter().map(|d| &**d).collect_vec();
                     agg_state
-                        .apply_batch(&ops, Some(&vis_map), &data, epoch, append_only)
+                        .apply_batch(&ops, Some(&vis_map), &data, epoch)
                         .await
                         .map_err(StreamExecutorError::agg_state_error)?;
                 }
@@ -461,7 +454,6 @@ mod tests {
         keyspace: Vec<Keyspace<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
-        append_only: bool,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -476,7 +468,6 @@ mod tests {
                 args.pk_indices,
                 args.executor_id,
                 args.key_indices,
-                args.append_only,
             )?))
         }
     }
@@ -488,7 +479,6 @@ mod tests {
         keyspace: Vec<Keyspace<impl StateStore>>,
         pk_indices: PkIndices,
         executor_id: u64,
-        append_only: bool,
     ) -> Box<dyn Executor> {
         let keys = key_indices
             .iter()
@@ -501,7 +491,6 @@ mod tests {
             keyspace,
             pk_indices,
             executor_id,
-            append_only,
         };
         let kind = calc_hash_key_kind(&keys);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args).unwrap()
@@ -552,33 +541,30 @@ mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
+        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
         ];
 
-        let hash_agg = new_boxed_hash_agg_executor(
-            Box::new(source),
-            agg_calls,
-            keys,
-            keyspace,
-            vec![],
-            1,
-            false,
-        );
+        let hash_agg =
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -642,22 +628,26 @@ mod tests {
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
+        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only,
             },
             // This is local hash aggregation, so we add another sum state
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
+                append_only,
             },
         ];
 
@@ -668,7 +658,6 @@ mod tests {
             keyspace,
             vec![],
             1,
-            false,
         );
         let mut hash_agg = hash_agg.execute();
 
@@ -740,23 +729,18 @@ mod tests {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only: false,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only: false,
             },
         ];
 
-        let hash_agg = new_boxed_hash_agg_executor(
-            Box::new(source),
-            agg_calls,
-            keys,
-            keyspace,
-            vec![],
-            1,
-            false,
-        );
+        let hash_agg =
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier
@@ -826,28 +810,24 @@ mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
+        let append_only = true;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only,
             },
         ];
 
-        let hash_agg = new_boxed_hash_agg_executor(
-            Box::new(source),
-            agg_calls,
-            keys,
-            keyspace,
-            vec![],
-            1,
-            true,
-        );
+        let hash_agg =
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
         let mut hash_agg = hash_agg.execute();
 
         // Consume the init barrier

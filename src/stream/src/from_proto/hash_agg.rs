@@ -32,7 +32,6 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     keyspace: Vec<Keyspace<S>>,
     pk_indices: PkIndices,
     executor_id: u64,
-    append_only: bool,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -47,7 +46,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.pk_indices,
             args.executor_id,
             args.key_indices,
-            args.append_only,
         )?
         .boxed())
     }
@@ -71,7 +69,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(build_agg_call_from_prost)
+            .map(|agg_call| build_agg_call_from_prost(node.append_only, agg_call))
             .try_collect()?;
         // Build vector of keyspace via table ids.
         // One keyspace for one agg call.
@@ -93,7 +91,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             keyspace,
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
-            append_only: node.append_only,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl};
 
 use crate::executor::aggregation::StreamingAggStateImpl;
@@ -34,6 +34,7 @@ pub struct StreamingSingleValueAgg<T: Array> {
     /// more than one row,
     row_cnt: i64,
     result: Option<T::OwnedItem>,
+    append_only: bool,
 }
 
 impl<T: Array> Clone for StreamingSingleValueAgg<T> {
@@ -41,32 +42,33 @@ impl<T: Array> Clone for StreamingSingleValueAgg<T> {
         Self {
             row_cnt: self.row_cnt,
             result: self.result.clone(),
+            append_only: self.append_only,
         }
     }
 }
 
-impl<T: Array> TryFrom<Datum> for StreamingSingleValueAgg<T> {
-    type Error = RwError;
+impl<T: Array> StreamingSingleValueAgg<T> {
+    pub fn new(append_only: bool) -> Self {
+        Self::with_row_cnt(None, append_only)
+    }
 
     /// This function makes the assumption that if this function gets called, then
     /// we must have row count equal to 1. If the row count is equal to 0,
     /// then `new` will be called instead of this function.
-    fn try_from(x: Datum) -> Result<Self> {
+    pub fn new_with_datum(x: Datum, append_only: bool) -> Result<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(T::OwnedItem::try_from(scalar)?);
         }
 
-        Ok(Self { row_cnt: 1, result })
-    }
-}
-
-impl<T: Array> StreamingSingleValueAgg<T> {
-    pub fn new() -> Self {
-        Self::with_row_cnt(None)
+        Ok(Self {
+            row_cnt: 1,
+            result,
+            append_only,
+        })
     }
 
-    pub fn with_row_cnt(datum: Datum) -> Self {
+    pub fn with_row_cnt(datum: Datum, append_only: bool) -> Self {
         let mut row_cnt = 0;
         if let Some(cnt) = datum {
             match cnt {
@@ -82,6 +84,7 @@ impl<T: Array> StreamingSingleValueAgg<T> {
         Self {
             row_cnt,
             result: None,
+            append_only,
         }
     }
 
@@ -153,7 +156,6 @@ macro_rules! impl_single_value_agg {
                 ops: Ops<'_>,
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
-                _append_only: bool,
             ) -> Result<()> {
                 self.apply_batch_concrete(ops, visibility, data[0].into())
             }
@@ -168,6 +170,10 @@ macro_rules! impl_single_value_agg {
 
             fn reset(&mut self) {
                 self.row_cnt = 0;
+            }
+
+            fn is_append_only(&self) -> bool {
+                self.append_only
             }
         }
     };
@@ -195,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_single_value_agg() {
-        let mut state = StreamingSingleValueAgg::<Utf8Array>::new();
+        let mut state = StreamingSingleValueAgg::<Utf8Array>::new(false);
 
         assert_eq!(state.get_output().unwrap(), None);
 
@@ -205,7 +211,6 @@ mod tests {
                 &[Op::Insert],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["abc"]})],
-                false,
             )
             .unwrap();
 
@@ -220,7 +225,6 @@ mod tests {
                 &[Op::UpdateDelete],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["abc"]})],
-                false,
             )
             .unwrap();
 
@@ -232,7 +236,6 @@ mod tests {
                 &[Op::UpdateInsert],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["xyz"]})],
-                false,
             )
             .unwrap();
 
@@ -247,7 +250,6 @@ mod tests {
                 &[Op::UpdateInsert],
                 None,
                 &[&ArrayImpl::from(array_nonnull! {Utf8Array, ["opq"]})],
-                false,
             )
             .is_err());
     }

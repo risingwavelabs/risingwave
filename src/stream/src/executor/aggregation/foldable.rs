@@ -54,6 +54,7 @@ where
     I: Array,
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
+    append_only: bool,
     result: Option<R::OwnedItem>,
     _phantom: PhantomData<(I, S, R)>,
 }
@@ -67,6 +68,7 @@ where
     fn clone(&self) -> Self {
         Self {
             result: self.result.clone(),
+            append_only: self.append_only,
             _phantom: PhantomData,
         }
     }
@@ -305,6 +307,7 @@ where
     fn default() -> Self {
         Self {
             result: S::initial(),
+            append_only: false,
             _phantom: PhantomData,
         }
     }
@@ -316,25 +319,15 @@ where
     I: Array,
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(append_only: bool) -> Self {
+        Self {
+            result: S::initial(),
+            append_only,
+            _phantom: PhantomData,
+        }
     }
 
-    /// Get current state without using an array builder
-    pub fn get_state(&self) -> &Option<R::OwnedItem> {
-        &self.result
-    }
-}
-
-impl<R, I, S> TryFrom<Datum> for StreamingFoldAgg<R, I, S>
-where
-    R: Array,
-    I: Array,
-    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
-{
-    type Error = RwError;
-
-    fn try_from(x: Datum) -> Result<Self> {
+    pub fn new_with_datum(x: Datum, append_only: bool) -> Result<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(R::OwnedItem::try_from(scalar)?);
@@ -342,8 +335,14 @@ where
 
         Ok(Self {
             result,
+            append_only,
             _phantom: PhantomData,
         })
+    }
+
+    /// Get current state without using an array builder
+    pub fn get_state(&self) -> &Option<R::OwnedItem> {
+        &self.result
     }
 }
 
@@ -358,9 +357,8 @@ macro_rules! impl_fold_agg {
                 ops: Ops<'_>,
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
-                append_only: bool,
             ) -> Result<()> {
-                if append_only {
+                if self.is_append_only() {
                     self.apply_batch_append_only_concrete(ops, visibility, data[0].into())
                 } else {
                     self.apply_batch_concrete(ops, visibility, data[0].into())
@@ -377,6 +375,10 @@ macro_rules! impl_fold_agg {
 
             fn reset(&mut self) {
                 self.result = S::initial();
+            }
+
+            fn is_append_only(&self) -> bool {
+                self.append_only
             }
         }
     };
@@ -420,12 +422,11 @@ mod tests {
     /// This test uses `Box<dyn StreamingAggStateImpl>` to test a state.
     fn test_primitive_sum_boxed() {
         let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(TestStreamingSumAgg::<I64Array>::new());
+            Box::new(TestStreamingSumAgg::<I64Array>::default());
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -434,7 +435,6 @@ mod tests {
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -442,12 +442,11 @@ mod tests {
 
     #[test]
     fn test_primitive_sum_i64() {
-        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        let mut agg = TestStreamingSumAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -456,7 +455,6 @@ mod tests {
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -484,12 +482,11 @@ mod tests {
                     )
                 })
                 .unzip();
-            let mut agg = TestStreamingSumAgg::<F64Array>::new();
+            let mut agg = TestStreamingSumAgg::<F64Array>::default();
             agg.apply_batch(
                 &ops,
                 None,
                 &[&ArrayImpl::Float64(F64Array::from_slice(&data).unwrap())],
-                false,
             )
             .unwrap();
             assert_eq!(
@@ -501,12 +498,11 @@ mod tests {
 
     #[test]
     fn test_primitive_sum_first_deletion() {
-        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        let mut agg = TestStreamingSumAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-7);
@@ -515,7 +511,6 @@ mod tests {
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-8);
@@ -525,7 +520,7 @@ mod tests {
     /// Even if there is no element after some insertions and equal number of deletion operations,
     /// `PrimitiveSummable` should output `0` instead of `None`.
     fn test_primitive_sum_no_none() {
-        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        let mut agg = TestStreamingSumAgg::<I64Array>::default();
 
         assert_eq!(agg.get_output().unwrap(), None);
 
@@ -533,7 +528,6 @@ mod tests {
             &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array_nonnull!(I64Array, [1, 2, 1, 2]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -542,7 +536,6 @@ mod tests {
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![false, true, false, true]).try_into().unwrap()),
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -550,12 +543,11 @@ mod tests {
 
     #[test]
     fn test_primitive_count() {
-        let mut agg = TestStreamingCountAgg::<I64Array>::new();
+        let mut agg = TestStreamingCountAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
-            false,
         )
         .unwrap();
 
@@ -565,7 +557,6 @@ mod tests {
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).try_into().unwrap()),
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &1);
@@ -573,12 +564,11 @@ mod tests {
 
     #[test]
     fn test_minimum() {
-        let mut agg = TestStreamingMinAgg::<I64Array>::new();
+        let mut agg = TestStreamingMinAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(1), Some(10), None, Some(5)]).into()],
-            false,
         )
         .unwrap();
 
@@ -588,7 +578,6 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(1), Some(10), Some(-1), Some(5)]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-1);
@@ -596,12 +585,11 @@ mod tests {
 
     #[test]
     fn test_minimum_float() {
-        let mut agg = TestStreamingMinAgg::<F64Array>::new();
+        let mut agg = TestStreamingMinAgg::<F64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(F64Array, [Some(1.0), Some(10.0), None, Some(5.0)]).into()],
-            false,
         )
         .unwrap();
 
@@ -611,7 +599,6 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(F64Array, [Some(1.0), Some(10.0), Some(-1.0), Some(5.0)]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_float64(), &-1.0);
@@ -619,12 +606,11 @@ mod tests {
 
     #[test]
     fn test_maximum() {
-        let mut agg = TestStreamingMaxAgg::<I64Array>::new();
+        let mut agg = TestStreamingMaxAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(10), Some(1), None, Some(5)]).into()],
-            false,
         )
         .unwrap();
 
@@ -634,7 +620,6 @@ mod tests {
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
             &[&array!(I64Array, [Some(1), Some(10), Some(100), Some(5)]).into()],
-            false,
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);

@@ -32,7 +32,6 @@ pub struct LocalSimpleAggExecutor {
     pub(super) input: Box<dyn Executor>,
     pub(super) info: ExecutorInfo,
     pub(super) agg_calls: Vec<AggCall>,
-    pub(super) append_only: bool,
 }
 
 impl Executor for LocalSimpleAggExecutor {
@@ -58,7 +57,6 @@ impl LocalSimpleAggExecutor {
         agg_calls: &[AggCall],
         states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
-        append_only: bool,
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
         agg_calls
@@ -71,7 +69,7 @@ impl LocalSimpleAggExecutor {
                     .iter()
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
-                state.apply_batch(&ops, visibility.as_ref(), &cols[..], append_only)
+                state.apply_batch(&ops, visibility.as_ref(), &cols[..])
             })
             .map_err(StreamExecutorError::agg_state_error)?;
         Ok(())
@@ -83,7 +81,6 @@ impl LocalSimpleAggExecutor {
             input,
             info,
             agg_calls,
-            append_only,
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
@@ -94,6 +91,7 @@ impl LocalSimpleAggExecutor {
                     agg_call.args.arg_types(),
                     &agg_call.kind,
                     &agg_call.return_type,
+                    agg_call.append_only,
                     None,
                 )
             })
@@ -105,7 +103,7 @@ impl LocalSimpleAggExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&agg_calls, &mut states, chunk, append_only)?;
+                    Self::apply_chunk(&agg_calls, &mut states, chunk)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -152,7 +150,6 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        append_only: bool,
     ) -> Result<Self> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
         let info = ExecutorInfo {
@@ -165,7 +162,6 @@ impl LocalSimpleAggExecutor {
             input,
             info,
             agg_calls,
-            append_only,
         })
     }
 }
@@ -198,6 +194,7 @@ mod tests {
             kind: AggKind::RowCount,
             args: AggArgs::None,
             return_type: DataType::Int64,
+            append_only: false,
         }];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
@@ -205,7 +202,6 @@ mod tests {
             agg_calls,
             vec![],
             1,
-            false,
         )?);
         let mut simple_agg = simple_agg.execute();
 
@@ -252,16 +248,19 @@ mod tests {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only: false,
             },
         ];
 
@@ -270,7 +269,6 @@ mod tests {
             agg_calls,
             vec![],
             1,
-            false,
         )?);
         let mut simple_agg = simple_agg.execute();
 

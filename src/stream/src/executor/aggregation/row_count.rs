@@ -30,14 +30,15 @@ use super::StreamingAggStateImpl;
 #[derive(Clone, Debug, Default)]
 pub struct StreamingRowCountAgg {
     row_cnt: i64,
+    append_only: bool,
 }
 
 impl StreamingRowCountAgg {
-    pub fn new() -> Self {
-        StreamingRowCountAgg::with_row_cnt(None)
+    pub fn new(append_only: bool) -> Self {
+        StreamingRowCountAgg::with_row_cnt(None, append_only)
     }
 
-    pub fn with_row_cnt(datum: Datum) -> Self {
+    pub fn with_row_cnt(datum: Datum, append_only: bool) -> Self {
         let mut row_cnt = 0;
         if let Some(cnt) = datum {
             match cnt {
@@ -50,7 +51,10 @@ impl StreamingRowCountAgg {
                 ),
             }
         }
-        Self { row_cnt }
+        Self {
+            row_cnt,
+            append_only,
+        }
     }
 
     pub fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
@@ -68,9 +72,8 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         _data: &[&ArrayImpl],
-        append_only: bool,
     ) -> Result<()> {
-        if append_only {
+        if self.is_append_only() {
             match visibility {
                 None => {
                     ops.iter().for_each(|op| {
@@ -123,6 +126,10 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
     fn reset(&mut self) {
         self.row_cnt = 0;
     }
+
+    fn is_append_only(&self) -> bool {
+        self.append_only
+    }
 }
 
 #[cfg(test)]
@@ -131,25 +138,25 @@ mod tests {
 
     #[test]
     fn test_countable_agg() {
-        let mut state = StreamingRowCountAgg::new();
+        let mut state = StreamingRowCountAgg::new(false);
 
         // when there is no element, output should be `0`.
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // insert one element to state
-        state.apply_batch(&[Op::Insert], None, &[], false).unwrap();
+        state.apply_batch(&[Op::Insert], None, &[]).unwrap();
 
         // should be one row
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &1);
 
         // delete one element from state
-        state.apply_batch(&[Op::Delete], None, &[], false).unwrap();
+        state.apply_batch(&[Op::Delete], None, &[]).unwrap();
 
         // should be 0 rows.
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // one more deletion, so we are having `-1` elements inside.
-        state.apply_batch(&[Op::Delete], None, &[], false).unwrap();
+        state.apply_batch(&[Op::Delete], None, &[]).unwrap();
 
         // should be the same as `TestState`'s output
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &-1);
@@ -160,7 +167,6 @@ mod tests {
                 &[Op::Delete, Op::Insert],
                 Some(&(vec![false, true]).try_into().unwrap()),
                 &[],
-                false,
             )
             .unwrap();
 
@@ -173,7 +179,6 @@ mod tests {
                 &[Op::Delete, Op::Insert],
                 Some(&(vec![true, false]).try_into().unwrap()),
                 &[],
-                false,
             )
             .unwrap();
 

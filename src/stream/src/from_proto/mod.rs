@@ -103,7 +103,6 @@ pub fn create_executor(
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorBuilder,
-        NodeBody::AppendOnlyHashAgg => HashAggExecutorBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
         NodeBody::GlobalSimpleAgg => SimpleAggExecutorBuilder,
