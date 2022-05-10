@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
@@ -67,9 +68,9 @@ impl PlanTreeNodeUnary for BatchFilter {
 impl_plan_tree_node_for_unary! { BatchFilter }
 
 impl ToDistributedBatch for BatchFilter {
-    fn to_distributed(&self) -> PlanRef {
-        let new_input = self.input().to_distributed();
-        self.clone_with_input(new_input).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_distributed()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -84,8 +85,8 @@ impl ToBatchProst for BatchFilter {
 }
 
 impl ToLocalBatch for BatchFilter {
-    fn to_local(&self) -> PlanRef {
-        let new_input = self.input().to_local_with_order_required(Order::any());
-        self.clone_with_input(new_input).into()
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

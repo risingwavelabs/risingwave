@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GenerateTimeSeriesNode;
 
@@ -56,8 +57,8 @@ impl fmt::Display for BatchGenerateSeries {
 }
 
 impl ToDistributedBatch for BatchGenerateSeries {
-    fn to_distributed(&self) -> PlanRef {
-        Self::with_dist(self.logical().clone(), Distribution::Single).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }
 }
 
@@ -72,7 +73,7 @@ impl ToBatchProst for BatchGenerateSeries {
 }
 
 impl ToLocalBatch for BatchGenerateSeries {
-    fn to_local(&self) -> PlanRef {
-        Self::with_dist(self.logical().clone(), Distribution::Single).into()
+    fn to_local(&self) -> Result<PlanRef> {
+        Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }
 }
