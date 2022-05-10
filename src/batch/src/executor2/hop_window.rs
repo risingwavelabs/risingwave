@@ -19,7 +19,6 @@ use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
@@ -70,7 +69,7 @@ impl BoxedExecutor2Builder for HopWindowExecutor2 {
                 source.plan_node().get_identity().clone(),
             )));
         }
-        Err(InternalError("HopWindow must have one child".to_string()).into())
+        Err(ErrorCode::InternalError("HopWindow must have one child".to_string()).into())
     }
 }
 
@@ -163,6 +162,48 @@ impl HopWindowExecutor2 {
             window_slide_expr,
         );
 
+        let mut window_start_exprs = Vec::with_capacity(units);
+        let mut window_end_exprs = Vec::with_capacity(units);
+
+        for i in 0..units {
+            let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "window_slide {} cannot be multiplied by {}",
+                    window_slide, i
+                )))
+            })?;
+            let window_start_offset_expr = LiteralExpression::new(
+                DataType::Interval,
+                Some(ScalarImpl::Interval(window_start_offset)),
+            )
+            .boxed();
+            let window_end_offset = window_slide.checked_mul_int(i + units).ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "window_slide {} cannot be multiplied by {}",
+                    window_slide, i
+                )))
+            })?;
+            let window_end_offset_expr = LiteralExpression::new(
+                DataType::Interval,
+                Some(ScalarImpl::Interval(window_end_offset)),
+            )
+            .boxed();
+            let window_start_expr = new_binary_expr(
+                expr_node::Type::Add,
+                DataType::Timestamp,
+                InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                window_start_offset_expr,
+            );
+            window_start_exprs.push(window_start_expr);
+            let window_end_expr = new_binary_expr(
+                expr_node::Type::Add,
+                DataType::Timestamp,
+                InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                window_end_offset_expr,
+            );
+            window_end_exprs.push(window_end_expr);
+        }
+
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
@@ -172,43 +213,8 @@ impl HopWindowExecutor2 {
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
-                let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                    RwError::from(ErrorCode::InternalError(format!(
-                        "window_slide {} cannot be multiplied by {}",
-                        window_slide, i
-                    )))
-                })?;
-                let window_start_offset_expr = LiteralExpression::new(
-                    DataType::Interval,
-                    Some(ScalarImpl::Interval(window_start_offset)),
-                )
-                .boxed();
-                let window_end_offset =
-                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(format!(
-                            "window_slide {} cannot be multiplied by {}",
-                            window_slide, i
-                        )))
-                    })?;
-                let window_end_offset_expr = LiteralExpression::new(
-                    DataType::Interval,
-                    Some(ScalarImpl::Interval(window_end_offset)),
-                )
-                .boxed();
-                let window_start_expr = new_binary_expr(
-                    expr_node::Type::Add,
-                    DataType::Timestamp,
-                    InputRefExpression::new(DataType::Timestamp, 0).boxed(),
-                    window_start_offset_expr,
-                );
-                let window_start_col = window_start_expr.eval(&hop_start_chunk)?;
-                let window_end_expr = new_binary_expr(
-                    expr_node::Type::Add,
-                    DataType::Timestamp,
-                    InputRefExpression::new(DataType::Timestamp, 0).boxed(),
-                    window_end_offset_expr,
-                );
-                let window_end_col = window_end_expr.eval(&hop_start_chunk)?;
+                let window_start_col = window_start_exprs[i].eval(&hop_start_chunk)?;
+                let window_end_col = window_end_exprs[i].eval(&hop_start_chunk)?;
                 let mut new_cols = origin_cols.clone();
                 new_cols.extend_from_slice(&[
                     Column::new(window_start_col),
