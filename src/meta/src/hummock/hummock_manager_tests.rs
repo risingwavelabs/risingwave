@@ -57,7 +57,7 @@ async fn test_hummock_pin_unpin() {
             .await
             .unwrap();
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(2, hummock_version.levels.len());
+        assert_eq!(7, hummock_version.levels.len());
         assert_eq!(0, hummock_version.levels[0].table_infos.len());
         assert_eq!(0, hummock_version.levels[1].table_infos.len());
 
@@ -964,7 +964,7 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    assert!(s.contains("Compaction task id: 1, target level: 1"));
+    assert!(s.contains("Compaction task id: 1, target level: 6"));
 }
 
 #[tokio::test]

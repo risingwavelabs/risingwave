@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 #[derive(Clone, Debug, PartialEq)]
 pub struct SSTableInfo {
     pub key_range: KeyRange,
-    pub table_id: u64,
+    pub table_id: HummockSSTableId,
     pub file_size: u64,
     pub vnode_bitmaps: Vec<VNodeBitmap>,
 }
@@ -59,8 +59,6 @@ impl From<&SSTableInfo> for SstableInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
-    total_bytes: u64,
-    level_max_bytes: u64,
     compacting_files: HashMap<HummockSSTableId, u64>,
     pending_tasks: Vec<(u64, Vec<HummockSSTableId>)>,
 }
@@ -69,8 +67,6 @@ impl LevelHandler {
     pub fn new(level: u32) -> Self {
         Self {
             level,
-            total_bytes: 0,
-            level_max_bytes: 0,
             compacting_files: HashMap::default(),
             pending_tasks: vec![],
         }
@@ -140,8 +136,6 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
             pending_tasks,
             compacting_files,
             level: lh.level,
-            total_bytes: 0,
-            level_max_bytes: 0,
         }
     }
 }
