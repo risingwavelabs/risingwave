@@ -12,12 +12,6 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
-// Hash mapping for meta. Stores mapping from virtual node to parallel unit id.
-message ParallelUnitMapping {
-  uint32 table_id = 1;
-  repeated uint32 hash_mapping = 2;
-}
-
 // will be deprecated and replaced by catalog.Table and catalog.Source
 message Table {
   plan_common.TableRefId table_ref_id = 1;

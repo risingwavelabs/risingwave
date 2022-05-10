@@ -274,7 +274,7 @@ impl HummockStorage {
                     if vnode_set.is_none()
                         || bitmap_overlap(
                             vnode_set.as_ref().unwrap(),
-                            level.table_infos[table_idx].get_vnode_bitmap(),
+                            level.table_infos[table_idx].get_vnode_bitmaps(),
                         )
                     {
                         table_counts += 1;

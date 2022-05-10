@@ -19,6 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::{CompactionGroupId, Prefix};
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::VNodeBitmap;
 
 use crate::hummock::multi_builder::CapacitySplitTableBuilder;
@@ -101,12 +102,12 @@ pub struct GroupedSstableBuilder<B> {
 
 impl<B, F> GroupedSstableBuilder<B>
 where
-    B: Copy + Fn() -> F,
-    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    B: Clone + Fn() -> F,
+    F: Future<Output = HummockResult<(HummockSSTableId, SSTableBuilder)>>,
 {
     pub fn new(get_id_and_builder: B, grouping: KeyValueGroupingImpl) -> Self {
         Self {
-            get_id_and_builder,
+            get_id_and_builder: get_id_and_builder.clone(),
             grouping,
             builders: HashMap::from([(
                 DEFAULT_KEY_VALUE_GROUP_ID,
@@ -137,7 +138,7 @@ where
         let entry = self
             .builders
             .entry(group_id)
-            .or_insert_with(|| CapacitySplitTableBuilder::new(self.get_id_and_builder));
+            .or_insert_with(|| CapacitySplitTableBuilder::new(self.get_id_and_builder.clone()));
         entry.add_full_key(full_key, value, allow_split).await
     }
 
@@ -167,7 +168,6 @@ mod tests {
     use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
-    #[ignore]
     async fn test_compaction_group_grouping() {
         let next_id = AtomicU64::new(1001);
         let block_size = 1 << 10;
@@ -195,7 +195,7 @@ mod tests {
             builder
                 .add_full_key(
                     FullKey::from_user_key(
-                        b"\x00\x00\x00\x00\x00".to_vec(),
+                        b"\x74\x00\x00\x00\x00".to_vec(),
                         (table_capacity - i) as u64,
                     )
                     .as_slice(),
@@ -208,7 +208,7 @@ mod tests {
             builder
                 .add_full_key(
                     FullKey::from_user_key(
-                        [b"\x00", prefix.to_be_bytes().as_slice()].concat().to_vec(),
+                        [b"\x74", prefix.to_be_bytes().as_slice()].concat().to_vec(),
                         (table_capacity - i) as u64,
                     )
                     .as_slice(),
