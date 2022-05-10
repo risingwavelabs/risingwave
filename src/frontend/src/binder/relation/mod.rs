@@ -22,10 +22,12 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
 
+mod generate_series;
 mod join;
 mod subquery;
 mod table_or_source;
 mod window_table_function;
+pub use generate_series::BoundGenerateSeriesFunction;
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundTableSource};
@@ -40,6 +42,7 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
+    GenerateSeriesFunction(Box<BoundGenerateSeriesFunction>),
 }
 
 impl Binder {
@@ -157,13 +160,18 @@ impl Binder {
                     let (schema_name, table_name) = Self::resolve_table_name(name)?;
                     self.bind_table_or_source(&schema_name, &table_name, alias)
                 } else {
-                    let kind =
-                        WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
-                            ErrorCode::NotImplemented(
-                                format!("unknown window function kind: {}", name.0[0].value),
-                                1191.into(),
-                            )
-                        })?;
+                    let func_name = &name.0[0].value;
+                    if func_name.eq_ignore_ascii_case("generate_series") {
+                        return Ok(Relation::GenerateSeriesFunction(Box::new(
+                            self.bind_generate_series_function(args)?,
+                        )));
+                    }
+                    let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
+                        ErrorCode::NotImplemented(
+                            format!("unknown window function kind: {}", name.0[0].value),
+                            1191.into(),
+                        )
+                    })?;
                     Ok(Relation::WindowTableFunction(Box::new(
                         self.bind_window_table_function(kind, args)?,
                     )))
