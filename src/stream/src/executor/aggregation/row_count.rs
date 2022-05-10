@@ -77,7 +77,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
             match visibility {
                 None => {
                     ops.iter().for_each(|op| {
-                        assert_eq!(Op::Insert, *op);
+                        debug_assert!(Op::Insert, *op);
                     });
                     self.row_cnt += ops.len() as i64;
                 }
