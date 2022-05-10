@@ -380,7 +380,6 @@ impl ToBatch for LogicalJoin {
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            // todo!("nested loop join")
             Err(RwError::from(ErrorCode::NotImplemented(
                 "nested loop join".to_string(),
                 None.into(),
@@ -423,7 +422,10 @@ impl ToStream for LogicalJoin {
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            todo!("nested loop join")
+            Err(RwError::from(ErrorCode::NotImplemented(
+                "nested loop join".to_string(),
+                None.into(),
+            )))
         }
     }
 

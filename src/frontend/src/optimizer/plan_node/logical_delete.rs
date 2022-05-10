@@ -16,7 +16,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 
 use super::{BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
@@ -101,10 +101,14 @@ impl ToBatch for LogicalDelete {
 
 impl ToStream for LogicalDelete {
     fn to_stream(&self) -> Result<PlanRef> {
-        unreachable!("delete should always be converted to batch plan");
+        Err(RwError::from(ErrorCode::InternalError(
+            "delete should always be converted to batch plan".to_string(),
+        )))
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
-        unreachable!("delete should always be converted to batch plan");
+        Err(RwError::from(ErrorCode::InternalError(
+            "delete should always be converted to batch plan".to_string(),
+        )))
     }
 }
