@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
@@ -59,8 +60,8 @@ impl fmt::Display for BatchValues {
 }
 
 impl ToDistributedBatch for BatchValues {
-    fn to_distributed(&self) -> PlanRef {
-        Self::with_dist(self.logical().clone(), Distribution::Single).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }
 }
 
@@ -144,7 +145,7 @@ mod tests {
 }
 
 impl ToLocalBatch for BatchValues {
-    fn to_local(&self) -> PlanRef {
-        Self::with_dist(self.logical().clone(), Distribution::Single).into()
+    fn to_local(&self) -> Result<PlanRef> {
+        Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
     }
 }

@@ -162,8 +162,9 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion, k
     current.block_on(async move {
         let mut output = format!("{} keys cost time: [", key_count);
         for h in handles {
+            use std::fmt::Write;
             let t = h.await.unwrap();
-            output.push_str(&format!("{:?}, ", t));
+            write!(output, "{:?}, ", t).unwrap();
         }
         println!("{}", output);
     });

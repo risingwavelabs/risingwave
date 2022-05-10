@@ -2904,7 +2904,7 @@ fn parse_drop_table() {
         Statement::Drop(stmt) => {
             assert!(!stmt.if_exists);
             assert_eq!(ObjectType::Table, stmt.object_type);
-            assert_eq!(Ident::new("foo"), stmt.name);
+            assert_eq!(ObjectName(vec![Ident::new("foo")]), stmt.object_name);
             assert_eq!(stmt.drop_mode, AstOption::None);
         }
         _ => unreachable!(),
@@ -2915,7 +2915,7 @@ fn parse_drop_table() {
         Statement::Drop(stmt) => {
             assert!(stmt.if_exists);
             assert_eq!(ObjectType::Table, stmt.object_type);
-            assert_eq!(Ident::new("foo"), stmt.name);
+            assert_eq!(ObjectName(vec![Ident::new("foo")]), stmt.object_name);
             assert_eq!(stmt.drop_mode, AstOption::Some(DropMode::Cascade));
         }
         _ => unreachable!(),
@@ -2939,7 +2939,7 @@ fn parse_drop_view() {
     let sql = "DROP VIEW myview";
     match verified_stmt(sql) {
         Statement::Drop(stmt) => {
-            assert_eq!(Ident::new("myview"), stmt.name);
+            assert_eq!(ObjectName(vec![Ident::new("myview")]), stmt.object_name);
             assert_eq!(ObjectType::View, stmt.object_type);
         }
         _ => unreachable!(),
@@ -2951,7 +2951,7 @@ fn parse_materialized_drop_view() {
     let sql = "DROP MATERIALIZED VIEW mymview";
     match verified_stmt(sql) {
         Statement::Drop(stmt) => {
-            assert_eq!(Ident::new("mymview"), stmt.name);
+            assert_eq!(ObjectName(vec![Ident::new("mymview")]), stmt.object_name);
             assert_eq!(ObjectType::MaterializedView, stmt.object_type);
         }
         _ => unreachable!(),

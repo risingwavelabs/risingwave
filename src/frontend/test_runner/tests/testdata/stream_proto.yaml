@@ -13,7 +13,7 @@
                 appendOnly: true
                 batchPlan:
                   tableRefId:
-                    tableId: 1
+                    tableId: 2
                   columnDescs:
                     - columnType:
                         typeName: INT32
@@ -39,7 +39,7 @@
                 name: "_row_id#0"
             chain:
               tableRefId:
-                tableId: 1
+                tableId: 2
               upstreamFields:
                 - dataType:
                     typeName: INT64
@@ -144,7 +144,7 @@
             appendOnly: true
             batchPlan:
               tableRefId:
-                tableId: 1
+                tableId: 2
               columnDescs:
                 - columnType:
                     typeName: INT32
@@ -170,7 +170,7 @@
             name: "_row_id#0"
         chain:
           tableRefId:
-            tableId: 1
+            tableId: 2
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -245,7 +245,7 @@
             appendOnly: true
             batchPlan:
               tableRefId:
-                tableId: 1
+                tableId: 2
               columnDescs:
                 - columnType:
                     typeName: INT32
@@ -271,7 +271,7 @@
             name: "_row_id#0"
         chain:
           tableRefId:
-            tableId: 1
+            tableId: 2
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -352,7 +352,7 @@
                     appendOnly: true
                     batchPlan:
                       tableRefId:
-                        tableId: 1
+                        tableId: 2
                       columnDescs:
                         - columnType:
                             typeName: INT32
@@ -378,7 +378,7 @@
                     name: "_row_id#0"
                 chain:
                   tableRefId:
-                    tableId: 1
+                    tableId: 2
                   upstreamFields:
                     - dataType:
                         typeName: INT64
@@ -503,7 +503,7 @@
                             appendOnly: true
                             batchPlan:
                               tableRefId:
-                                tableId: 1
+                                tableId: 2
                               columnDescs:
                                 - columnType:
                                     typeName: INT32
@@ -538,7 +538,7 @@
                             name: "_row_id#0"
                         chain:
                           tableRefId:
-                            tableId: 1
+                            tableId: 2
                           upstreamFields:
                             - dataType:
                                 typeName: INT64

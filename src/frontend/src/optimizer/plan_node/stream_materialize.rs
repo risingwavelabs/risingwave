@@ -117,7 +117,7 @@ impl StreamMaterialize {
             } else {
                 input.pk_indices().to_vec()
             })
-            .enforce_if_not_satisfies(input, Order::any()),
+            .enforce_if_not_satisfies(input, Order::any())?,
         };
 
         let base = Self::derive_plan_base(&input)?;
