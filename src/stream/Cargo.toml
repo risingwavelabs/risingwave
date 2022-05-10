@@ -23,6 +23,7 @@ iter-chunks = "0.1"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
+madsim = "0.2.0-alpha.1"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
 num-traits = "0.2"
@@ -55,7 +56,7 @@ tokio = { version = "1", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = { version = "0.1" }
 tracing-futures = "0.2"
