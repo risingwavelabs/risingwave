@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
@@ -67,11 +68,11 @@ impl PlanTreeNodeUnary for BatchSimpleAgg {
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
 impl ToDistributedBatch for BatchSimpleAgg {
-    fn to_distributed(&self) -> PlanRef {
+    fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(), &Distribution::Single);
-        self.clone_with_input(new_input).into()
+            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -90,8 +91,8 @@ impl ToBatchProst for BatchSimpleAgg {
 }
 
 impl ToLocalBatch for BatchSimpleAgg {
-    fn to_local(&self) -> PlanRef {
-        let new_input = self.input().to_local_with_order_required(Order::any());
-        self.clone_with_input(new_input).into()
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

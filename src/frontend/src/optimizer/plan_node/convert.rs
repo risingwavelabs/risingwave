@@ -37,14 +37,14 @@ pub trait ToStream {
     /// Now it is used to:
     /// 1. ensure every plan node's output having pk column
     /// 2. add `row_count`() in every Agg
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping);
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)>;
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(Distribution::any())`
-    fn to_stream(&self) -> PlanRef;
+    fn to_stream(&self) -> Result<PlanRef>;
 
     /// convert the plan to streaming physical plan and satisfy the required distribution
-    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
-        let ret = self.to_stream();
+    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> Result<PlanRef> {
+        let ret = self.to_stream()?;
         required_dist.enforce_if_not_satisfies(ret, Order::any())
     }
 }
@@ -60,10 +60,10 @@ pub trait ToStream {
 ///   `to_batch_with_order_required(Order::any())`. you can see [`LogicalJoin`] as an example.
 pub trait ToBatch {
     /// `to_batch` is equivalent to `to_batch_with_order_required(Order::any())`
-    fn to_batch(&self) -> PlanRef;
+    fn to_batch(&self) -> Result<PlanRef>;
     /// convert the plan to batch physical plan and satisfy the required Order
-    fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
-        let ret = self.to_batch();
+    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let ret = self.to_batch()?;
         required_order.enforce_if_not_satisfies(ret)
     }
 }
@@ -73,11 +73,11 @@ pub trait ToBatch {
 /// This is quite similar to `ToBatch`, but different in several ways. For example it converts
 /// scan to exchange + scan.
 pub trait ToLocalBatch {
-    fn to_local(&self) -> PlanRef;
+    fn to_local(&self) -> Result<PlanRef>;
 
     /// Convert the plan to batch local physical plan and satisfy the required Order
-    fn to_local_with_order_required(&self, required_order: &Order) -> PlanRef {
-        let ret = self.to_local();
+    fn to_local_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let ret = self.to_local()?;
         required_order.enforce_if_not_satisfies(ret)
     }
 }
@@ -95,15 +95,15 @@ pub trait ToLocalBatch {
 pub trait ToDistributedBatch {
     /// `to_distributed` is equivalent to `to_distributed_with_required(Distribution::any(),
     /// Order::any())`
-    fn to_distributed(&self) -> PlanRef;
+    fn to_distributed(&self) -> Result<PlanRef>;
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(
         &self,
         required_order: &Order,
         required_dist: &Distribution,
-    ) -> PlanRef {
-        let ret = self.to_distributed();
-        let ret = required_order.enforce_if_not_satisfies(ret);
+    ) -> Result<PlanRef> {
+        let ret = self.to_distributed()?;
+        let ret = required_order.enforce_if_not_satisfies(ret)?;
         required_dist.enforce_if_not_satisfies(ret, required_order)
     }
 }
@@ -113,7 +113,7 @@ macro_rules! impl_to_batch {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToBatch for [<$convention $name>] {
-                fn to_batch(&self) -> PlanRef {
+                fn to_batch(&self) -> Result<PlanRef> {
                     panic!("converting into batch is only allowed on logical plan")
                 }
             })*
@@ -128,10 +128,10 @@ macro_rules! impl_to_stream {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToStream for [<$convention $name>] {
-                fn to_stream(&self) -> PlanRef {
+                fn to_stream(&self) -> Result<PlanRef>{
                     panic!("converting to stream is only allowed on logical plan")
                 }
-                fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping){
+                fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)>{
                     panic!("logical rewrite is only allowed on logical plan")
                 }
             })*
@@ -146,7 +146,7 @@ macro_rules! ban_to_distributed {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToDistributedBatch for [<$convention $name>] {
-                fn to_distributed(&self) -> PlanRef {
+                fn to_distributed(&self) -> Result<PlanRef> {
                     panic!("converting to distributed is only allowed on batch plan")
                 }
             })*
@@ -161,7 +161,7 @@ macro_rules! ban_to_local {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToLocalBatch for [<$convention $name>] {
-                fn to_local(&self) -> PlanRef {
+                fn to_local(&self) -> Result<PlanRef> {
                     panic!("converting to distributed is only allowed on batch plan")
                 }
             })*
