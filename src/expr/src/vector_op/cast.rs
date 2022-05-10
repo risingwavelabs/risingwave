@@ -246,8 +246,8 @@ mod tests {
     #[test]
     fn integer_cast_to_bool() {
         use super::*;
-        assert_eq!(int32_to_bool(32).unwrap(), true);
-        assert_eq!(int32_to_bool(-32).unwrap(), true);
-        assert_eq!(int32_to_bool(0).unwrap(), false);
+        assert!(int32_to_bool(32).unwrap());
+        assert!(int32_to_bool(-32).unwrap());
+        assert!(!int32_to_bool(0).unwrap());
     }
 }
