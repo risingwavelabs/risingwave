@@ -39,6 +39,7 @@ struct PulsarSingleSplitReader {
     split: PulsarSplit,
 }
 
+// {ledger_id}:{entry_id}:{partition}:{batch_index}
 fn parse_message_id(id: &str) -> Result<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
@@ -182,20 +183,20 @@ impl SplitReader for PulsarSplitReader {
         Ok(Some(ret))
     }
 
-    async fn new(_props: Properties, _state: ConnectorStateV2) -> Result<Self>
+    async fn new(props: Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
         let (tx, rx) = mpsc::unbounded_channel();
         let rx = UnboundedReceiverStream::from(rx);
-        let splits = try_match_expand!(_state, ConnectorStateV2::Splits).map_err(|e| anyhow!(e))?;
+        let splits = try_match_expand!(state, ConnectorStateV2::Splits).map_err(|e| anyhow!(e))?;
 
         let pulsar_splits: Vec<PulsarSplit> = splits
             .into_iter()
             .map(|split| try_match_expand!(split, SplitImpl::Pulsar).map_err(|e| anyhow!(e)))
             .collect::<Result<Vec<PulsarSplit>>>()?;
 
-        let props = Arc::new(AnyhowProperties::new(_props.0));
+        let props = Arc::new(AnyhowProperties::new(props.0));
 
         let mut futures = vec![];
         let mut stop_chs = vec![];
