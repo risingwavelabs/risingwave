@@ -48,64 +48,64 @@ fn parse_create_table_with_defaults() {
             assert_eq!(
                 columns,
                 vec![
-                    ColumnDef {
-                        name: "customer_id".into(),
-                        data_type: DataType::Int(None),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ColumnDef::without_sub_defs(
+                        "customer_id".into(),
+                        DataType::Int(None),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::Default(verified_expr(
                                 "nextval(public.customer_customer_id_seq)"
                             ))
                         }],
-                    },
-                    ColumnDef {
-                        name: "store_id".into(),
-                        data_type: DataType::SmallInt(None),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "store_id".into(),
+                        DataType::SmallInt(None),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
                         }],
-                    },
-                    ColumnDef {
-                        name: "first_name".into(),
-                        data_type: DataType::Varchar(Some(45)),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "first_name".into(),
+                        DataType::Varchar(Some(45)),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
                         }],
-                    },
-                    ColumnDef {
-                        name: "last_name".into(),
-                        data_type: DataType::Varchar(Some(45)),
-                        collation: Some(ObjectName(vec![Ident::with_quote('"', "es_ES")])),
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "last_name".into(),
+                        DataType::Varchar(Some(45)),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
                         }],
-                    },
-                    ColumnDef {
-                        name: "email".into(),
-                        data_type: DataType::Varchar(Some(50)),
-                        collation: None,
-                        options: vec![],
-                    },
-                    ColumnDef {
-                        name: "address_id".into(),
-                        data_type: DataType::SmallInt(None),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "email".into(),
+                        DataType::Varchar(Some(50)),
+                        None,
+                        vec![],
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "address_id".into(),
+                        DataType::SmallInt(None),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull
                         }],
-                    },
-                    ColumnDef {
-                        name: "activebool".into(),
-                        data_type: DataType::Boolean,
-                        collation: None,
-                        options: vec![
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "activebool".into(),
+                        DataType::Boolean,
+                        None,
+                        vec![
                             ColumnOptionDef {
                                 name: None,
                                 option: ColumnOption::Default(Expr::Value(Value::Boolean(true))),
@@ -115,12 +115,12 @@ fn parse_create_table_with_defaults() {
                                 option: ColumnOption::NotNull,
                             }
                         ],
-                    },
-                    ColumnDef {
-                        name: "create_date".into(),
-                        data_type: DataType::Date,
-                        collation: None,
-                        options: vec![
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "create_date".into(),
+                        DataType::Date,
+                        None,
+                        vec![
                             ColumnOptionDef {
                                 name: None,
                                 option: ColumnOption::Default(verified_expr("CAST(now() AS TEXT)"))
@@ -130,12 +130,12 @@ fn parse_create_table_with_defaults() {
                                 option: ColumnOption::NotNull,
                             }
                         ],
-                    },
-                    ColumnDef {
-                        name: "last_update".into(),
-                        data_type: DataType::Timestamp(false),
-                        collation: None,
-                        options: vec![
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "last_update".into(),
+                        DataType::Timestamp(false),
+                        None,
+                        vec![
                             ColumnOptionDef {
                                 name: None,
                                 option: ColumnOption::Default(verified_expr("now()")),
@@ -145,16 +145,16 @@ fn parse_create_table_with_defaults() {
                                 option: ColumnOption::NotNull,
                             }
                         ],
-                    },
-                    ColumnDef {
-                        name: "active".into(),
-                        data_type: DataType::Int(None),
-                        collation: None,
-                        options: vec![ColumnOptionDef {
+                    ),
+                    ColumnDef::without_sub_defs(
+                        "active".into(),
+                        DataType::Int(None),
+                        None,
+                        vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull
                         }],
-                    },
+                    ),
                 ]
             );
             assert!(constraints.is_empty());

@@ -1536,6 +1536,15 @@ impl Parser {
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
         let name = self.parse_identifier()?;
         let data_type = self.parse_data_type()?;
+        let sub_defs = {
+            if DataType::Struct == data_type {
+                let (sub_defs, _) = self.parse_struct_columns()?;
+                sub_defs
+            } else {
+                vec![]
+            }
+        };
+
         let collation = if self.parse_keyword(Keyword::COLLATE) {
             Some(self.parse_object_name()?)
         } else {
@@ -1564,6 +1573,7 @@ impl Parser {
             data_type,
             collation,
             options,
+            sub_defs,
         })
     }
 
@@ -1930,6 +1940,35 @@ impl Parser {
         Ok(data_type)
     }
 
+    pub fn parse_struct_columns(
+        &mut self,
+    ) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+        let mut columns = vec![];
+        let mut constraints = vec![];
+        if !self.consume_token(&Token::Lt) || self.consume_token(&Token::Gt) {
+            return Ok((columns, constraints));
+        }
+
+        loop {
+            if let Some(constraint) = self.parse_optional_table_constraint()? {
+                constraints.push(constraint);
+            } else if let Token::Word(_) = self.peek_token() {
+                columns.push(self.parse_column_def()?);
+            } else {
+                return self.expected("column name or constraint definition", self.peek_token());
+            }
+            let comma = self.consume_token(&Token::Comma);
+            if self.consume_token(&Token::Gt) {
+                // allow a trailing comma, even though it's not in standard
+                break;
+            } else if !comma {
+                return self.expected("',' or ')' after column definition", self.peek_token());
+            }
+        }
+
+        Ok((columns, constraints))
+    }
+
     /// Parse a SQL datatype
     pub fn parse_data_type_inner(&mut self) -> Result<DataType, ParserError> {
         match self.next_token() {
@@ -1986,6 +2025,7 @@ impl Parser {
                         Ok(DataType::Text)
                     }
                 }
+                Keyword::STRUCT => Ok(DataType::Struct),
                 Keyword::BYTEA => Ok(DataType::Bytea),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
                     let (precision, scale) = self.parse_optional_precision_scale()?;

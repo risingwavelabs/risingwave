@@ -75,6 +75,7 @@ pub enum DataType {
     Custom(ObjectName),
     /// Arrays
     Array(Box<DataType>),
+    Struct,
 }
 
 impl fmt::Display for DataType {
@@ -118,6 +119,7 @@ impl fmt::Display for DataType {
             DataType::Bytea => write!(f, "BYTEA"),
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
+            DataType::Struct => write!(f, "STRUCT"),
         }
     }
 }

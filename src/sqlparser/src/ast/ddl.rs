@@ -244,11 +244,32 @@ pub struct ColumnDef {
     pub data_type: DataType,
     pub collation: Option<ObjectName>,
     pub options: Vec<ColumnOptionDef>,
+    pub sub_defs: Vec<ColumnDef>,
+}
+
+impl ColumnDef {
+    pub fn without_sub_defs(
+        name: Ident,
+        data_type: DataType,
+        collation: Option<ObjectName>,
+        options: Vec<ColumnOptionDef>,
+    ) -> Self {
+        ColumnDef {
+            name,
+            data_type,
+            collation,
+            options,
+            sub_defs: vec![],
+        }
+    }
 }
 
 impl fmt::Display for ColumnDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.name, self.data_type)?;
+        if !self.sub_defs.is_empty() {
+            write!(f, " <{}>", display_comma_separated(&self.sub_defs))?;
+        }
         for option in &self.options {
             write!(f, " {}", option)?;
         }
