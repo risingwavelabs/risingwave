@@ -204,7 +204,7 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_lookup_this_epoch() {
     // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
     // fails because read epoch doesn't take effect in memory state store.
@@ -274,7 +274,7 @@ async fn test_lookup_this_epoch() {
     check_chunk_eq(chunk2, &expected_chunk2);
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);

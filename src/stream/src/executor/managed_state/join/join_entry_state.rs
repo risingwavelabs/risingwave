@@ -219,7 +219,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);

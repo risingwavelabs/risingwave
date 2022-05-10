@@ -346,7 +346,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
@@ -428,10 +428,11 @@ mod tests {
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
-            tokio::spawn(async move {
+            madsim::task::spawn(async move {
                 let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            })
+            .detach();
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
@@ -473,7 +474,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_table_dropped() -> Result<()> {
         let table_id = TableId::default();
 
@@ -549,10 +550,11 @@ mod tests {
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
-            tokio::spawn(async move {
+            madsim::task::spawn(async move {
                 let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            })
+            .detach();
         };
 
         write_chunk(chunk.clone());

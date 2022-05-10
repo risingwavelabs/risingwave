@@ -416,7 +416,7 @@ mod tests {
         )
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_top_n_state() {
         let store = MemoryStateStore::new();
         let data_types = vec![DataType::Varchar, DataType::Int64];

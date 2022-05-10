@@ -304,7 +304,7 @@ mod tests {
         managed_state
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_string_agg_state() {
         let keyspace = create_in_memory_keyspace();
         let store = keyspace.state_store();

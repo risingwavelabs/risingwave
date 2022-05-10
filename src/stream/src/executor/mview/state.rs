@@ -112,7 +112,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the amount of rows is expected.
