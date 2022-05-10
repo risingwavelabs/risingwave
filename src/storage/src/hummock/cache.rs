@@ -924,6 +924,7 @@ mod tests {
 
             cache.release(new_entry);
             assert!((*new_entry).is_in_cache());
+            #[cfg(debug_assertions)]
             assert!((*new_entry).is_in_lru());
 
             // assert old value unchanged.
@@ -933,9 +934,12 @@ mod tests {
 
             cache.release(old_entry);
             assert!(!(*old_entry).is_in_cache());
-            assert!(!(*old_entry).is_in_lru());
             assert!((*new_entry).is_in_cache());
-            assert!((*new_entry).is_in_lru());
+            #[cfg(debug_assertions)]
+            {
+                assert!(!(*old_entry).is_in_lru());
+                assert!((*new_entry).is_in_lru());
+            }
         }
     }
 

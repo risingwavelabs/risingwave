@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "bench_merge_iter"
 harness = false
+
+[[bench]]
+name = "bench_fs_operation"
+harness = false
