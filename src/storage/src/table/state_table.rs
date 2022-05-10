@@ -156,12 +156,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        // let cell_based_iter = self.cell_based_streaming_iter.do_next();
-        // // let cell_based_item = cell_based_iter.unwrap();
-        // let peekable_cell_based_iter = cell_based_iter.boxed().peekable();
-
-        // let c = peekable_cell_based_iter.next();
-
+        // todo(wcy-fdu): use async_stream to implement this part.
         self.cell_based_streaming_iter.peek().await.map_err(err)?;
 
         let mut mem_table_iter_next_flag = false;

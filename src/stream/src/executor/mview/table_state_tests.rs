@@ -333,7 +333,8 @@ async fn test_state_table_iter() {
     let epoch = u64::MAX;
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
-    // [3333, 3333, 3333], [6, 66, 666], [9, 99, 999] exists in cell_based_table
+    // [1, 11, 111], [3333, 3333, 3333], [6, 66, 666], [9, 99, 999] exists in cell_based_table
+
     state
         .insert(
             Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
@@ -387,9 +388,12 @@ async fn test_state_table_iter() {
             ]),
         )
         .unwrap();
+
     let mut iter = state.iter(epoch).await.unwrap();
+
     let res = iter.next().await.unwrap();
     assert!(res.is_some());
+    // this row exists in mem_table
     assert_eq!(
         Row(vec![
             Some(1_i32.into()),
@@ -424,7 +428,7 @@ async fn test_state_table_iter() {
 
     let res = iter.next().await.unwrap();
 
-    // this row exists in cell_based_table
+    // this row exists in mem_table
     assert_eq!(
         Row(vec![
             Some(5_i32.into()),
@@ -435,6 +439,7 @@ async fn test_state_table_iter() {
     );
     let res = iter.next().await.unwrap();
 
+    // this row exists in cell_based_table
     assert_eq!(
         Row(vec![
             Some(6_i32.into()),
@@ -445,7 +450,7 @@ async fn test_state_table_iter() {
     );
 
     let res = iter.next().await.unwrap();
-
+    // this row exists in mem_table
     assert_eq!(
         Row(vec![
             Some(7_i32.into()),
@@ -457,6 +462,7 @@ async fn test_state_table_iter() {
 
     let res = iter.next().await.unwrap();
 
+    // this row exists in mem_table
     assert_eq!(
         Row(vec![
             Some(8_i32.into()),
@@ -468,6 +474,7 @@ async fn test_state_table_iter() {
 
     let res = iter.next().await.unwrap();
 
+    // this row exists in cell_based_table
     assert_eq!(
         Row(vec![
             Some(9_i32.into()),
