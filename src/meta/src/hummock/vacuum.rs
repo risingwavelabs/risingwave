@@ -170,7 +170,7 @@ where
             let compactor = match self.compactor_manager.next_compactor() {
                 None => {
                     tracing::warn!("No vacuum worker is available.");
-                    return Ok(vec![]);
+                    break;
                 }
                 Some(compactor) => compactor,
             };

@@ -798,7 +798,6 @@ where
             new_hummock_version.uncommitted_epochs.swap_remove(idx);
         }
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        // TODO: avoid this.
         new_hummock_version.max_committed_epoch = epoch;
         commit_multi_var!(self, None, new_hummock_version, current_version_id)?;
 
