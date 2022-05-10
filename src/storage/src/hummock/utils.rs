@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
@@ -123,18 +122,4 @@ where
             .collect();
     }
     result_sst_ids
-}
-
-/// Search the SST containing the specified key within a level, using binary search.
-pub(crate) fn search_sst_idx<B>(level: &Level, key: &B) -> usize
-where
-    B: AsRef<[u8]> + Send + ?Sized,
-{
-    level
-        .table_infos
-        .partition_point(|table| {
-            let ord = user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
-            ord == Ordering::Less || ord == Ordering::Equal
-        })
-        .saturating_sub(1) // considering the boundary of 0
 }

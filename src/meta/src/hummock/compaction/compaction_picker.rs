@@ -64,7 +64,7 @@ impl CompactionPicker for MinOverlappingPicker {
             let mut pending_campct = false;
             let overlap_files = self
                 .overlap_strategy
-                .check_base_level_overlap(&[table.clone()], &levels[target_level].table_infos);
+                .check_overlap_with_tables(&[table.clone()], &levels[target_level].table_infos);
             for other in overlap_files {
                 if level_handlers[target_level].is_pending_compact(&other.id) {
                     pending_campct = true;
