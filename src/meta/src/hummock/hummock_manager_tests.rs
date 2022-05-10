@@ -113,6 +113,7 @@ async fn test_hummock_pin_unpin() {
 async fn test_hummock_compaction_task() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
+    let sst_num = 2;
 
     // No compaction task available.
     let task = hummock_manager.get_compact_task(context_id).await.unwrap();
@@ -120,7 +121,7 @@ async fn test_hummock_compaction_task() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
@@ -165,6 +166,10 @@ async fn test_hummock_compaction_task() {
         0
     );
     assert_eq!(compact_task.get_task_id(), 1);
+    // In the test case, we assume that each SST contains data of 2 relational tables, and
+    // one of them overlaps with the previous SST. So there will be one more relational tables
+    // (for vnode mapping) than SSTs.
+    assert_eq!(compact_task.get_vnode_mappings().len(), sst_num + 1);
 
     // Cancel the task and succeed.
     compact_task.task_status = false;

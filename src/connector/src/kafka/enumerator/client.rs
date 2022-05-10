@@ -55,7 +55,8 @@ impl KafkaSplitEnumerator {
         let mut scan_start_offset = match properties
             .0
             .get(KAFKA_CONFIG_SCAN_STARTUP_MODE)
-            .map(String::as_str)
+            .map(|s| s.to_lowercase())
+            .as_deref()
         {
             Some("earliest") => KafkaEnumeratorOffset::Earliest,
             Some("latest") => KafkaEnumeratorOffset::Latest,

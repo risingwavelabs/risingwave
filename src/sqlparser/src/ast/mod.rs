@@ -992,7 +992,7 @@ impl fmt::Display for Statement {
                 location,
                 managed_location,
             } => {
-                write!(f, "CREATE")?;
+                write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
                     write!(f, " IF NOT EXISTS")?;
                 }
@@ -1492,6 +1492,7 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Database,
 }
 
 impl fmt::Display for ObjectType {
@@ -1504,6 +1505,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Database => "DATABASE",
         })
     }
 }
@@ -1524,6 +1526,8 @@ impl ParseTo for ObjectType {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
             ObjectType::Schema
+        } else if parser.parse_keyword(Keyword::DATABASE) {
+            ObjectType::Database
         } else {
             return parser.expected(
                 "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",
