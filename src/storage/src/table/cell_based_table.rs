@@ -490,20 +490,20 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         Ok(iter)
     }
 
-    pub async fn peek(&mut self) -> StorageResult<()> {
+    pub async fn init_cell_based_item(&mut self) -> StorageResult<()> {
         if self.cell_based_item.is_none() {
-            self.cell_based_item = self.next_inner().await?;
+            self.cell_based_item = self.next().await?;
         }
         Ok(())
     }
 
-    pub async fn next(&mut self) -> StorageResult<()> {
-        self.cell_based_item = self.next_inner().await?;
+    pub async fn update_current_item(&mut self) -> StorageResult<()> {
+        self.cell_based_item = self.next().await?;
         Ok(())
     }
 
     /// return a row with its pk
-    pub async fn next_inner(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
+    async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
                 None => {

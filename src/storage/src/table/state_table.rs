@@ -157,7 +157,10 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
         // todo(wcy-fdu): use async_stream to implement this part.
-        self.cell_based_streaming_iter.peek().await.map_err(err)?;
+        self.cell_based_streaming_iter
+            .init_cell_based_item()
+            .await
+            .map_err(err)?;
 
         let mut mem_table_iter_next_flag = false;
         let mut res = None;
@@ -170,7 +173,10 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
             }
             (Some((_, row)), None) => {
                 res = Some(row.clone());
-                self.cell_based_streaming_iter.next().await.map_err(err)?;
+                self.cell_based_streaming_iter
+                    .update_current_item()
+                    .await
+                    .map_err(err)?;
             }
             (None, Some((_, row_op))) => {
                 mem_table_iter_next_flag = true;
@@ -185,12 +191,21 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     serialize_pk(mem_table_pk, &self.pk_serializer).map_err(err)?;
                 match cell_based_pk.cmp(&mem_table_pk_bytes) {
                     Ordering::Less => {
+                        // cell_based_table_item will be return
                         res = Some(cell_based_row.clone());
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                        self.cell_based_streaming_iter
+                            .update_current_item()
+                            .await
+                            .map_err(err)?;
                     }
                     Ordering::Equal => {
+                        // mem_table_item will be return, while both cell_based_streaming_iter and
+                        // mem_table_iter need to execute next() once.
                         mem_table_iter_next_flag = true;
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                        self.cell_based_streaming_iter
+                            .update_current_item()
+                            .await
+                            .map_err(err)?;
                         match mem_table_row_op {
                             RowOp::Insert(row) => {
                                 res = Some(row.clone());
@@ -200,8 +215,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                         }
                     }
                     Ordering::Greater => {
-                        // mem_table_item will be return, while cell_based_item need to be saved and
-                        // will be used in following next()
+                        // mem_table_item will be return
                         mem_table_iter_next_flag = true;
                         match mem_table_row_op {
                             RowOp::Insert(row) => res = Some(row.clone()),
