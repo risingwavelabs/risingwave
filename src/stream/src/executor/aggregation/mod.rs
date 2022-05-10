@@ -32,6 +32,7 @@ use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 pub use row_count::*;
 use static_assertions::const_assert_eq;
@@ -338,6 +339,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
+    state_tables: &[StateTable<S>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -363,6 +365,8 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
             key_hash_code.clone(),
+            key,
+            &state_tables[idx],
         )
         .await
         .map_err(StreamExecutorError::agg_state_error)?;
@@ -383,4 +387,23 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         managed_states,
         prev_states: None,
     })
+}
+
+/// Get the pk keys len (Do not count group key).
+/// For hash agg, add with group key to get internal table primary key len.
+/// For simple agg,
+pub fn get_key_len(agg_call: &AggCall) -> usize {
+    match agg_call.kind {
+        // If append_only, do not need order key.
+        AggKind::Min | AggKind::Max => {
+            if agg_call.append_only {
+                0
+            } else {
+                1
+            }
+        }
+        // These agg call do not have keys besides group key.
+        AggKind::Sum | AggKind::Count | AggKind::SingleValue | AggKind::RowCount => 0,
+        _ => unimplemented!("{:?} do not implemented!", agg_call.kind),
+    }
 }
