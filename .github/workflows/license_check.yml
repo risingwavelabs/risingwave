@@ -2,10 +2,11 @@ name: License checker
 
 on:
   push:
-    branches: [main]
+    branches:
+    - main
+    - "forks/*"
   pull_request:
     branches: [main]
-
 jobs:
   license-header-check:
     runs-on: ubuntu-latest

@@ -57,7 +57,6 @@ const PopupBox = styled("div")({
   alignItems: "center",
   backgroundColor: "white",
   borderRadius: "20px",
-  boxShadow: "14px 14px 28px #e6e6e6, -14px -14px 28px #ffffff"
 });
 
 const PopupBoxHeader = styled("div")({
