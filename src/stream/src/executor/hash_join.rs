@@ -1586,7 +1586,8 @@ mod tests {
         let chunk_l2 = StreamChunk::from_pretty(
             "  I I
              + 3 8
-             - 3 8",
+             - 3 8
+             - 1 4", // delete row to cause an empty JoinHashEntry
         );
         let chunk_r1 = StreamChunk::from_pretty(
             "  I I
@@ -1597,7 +1598,8 @@ mod tests {
         let chunk_r2 = StreamChunk::from_pretty(
             "  I  I
              + 5 10
-             - 5 10",
+             - 5 10
+             + 1 2",
         );
         let (mut tx_l, mut tx_r, mut hash_join) = create_executor::<{ JoinType::FullOuter }>(true);
 
@@ -1628,7 +1630,8 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I I
                 + 3 8 . .
-                - 3 8 . ."
+                - 3 8 . .
+                - 1 4 . ."
             )
         );
 
@@ -1642,7 +1645,9 @@ mod tests {
                 U- 2 5 . .
                 U+ 2 5 2 6
                 +  . . 4 8
-                +  . . 3 4" // 3 4 should be forwarded only once
+                +  . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
+                             * despite matching on eq join on 2
+                             * entries */
             )
         );
 
@@ -1654,7 +1659,9 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I I
                 + . . 5 10
-                - . . 5 10"
+                - . . 5 10
+                + . . 1 2" /* regression test (#2420): 1 2 forwarded even if matches on an empty
+                            * join entry */
             )
         );
     }
