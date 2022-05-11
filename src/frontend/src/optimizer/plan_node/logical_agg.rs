@@ -434,20 +434,19 @@ impl ColPrunable for LogicalAgg {
         };
         let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
-        let agg_call_required_cols = {
+        let (agg_call_required_cols, agg_calls) = {
             let mut tmp = FixedBitSet::with_capacity(self.input().schema().fields().len());
-            required_cols
+            let new_agg_calls = required_cols
                 .iter()
                 .filter(|&&index| index >= self.group_keys.len())
-                .for_each(|&index| {
-                    tmp.extend(
-                        self.agg_calls()[index - self.group_keys().len()]
-                            .inputs
-                            .iter()
-                            .map(|x| x.index()),
-                    );
-                });
-            tmp
+                .map(|&index| {
+                    let index = index - self.group_keys.len();
+                    let agg_call = self.agg_calls[index].clone();
+                    tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
+                    agg_call
+                })
+                .collect_vec();
+            (tmp, new_agg_calls)
         };
 
         let input_required_cols = {
@@ -456,20 +455,54 @@ impl ColPrunable for LogicalAgg {
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
         };
-
         let mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input().schema().len(),
         );
-        let (agg, _) = self.rewrite_with_input(
-            self.input().prune_col(&input_required_cols),
-            mapping.clone(),
-        );
+        let agg = {
+            let agg_calls = agg_calls
+                .iter()
+                .cloned()
+                .map(|mut agg_call| {
+                    agg_call
+                        .inputs
+                        .iter_mut()
+                        .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
+                    agg_call
+                })
+                .collect();
+            let group_keys = self
+                .group_keys
+                .iter()
+                .cloned()
+                .map(|key| mapping.map(key))
+                .collect();
+            LogicalAgg::new(
+                agg_calls,
+                group_keys,
+                self.input.prune_col(&input_required_cols),
+            )
+        };
 
         if group_key_required_cols.is_subset(&upstream_required_cols) {
             agg.into()
         } else {
             // Some group key columns are not needed
+            let new_output_cols = {
+                let mapping = self.i2o_col_mapping();
+                let mut tmp = input_required_cols
+                    .iter()
+                    .filter_map(|&idx| mapping.try_map(idx))
+                    .collect_vec();
+                tmp.extend(
+                    required_cols
+                        .iter()
+                        .filter(|&&index| index >= self.group_keys.len()),
+                );
+                tmp
+            };
+            let mapping =
+                &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
             let output_required_cols = required_cols
                 .iter()
                 .map(|&idx| mapping.map(idx))
@@ -689,7 +722,7 @@ mod tests {
     /// ```
     /// with required columns [0,1] (all columns) will result in
     /// ```text
-    /// Agg(max(input_ref(1))) group by (input_ref(0))
+    /// Agg(min(input_ref(1))) group by (input_ref(0))
     ///  TableScan(v2, v3)
     async fn test_prune_all() {
         let ty = DataType::Int32;
@@ -741,7 +774,7 @@ mod tests {
     /// with required columns [1] (group key removed) will result in
     /// ```text
     /// Project(input_ref(1))
-    ///   Agg(max(input_ref(1))) group by (input_ref(0))
+    ///   Agg(min(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
     async fn test_prune_group_key() {
         let ctx = OptimizerContext::mock().await;
