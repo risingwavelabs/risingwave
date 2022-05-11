@@ -23,15 +23,19 @@ mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
+mod forward_sstable_iterator;
 pub mod multi_builder;
-mod sstable_iterator;
 use bytes::{Buf, BufMut};
-pub use sstable_iterator::*;
-mod reverse_sstable_iterator;
-pub use reverse_sstable_iterator::*;
+use fail::fail_point;
+pub use forward_sstable_iterator::*;
+mod backward_sstable_iterator;
+pub use backward_sstable_iterator::*;
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+pub mod group_builder;
 mod utils;
+
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 
@@ -45,12 +49,12 @@ const VERSION: u32 = 1;
 #[derive(Clone, Debug)]
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
-    pub id: u64,
+    pub id: HummockSSTableId,
     pub meta: SstableMeta,
 }
 
 impl Sstable {
-    pub fn new(id: u64, meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
         Self { id, meta }
     }
 
@@ -59,7 +63,11 @@ impl Sstable {
     }
 
     pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
-        if self.has_bloom_filter() {
+        let enable_bloom_filter: fn() -> bool = || {
+            fail_point!("disable_bloom_filter", |_| false);
+            true
+        };
+        if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = farmhash::fingerprint32(user_key);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             bloom.surely_not_have_hash(hash)
@@ -85,6 +93,8 @@ impl Sstable {
                 right: self.meta.largest_key.clone(),
                 inf: false,
             }),
+            file_size: self.meta.estimated_size as u64,
+            vnode_bitmaps: vec![],
         }
     }
 }

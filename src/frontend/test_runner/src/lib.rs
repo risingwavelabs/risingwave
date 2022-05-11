@@ -58,7 +58,7 @@ pub struct TestCase {
     /// Logical plan with optimization `.gen_optimized_logical_plan()`
     pub optimized_logical_plan: Option<String>,
 
-    /// Distributed batch plan `.gen_dist_batch_query_plan()`
+    /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
 
     /// Proto JSON of generated batch plan
@@ -105,7 +105,7 @@ pub struct TestCaseResult {
     /// Logical plan with optimization `.gen_optimized_logical_plan()`
     pub optimized_logical_plan: Option<String>,
 
-    /// Distributed batch plan `.gen_dist_batch_query_plan()`
+    /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
 
     /// Proto JSON of generated batch plan
@@ -274,8 +274,7 @@ impl TestCase {
                     create_mv::handle_create_mv(context, name, query).await?;
                 }
                 Statement::Drop(drop_statement) => {
-                    let table_object_name = ObjectName(vec![drop_statement.name]);
-                    drop_table::handle_drop_table(context, table_object_name).await?;
+                    drop_table::handle_drop_table(context, drop_statement.object_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -327,7 +326,7 @@ impl TestCase {
         }
 
         if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
-            let batch_plan = logical_plan.gen_dist_batch_query_plan();
+            let batch_plan = logical_plan.gen_batch_query_plan()?;
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_plan.is_some() {

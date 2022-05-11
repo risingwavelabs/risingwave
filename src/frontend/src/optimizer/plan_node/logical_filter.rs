@@ -23,6 +23,7 @@ use super::{
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
+use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -142,24 +143,24 @@ impl ColPrunable for LogicalFilter {
 }
 
 impl ToBatch for LogicalFilter {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchFilter::new(new_logical).into()
+        Ok(BatchFilter::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_stream();
+    fn to_stream(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
-        StreamFilter::new(new_logical).into()
+        Ok(StreamFilter::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (filter.into(), out_col_change)
+        Ok((filter.into(), out_col_change))
     }
 }
 

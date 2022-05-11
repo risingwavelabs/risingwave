@@ -19,8 +19,12 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
+      checkpoint-interval: 100
     - use: compute-node
     - use: frontend
+
+    # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
+    # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
@@ -49,28 +53,34 @@ risedev:
     - use: meta-node
     - use: compute-node
       user-managed: true
-    - use: frontend-legacy
+    - use: frontend
 
-  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
   dev-frontend:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+      user-managed: true
+
+  dev-meta:
+    - use: meta-node
+      user-managed: true
+    - use: compute-node
+    - use: frontend
+
+  # TODO: Remove all legacy configs after java removed.
+  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
+  dev-frontend-legacy:
     - use: meta-node
     - use: compute-node
     - use: frontend-legacy
       user-managed: true
 
   # `dev-meta-node` have the same settings as default except the the meta node will be started by user.
-  dev-meta-node:
+  dev-meta-node-legacy:
     - use: meta-node
       user-managed: true
     - use: compute-node
     - use: frontend-legacy
-
-  dev-frontend-v2:
-    - use: minio
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
-      user-managed: true
 
   full:
     - use: minio
@@ -78,6 +88,7 @@ risedev:
     - use: meta-node
     - use: compute-node
     - use: frontend
+    - use: compactor
     - use: prometheus
     - use: grafana
     - use: zookeeper
@@ -96,6 +107,102 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  ######################################
+  ### Configurations used in Compose ###
+  ######################################
+
+  compose:
+    - use: minio
+      id: minio-0
+      address: ${id}
+      listen-address: "0.0.0.0"
+      console-address: "0.0.0.0"
+
+    - use: meta-node
+      # Id must starts with `meta-node`, therefore to be picked up by other
+      # components.
+      id: meta-node-0
+
+      # Advertise address can be `id`, so as to use docker's DNS. If running
+      # in host network mode, we should use IP directly in this field.
+      address: ${id}
+
+      listen-address: "0.0.0.0"
+
+    - use: compute-node
+      id: compute-node-0
+      listen-address: "0.0.0.0"
+      address: ${id}
+
+    - use: frontend
+      id: frontend-node-0
+      listen-address: "0.0.0.0"
+      address: ${id}
+
+    - use: compactor
+      id: compactor-0
+      listen-address: "0.0.0.0"
+      address: ${id}
+
+    - use: redpanda
+
+    - use: prometheus
+      id: prometheus-0
+      listen-address: "0.0.0.0"
+      address: ${id}
+
+  # special config for deployment, see related PR for more information
+  compose-3node-host-deploy:
+    - use: minio
+      id: minio-0
+      address: rw-source
+      listen-address: "0.0.0.0"
+      console-address: "0.0.0.0"
+
+    - use: meta-node
+      # Id must starts with `meta-node`, therefore to be picked up by other
+      # components.
+      id: meta-node-0
+
+      # Advertise address can be `id`, so as to use docker's DNS. If running
+      # in host network mode, we should use IP directly in this field.
+      address: rw-meta
+
+      listen-address: "0.0.0.0"
+
+    - use: compute-node
+      id: compute-node-0
+      listen-address: "0.0.0.0"
+      address: rw-compute-1
+
+    - use: compute-node
+      id: compute-node-1
+      listen-address: "0.0.0.0"
+      address: rw-compute-2
+
+    - use: compute-node
+      id: compute-node-2
+      listen-address: "0.0.0.0"
+      address: rw-compute-3
+
+    - use: frontend
+      id: frontend-node-0
+      listen-address: "0.0.0.0"
+      address: rw-meta
+
+    - use: compactor
+      id: compactor-0
+      listen-address: "0.0.0.0"
+      address: rw-source
+
+    - use: redpanda
+      address: rw-source
+
+    - use: prometheus
+      id: prometheus-0
+      listen-address: "0.0.0.0"
+      address: rw-meta
+
   #################################
   ### Configurations used on CI ###
   #################################
@@ -108,6 +215,7 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
+    - use: compactor
 
   ci-3cn-1fe:
     - use: minio
@@ -125,6 +233,7 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend
+    - use: compactor
 
   ci-3node:
     - use: minio
@@ -142,6 +251,7 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend-legacy
+    - use: compactor
 
   ci-1node:
     - use: minio
@@ -151,6 +261,7 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend-legacy
+    - use: compactor
 
   ci-kafka:
     - use: minio
@@ -160,19 +271,34 @@ risedev:
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
+    - use: compactor
     - use: zookeeper
       persist-data: true
     - use: kafka
       persist-data: true
 
+compose:
+  risingwave: "ghcr.io/singularity-data/risingwave:latest"
+  compute-node: "ghcr.io/singularity-data/compute-node:latest"
+  meta-node: "ghcr.io/singularity-data/meta-node:latest"
+  compactor-node: "ghcr.io/singularity-data/compactor-node:latest"
+  frontend-node: "ghcr.io/singularity-data/frontend-node:latest"
+  prometheus: "prom/prometheus:latest"
+  minio: "quay.io/minio/minio:latest"
+  redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
+  grafana: "grafana/grafana-oss:latest"
+
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
-    # Listen address of MinIO s3 endpoint
+    # Advertise address of MinIO s3 endpoint
     address: "127.0.0.1"
 
-    # Listen port of MinIO s3 endpoint
+    # Advertise port of MinIO s3 endpoint
     port: 9301
+
+    # Listen address of MinIO endpoint
+    listen-address: ${address}
 
     # Console address of MinIO s3 endpoint
     console-address: "127.0.0.1"
@@ -185,12 +311,6 @@ template:
 
     # Root password (can be used to login to MinIO console)
     root-password: hummockadmin
-
-    # Hummock username
-    hummock-user: hummock
-
-    # Hummock user password
-    hummock-password: "12345678"
 
     # Bucket name to store hummock information
     hummock-bucket: hummock001
@@ -205,11 +325,14 @@ template:
     # Id of this instance
     id: "etcd"
 
-    # Address of the single-node etcd.
+    # Advertise address of the single-node etcd.
     address: "127.0.0.1"
 
     # Listen port of the single-node etcd.
     port: 2388
+
+    # Listen address
+    listen-address: ${address}
 
     # Peer listen port of the single-node etcd.
     peer-port: 2389
@@ -218,14 +341,14 @@ template:
     unsafe-no-fsync: false
 
   compute-node:
-    # Compute-node listen address
+    # Compute-node advertise address
     address: "127.0.0.1"
+
+    # Listen address
+    listen-address: ${address}
 
     # Compute-node listen port
     port: 5688
-
-    # Prometheus exporter listen address
-    exporter-address: "127.0.0.1"
 
     # Prometheus exporter listen port
     exporter-port: 1222
@@ -248,6 +371,9 @@ template:
     # Sanity check: should use shared storage if there're multiple compute nodes
     provide-compute-node: "compute-node*"
 
+    # Sanity check: should start at lease one compactor if using shared object store
+    provide-compactor: "compactor*"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
@@ -255,20 +381,17 @@ template:
     enable-in-memory-kv-state-backend: false
 
   meta-node:
-    # Meta-node listen address
+    # Meta-node advertise address
     address: "127.0.0.1"
 
     # Meta-node listen port
     port: 5690
 
-    # Dashboard listen address
-    dashboard-address: "127.0.0.1"
+    # Listen address
+    listen-address: ${address}
 
     # Dashboard listen port
     dashboard-port: 5691
-
-    # Prometheus exporter listen address
-    exporter-address: "127.0.0.1"
 
     # Prometheus exporter listen port
     exporter-port: 1250
@@ -289,11 +412,14 @@ template:
     unsafe-disable-recovery: false
 
   prometheus:
-    # Listen address of Prometheus
+    # Advertise address of Prometheus
     address: "127.0.0.1"
 
     # Listen port of Prometheus
     port: 9500
+
+    # Listen address
+    listen-address: ${address}
 
     # Id of this instance
     id: prometheus
@@ -307,12 +433,18 @@ template:
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
 
+    # Compactors used by this Prometheus instance
+    provide-compactor: "compactor*"
+
   frontend-legacy:
     # Listen address of frontend-legacy
     address: "127.0.0.1"
 
     # Listen port of frontend-legacy
     port: 4567
+
+    # Listen address
+    listen-address: ${address}
 
     # Id of this instance
     id: frontend-legacy-${port}
@@ -324,16 +456,47 @@ template:
     user-managed: false
 
   frontend:
-    # Listen address of frontend
+    # Advertise address of frontend
     address: "127.0.0.1"
 
     # Listen port of frontend
     port: 4566
 
+    # Listen address
+    listen-address: ${address}
+
     # Id of this instance
     id: frontend-${port}
 
     # Meta-nodes used by this frontend instance
+    provide-meta-node: "meta-node*"
+
+    # If `user-managed` is true, this service will be started by user with the above config
+    user-managed: false
+
+  compactor:
+    # Compactor advertise address
+    address: "127.0.0.1"
+
+    # Compactor listen port
+    port: 6660
+
+    # Listen address
+    listen-address: ${address}
+
+    # Prometheus exporter listen port
+    exporter-port: 1260
+
+    # Id of this instance
+    id: compactor-${port}
+
+    # Minio instances used by this compute node
+    provide-minio: "minio*"
+
+    # AWS s3 bucket used by this compute node
+    provide-aws-s3: "aws-s3*"
+
+    # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
     # If `user-managed` is true, this service will be started by user with the above config
@@ -380,11 +543,14 @@ template:
     # Id to be picked-up by services
     id: kafka-${port}
 
-    # Listen address of Kafka
+    # Advertise address of Kafka
     address: "127.0.0.1"
 
     # Listen port of Kafka
     port: 29092
+
+    # Listen address
+    listen-address: ${address}
 
     # ZooKeeper used by this Kafka instance
     provide-zookeeper: "zookeeper*"
@@ -400,11 +566,28 @@ template:
     # Id to be picked-up by services
     id: zookeeper-${port}
 
-    # Listen address of ZooKeeper
+    # Advertise address of ZooKeeper
     address: "127.0.0.1"
+
+    # Listen address
+    listen-address: ${address}
 
     # Listen port of ZooKeeper
     port: 2181
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
+
+  # Only supported in RiseDev compose
+  redpanda:
+    # Id to be picked-up by services
+    id: redpanda
+
+    # Port used inside docker-compose cluster (e.g. create MV)
+    internal-port: 29092
+
+    # Port used on host (e.g. import data, connecting using kafkacat)
+    outside-port: 9092
+
+    # Connect address
+    address: ${id}

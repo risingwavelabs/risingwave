@@ -17,6 +17,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{ColPrunable, LogicalProject, PlanBase, PlanRef, StreamSource, ToBatch, ToStream};
 use crate::catalog::source_catalog::SourceCatalog;
@@ -86,20 +87,23 @@ impl ColPrunable for LogicalSource {
 }
 
 impl ToBatch for LogicalSource {
-    fn to_batch(&self) -> PlanRef {
-        panic!("there is no batch source operator");
+    fn to_batch(&self) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "there is no batch source operator".to_string(),
+            None.into(),
+        )))
     }
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self) -> PlanRef {
-        StreamSource::new(self.clone()).into()
+    fn to_stream(&self) -> Result<PlanRef> {
+        Ok(StreamSource::new(self.clone()).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        (
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        Ok((
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),
-        )
+        ))
     }
 }

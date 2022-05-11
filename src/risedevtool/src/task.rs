@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
 mod ensure_stop_service;
@@ -28,6 +29,7 @@ mod task_configure_grpc_node;
 mod task_configure_minio;
 mod task_etcd_ready_check;
 mod task_kafka_ready_check;
+mod utils;
 mod zookeeper_service;
 
 use std::env;
@@ -43,7 +45,9 @@ use indicatif::ProgressBar;
 use isahc::prelude::*;
 use isahc::Request;
 use tempfile::TempDir;
+pub use utils::*;
 
+pub use self::compactor_service::*;
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
 pub use self::ensure_stop_service::*;

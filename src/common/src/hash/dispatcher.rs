@@ -107,14 +107,15 @@ mod tests {
 
     fn all_data_types() -> Vec<DataType> {
         vec![
-            DataType::Boolean, // 0
-            DataType::Int16,   // 1
-            DataType::Int32,   // 2
-            DataType::Int64,   // 3
-            DataType::Float32, // 4
-            DataType::Float64, // 5
-            DataType::Decimal, // 6
-            DataType::Varchar, // 7
+            DataType::Boolean,   // 0
+            DataType::Int16,     // 1
+            DataType::Int32,     // 2
+            DataType::Int64,     // 3
+            DataType::Float32,   // 4
+            DataType::Float64,   // 5
+            DataType::Decimal,   // 6
+            DataType::Varchar,   // 7
+            DataType::Timestamp, // 8
         ]
     }
 
@@ -136,6 +137,7 @@ mod tests {
         compare_key_kinds(&[1], HashKeyKind::Key16);
         compare_key_kinds(&[2], HashKeyKind::Key32);
         compare_key_kinds(&[3], HashKeyKind::Key64);
+        compare_key_kinds(&[8], HashKeyKind::Key128);
         compare_key_kinds(&[3, 4], HashKeyKind::Key128);
         compare_key_kinds(&[3, 4, 6], HashKeyKind::Key256);
         compare_key_kinds(&[7], HashKeyKind::KeySerialized);

@@ -42,7 +42,7 @@ pub use chrono_array::{
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
-pub use data_chunk::{DataChunk, DataChunkRef};
+pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
@@ -51,7 +51,7 @@ pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
-pub use stream_chunk::{Op, StreamChunk};
+pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
@@ -156,6 +156,11 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Retrieve a reference to value.
     fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
 
+    /// # Safety
+    ///
+    /// Retrieve a reference to value without checking the index boundary.
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+
     /// Number of items of array.
     fn len(&self) -> usize;
 
@@ -171,6 +176,14 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+    }
+
+    /// # Safety
+    ///
+    /// The unchecked version of `is_null`, ignore index out of bound check. It is
+    /// the caller's responsibility to ensure the index is valid.
+    unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
+        !self.null_bitmap().is_set_unchecked(idx)
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
@@ -285,30 +298,6 @@ impl From<DecimalArray> for ArrayImpl {
 impl From<Utf8Array> for ArrayImpl {
     fn from(arr: Utf8Array) -> Self {
         Self::Utf8(arr)
-    }
-}
-
-impl From<IntervalArray> for ArrayImpl {
-    fn from(arr: IntervalArray) -> Self {
-        Self::Interval(arr)
-    }
-}
-
-impl From<NaiveDateArray> for ArrayImpl {
-    fn from(arr: NaiveDateArray) -> Self {
-        Self::NaiveDate(arr)
-    }
-}
-
-impl From<NaiveDateTimeArray> for ArrayImpl {
-    fn from(arr: NaiveDateTimeArray) -> Self {
-        Self::NaiveDateTime(arr)
-    }
-}
-
-impl From<NaiveTimeArray> for ArrayImpl {
-    fn from(arr: NaiveTimeArray) -> Self {
-        Self::NaiveTime(arr)
     }
 }
 
@@ -523,6 +512,18 @@ macro_rules! impl_array {
             pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
                 match self {
                     $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
+                }
+            }
+
+            /// # Safety
+            ///
+            /// This function is unsafe because it does not check the validity of `idx`. It is caller's
+            /// responsibility to ensure the validity of `idx`.
+            ///
+            /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
+            pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.value_at_unchecked(idx).map(ScalarRefImpl::$variant_name), )*
                 }
             }
 

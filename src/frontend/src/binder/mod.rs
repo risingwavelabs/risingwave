@@ -18,13 +18,13 @@ use risingwave_sqlparser::ast::Statement;
 pub mod bind_context;
 mod delete;
 pub(crate) mod expr;
-mod field;
 mod insert;
 mod query;
 mod relation;
 mod select;
 mod set_expr;
 mod statement;
+mod struct_field;
 mod values;
 
 pub use bind_context::BindContext;
@@ -32,8 +32,8 @@ pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundTableSource, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundTableSource,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;

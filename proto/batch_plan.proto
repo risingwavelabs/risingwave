@@ -3,6 +3,7 @@ syntax = "proto3";
 package batch_plan;
 
 import "common.proto";
+import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
@@ -75,6 +76,7 @@ message OrderByNode {
 message TopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
   uint32 limit = 2;
+  uint32 offset = 3;
 }
 
 message LimitNode {
@@ -125,10 +127,22 @@ message SortMergeJoinNode {
   plan_common.OrderType direction = 4;
 }
 
+message HopWindowNode {
+  expr.InputRefExpr time_col = 1;
+  data.IntervalUnit window_slide = 2;
+  data.IntervalUnit window_size = 3;
+}
+
 message GenerateInt32SeriesNode {
   int32 start = 1;
   int32 stop = 2;
   int32 step = 3;
+}
+
+message GenerateTimeSeriesNode {
+  string start = 1;
+  string stop = 2;
+  data.IntervalUnit step = 3;
 }
 
 // Task is a running instance of Stage.
@@ -158,7 +172,7 @@ message ExchangeNode {
 }
 
 message MergeSortExchangeNode {
-  ExchangeNode exchange_node = 1;
+  ExchangeNode exchange = 1;
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
@@ -187,6 +201,8 @@ message PlanNode {
     MergeSortExchangeNode merge_sort_exchange = 21;
     SortMergeJoinNode sort_merge_join = 22;
     GenerateInt32SeriesNode generate_int32_series = 23;
+    HopWindowNode hop_window = 25;
+    GenerateTimeSeriesNode generate_time_series = 26;
   }
   string identity = 24;
 }

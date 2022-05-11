@@ -17,7 +17,7 @@ use hyper::body::Buf;
 use hyper::{Client, Uri};
 use serde_derive::{Deserialize, Serialize};
 
-use crate::pulsar::topic::ParsedTopic;
+use crate::pulsar::topic::Topic;
 
 #[derive(Debug, Default)]
 pub struct PulsarAdminClient {
@@ -33,18 +33,15 @@ impl PulsarAdminClient {
 }
 
 impl PulsarAdminClient {
-    pub async fn get_last_message_id(&self, topic: &ParsedTopic) -> Result<LastMessageID> {
+    pub async fn get_last_message_id(&self, topic: &Topic) -> Result<LastMessageID> {
         self.get(topic, "lastMessageId").await
     }
 
-    pub async fn get_topic_metadata(
-        &self,
-        topic: &ParsedTopic,
-    ) -> Result<PartitionedTopicMetadata> {
+    pub async fn get_topic_metadata(&self, topic: &Topic) -> Result<PartitionedTopicMetadata> {
         self.get(topic, "partitions").await
     }
 
-    pub async fn get<T>(&self, topic: &ParsedTopic, api: &str) -> Result<T>
+    pub async fn get<T>(&self, topic: &Topic, api: &str) -> Result<T>
     where
         T: for<'a> serde::Deserialize<'a>,
     {

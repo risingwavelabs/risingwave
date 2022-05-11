@@ -15,23 +15,23 @@
 use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, TableAlias, TableFactor};
+use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
+use risingwave_common::error::{internal_error, ErrorCode, Result};
+use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
 
+mod generate_series;
 mod join;
 mod subquery;
 mod table_or_source;
 mod window_table_function;
+pub use generate_series::BoundGenerateSeriesFunction;
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
-
-use crate::catalog::column_catalog::ColumnCatalog;
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
@@ -42,29 +42,61 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
+    GenerateSeriesFunction(Box<BoundGenerateSeriesFunction>),
 }
 
 impl Binder {
-    /// return the (`schema_name`, `table_name`)
-    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
-        let mut identifiers = name.0;
-        let table_name = identifiers
+    /// return first and second name in identifiers,
+    /// must have one name and can use default name as other one.
+    fn resolve_double_name(
+        mut identifiers: Vec<Ident>,
+        err_str: &str,
+        default_name: &str,
+    ) -> Result<(String, String)> {
+        let second_name = identifiers
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("empty table name".into()))?
+            .ok_or_else(|| ErrorCode::InternalError(err_str.into()))?
             .value;
 
-        let schema_name = identifiers
+        let first_name = identifiers
             .pop()
             .map(|ident| ident.value)
-            .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
+            .unwrap_or_else(|| default_name.into());
 
-        Ok((schema_name, table_name))
+        Ok((first_name, second_name))
+    }
+
+    /// return the (`schema_name`, `table_name`)
+    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
+        Self::resolve_double_name(name.0, "empty table name", DEFAULT_SCHEMA_NAME)
+    }
+
+    /// return the ( `database_name`, `schema_name`)
+    pub fn resolve_schema_name(
+        default_db_name: &str,
+        name: ObjectName,
+    ) -> Result<(String, String)> {
+        Self::resolve_double_name(name.0, "empty schema name", default_db_name)
+    }
+
+    /// return the `database_name`
+    pub fn resolve_database_name(name: ObjectName) -> Result<String> {
+        let mut identifiers = name.0;
+        if identifiers.len() > 1 {
+            return Err(internal_error("database name must contain 1 argument"));
+        }
+        let database_name = identifiers
+            .pop()
+            .ok_or_else(|| internal_error("empty database name"))?
+            .value;
+
+        Ok(database_name)
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = ColumnCatalog>,
+        columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
         alias: Option<TableAlias>,
     ) -> Result<()> {
@@ -80,20 +112,20 @@ impl Binder {
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, mut catalog)| {
-                let name = match catalog.is_hidden {
-                    true => catalog.name().to_string(),
+            .for_each(|(index, (is_hidden, mut field))| {
+                let name = match is_hidden {
+                    true => field.name.to_string(),
                     false => alias_iter
                         .next()
                         .map(|t| t.value)
-                        .unwrap_or_else(|| catalog.name().to_string()),
+                        .unwrap_or_else(|| field.name.to_string()),
                 };
-                catalog.column_desc.name = name.clone();
+                field.name = name.clone();
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     begin + index,
-                    catalog.is_hidden,
-                    catalog.column_desc,
+                    is_hidden,
+                    field,
                 ));
                 self.context
                     .indexs_of
@@ -128,13 +160,18 @@ impl Binder {
                     let (schema_name, table_name) = Self::resolve_table_name(name)?;
                     self.bind_table_or_source(&schema_name, &table_name, alias)
                 } else {
-                    let kind =
-                        WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
-                            ErrorCode::NotImplemented(
-                                format!("unknown window function kind: {}", name.0[0].value),
-                                1191.into(),
-                            )
-                        })?;
+                    let func_name = &name.0[0].value;
+                    if func_name.eq_ignore_ascii_case("generate_series") {
+                        return Ok(Relation::GenerateSeriesFunction(Box::new(
+                            self.bind_generate_series_function(args)?,
+                        )));
+                    }
+                    let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
+                        ErrorCode::NotImplemented(
+                            format!("unknown window function kind: {}", name.0[0].value),
+                            1191.into(),
+                        )
+                    })?;
                     Ok(Relation::WindowTableFunction(Box::new(
                         self.bind_window_table_function(kind, args)?,
                     )))

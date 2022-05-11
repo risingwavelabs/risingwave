@@ -24,15 +24,15 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    preflight_check, AwsS3Config, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
-    EnsureStopService, ExecuteContext, FrontendService, FrontendServiceV2, GrafanaService,
-    JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig,
-    Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander,
+    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, FrontendServiceV2,
+    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
+    ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -122,11 +122,13 @@ fn task_main(
             ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
             ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
+            ServiceConfig::RedPanda(_) => None,
         };
 
         if let Some(x) = listen_info {
@@ -197,7 +199,7 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
-                    c.address, c.port, c.dashboard_address, c.dashboard_port
+                    c.address, c.port, c.address, c.dashboard_port
                 ));
             }
             ServiceConfig::Frontend(c) => {
@@ -235,6 +237,16 @@ fn task_main(
                         .blue()
                         .bold()
                 )?;
+            }
+            ServiceConfig::Compactor(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = CompactorService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("compactor {}:{}", c.address, c.port));
             }
             ServiceConfig::Grafana(c) => {
                 let mut ctx =
@@ -300,6 +312,9 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("kafka {}:{}", c.address, c.port));
+            }
+            ServiceConfig::RedPanda(_) => {
+                return Err(anyhow!("redpanda is only supported in RiseDev compose."));
             }
         }
 

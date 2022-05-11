@@ -52,7 +52,6 @@ pub struct ActorInfos {
 pub struct BuildGraphInfo {
     pub table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
     pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
-    pub upstream_distribution_keys: HashMap<TableId, Vec<i32>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -117,6 +116,23 @@ where
                 v.insert(table_fragment);
                 Ok(())
             }
+        }
+    }
+
+    /// Cancel creation of a new `TableFragments` and delete it from meta store.
+    pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> Result<()> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(*table_id) {
+            Entry::Occupied(o) => {
+                TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
+                o.remove();
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
         }
     }
 
@@ -345,8 +361,6 @@ where
                         .insert(*table_id, table_fragment.node_actor_ids());
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
-                    info.upstream_distribution_keys
-                        .insert(*table_id, table_fragment.distribution_keys().clone());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

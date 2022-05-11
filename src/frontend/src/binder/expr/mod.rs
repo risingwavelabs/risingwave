@@ -16,7 +16,8 @@ use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
+    UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -78,6 +79,11 @@ impl Binder {
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => self.bind_in_subquery(*expr, *subquery, negated),
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
@@ -141,6 +147,24 @@ impl Binder {
             )
         } else {
             Ok(in_expr.into())
+        }
+    }
+
+    pub(super) fn bind_in_subquery(
+        &mut self,
+        expr: Expr,
+        subquery: Query,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let bound_expr = self.bind_expr(expr)?;
+        let bound_subquery = self.bind_subquery_expr(subquery, SubqueryKind::In(bound_expr))?;
+        if negated {
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![bound_subquery], DataType::Boolean)
+                    .into(),
+            )
+        } else {
+            Ok(bound_subquery)
         }
     }
 

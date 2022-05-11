@@ -14,7 +14,7 @@
 
 use std::{ptr, u64};
 
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 
 use super::version_cmp::VersionedComparator;
 
@@ -68,6 +68,16 @@ pub fn get_epoch(full_key: &[u8]) -> Epoch {
 /// Extract user key without epoch part
 pub fn user_key(full_key: &[u8]) -> &[u8] {
     split_key_epoch(full_key).0
+}
+
+/// Extract table id in key prefix
+pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
+    if full_key[0] == b't' {
+        let mut buf = &full_key[1..];
+        Some(buf.get_u32())
+    } else {
+        None
+    }
 }
 
 // Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
@@ -149,6 +159,10 @@ pub struct FullKey<T: AsRef<[u8]>>(T);
 impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn into_inner(self) -> T {
         self.0
+    }
+
+    pub fn inner(&self) -> &T {
+        &self.0
     }
 }
 

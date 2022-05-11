@@ -34,25 +34,14 @@ pub struct BoundSelect {
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
-    pub schema: Schema,
+    pub having: Option<ExprImpl>,
+    schema: Schema,
 }
 
 impl BoundSelect {
-    /// The names returned by this [`BoundSelect`].
-    pub fn names(&self) -> Vec<String> {
-        self.aliases
-            .iter()
-            .cloned()
-            .map(|alias| alias.unwrap_or_else(|| UNNAMED_COLUMN.to_string()))
-            .collect()
-    }
-
-    /// The types returned by this [`BoundSelect`].
-    pub fn data_types(&self) -> Vec<DataType> {
-        self.select_items
-            .iter()
-            .map(|item| item.return_type())
-            .collect()
+    /// The schema returned by this [`BoundSelect`].
+    pub fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     pub fn is_correlated(&self) -> bool {
@@ -77,16 +66,7 @@ impl Binder {
             .transpose()?;
         self.context.clause = None;
 
-        if let Some(selection) = &selection {
-            let return_type = selection.return_type();
-            if return_type != DataType::Boolean {
-                return Err(ErrorCode::InternalError(format!(
-                    "argument of WHERE must be boolean, not type {:?}",
-                    return_type
-                ))
-                .into());
-            }
-        }
+        Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
         let group_by = select
@@ -94,6 +74,10 @@ impl Binder {
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
+
+        // Bind HAVING clause.
+        let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
+        Self::require_bool_clause(&having, "HAVING")?;
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
@@ -115,6 +99,7 @@ impl Binder {
             from,
             where_clause: selection,
             group_by,
+            having,
             schema: Schema { fields },
         })
     }
@@ -185,10 +170,24 @@ impl Binder {
         column_binding
             .map(|c| {
                 (
-                    InputRef::new(c.index, c.desc.data_type.clone()).into(),
-                    Some(c.desc.name.clone()),
+                    InputRef::new(c.index, c.field.data_type.clone()).into(),
+                    Some(c.field.name.clone()),
                 )
             })
             .unzip()
+    }
+
+    fn require_bool_clause(expr: &Option<ExprImpl>, clause: &str) -> Result<()> {
+        if let Some(expr) = expr {
+            let return_type = expr.return_type();
+            if return_type != DataType::Boolean {
+                return Err(ErrorCode::InternalError(format!(
+                    "argument of {} must be boolean, not type {:?}",
+                    clause, return_type
+                ))
+                .into());
+            }
+        }
+        Ok(())
     }
 }

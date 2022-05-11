@@ -1,0 +1,109 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::sync::Arc;
+
+use futures::StreamExt;
+use risingwave_common::catalog::Schema;
+
+use super::monitor::StreamingMetrics;
+use super::{
+    BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, MessageStream, PkIndicesRef,
+};
+use crate::task::ActorId;
+
+mod epoch_check;
+mod schema_check;
+mod trace;
+mod update_check;
+
+struct DebugExtraInfo {
+    input_pos: usize,
+    actor_id: ActorId,
+    metrics: Arc<StreamingMetrics>,
+}
+
+/// [`DebugExecutor`] will do some sanity checks and logging for the wrapped executor.
+pub struct DebugExecutor {
+    input: BoxedExecutor,
+
+    extra: DebugExtraInfo,
+}
+
+impl DebugExecutor {
+    pub fn new(
+        input: BoxedExecutor,
+        input_pos: usize,
+        actor_id: ActorId,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        Self {
+            input,
+            extra: DebugExtraInfo {
+                input_pos,
+                actor_id,
+                metrics,
+            },
+        }
+    }
+
+    #[allow(clippy::redundant_clone)]
+    #[allow(clippy::let_and_return)]
+    fn wrap(
+        info: Arc<ExecutorInfo>,
+        extra: DebugExtraInfo,
+        stream: impl MessageStream,
+    ) -> impl MessageStream {
+        // Trace
+        let stream = trace::trace(
+            info.clone(),
+            extra.input_pos,
+            extra.actor_id,
+            extra.metrics,
+            stream,
+        );
+        // Schema check
+        let stream = schema_check::schema_check(info.clone(), stream);
+        // Epoch check
+        let stream = epoch_check::epoch_check(info.clone(), stream);
+        // Update check
+        let stream = update_check::update_check(info.clone(), stream);
+
+        stream
+    }
+}
+
+impl Executor for DebugExecutor {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        let info = Arc::new(self.input.info());
+        Self::wrap(info, self.extra, self.input.execute()).boxed()
+    }
+
+    fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
+        let info = Arc::new(self.input.info());
+        Self::wrap(info, self.extra, self.input.execute_with_epoch(epoch)).boxed()
+    }
+
+    fn schema(&self) -> &Schema {
+        self.input.schema()
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        self.input.pk_indices()
+    }
+
+    fn identity(&self) -> &str {
+        self.input.identity()
+    }
+}

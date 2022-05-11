@@ -40,19 +40,19 @@ impl MetaNodeService {
         }
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
         cmd.arg("--host")
-            .arg(format!("{}:{}", config.address, config.port))
+            .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",
-                config.dashboard_address, config.dashboard_port
+                config.listen_address, config.dashboard_port
             ));
 
         cmd.arg("--prometheus-host").arg(format!(
             "{}:{}",
-            config.exporter_address, config.exporter_port
+            config.listen_address, config.exporter_port
         ));
 
         match config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
@@ -74,12 +74,18 @@ impl MetaNodeService {
         }
 
         if config.enable_dashboard_v2 {
-            cmd.arg("--dashboard-ui-path").arg(env::var("PREFIX_UI")?);
+            cmd.arg("--dashboard-ui-path")
+                .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
         }
 
         if config.unsafe_disable_recovery {
             cmd.arg("--disable-recovery");
         }
+
+        if let Some(interval) = config.checkpoint_interval {
+            cmd.arg("--checkpoint-interval").arg(interval.to_string());
+        }
+
         Ok(())
     }
 }

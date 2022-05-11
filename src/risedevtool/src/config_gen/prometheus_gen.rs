@@ -21,13 +21,13 @@ pub struct PrometheusGen;
 impl PrometheusGen {
     pub fn gen_prometheus_yml(&self, config: &PrometheusConfig) -> String {
         let prometheus_host = &config.address;
-        let prometheus_port = config.port;
+        let prometheus_port = &config.port;
         let compute_node_targets = config
             .provide_compute_node
             .as_ref()
             .unwrap()
             .iter()
-            .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
         let meta_node_targets = config
@@ -35,7 +35,7 @@ impl PrometheusGen {
             .as_ref()
             .unwrap()
             .iter()
-            .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
         let minio_targets = config
@@ -44,6 +44,14 @@ impl PrometheusGen {
             .unwrap()
             .iter()
             .map(|node| format!("\"{}:{}\"", node.address, node.port))
+            .join(",");
+
+        let compactor_targets = config
+            .provide_compactor
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
             .join(",");
 
         format!(
@@ -69,6 +77,10 @@ scrape_configs:
     metrics_path: /minio/v2/metrics/cluster
     static_configs:
     - targets: [{minio_targets}]
+
+  - job_name: compactor-job
+    static_configs:
+      - targets: [{compactor_targets}]
 "#,
         )
     }

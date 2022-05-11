@@ -88,20 +88,6 @@ impl ColumnDesc {
         }
     }
 
-    pub fn with_name(
-        column_id: ColumnId,
-        data_type: DataType,
-        name: impl Into<String>,
-    ) -> ColumnDesc {
-        ColumnDesc {
-            data_type,
-            column_id,
-            name: name.into(),
-            field_descs: vec![],
-            type_name: String::new(),
-        }
-    }
-
     /// Convert to proto
     pub fn to_protobuf(&self) -> ProstColumnDesc {
         ProstColumnDesc {
@@ -121,20 +107,14 @@ impl ColumnDesc {
     /// Flatten a nested column to a list of columns (including itself).
     /// If the type is atomic, it returns simply itself.
     /// If the type has multiple nesting levels, it traverses for the tree-like schema,
-    /// and returns every children node.
+    /// and returns every tree node.
     pub fn flatten(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
-        descs.append(
-            &mut self
-                .field_descs
-                .iter()
-                .flat_map(|d| {
-                    let mut desc = d.clone();
-                    desc.name = self.name.clone() + "." + &desc.name;
-                    desc.flatten()
-                })
-                .collect_vec(),
-        );
+        descs.extend(self.field_descs.iter().flat_map(|d| {
+            let mut desc = d.clone();
+            desc.name = self.name.clone() + "." + &desc.name;
+            desc.flatten()
+        }));
         descs
     }
 
@@ -215,38 +195,18 @@ impl ColumnDesc {
 }
 
 impl From<ProstColumnDesc> for ColumnDesc {
-    // Since the prost DataType struct doesn't have field, so it need to be reinit when into
-    // ColumnDesc
     fn from(prost: ProstColumnDesc) -> Self {
-        if let DataType::Struct { .. } = DataType::from(prost.column_type.as_ref().unwrap()) {
-            let descs: Vec<ColumnDesc> = prost
-                .field_descs
-                .into_iter()
-                .map(ColumnDesc::from)
-                .collect();
-            let date_type = DataType::Struct {
-                fields: descs
-                    .clone()
-                    .into_iter()
-                    .map(|c| c.data_type)
-                    .collect_vec()
-                    .into(),
-            };
-            Self {
-                data_type: date_type,
-                column_id: ColumnId::new(prost.column_id),
-                name: prost.name,
-                type_name: prost.type_name,
-                field_descs: descs,
-            }
-        } else {
-            Self {
-                data_type: DataType::from(prost.column_type.as_ref().unwrap()),
-                column_id: ColumnId::new(prost.column_id),
-                name: prost.name,
-                type_name: prost.type_name,
-                field_descs: vec![],
-            }
+        let field_descs: Vec<ColumnDesc> = prost
+            .field_descs
+            .into_iter()
+            .map(ColumnDesc::from)
+            .collect();
+        Self {
+            data_type: DataType::from(prost.column_type.as_ref().unwrap()),
+            column_id: ColumnId::new(prost.column_id),
+            name: prost.name,
+            type_name: prost.type_name,
+            field_descs,
         }
     }
 }
@@ -283,6 +243,7 @@ pub mod tests {
     use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
     use crate::catalog::ColumnDesc;
+    use crate::test_prelude::*;
     use crate::types::DataType;
 
     pub fn build_prost_desc() -> ProstColumnDesc {

@@ -19,7 +19,8 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use clap::StructOpt;
 use risedev::{
-    ComputeNodeService, ConfigExpander, FrontendServiceV2, MetaNodeService, ServiceConfig,
+    CompactorService, ComputeNodeService, ConfigExpander, FrontendServiceV2, MetaNodeService,
+    ServiceConfig,
 };
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -44,6 +45,7 @@ pub enum RisingWaveService {
     Compute(Vec<OsString>),
     Meta(Vec<OsString>),
     Frontend(Vec<OsString>),
+    Compactor(Vec<OsString>),
 }
 
 pub async fn playground() -> Result<()> {
@@ -78,6 +80,13 @@ pub async fn playground() -> Result<()> {
                     let mut command = Command::new("frontend-node");
                     FrontendServiceV2::apply_command_args(&mut command, c)?;
                     rw_services.push(RisingWaveService::Frontend(
+                        command.get_args().map(ToOwned::to_owned).collect(),
+                    ));
+                }
+                ServiceConfig::Compactor(c) => {
+                    let mut command = Command::new("compactor");
+                    CompactorService::apply_command_args(&mut command, c)?;
+                    rw_services.push(RisingWaveService::Compactor(
                         command.get_args().map(ToOwned::to_owned).collect(),
                     ));
                 }
@@ -120,6 +129,14 @@ pub async fn playground() -> Result<()> {
                 tracing::info!("opts: {:#?}", opts);
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
+            }
+            RisingWaveService::Compactor(mut opts) => {
+                opts.insert(0, "compactor".into());
+                tracing::info!("starting compactor thread with cli args: {:?}", opts);
+                let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
+                tracing::info!("opts: {:#?}", opts);
+                let _compactor_handle =
+                    tokio::spawn(async move { risingwave_compactor::start(opts).await });
             }
         }
     }

@@ -14,32 +14,25 @@
 
 use drop_stream::*;
 use drop_table::*;
-use generic_exchange::*;
-use merge_sort_exchange::*;
-use order_by::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
-pub use row_seq_scan::*;
-use sort_agg::*;
 
 use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::generate_series::GenerateSeriesI32Executor;
-use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
-use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
-use crate::executor::join::HashJoinExecutorBuilder;
-use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
-    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, FilterExecutor2,
-    HashAggExecutor2Builder, InsertExecutor2, LimitExecutor2, ProjectExecutor2, TopNExecutor2,
-    TraceExecutor2, ValuesExecutor2,
+    BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
+    GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2, HashAggExecutor2Builder,
+    HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
+    NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
+    SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2,
+    ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -49,15 +42,7 @@ mod drop_stream;
 mod drop_table;
 pub mod executor2_wrapper;
 mod fuse;
-mod generate_series;
-mod generic_exchange;
 mod join;
-mod merge_sort_exchange;
-pub mod monitor;
-mod order_by;
-mod row_seq_scan;
-mod sort_agg;
-mod stream_scan;
 #[cfg(test)]
 pub mod test_utils;
 mod trace;
@@ -105,6 +90,15 @@ pub trait BoxedExecutorBuilder {
     }
 }
 
+#[allow(dead_code)]
+struct NotImplementedBuilder;
+
+impl BoxedExecutorBuilder for NotImplementedBuilder {
+    fn new_boxed_executor(_source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+        Err(ErrorCode::NotImplemented("Executor not implemented".to_string(), None.into()).into())
+    }
+}
+
 pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
@@ -113,7 +107,7 @@ pub struct ExecutorBuilder<'a> {
 }
 
 macro_rules! build_executor {
-    ($source: expr, $($proto_type_name:path => $data_type:ty),*) => {
+    ($source: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $source.plan_node().get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
@@ -125,7 +119,7 @@ macro_rules! build_executor {
 }
 
 macro_rules! build_executor2 {
-    ($source: expr, $($proto_type_name:path => $data_type:ty),*) => {
+    ($source: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $source.plan_node().get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
@@ -181,27 +175,29 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
-            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::SortAgg => SortAggExecutor2,
+            NodeBody::OrderBy => OrderByExecutor2,
             NodeBody::CreateSource => CreateSourceExecutor,
-            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
-            NodeBody::HashJoin => HashJoinExecutorBuilder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
+            NodeBody::HashJoin => HashJoinExecutor2Builder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
-            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
+            NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
@@ -210,27 +206,29 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build2(&self) -> Result<BoxedExecutor2> {
         let real_executor = build_executor2! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::DropTable => DropTableExecutor,
-            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::SortAgg => SortAggExecutor2,
+            NodeBody::OrderBy => OrderByExecutor2,
             NodeBody::CreateSource => CreateSourceExecutor,
-            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
             NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
-            NodeBody::HashJoin => HashJoinExecutorBuilder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
+            NodeBody::HashJoin => HashJoinExecutor2Builder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
-            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
+            NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))
@@ -242,6 +240,10 @@ impl<'a> ExecutorBuilder<'a> {
 
     pub fn global_batch_env(&self) -> &BatchEnvironment {
         &self.env
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 }
 

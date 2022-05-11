@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -66,11 +68,11 @@ impl PlanTreeNodeUnary for BatchTopN {
 impl_plan_tree_node_for_unary! {BatchTopN}
 
 impl ToDistributedBatch for BatchTopN {
-    fn to_distributed(&self) -> PlanRef {
+    fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(), &Distribution::Single);
-        self.clone_with_input(new_input).into()
+            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -79,7 +81,15 @@ impl ToBatchProst for BatchTopN {
         let column_orders = self.logical.topn_order().to_protobuf(&self.base.schema);
         NodeBody::TopN(TopNNode {
             limit: self.logical.limit() as u32,
+            offset: self.logical.offset() as u32,
             column_orders,
         })
+    }
+}
+
+impl ToLocalBatch for BatchTopN {
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

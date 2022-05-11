@@ -28,6 +28,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -35,13 +36,10 @@ use enum_as_inner::EnumAsInner;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_connector::SplitImpl;
+use risingwave_common::error::Result;
 pub use table_v2::*;
 
-use crate::connector_source::{ConnectorReaderContext, ConnectorSource, ConnectorStreamReader};
+use crate::connector_source::{ConnectorSource, ConnectorStreamReader};
 
 pub mod parser;
 
@@ -49,6 +47,7 @@ pub mod connector_source;
 mod manager;
 
 mod common;
+mod row_id;
 mod table_v2;
 
 extern crate core;
@@ -69,6 +68,7 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
     Connector(ConnectorStreamReader),
@@ -76,7 +76,7 @@ pub enum SourceStreamReaderImpl {
 
 #[async_trait]
 impl StreamSourceReader for SourceStreamReaderImpl {
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await,
             SourceStreamReaderImpl::Connector(c) => c.next().await,
@@ -84,51 +84,18 @@ impl StreamSourceReader for SourceStreamReaderImpl {
     }
 }
 
-pub enum SourceReaderContext {
-    None(()),
-    ConnectorReaderContext(Vec<SplitImpl>),
-}
-
-impl SourceImpl {
-    pub async fn stream_reader(
-        &self,
-        context: SourceReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<SourceStreamReaderImpl> {
-        log::debug!("Creating new stream reader");
-
-        match (self, context) {
-            (SourceImpl::TableV2(x), SourceReaderContext::None(_)) => x
-                .stream_reader(TableV2ReaderContext {}, column_ids)
-                .await
-                .map(SourceStreamReaderImpl::TableV2),
-            (SourceImpl::Connector(c), SourceReaderContext::ConnectorReaderContext(context)) => c
-                .stream_reader(ConnectorReaderContext { splits: context }, column_ids)
-                .await
-                .map(SourceStreamReaderImpl::Connector),
-            _ => Err(RwError::from(InternalError(
-                "unmatched source and context".to_string(),
-            ))),
-        }
-    }
-}
-
-#[async_trait]
-pub trait Source: Send + Sync + 'static {
-    type ReaderContext;
-    type StreamReader: StreamSourceReader;
-
-    /// Create a stream reader
-    async fn stream_reader(
-        &self,
-        context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::StreamReader>;
+/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
+/// current design, one connector source can have multiple split reader. The keys are unique
+/// `split_id` and values are the latest offset for each split.
+#[derive(Clone, Debug)]
+pub struct StreamChunkWithState {
+    pub chunk: StreamChunk,
+    pub split_offset_mapping: Option<HashMap<String, String>>,
 }
 
 #[async_trait]
 pub trait StreamSourceReader: Send + Sync + 'static {
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunk>;
+    async fn next(&mut self) -> Result<StreamChunkWithState>;
 }

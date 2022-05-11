@@ -52,7 +52,8 @@ impl LogicalScan {
         // 3. operator_idx: usize,  column index in the ScanOperator's schema.
         // in a query we get the same version of catalog, so the mapping from column_id and
         // table_idx will not changes. and the `required_col_idx is the `table_idx` of the
-        // required columns, in other word, is the mapping from operator_idx to table_idx
+        // required columns, in other word, is the mapping from operator_idx to table_idx.
+
         let mut id_to_op_idx = HashMap::new();
 
         let fields = required_col_idx
@@ -64,12 +65,14 @@ impl LogicalScan {
                 col.into()
             })
             .collect();
+
         let pk_indices = table_desc
-            .pk
+            .pks
             .iter()
-            .map(|c| id_to_op_idx.get(&c.column_desc.column_id).copied())
+            .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
+
         let schema = Schema { fields };
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
@@ -131,6 +134,22 @@ impl LogicalScan {
         &self.indexes
     }
 
+    /// distribution keys stored in catalog only contains column index of the table (`table_idx`),
+    /// so we need to convert it to `operator_idx` when filling distributions.
+    pub fn map_distribution_keys(&self) -> Vec<usize> {
+        let tb_idx_to_op_idx = self
+            .required_col_idx
+            .iter()
+            .enumerate()
+            .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
+            .collect::<HashMap<_, _>>();
+        self.table_desc
+            .distribution_keys
+            .iter()
+            .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
+            .collect()
+    }
+
     pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> LogicalScan {
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
         let all_columns = index
@@ -188,17 +207,17 @@ impl ColPrunable for LogicalScan {
 }
 
 impl ToBatch for LogicalScan {
-    fn to_batch(&self) -> PlanRef {
-        BatchSeqScan::new(self.clone()).into()
+    fn to_batch(&self) -> Result<PlanRef> {
+        Ok(BatchSeqScan::new(self.clone()).into())
     }
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> PlanRef {
-        StreamTableScan::new(self.clone()).into()
+    fn to_stream(&self) -> Result<PlanRef> {
+        Ok(StreamTableScan::new(self.clone()).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         match self.base.pk_indices.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
@@ -212,15 +231,16 @@ impl ToStream for LogicalScan {
                 }
                 let col_need_to_add = self
                     .table_desc
-                    .pk
+                    .order_desc
                     .iter()
                     .filter(|c| !col_ids.contains(&c.column_desc.column_id))
                     .map(|c| col_id_to_tb_idx.get(&c.column_desc.column_id).unwrap())
                     .collect_vec();
+
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);
                 let new_len = required_col_idx.len();
-                (
+                Ok((
                     Self::new(
                         self.table_name.clone(),
                         required_col_idx,
@@ -230,12 +250,12 @@ impl ToStream for LogicalScan {
                     )
                     .into(),
                     ColIndexMapping::identity_or_none(self.schema().len(), new_len),
-                )
+                ))
             }
-            false => (
+            false => Ok((
                 self.clone().into(),
                 ColIndexMapping::identity(self.schema().len()),
-            ),
+            )),
         }
     }
 }

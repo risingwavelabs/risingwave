@@ -14,10 +14,13 @@
 //
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
-use crate::utils::ColIndexMapping;
+use crate::expr::ExprImpl;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
@@ -26,17 +29,22 @@ pub struct LogicalApply {
     pub base: PlanBase,
     left: PlanRef,
     right: PlanRef,
+    on: Condition,
     join_type: JoinType,
 }
 
 impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LogicalApply {{ type: {:?} }}", &self.join_type)
+        write!(
+            f,
+            "LogicalApply {{ type: {:?}, on: {} }}",
+            &self.join_type, &self.on
+        )
     }
 }
 
 impl LogicalApply {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType) -> Self {
+    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         assert!(
             matches!(
                 join_type,
@@ -59,17 +67,27 @@ impl LogicalApply {
             base,
             left,
             right,
+            on,
             join_type,
         }
     }
 
-    pub fn create(left: PlanRef, right: PlanRef, join_type: JoinType) -> PlanRef {
-        Self::new(left, right, join_type).into()
+    pub fn create(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on_clause: ExprImpl,
+    ) -> PlanRef {
+        Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
     /// Get the join type of the logical apply.
     pub fn join_type(&self) -> JoinType {
         self.join_type
+    }
+
+    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType) {
+        (self.left, self.right, self.on, self.join_type)
     }
 }
 
@@ -83,7 +101,7 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(left, right, self.join_type)
+        Self::new(left, right, self.join_type, self.on.clone())
     }
 }
 
@@ -96,17 +114,23 @@ impl ColPrunable for LogicalApply {
 }
 
 impl ToBatch for LogicalApply {
-    fn to_batch(&self) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn to_batch(&self) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalApply should be unnested".to_string(),
+        )))
     }
 }
 
 impl ToStream for LogicalApply {
-    fn to_stream(&self) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn to_stream(&self) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalApply should be unnested".to_string(),
+        )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        panic!("LogicalApply should be unnested")
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        Err(RwError::from(ErrorCode::InternalError(
+            "LogicalApply should be unnested".to_string(),
+        )))
     }
 }

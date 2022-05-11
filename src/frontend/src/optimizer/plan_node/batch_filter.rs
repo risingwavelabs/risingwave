@@ -14,12 +14,14 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::PlanBase;
+use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
+use crate::optimizer::property::Order;
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
@@ -66,9 +68,9 @@ impl PlanTreeNodeUnary for BatchFilter {
 impl_plan_tree_node_for_unary! { BatchFilter }
 
 impl ToDistributedBatch for BatchFilter {
-    fn to_distributed(&self) -> PlanRef {
-        let new_input = self.input().to_distributed();
-        self.clone_with_input(new_input).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_distributed()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -79,5 +81,12 @@ impl ToBatchProst for BatchFilter {
                 ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
             ),
         })
+    }
+}
+
+impl ToLocalBatch for BatchFilter {
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

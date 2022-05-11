@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+
+const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 #[derive(Clone, Debug)]
 pub struct Properties(pub HashMap<String, String>);
@@ -50,6 +53,36 @@ impl Properties {
     /// It's an alternative of `get` but returns kinesis-specifc error hints.
     pub fn get_kinesis(&self, key: &str) -> Result<String> {
         self.get_inner(key, " when using Kinesis source")
+    }
+
+    /// It's an alternative of `get` but returns nexmark-specifc error hints.
+    pub fn get_nexmark(&self, key: &str) -> Result<String> {
+        self.get_inner(key, " when using Nexmark source")
+    }
+
+    pub fn get_connector_type(&self) -> Result<String> {
+        self.get_inner(UPSTREAM_SOURCE_KEY, "when get connector type")
+    }
+
+    /// Returns the value for the given key automatically parsed, or a default
+    /// value if the key does not exist.
+    pub fn get_as_or<T: FromStr + std::fmt::Display>(&self, key: &str, default: T) -> Result<T> {
+        let value = self
+            .get_inner(key, "")
+            .unwrap_or_else(|_| default.to_string());
+        value.parse::<T>().map_err(|_| {
+            RwError::from(ProtocolError(format!(
+                "Invalid value \"{}\" of key \"{}\"",
+                value, key
+            )))
+        })
+    }
+
+    /// Returns the value for the given key or a default value if the key does
+    /// not exist.
+    pub fn get_or(&self, key: &str, default: &str) -> String {
+        self.get_inner(key, "")
+            .unwrap_or_else(|_| default.to_string())
     }
 }
 
@@ -88,6 +121,15 @@ impl AnyhowProperties {
     /// It's an alternative of `get` but returns kafka-specifc error hints.
     pub fn get_kafka(&self, key: &str) -> anyhow::Result<String> {
         self.get_inner(key, " when using Kafka source")
+    }
+
+    /// It's an alternative of `get` but returns nexmark-specifc error hints.
+    pub fn get_nexmark(&self, key: &str) -> anyhow::Result<String> {
+        self.get_inner(key, " when using Nexmark source")
+    }
+
+    pub fn get_connector_type(&self) -> anyhow::Result<String> {
+        self.get_inner(UPSTREAM_SOURCE_KEY, "when get connector type")
     }
 }
 

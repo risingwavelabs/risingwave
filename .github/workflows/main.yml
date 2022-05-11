@@ -13,8 +13,8 @@ on:
       - "v*"
   workflow_dispatch:
 env:
-  RUST_TOOLCHAIN: nightly-2022-04-09
-  CACHE_KEY_SUFFIX: v20220412
+  RUST_TOOLCHAIN: nightly-2022-05-09
+  CACHE_KEY_SUFFIX: v20220510
   CARGO_TERM_COLOR: always
   RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
@@ -24,7 +24,7 @@ env:
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
 permissions:
   id-token: write
-  contents: read
+  contents: write
 jobs:
   start-runner-a:
     name: ec2-start-a
@@ -203,7 +203,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    timeout-minutes: 20
+    timeout-minutes: 22
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -272,21 +272,21 @@ jobs:
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
       - name: e2e, ci-3cn-1fe, streaming
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e, ci-3cn-1fe, delta join
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e, ci-3cn-1fe, batch distributed
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
@@ -294,14 +294,14 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node (legacy frontend)
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test batch 3-node (legacy frontend)
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
@@ -326,7 +326,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    timeout-minutes: 20
+    timeout-minutes: 22
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -395,21 +395,21 @@ jobs:
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
       - name: e2e, ci-3cn-1fe, streaming
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e, ci-3cn-1fe, delta join
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e, ci-3cn-1fe, batch distributed
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
@@ -417,14 +417,14 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node (legacy frontend)
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test batch 3-node (legacy frontend)
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: |
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
@@ -557,6 +557,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-start ci-kafka
+          ./scripts/source/prepare_ci_kafka.sh
           sqllogictest -p 4566 './e2e_test/source/**/*.slt'
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
@@ -719,7 +720,7 @@ jobs:
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
         with:
-          version: '3.x'
+          version: "3.x"
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -740,13 +741,16 @@ jobs:
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
-          cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --all-targets --all-features --locked -- -D warnings
       - name: Run rust doc check
         run: |
           cargo doc --document-private-items --no-deps
+      - name: Run rust failpoints test
+        run: |
+          cargo nextest run failpoints  --features failpoints --no-fail-fast
       - name: Run rust test with coverage
         run: |
-          cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
+          cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -810,6 +814,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: ${{ github.ref }}
           body: ${{steps.github_release.outputs.changelog}}
+          draft: true
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/download-artifact@v2

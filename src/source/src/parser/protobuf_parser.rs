@@ -20,6 +20,7 @@ use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use risingwave_pb::plan_common::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
@@ -27,7 +28,6 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use super::common::str_to_date;
 use crate::{Event, SourceColumnDesc, SourceParser};
 
 /// Parser for Protobuf-encoded bytes.
@@ -267,6 +267,16 @@ impl SourceParser for ProtobufParser {
                         _ => None,
                     }).map(ScalarImpl::NaiveDate)
                 }
+                DataType::Timestamp =>{
+                    value.and_then(|v| match v {
+                        Value::String(b) => str_to_timestamp(&b).ok(),
+                        Value::Option(Some(boxed_value)) => match *boxed_value {
+                            Value::String(b) => str_to_timestamp(&b).ok(),
+                            _ => None,
+                        }
+                        _ => None,
+                    }).map(ScalarImpl::NaiveDateTime)
+                }
                 _ => unimplemented!(),
             }
         }).collect::<Vec<Datum>>();
@@ -285,12 +295,13 @@ mod tests {
     use maplit::hashmap;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::vector_op::cast::str_to_date;
     use risingwave_pb::plan_common::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 
-    use super::str_to_date;
     use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
 
     static PROTO_FILE_DATA: &str = r#"

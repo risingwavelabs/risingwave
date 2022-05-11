@@ -38,6 +38,7 @@ use chrono::{Datelike, Timelike};
 pub use chrono_wrapper::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 pub use decimal::Decimal;
 pub use interval::*;
+use itertools::Itertools;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
@@ -98,11 +99,14 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
-            TypeName::Struct => DataType::Struct {
-                fields: Arc::new([]),
-            },
+            TypeName::Struct => {
+                let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
+                DataType::Struct {
+                    fields: fields.into(),
+                }
+            }
             TypeName::List => DataType::List {
-                datatype: Box::new(DataType::Int32),
+                datatype: Box::new((&proto.field_type[0]).into()),
             },
         }
     }
@@ -125,9 +129,13 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataType::Struct { .. } => {
-                todo!()
-            }
+            DataType::Struct { fields } => StructArrayBuilder::with_meta(
+                capacity,
+                ArrayMeta::Struct {
+                    children: fields.clone(),
+                },
+            )?
+            .into(),
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
@@ -159,9 +167,21 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
+        let field_type = {
+            match self {
+                DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
+                DataType::List { datatype } => {
+                    vec![datatype.to_protobuf()]
+                }
+                _ => {
+                    vec![]
+                }
+            }
+        };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
+            field_type,
             ..Default::default()
         }
     }
@@ -177,10 +197,10 @@ impl DataType {
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
             DataType::Decimal => DataSize::Fixed(16),
             DataType::Varchar => DataSize::Variable,
-            DataType::Date => DataSize::Fixed(size_of::<i32>()),
-            DataType::Time => DataSize::Fixed(size_of::<i64>()),
-            DataType::Timestamp => DataSize::Fixed(size_of::<i64>()),
-            DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
+            DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
+            DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
+            DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+            DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
             DataType::Interval => DataSize::Variable,
             DataType::Struct { .. } => DataSize::Variable,
             DataType::List { .. } => DataSize::Variable,
@@ -391,6 +411,8 @@ impl ToOwnedDatum for DatumRef<'_> {
 }
 
 /// `for_all_native_types` includes all native variants of our scalar types.
+///
+/// Specifically, it doesn't support u8/u16/u32/u64.
 #[macro_export]
 macro_rules! for_all_native_types {
     ($macro:ident $(, $x:tt)*) => {
@@ -533,7 +555,7 @@ impl std::hash::Hash for ScalarImpl {
             ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
                 match $self {
                     $( Self::$scalar_type(inner) => {
-                        inner.hash_wrapper(state);
+                        NativeType::hash_wrapper(inner, state);
                     }, )*
                     Self::Bool(b) => b.hash(state),
                     Self::Utf8(s) => s.hash(state),

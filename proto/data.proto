@@ -69,6 +69,10 @@ message DataType {
   uint32 scale = 3;
   bool is_nullable = 4;
   IntervalType interval_type = 5;
+  // For struct type, it represents all the fields in the struct.
+  // For list type it only contains 1 element which is the inner item type of the List.
+  // For example, `ARRAY<INTEGER>` will be represented as `vec![DataType::Int32]`.
+  repeated DataType field_type = 6;
 }
 
 message StructArrayData {
@@ -146,16 +150,18 @@ message StopMutation {
   repeated uint32 actors = 1;
 }
 
-message Actors {
-  repeated common.ActorInfo info = 1;
+message DispatcherMutation {
+  uint32 actor_id = 1;
+  uint64 dispatcher_id = 2;
+  repeated common.ActorInfo info = 3;
 }
 
 message UpdateMutation {
-  map<uint32, Actors> actors = 1;
+  repeated DispatcherMutation mutations = 1;
 }
 
 message AddMutation {
-  map<uint32, Actors> actors = 1;
+  repeated DispatcherMutation mutations = 1;
 }
 
 message Epoch {

@@ -15,7 +15,7 @@
 use std::fmt;
 
 use risingwave_pb::plan_common::TableRefId;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, ToStreamProst};
@@ -64,7 +64,7 @@ impl fmt::Display for StreamSource {
 
 impl ToStreamProst for StreamSource {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        ProstStreamNode::SourceNode(SourceNode {
+        ProstStreamNode::Source(SourceNode {
             // TODO: Refactor this id
             table_ref_id: TableRefId {
                 table_id: self.logical.source_catalog.id as i32,

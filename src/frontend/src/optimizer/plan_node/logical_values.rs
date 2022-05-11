@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::{fmt, vec};
 
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
@@ -82,18 +83,24 @@ impl ColPrunable for LogicalValues {
 }
 
 impl ToBatch for LogicalValues {
-    fn to_batch(&self) -> PlanRef {
-        BatchValues::new(self.clone()).into()
+    fn to_batch(&self) -> Result<PlanRef> {
+        Ok(BatchValues::new(self.clone()).into())
     }
 }
 
 impl ToStream for LogicalValues {
-    fn to_stream(&self) -> PlanRef {
-        unimplemented!("Stream values executor is unimplemented!")
+    fn to_stream(&self) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "Stream values executor is unimplemented!".to_string(),
+            None.into(),
+        )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
-        unimplemented!("Stream values executor is unimplemented!")
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "Stream values executor is unimplemented!".to_string(),
+            None.into(),
+        )))
     }
 }
 

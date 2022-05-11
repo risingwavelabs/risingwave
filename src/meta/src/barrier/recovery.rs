@@ -56,18 +56,9 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(
-        &self,
-        prev_epoch: Epoch,
-        prev_command: Option<Command>,
-    ) -> RecoveryResult {
+    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
-
-        // clean up the previous command dirty data.
-        if let Some(prev_command) = prev_command {
-            self.clean_up(prev_command).await;
-        }
 
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
@@ -133,21 +124,6 @@ where
                 .flat_map(|r| r.finished_create_mviews)
                 .collect(),
         );
-    }
-
-    /// Clean up previous command dirty data. Currently, we only need to handle table fragments info
-    /// for `CreateMaterializedView`. For `DropMaterializedView`, since we already response fail to
-    /// frontend and the actors will be rebuild by follow recovery process, it's okay to retain
-    /// it.
-    async fn clean_up(&self, prev_command: Command) {
-        if let Some(table_id) = prev_command.creating_table_id() {
-            let retry_strategy = Self::get_retry_strategy();
-            tokio_retry::Retry::spawn(retry_strategy, || async {
-                self.fragment_manager.drop_table_fragments(&table_id).await
-            })
-            .await
-            .expect("Retry clean up until success");
-        }
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty

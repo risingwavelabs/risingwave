@@ -31,7 +31,9 @@ impl Rule for IndexDeltaJoinRule {
             return Some(plan);
         }
 
-        // FIXME: https://github.com/singularity-data/risingwave/issues/2098, so there won't be any exchange
+        /// FIXME: Exchanges still may exist after table scan, because table scan's distribution
+        /// follows upstream materialize node(e.g. subset of pk), whereas join distributes by join
+        /// key.
         fn match_through_exchange(plan: PlanRef) -> Option<PlanRef> {
             if let Some(exchange) = plan.as_stream_exchange() {
                 match_through_exchange(exchange.input())
@@ -61,7 +63,24 @@ impl Rule for IndexDeltaJoinRule {
                 .iter()
                 .map(|idx| column_descs[*idx].column_id)
                 .collect_vec();
+
             for (name, index) in table_scan.logical().indexes() {
+                // 1. Check if distribution keys are the same.
+                // We don't assume the hash function we are using satisfies commutativity
+                // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
+                // keys here.
+                if index
+                    .distribution_keys
+                    .iter()
+                    .map(|x| index.columns[*x].column_id)
+                    .collect_vec()
+                    != columns_to_match
+                {
+                    continue;
+                }
+
+                // 2. Check if the join keys are prefix of order keys
+
                 // A HashSet containing remaining columns to match
                 let mut remaining_to_match =
                     columns_to_match.iter().copied().collect::<HashSet<_>>();
@@ -69,7 +88,7 @@ impl Rule for IndexDeltaJoinRule {
                 // Begin match join columns with index prefix. e.g., if the join columns are `a, b,
                 // c`, and the index has `a, b, c` or `a, c, b` or any combination as prefix, then
                 // we can use this index.
-                for ordered_column in &index.pk {
+                for ordered_column in &index.order_desc {
                     let column_id = ordered_column.column_desc.column_id;
 
                     match remaining_to_match.remove(&column_id) {
@@ -83,36 +102,18 @@ impl Rule for IndexDeltaJoinRule {
                 }
             }
 
-            // FIXME: https://github.com/singularity-data/risingwave/issues/2099
-
             None
         }
 
-        fn replace_across_exchange(plan: PlanRef, index_scan: PlanRef) -> PlanRef {
-            if let Some(exchange) = plan.as_stream_exchange() {
-                exchange
-                    .clone_with_input(replace_across_exchange(exchange.input(), index_scan))
-                    .into()
-            } else if plan.as_stream_table_scan().is_some() {
-                index_scan
-            } else {
-                unreachable!()
-            }
-        }
+        if let Some(left) = match_indexes(&left_indices, input_left) {
+            if let Some(right) = match_indexes(&right_indices, input_right) {
+                // We already ensured that index and join use the same distribution, so we directly
+                // replace the children with stream index scan without inserting any exchanges.
 
-        if let Some(index_scan_left) = match_indexes(&left_indices, input_left) {
-            if let Some(index_scan_right) = match_indexes(&right_indices, input_right) {
-                // TODO: rewrite child to stream index scan
                 Some(
-                    join.to_delta_join(
-                        input_left.logical().table_desc().table_id,
-                        input_right.logical().table_desc().table_id,
-                    )
-                    .clone_with_left_right(
-                        replace_across_exchange(Rc::clone(&join.inputs()[0]), index_scan_left),
-                        replace_across_exchange(Rc::clone(&join.inputs()[1]), index_scan_right),
-                    )
-                    .into(),
+                    join.to_delta_join()
+                        .clone_with_left_right(left, right)
+                        .into(),
                 )
             } else {
                 Some(plan)

@@ -29,6 +29,7 @@ enum WorkerType {
   FRONTEND = 0;
   COMPUTE_NODE = 1;
   RISE_CTL = 2;
+  COMPACTOR = 3;
 }
 
 enum ParallelUnitType {
@@ -60,4 +61,10 @@ message Cluster {
   uint32 id = 1;
   repeated common.WorkerNode nodes = 2;
   map<string, string> config = 3;
+}
+
+message ParallelUnitMapping {
+  uint32 table_id = 1;
+  repeated uint64 original_indices = 2;
+  repeated uint32 data = 3;
 }

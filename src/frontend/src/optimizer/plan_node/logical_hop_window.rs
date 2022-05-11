@@ -17,13 +17,14 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHopWindow, ToBatch,
-    ToStream,
+    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::InputRef;
+use crate::expr::{InputRef, InputRefDisplay};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -91,6 +92,17 @@ impl LogicalHopWindow {
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         ColIndexMapping::identity_or_none(self.input.schema().len(), self.schema().len())
     }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        write!(
+            f,
+            "{} {{ time_col: {} slide: {} size: {} }}",
+            name,
+            InputRefDisplay(self.time_col.index),
+            self.window_slide,
+            self.window_size
+        )
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalHopWindow {
@@ -131,77 +143,78 @@ impl_plan_tree_node_for_unary! {LogicalHopWindow}
 
 impl fmt::Display for LogicalHopWindow {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalHopWindow {{ time_col: {}, slide: {}, size: {} }}",
-            self.time_col, self.window_slide, self.window_size,
-        )
+        self.fmt_with_name(f, "LogicalHopWindow")
     }
 }
 
 impl ColPrunable for LogicalHopWindow {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
-        let require_win_start = upstream_required_cols.contains(self.window_start_col_idx());
-        let require_win_end = upstream_required_cols.contains(self.window_end_col_idx());
-
-        let upstream_required_cols = {
-            let o2i = self.o2i_col_mapping();
-            o2i.rewrite_bitset(&upstream_required_cols)
-                .ones()
-                .collect_vec()
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+        let require_win_start = required_cols.contains(self.window_start_col_idx());
+        let require_win_end = required_cols.contains(self.window_end_col_idx());
+        let o2i = self.o2i_col_mapping();
+        let input_required_cols = {
+            let mut tmp = o2i.rewrite_bitset(required_cols);
+            // LogicalHopWindow should keep all required cols from upstream,
+            // as well as its own time_col.
+            tmp.put(self.time_col.index());
+            tmp
         };
-        let input = self.input.prune_col(&upstream_required_cols);
-        let input_change = ColIndexMapping::with_remaining_columns(
-            &upstream_required_cols,
-            self.input().schema().len(),
-        );
+        let input = self.input.prune_col(&input_required_cols);
+        let input_change = ColIndexMapping::with_remaining_columns(&input_required_cols);
         let (new_hop, _) = self.rewrite_with_input(input, input_change);
-        match (require_win_start, require_win_end) {
-            (true, true) => new_hop.into(),
-            (true, false) => {
-                let proj_map = ColIndexMapping::identity_or_none(
-                    new_hop.schema().len(),
-                    new_hop.schema().len() - 1,
-                );
-                LogicalProject::with_mapping(new_hop.into(), proj_map)
+        let required_output_cols: FixedBitSet = {
+            // output cols = { cols required by upstream from input node } ∪ { additional window
+            // cols }
+
+            // `required_output_cols` indicates whether a column is needed or not
+            let mut required_output_cols = FixedBitSet::with_capacity(new_hop.schema().len());
+
+            // get indices of columns which are required by upstream in `new_hop`
+            let input_cols_required_by_upstream_in_new_hop = {
+                // map the indices from output to input
+                let input_required_cols = o2i.rewrite_bitset(required_cols);
+                // this mapping will only keeps required input columns
+                let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+                mapping.rewrite_bitset(&input_required_cols)
+            };
+            required_output_cols.union_with(&input_cols_required_by_upstream_in_new_hop);
+
+            let win_start_index = new_hop.schema().len() - 2;
+            let win_end_index = new_hop.schema().len() - 1;
+            if require_win_start {
+                required_output_cols.put(win_start_index);
             }
-            (false, true) => {
-                let mut proj_map = ColIndexMapping::identity_or_none(
-                    new_hop.schema().len(),
-                    new_hop.schema().len() - 1,
-                );
-                proj_map.put(new_hop.schema().len() - 1, Some(new_hop.schema().len() - 2));
-                proj_map.put(new_hop.schema().len() - 2, None);
-                LogicalProject::with_mapping(new_hop.into(), proj_map)
+            if require_win_end {
+                required_output_cols.put(win_end_index);
             }
-            (false, false) => {
-                let proj_map = ColIndexMapping::identity_or_none(
-                    new_hop.schema().len(),
-                    new_hop.schema().len() - 2,
-                );
-                LogicalProject::with_mapping(new_hop.into(), proj_map)
-            }
-        }
+            required_output_cols
+        };
+        LogicalProject::with_mapping(
+            new_hop.into(),
+            ColIndexMapping::with_remaining_columns(&required_output_cols),
+        )
     }
 }
 
 impl ToBatch for LogicalHopWindow {
-    fn to_batch(&self) -> PlanRef {
-        unimplemented!("LogicalHopWindow::ToBatch")
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
+        let new_logical = self.clone_with_input(new_input);
+        Ok(BatchHopWindow::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalHopWindow {
-    fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_stream();
+    fn to_stream(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
-        StreamHopWindow::new(new_logical).into()
+        Ok(StreamHopWindow::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (hop.into(), out_col_change)
+        Ok((hop.into(), out_col_change))
     }
 }

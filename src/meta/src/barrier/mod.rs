@@ -173,10 +173,13 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make interval configurable.
-        // TODO: when tracing is on, warn the developer on this short interval.
-        let interval = Duration::from_millis(100);
         let enable_recovery = env.opts.enable_recovery;
+        let interval = env.opts.checkpoint_interval;
+        tracing::info!(
+            "Starting barrier manager with: interval={:?}, enable_recovery={}",
+            interval,
+            enable_recovery
+        );
 
         Self {
             interval,
@@ -215,7 +218,7 @@ where
             state.prev_epoch = new_epoch;
 
             let (new_epoch, actors_to_finish, finished_create_mviews) =
-                self.recovery(state.prev_epoch, None).await;
+                self.recovery(state.prev_epoch).await;
             unfinished.add(new_epoch.0, actors_to_finish, vec![]);
             for finished in finished_create_mviews {
                 unfinished.finish_actors(finished.epoch, once(finished.actor_id));
@@ -259,7 +262,7 @@ where
                 &info,
                 &state.prev_epoch,
                 &new_epoch,
-                command.clone(),
+                command,
             );
 
             let mut notifiers = notifiers;
@@ -285,7 +288,7 @@ where
                     if self.enable_recovery {
                         // If failed, enter recovery mode.
                         let (new_epoch, actors_to_finish, finished_create_mviews) =
-                            self.recovery(state.prev_epoch, Some(command)).await;
+                            self.recovery(state.prev_epoch).await;
                         unfinished = UnfinishedNotifiers::default();
                         unfinished.add(new_epoch.0, actors_to_finish, vec![]);
                         for finished in finished_create_mviews {
@@ -407,12 +410,7 @@ where
             .await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
-}
 
-impl<S> GlobalBarrierManager<S>
-where
-    S: MetaStore,
-{
     async fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
         self.scheduled_barriers
             .push((command, once(notifier).collect()))

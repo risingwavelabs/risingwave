@@ -21,15 +21,19 @@ pub struct ComputeNodeConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
-    pub exporter_address: String,
+    pub listen_address: String,
     pub exporter_port: u16,
+
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
+    pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
 }
@@ -41,16 +45,21 @@ pub struct MetaNodeConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
-    pub dashboard_address: String,
+    pub listen_address: String,
     pub dashboard_port: u16,
-    pub exporter_address: String,
     pub exporter_port: u16,
+
     pub user_managed: bool,
+
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+
     pub enable_dashboard_v2: bool,
     pub unsafe_disable_recovery: bool,
+    pub checkpoint_interval: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -60,8 +69,32 @@ pub struct FrontendConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
+    pub listen_address: String,
+
+    pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub user_managed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct CompactorConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    #[serde(with = "string")]
+    pub port: u16,
+    pub listen_address: String,
+    pub exporter_port: u16,
+
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
 }
@@ -73,28 +106,37 @@ pub struct MinioConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
+    pub listen_address: String,
+
     pub console_address: String,
+    #[serde(with = "string")]
     pub console_port: u16,
+
     pub root_user: String,
     pub root_password: String,
-    pub hummock_user: String,
-    pub hummock_password: String,
     pub hummock_bucket: String,
+
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
 pub struct EtcdConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     // TODO: only one node etcd is supported.
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
+    pub listen_address: String,
+
     pub peer_port: u16,
     pub unsafe_no_fsync: bool,
 }
@@ -106,11 +148,16 @@ pub struct PrometheusConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
+    pub listen_address: String,
+
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_compactor: Option<Vec<CompactorConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -153,8 +200,12 @@ pub struct KafkaConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
+    pub listen_address: String,
+
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
     pub broker_id: u32,
@@ -167,9 +218,25 @@ pub struct ZooKeeperConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
     pub address: String,
+    #[serde(with = "string")]
     pub port: u16,
+    pub listen_address: String,
+
     pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct RedPandaConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub internal_port: u16,
+    pub outside_port: u16,
+    pub address: String,
 }
 
 /// All service configuration
@@ -179,6 +246,7 @@ pub enum ServiceConfig {
     MetaNode(MetaNodeConfig),
     Frontend(FrontendConfig),
     FrontendV2(FrontendConfig),
+    Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
     Prometheus(PrometheusConfig),
@@ -187,6 +255,7 @@ pub enum ServiceConfig {
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
     ZooKeeper(ZooKeeperConfig),
+    RedPanda(RedPandaConfig),
 }
 
 impl ServiceConfig {
@@ -196,6 +265,7 @@ impl ServiceConfig {
             Self::MetaNode(c) => &c.id,
             Self::Frontend(c) => &c.id,
             Self::FrontendV2(c) => &c.id,
+            Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
             Self::Prometheus(c) => &c.id,
@@ -204,6 +274,33 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
+            Self::RedPanda(c) => &c.id,
         }
+    }
+}
+
+mod string {
+    use std::fmt::Display;
+    use std::str::FromStr;
+
+    use serde::{de, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        T: Display,
+        S: Serializer,
+    {
+        serializer.collect_str(value)
+    }
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        T: FromStr,
+        T::Err: Display,
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
     }
 }

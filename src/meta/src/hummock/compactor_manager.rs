@@ -21,6 +21,8 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
+pub type CompactorManagerRef = Arc<CompactorManager>;
+
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<Result<SubscribeCompactTasksResponse>>,
@@ -32,6 +34,7 @@ impl Compactor {
         compact_task: Option<CompactTask>,
         vacuum_task: Option<VacuumTask>,
     ) -> Result<()> {
+        // TODO: compactor node backpressure
         self.sender
             .send(Ok(SubscribeCompactTasksResponse {
                 compact_task,
@@ -94,7 +97,6 @@ impl CompactorManager {
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         let mut guard = self.inner.write();
         if guard.compactors.is_empty() {
-            tracing::warn!("No compactor is available.");
             return None;
         }
         let compactor_index = guard.next_compactor % guard.compactors.len();
@@ -103,7 +105,6 @@ impl CompactorManager {
         Some(compactor)
     }
 
-    /// A new compactor is registered.
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
@@ -170,6 +171,8 @@ mod tests {
                 write: Some(TableSetStatistics::default()),
             }),
             task_status: false,
+            prefix_pairs: vec![],
+            vnode_mappings: vec![],
         }
     }
 
@@ -236,11 +239,7 @@ mod tests {
             TryRecvError::Empty
         ));
 
-        let task = hummock_manager
-            .get_compact_task(compactor.context_id())
-            .await
-            .unwrap()
-            .unwrap();
+        let task = hummock_manager.get_compact_task().await.unwrap().unwrap();
         compactor.send_task(Some(task.clone()), None).await.unwrap();
         // Get a compact task.
         assert_eq!(

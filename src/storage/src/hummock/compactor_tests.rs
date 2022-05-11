@@ -24,7 +24,7 @@ mod tests {
     use risingwave_rpc_client::HummockMetaClient;
 
     use crate::hummock::compactor::{Compactor, CompactorContext};
-    use crate::hummock::{HummockStorage, LocalVersionManager, SstableStore};
+    use crate::hummock::{HummockStorage, SstableStore};
     use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStoreImpl};
     use crate::storage_value::StorageValue;
@@ -53,11 +53,9 @@ mod tests {
             block_cache_capacity,
             meta_cache_capacity,
         ));
-        let local_version_manager = Arc::new(LocalVersionManager::new());
         let storage = HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
-            local_version_manager.clone(),
             hummock_meta_client.clone(),
             Arc::new(StateStoreMetrics::unused()),
         )
@@ -73,7 +71,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // TODO(soundOfDestiny): re-enable the test case
     async fn test_compaction_same_key_not_split() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -110,22 +107,18 @@ mod tests {
 
         // 2. get compact task
         let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
+            .get_compact_task()
             .await
             .unwrap()
+            .unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .await
             .unwrap();
 
         // assert compact_task
         assert_eq!(
-            compact_task
-                .input_ssts
-                .first()
-                .unwrap()
-                .level
-                .as_ref()
-                .unwrap()
-                .table_infos
-                .len(),
+            compact_task.input_ssts.first().unwrap().table_infos.len(),
             kv_count
         );
 
@@ -144,10 +137,8 @@ mod tests {
             .id;
         let table = storage
             .sstable_store()
-            .sstables(&[output_table_id])
+            .sstable(output_table_id)
             .await
-            .unwrap()
-            .pop()
             .unwrap();
         let target_table_size = storage.options().sstable_size;
         assert!(
@@ -158,15 +149,14 @@ mod tests {
         );
 
         // 5. storage get back the correct kv after compaction
-        storage.local_version_manager().try_set_version(version);
+        storage
+            .local_version_manager()
+            .try_update_pinned_version(version);
         let get_val = storage.get(&key, epoch).await.unwrap().unwrap();
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
-        let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
-            .await
-            .unwrap();
+        let compact_task = hummock_manager_ref.get_compact_task().await.unwrap();
 
         assert!(compact_task.is_none());
     }
