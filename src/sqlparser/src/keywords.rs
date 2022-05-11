@@ -129,6 +129,7 @@ define_keywords!(
     COMMENT,
     COMMIT,
     COMMITTED,
+    CONCAT_WS,
     CONDITION,
     CONNECT,
     CONSTRAINT,

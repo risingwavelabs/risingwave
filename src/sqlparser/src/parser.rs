@@ -386,6 +386,7 @@ impl Parser {
                 Keyword::EXTRACT => self.parse_extract_expr(),
                 Keyword::SUBSTRING => self.parse_substring_expr(),
                 Keyword::TRIM => self.parse_trim_expr(),
+                Keyword::CONCAT_WS => self.parse_concat_ws_expr(),
                 Keyword::INTERVAL => self.parse_literal_interval(),
                 Keyword::NOT => Ok(Expr::UnaryOp {
                     op: UnaryOperator::Not,
@@ -834,6 +835,19 @@ impl Parser {
             },
             unexpected => self.expected("trim_where field", unexpected),
         }
+    }
+
+    /// concat_ws
+    pub fn parse_concat_ws_expr(&mut self) -> Result<Expr, ParserError> {
+        self.expect_token(&Token::LParen)?;
+        let sep_expr = self.parse_expr()?;
+        let string_exprs = self.parse_comma_separated(Parser::parse_expr)?;
+        self.expect_token(&Token::RParen)?;
+
+        Ok(Expr::ConcatWs {
+            sep_expr: Box::new(sep_expr),
+            string_exprs: string_exprs,
+        })
     }
 
     // This function parses date/time fields for both the EXTRACT function-like

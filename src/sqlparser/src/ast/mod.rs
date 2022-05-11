@@ -254,6 +254,11 @@ pub enum Expr {
         // ([BOTH | LEADING | TRAILING], <expr>)
         trim_where: Option<(TrimWhereField, Box<Expr>)>,
     },
+    /// CONCAT_WS(SEP TEXT, STR "ANY" [, STR "ANY" [, ...] ])
+    ConcatWs {
+        sep_expr: Box<Expr>,
+        string_exprs: Vec<Expr>,
+    },
     /// `expr COLLATE collation`
     Collate {
         expr: Box<Expr>,
@@ -468,7 +473,8 @@ impl fmt::Display for Expr {
                 }
 
                 write!(f, ")")
-            }
+            },
+            Expr::ConcatWs { sep_expr, string_exprs } => write!(f, "TODO"),
             Expr::Row(exprs) => write!(
                 f,
                 "ROW({})",
