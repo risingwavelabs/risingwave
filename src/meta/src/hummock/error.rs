@@ -26,17 +26,19 @@ pub enum Error {
     InvalidContext(HummockContextId),
     #[error(transparent)]
     MetaStoreError(anyhow::Error),
+    #[error("compactor {0} is disconnected")]
+    CompactorUnreachable(HummockContextId),
+    #[error("compactor {0} is busy")]
+    CompactorBusy(HummockContextId),
+    #[error("compaction task {0} already assigned to compactor {1}")]
+    CompactionTaskAlreadyAssigned(u64, HummockContextId),
     #[error("internal error: {0}")]
     InternalError(String),
 }
 
 impl Error {
     pub fn retryable(&self) -> bool {
-        match self {
-            Error::InvalidContext(_) => false,
-            Error::MetaStoreError(_) => true,
-            Error::InternalError(_) => false,
-        }
+        matches!(self, Error::MetaStoreError(_))
     }
 }
 
@@ -64,6 +66,18 @@ impl From<Error> for ErrorCode {
             }
             Error::MetaStoreError(err) => ErrorCode::MetaError(err.to_error_str()),
             Error::InternalError(err) => ErrorCode::InternalError(err),
+            Error::CompactorBusy(context_id) => {
+                ErrorCode::InternalError(format!("compactor {} is busy", context_id))
+            }
+            Error::CompactorUnreachable(context_id) => {
+                ErrorCode::InternalError(format!("compactor {} is unreachable", context_id))
+            }
+            Error::CompactionTaskAlreadyAssigned(task_id, context_id) => {
+                ErrorCode::InternalError(format!(
+                    "compaction task {} already assigned to compactor {}",
+                    task_id, context_id
+                ))
+            }
         }
     }
 }
@@ -81,7 +95,7 @@ impl From<risingwave_common::error::RwError> for Error {
             ErrorCode::InternalError(err) => Error::InternalError(err.to_owned()),
             ErrorCode::ItemNotFound(err) => Error::InternalError(err.to_owned()),
             _ => {
-                panic!("convertion not supported");
+                panic!("conversion not supported");
             }
         }
     }

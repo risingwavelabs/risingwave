@@ -151,6 +151,58 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${id}
 
+  # special config for deployment, see related PR for more information
+  compose-3node-host-deploy:
+    - use: minio
+      id: minio-0
+      address: rw-source
+      listen-address: "0.0.0.0"
+      console-address: "0.0.0.0"
+
+    - use: meta-node
+      # Id must starts with `meta-node`, therefore to be picked up by other
+      # components.
+      id: meta-node-0
+
+      # Advertise address can be `id`, so as to use docker's DNS. If running
+      # in host network mode, we should use IP directly in this field.
+      address: rw-meta
+
+      listen-address: "0.0.0.0"
+
+    - use: compute-node
+      id: compute-node-0
+      listen-address: "0.0.0.0"
+      address: rw-compute-1
+
+    - use: compute-node
+      id: compute-node-1
+      listen-address: "0.0.0.0"
+      address: rw-compute-2
+
+    - use: compute-node
+      id: compute-node-2
+      listen-address: "0.0.0.0"
+      address: rw-compute-3
+
+    - use: frontend
+      id: frontend-node-0
+      listen-address: "0.0.0.0"
+      address: rw-meta
+
+    - use: compactor
+      id: compactor-0
+      listen-address: "0.0.0.0"
+      address: rw-source
+
+    - use: redpanda
+      address: rw-source
+
+    - use: prometheus
+      id: prometheus-0
+      listen-address: "0.0.0.0"
+      address: rw-meta
+
   #################################
   ### Configurations used on CI ###
   #################################
@@ -536,3 +588,6 @@ template:
 
     # Port used on host (e.g. import data, connecting using kafkacat)
     outside-port: 9092
+
+    # Connect address
+    address: ${id}
