@@ -95,7 +95,6 @@ impl CompactorManager {
 
     /// Gets next compactor to assign task.
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
-        // TODO pick a idle compactor instead of round-robin
         let mut guard = self.inner.write();
         if guard.compactors.is_empty() {
             return None;
@@ -240,11 +239,7 @@ mod tests {
             TryRecvError::Empty
         ));
 
-        let task = hummock_manager
-            .get_compact_task(compactor.context_id())
-            .await
-            .unwrap()
-            .unwrap();
+        let task = hummock_manager.get_compact_task().await.unwrap().unwrap();
         compactor.send_task(Some(task.clone()), None).await.unwrap();
         // Get a compact task.
         assert_eq!(
