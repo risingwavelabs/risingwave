@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::error::{Result, RwError};
@@ -7,9 +8,7 @@ use risingwave_common::{ensure, try_match_expand};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use super::template::UnaryBytesExpression;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
-use crate::vector_op::trim::trim;
 
 #[derive(Debug)]
 pub struct ConcatWsExpression {
@@ -24,7 +23,31 @@ impl Expression for ConcatWsExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        todo!()
+        let sep = self.sep_expr.eval(input)?;
+        let string_columns = self
+            .string_exprs
+            .iter()
+            .map(|c| c.eval(input))
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut builder = self.return_type.create_array_builder(input.cardinality())?;
+        let len = string_columns[0].len(); // length of each column
+
+        for i in 0..len { // iterates between each row
+            let mut data = None;
+
+            // for each item in a row
+            for column in &string_columns {
+                let datum = column.datum_at(i);
+
+                if datum.is_some() {
+                    data = datum;
+                    break;
+                }
+            }
+            builder.append_datum(&data)?;
+        }
+        Ok(Arc::new(builder.finish()?))
     }
 }
 
