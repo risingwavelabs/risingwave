@@ -1979,7 +1979,7 @@ impl Parser {
             if self.consume_token(&Token::Gt) {
                 break;
             } else if !comma {
-                return self.expected("',' or ')' after column definition", self.peek_token());
+                return self.expected("',' or '>' after column definition", self.peek_token());
             }
         }
 

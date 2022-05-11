@@ -58,7 +58,7 @@ CREATE TABLE T (v1 INT, v2 STRUCT <v1 INT, v2 INT>)
 ---
 CREATE TABLE T (v1 INT, v2 STRUCT <v1 INT, v2 INT>)
 =>
-CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "T", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None), collation: None, options: [], sub_defs: [] }, ColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Struct, collation: None, options: [], sub_defs: [ColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None), collation: None, options: [], sub_defs: [] }, ColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Int(None), collation: None, options: [], sub_defs: [] }] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
+CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "T", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None), collation: None, options: [], sub_defs: [] }, ColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Struct([Int(None), Int(None)]), collation: None, options: [], sub_defs: [ColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None), collation: None, options: [], sub_defs: [] }, ColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Int(None), collation: None, options: [], sub_defs: [] }] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
 
 CREATE TABLE T (v1 INT, v2 STRUCT <v1 INT, v2 INT, v3 STRUCT<v1 int, v2 int> >)
 ---
