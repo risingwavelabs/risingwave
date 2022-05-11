@@ -1039,6 +1039,42 @@
                 LogicalProject { exprs: [$0], expr_alias: [ ] }
                   LogicalFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
                     LogicalScan { table: nation, columns: [n_nationkey, n_name] }
+  batch_plan: |
+    BatchSort { order: [$1 DESC] }
+      BatchProject { exprs: [$0, $1], expr_alias: [ps_partkey, value] }
+        BatchNestedLoopJoin { type: Inner, predicate: ($2 > $3) }
+          BatchExchange { order: [], dist: Single }
+            BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($1)] }
+              BatchProject { exprs: [$0, ($2 * $1)], expr_alias: [ ,  ] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchHashJoin { type: Inner, predicate: $3 = $4 }
+                    BatchProject { exprs: [$0, $2, $3, $5], expr_alias: [ ,  ,  ,  ] }
+                      BatchExchange { order: [], dist: HashShard([5]) }
+                        BatchHashJoin { type: Inner, predicate: $1 = $4 }
+                          BatchExchange { order: [], dist: HashShard([1]) }
+                            BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                    BatchProject { exprs: [$0], expr_alias: [ ] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                          BatchScan { table: nation, columns: [n_nationkey, n_name] }
+          BatchProject { exprs: [($0 * 0.0001000000:Decimal)], expr_alias: [ ] }
+            BatchSimpleAgg { aggs: [sum($0)] }
+              BatchExchange { order: [], dist: Single }
+                BatchProject { exprs: [($1 * $0)], expr_alias: [ ] }
+                  BatchHashJoin { type: Inner, predicate: $2 = $3 }
+                    BatchProject { exprs: [$1, $2, $4], expr_alias: [ ,  ,  ] }
+                      BatchExchange { order: [], dist: HashShard([4]) }
+                        BatchHashJoin { type: Inner, predicate: $0 = $3 }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                    BatchProject { exprs: [$0], expr_alias: [ ] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
+                          BatchScan { table: nation, columns: [n_nationkey, n_name] }
 - id: tpch_q12
   before:
     - create_tables
