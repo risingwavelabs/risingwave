@@ -36,6 +36,6 @@ mod nexmark;
 mod pulsar;
 mod utils;
 pub use base::*;
-pub use utils::{AnyhowProperties, Properties};
+pub use utils::*;
 pub mod dummy_connector;
 pub mod state;
