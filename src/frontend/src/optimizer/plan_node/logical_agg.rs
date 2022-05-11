@@ -492,39 +492,39 @@ impl ColPrunable for LogicalAgg {
 }
 
 impl ToBatch for LogicalAgg {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_keys().is_empty() {
-            BatchSimpleAgg::new(new_logical).into()
+            Ok(BatchSimpleAgg::new(new_logical).into())
         } else {
-            BatchHashAgg::new(new_logical).into()
+            Ok(BatchHashAgg::new(new_logical).into())
         }
     }
 }
 
 impl ToStream for LogicalAgg {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef> {
         if self.group_keys().is_empty() {
-            StreamSimpleAgg::new(
+            Ok(StreamSimpleAgg::new(
                 self.clone_with_input(
                     self.input()
-                        .to_stream_with_dist_required(&Distribution::Single),
+                        .to_stream_with_dist_required(&Distribution::Single)?,
                 ),
             )
-            .into()
+            .into())
         } else {
-            StreamHashAgg::new(
+            Ok(StreamHashAgg::new(
                 self.clone_with_input(self.input().to_stream_with_dist_required(
                     &Distribution::HashShard(self.group_keys().to_vec()),
-                )),
+                )?),
             )
-            .into()
+            .into())
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
 
         // To rewrite StreamAgg, there are two things to do:
@@ -544,10 +544,10 @@ impl ToStream for LogicalAgg {
             }
         });
 
-        (
+        Ok((
             LogicalAgg::new(agg_calls, group_keys, input).into(),
             ColIndexMapping::new(map),
-        )
+        ))
     }
 }
 

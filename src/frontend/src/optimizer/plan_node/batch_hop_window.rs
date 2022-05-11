@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
@@ -67,16 +68,16 @@ impl PlanTreeNodeUnary for BatchHopWindow {
 impl_plan_tree_node_for_unary! { BatchHopWindow }
 
 impl ToDistributedBatch for BatchHopWindow {
-    fn to_distributed(&self) -> PlanRef {
-        let new_input = self.input().to_distributed();
-        self.clone_with_input(new_input).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_distributed()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 
     fn to_distributed_with_required(
         &self,
         required_order: &Order,
         required_dist: &Distribution,
-    ) -> PlanRef {
+    ) -> Result<PlanRef> {
         let input_required = self
             .logical
             .o2i_col_mapping()
@@ -84,10 +85,10 @@ impl ToDistributedBatch for BatchHopWindow {
             .unwrap_or(Distribution::Any);
         let new_input = self
             .input()
-            .to_distributed_with_required(required_order, &input_required);
+            .to_distributed_with_required(required_order, &input_required)?;
         let new_logical = self.logical.clone_with_input(new_input);
         let batch_plan = BatchHopWindow::new(new_logical);
-        let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into());
+        let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into())?;
         required_dist.enforce_if_not_satisfies(batch_plan, required_order)
     }
 }
@@ -103,8 +104,8 @@ impl ToBatchProst for BatchHopWindow {
 }
 
 impl ToLocalBatch for BatchHopWindow {
-    fn to_local(&self) -> PlanRef {
-        let new_input = self.input().to_local();
-        self.clone_with_input(new_input).into()
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

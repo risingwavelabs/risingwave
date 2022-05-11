@@ -218,7 +218,7 @@ where
             state.prev_epoch = new_epoch;
 
             let (new_epoch, actors_to_finish, finished_create_mviews) =
-                self.recovery(state.prev_epoch, None).await;
+                self.recovery(state.prev_epoch).await;
             unfinished.add(new_epoch.0, actors_to_finish, vec![]);
             for finished in finished_create_mviews {
                 unfinished.finish_actors(finished.epoch, once(finished.actor_id));
@@ -262,7 +262,7 @@ where
                 &info,
                 &state.prev_epoch,
                 &new_epoch,
-                command.clone(),
+                command,
             );
 
             let mut notifiers = notifiers;
@@ -288,7 +288,7 @@ where
                     if self.enable_recovery {
                         // If failed, enter recovery mode.
                         let (new_epoch, actors_to_finish, finished_create_mviews) =
-                            self.recovery(state.prev_epoch, Some(command)).await;
+                            self.recovery(state.prev_epoch).await;
                         unfinished = UnfinishedNotifiers::default();
                         unfinished.add(new_epoch.0, actors_to_finish, vec![]);
                         for finished in finished_create_mviews {
