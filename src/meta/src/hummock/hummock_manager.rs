@@ -975,7 +975,7 @@ where
         Ok(())
     }
 
-    /// List version ids in ascending order. TODO: support limit parameter
+    /// List version ids in ascending order.
     pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
         let versioning_guard = self.versioning.read().await;
         let version_ids = versioning_guard
@@ -1048,36 +1048,34 @@ where
         Ok(())
     }
 
-    /// Delete metadata of the given `version_id`
-    pub async fn delete_version(&self, version_id: HummockVersionId) -> Result<()> {
+    /// Delete metadata of the given `version_ids`
+    pub async fn delete_versions(&self, version_ids: &[HummockVersionId]) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        // Delete record in HummockVersion if any.
-        if versioning_guard.hummock_versions.get(&version_id).is_none() {
-            return Ok(());
-        }
         let versioning = versioning_guard.deref_mut();
         let pinned_versions_ref = &versioning.pinned_versions;
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
-        hummock_versions.remove(&version_id);
-        // Delete record in HummockTablesToDelete if any.
-        if let Some(ssts_to_delete) = stale_sstables.get_mut(&version_id) {
-            if !ssts_to_delete.id.is_empty() {
-                return Err(Error::InternalError(format!(
-                    "Version {} still has stale ssts undeleted:{:?}",
-                    version_id, ssts_to_delete.id
-                )));
+        for version_id in version_ids {
+            if hummock_versions.remove(version_id).is_none() {
+                continue;
+            }
+            if let Some(ssts_to_delete) = stale_sstables.get_mut(version_id) {
+                if !ssts_to_delete.id.is_empty() {
+                    return Err(Error::InternalError(format!(
+                        "Version {} still has stale ssts undeleted:{:?}",
+                        version_id, ssts_to_delete.id
+                    )));
+                }
+            }
+            stale_sstables.remove(version_id);
+
+            for version_pin in pinned_versions_ref.values() {
+                assert!(
+                    !version_pin.version_id.contains(version_id),
+                    "version still referenced shouldn't be deleted."
+                );
             }
         }
-        stale_sstables.remove(&version_id);
-
-        for version_pin in pinned_versions_ref.values() {
-            assert!(
-                !version_pin.version_id.contains(&version_id),
-                "version still referenced shouldn't be deleted."
-            );
-        }
-
         commit_multi_var!(self, None, hummock_versions, stale_sstables)?;
 
         #[cfg(test)]

@@ -717,7 +717,7 @@ async fn test_hummock_manager_basic() {
 
     // test delete_version
     hummock_manager
-        .delete_version(FIRST_VERSION_ID)
+        .delete_versions(&[FIRST_VERSION_ID])
         .await
         .unwrap();
     assert_eq!(
