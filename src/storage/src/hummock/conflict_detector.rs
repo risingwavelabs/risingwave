@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 use risingwave_common::config::StorageConfig;
 
 use crate::hummock::value::HummockValue;
@@ -26,9 +26,8 @@ use crate::hummock::HummockEpoch;
 
 pub struct ConflictDetector {
     // epoch -> key-sets
-    epoch_history: DashMap<HummockEpoch, HashSet<Bytes>>,
+    epoch_history: DashMap<HummockEpoch, Option<HashSet<Bytes>>>,
     epoch_watermark: AtomicCell<HummockEpoch>,
-    epoch_set: DashSet<HummockEpoch>,
 }
 
 impl Default for ConflictDetector {
@@ -36,7 +35,6 @@ impl Default for ConflictDetector {
         Self {
             epoch_history: DashMap::new(),
             epoch_watermark: AtomicCell::new(HummockEpoch::MIN),
-            epoch_set: DashSet::new(),
         }
     }
 }
@@ -87,17 +85,18 @@ impl ConflictDetector {
             "write to an archived epoch: {}",
             epoch
         );
-        assert!(
-            !self.epoch_set.contains(&epoch),
-            "write to an archived epoch: {}",
-            epoch
-        );
 
-        let mut written_key = self.epoch_history.entry(epoch).or_insert(HashSet::new());
+        let mut written_key = self
+            .epoch_history
+            .entry(epoch)
+            .or_insert(Some(HashSet::new()));
 
         for (key, value) in kv_pairs.iter() {
             assert!(
-                written_key.insert(key.clone()),
+                written_key
+                    .as_mut()
+                    .expect(format!("write to an archived epoch: {}", epoch).as_str())
+                    .insert(key.clone()),
                 "key {:?} is written again after previously written, value is {:?}",
                 key,
                 value,
@@ -113,16 +112,18 @@ impl ConflictDetector {
             epoch,
             self.get_epoch_watermark(),
         );
-        assert!(
-            self.epoch_set.insert(epoch),
-            "epoch has been archived: epoch is {}",
-            epoch
-        );
-        self.epoch_history.remove(&epoch);
+        if self.epoch_history.contains_key(&epoch) {
+            assert!(
+                self.epoch_history.get(&epoch).is_some(),
+                "epoch has been archived: epoch is {}",
+                epoch
+            );
+        }
+        self.epoch_history.insert(epoch, None);
         if let Some(first_epoch) = first_epoch {
             if first_epoch - 1 != self.get_epoch_watermark() {
                 self.set_watermark(first_epoch - 1);
-                self.epoch_set.retain(|x| x > &(first_epoch - 1));
+                self.epoch_history.retain(|x, _| x > &(first_epoch - 1));
             }
         }
     }
@@ -251,8 +252,19 @@ mod test {
             .as_slice(),
             233,
         );
-        assert!(!detector.epoch_history.get(&233).unwrap().is_empty());
+        detector.check_conflict_and_track_write_batch(
+            once((
+                Bytes::from("key1"),
+                HummockValue::Delete(Default::default()),
+            ))
+            .collect_vec()
+            .as_slice(),
+            234,
+        );
+        assert!(detector.epoch_history.get(&233).unwrap().is_some());
         detector.archive_epoch(233, Some(233));
+        assert!(detector.epoch_history.get(&233).unwrap().is_none());
+        detector.archive_epoch(233, Some(234));
         assert!(detector.epoch_history.get(&233).is_none());
     }
 
