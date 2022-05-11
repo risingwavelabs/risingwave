@@ -45,7 +45,7 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task(self.context_id)
+            .get_compact_task()
             .await
             .unwrap_or(None)
     }

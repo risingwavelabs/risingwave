@@ -203,7 +203,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    timeout-minutes: 20
+    timeout-minutes: 22
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -272,7 +272,7 @@ jobs:
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
       - name: e2e, ci-3cn-1fe, streaming
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
@@ -326,7 +326,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    timeout-minutes: 20
+    timeout-minutes: 22
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -395,7 +395,7 @@ jobs:
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
       - name: e2e, ci-3cn-1fe, streaming
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
