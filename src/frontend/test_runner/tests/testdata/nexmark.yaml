@@ -117,7 +117,7 @@
   sql: |
     SELECT
         Q.category,
-        AVG(Q.final)
+        AVG(Q.final) as avg
     FROM (
         SELECT MAX(B.price) AS final, A.category
         FROM auction A, bid B
@@ -127,7 +127,7 @@
     GROUP BY Q.category;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, ($1 / $2)], expr_alias: [category,  ] }
+      BatchProject { exprs: [$0, ($1 / $2)], expr_alias: [category, avg] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [$1, $2], expr_alias: [ ,  ] }
@@ -141,9 +141,9 @@
                         BatchExchange { order: [], dist: HashShard([0]) }
                           BatchScan { table: bid, columns: [auction, price, dateTime] }
   stream_plan: |
-    StreamMaterialize { columns: [category, expr#1], pk_columns: [category] }
+    StreamMaterialize { columns: [category, avg], pk_columns: [category] }
       StreamExchange { dist: HashShard([0]) }
-        StreamProject { exprs: [$0, ($2 / $3)], expr_alias: [category,  ] }
+        StreamProject { exprs: [$0, ($2 / $3)], expr_alias: [category, avg] }
           StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
             StreamProject { exprs: [$1, $3, $0], expr_alias: [ ,  ,  ] }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
@@ -200,6 +200,7 @@
         Q.seller,
         AVG(Q.final) OVER
             (PARTITION BY Q.seller ORDER BY Q.dateTime ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
+        as avg
     FROM (
         SELECT MAX(B.price) AS final, A.seller, B.dateTime
         FROM auction AS A, bid AS B
