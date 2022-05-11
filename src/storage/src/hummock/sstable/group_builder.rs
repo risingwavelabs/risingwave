@@ -98,11 +98,10 @@ impl KeyValueGrouping for VirtualNodeGrouping {
     ) -> Option<KeyValueGroupId> {
         if let Some(table_id) = get_table_id(full_key.inner()) {
             self.vnode2unit.get(&table_id).map(|mapping| {
-                (mapping[match value {
+                mapping[match value {
                     HummockValue::Put(meta, _) => meta.vnode,
                     HummockValue::Delete(meta) => meta.vnode,
-                } as usize]
-                    % 2) as KeyValueGroupId
+                } as usize] as KeyValueGroupId
             })
         } else {
             None
