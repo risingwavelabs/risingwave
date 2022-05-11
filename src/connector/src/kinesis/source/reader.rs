@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::{thread, time};
 
 use anyhow::{anyhow, Result};
@@ -20,8 +22,9 @@ use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
-use aws_sdk_kinesis::Client as kinesis_client;
+use aws_sdk_kinesis::Client as KinesisClient;
 use aws_smithy_types::DateTime;
+use tokio::sync::Mutex;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::kinesis::source::message::KinesisMessage;
@@ -31,12 +34,20 @@ use crate::{ConnectorStateV2, KinesisProperties};
 use crate::kinesis::{build_client, KINESIS_STREAM_NAME};
 
 pub struct KinesisSplitReader {
-    client: kinesis_client,
+    client: KinesisClient,
     stream_name: String,
     shard_id: String,
     latest_sequence_num: String,
     shard_iter: Option<String>,
     assigned_split: Option<KinesisSplit>,
+}
+
+pub struct KinesisMultiSplitReader {
+    client: KinesisClient,
+    // splits are not allowed to be empty, otherwise connector source should create
+    // [`DummySplitReader`] which is always idling.
+    splits: Vec<KinesisSplit>,
+    shard_iter: Arc<Mutex<HashMap<String, String>>>,
 }
 
 #[async_trait]
@@ -170,7 +181,6 @@ impl KinesisSplitReader {
             split_reader.assigned_split = Some(split);
             split_reader.shard_iter = shard_iter;
         } else if let ConnectorStateV2::Splits(s) = state {
-            
         } else {
             unreachable!()
         }
@@ -213,7 +223,7 @@ impl KinesisSplitReader {
     }
 
     async fn get_kinesis_iterator(
-        client: &kinesis_client,
+        client: &KinesisClient,
         stream_name: &String,
         shard_id: &String,
         shard_iterator_type: aws_sdk_kinesis::model::ShardIteratorType,
@@ -268,5 +278,64 @@ fn is_stopping(cur_seq_num: &str, split: &KinesisSplit) -> bool {
             false
         }
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_stream::stream;
+    use std::error::Error;
+    use rand::Rng;
+    use futures_async_stream::{for_await, try_stream};
+    use futures_concurrency::prelude::*;
+
+    use super::*;
+
+    #[try_stream(ok = i32, error = anyhow::Error)]
+    async fn stream(i: i32, sleep: u64) {
+        loop {
+            yield i;
+            std::thread::sleep(std::time::Duration::from_millis(sleep));
+    }
+
+    #[tokio::test]
+    async fn test_stream() -> Result<()> {
+        // let s_1 = stream! {
+        //     let mut i = 0;
+        //     loop {
+        //         yield Ok(i);
+        //         i += 1;
+        //         std::thread::sleep(std::time::Duration::from_millis(300))
+        //     }
+        // };
+        // let s_2 = stream! {
+        //     let mut i = 100;
+        //     loop {
+        //         yield Ok(i);
+        //         i += 1;
+        //         std::thread::sleep(std::time::Duration::from_millis(500))
+        //     }
+        // };
+        // let s_3 = stream! {
+        //     let mut i = 1000;
+        //     loop {
+        //         yield Ok(i);
+        //         i += 1;
+        //         std::thread::sleep(std::time::Duration::from_millis(700))
+        //     }
+        // };
+
+        let s_1 = stream(0, 300);
+        let s_2 = stream(100, 500);
+        let s_3 = stream(1000, 700);
+
+        let s = (s_1, s_2, s_3).merge().into_stream();
+
+        #[for_await]
+        for msg in s {
+            println!("{:?}", msg);
+        }
+
+        Ok(())
     }
 }
