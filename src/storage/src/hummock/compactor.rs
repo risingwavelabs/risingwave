@@ -128,6 +128,8 @@ impl Compactor {
             task_status: false,
             // TODO: get compaction group info from meta
             prefix_pairs: vec![],
+            // VNode mappings are not required when compacting shared buffer to L0
+            vnode_mappings: vec![],
         };
 
         let parallelism = compact_task.splits.len();
@@ -183,7 +185,7 @@ impl Compactor {
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
-        tracing::debug!(
+        tracing::info!(
             "Ready to handle compaction task: \n{}",
             compact_task_to_string(&compact_task)
         );
@@ -257,7 +259,7 @@ impl Compactor {
 
             self.compact_task
                 .sorted_output_ssts
-                .extend(sst.into_iter().map(|(sst, vnode_bitmap)| SstableInfo {
+                .extend(sst.into_iter().map(|(sst, vnode_bitmaps)| SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
@@ -265,7 +267,7 @@ impl Compactor {
                         inf: false,
                     }),
                     file_size: sst.meta.estimated_size as u64,
-                    vnode_bitmap,
+                    vnode_bitmaps,
                 }));
         }
 
@@ -333,7 +335,7 @@ impl Compactor {
         let mut ssts = Vec::new();
         ssts.reserve(builder.len());
         // TODO: decide upload concurrency
-        for (table_id, data, meta, vnode_bitmap) in builder.finish() {
+        for (table_id, data, meta, vnode_bitmaps) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
             let len = self
                 .context
@@ -350,7 +352,7 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
 
-            ssts.push((sst, vnode_bitmap));
+            ssts.push((sst, vnode_bitmaps));
         }
 
         Ok((split_index, ssts))
@@ -403,7 +405,7 @@ impl Compactor {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         if let Some(vacuum_task) = vacuum_task {
-            tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+            tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
             match Vacuum::vacuum(
                 sstable_store.clone(),
                 vacuum_task,
@@ -412,7 +414,7 @@ impl Compactor {
             .await
             {
                 Ok(_) => {
-                    tracing::debug!("Finish vacuuming SSTs");
+                    tracing::info!("Finish vacuuming SSTs");
                 }
                 Err(e) => {
                     tracing::warn!("Failed to vacuum SSTs. {}", e);

@@ -16,6 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Field;
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
@@ -196,23 +197,23 @@ impl ColPrunable for LogicalHopWindow {
 }
 
 impl ToBatch for LogicalHopWindow {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchHopWindow::new(new_logical).into()
+        Ok(BatchHopWindow::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalHopWindow {
-    fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_stream();
+    fn to_stream(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
-        StreamHopWindow::new(new_logical).into()
+        Ok(StreamHopWindow::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (hop.into(), out_col_change)
+        Ok((hop.into(), out_col_change))
     }
 }

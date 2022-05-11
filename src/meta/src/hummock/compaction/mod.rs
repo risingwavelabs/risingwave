@@ -203,6 +203,7 @@ impl CompactStatus {
             task_status: false,
             // TODO: fill with compaction group info
             prefix_pairs: vec![],
+            vnode_mappings: vec![],
         };
         self.next_compact_task_id += 1;
         Some(compact_task)
@@ -221,6 +222,19 @@ impl CompactStatus {
         for level in &compact_task.input_ssts {
             self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);
         }
+    }
+
+    pub fn cancel_compaction_tasks_if<F: Fn(u64) -> bool>(&mut self, should_cancel: F) -> u32 {
+        let mut count: u32 = 0;
+        for level in &mut self.level_handlers {
+            for pending_task_id in level.pending_tasks_ids() {
+                if should_cancel(pending_task_id) {
+                    level.remove_task(pending_task_id);
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
     /// Applies the compact task result and get a new hummock version.

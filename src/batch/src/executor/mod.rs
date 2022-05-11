@@ -28,8 +28,8 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder,
-    HopWindowExecutor2, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
+    GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2, HashAggExecutor2Builder,
+    HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
     NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
     SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2,
     ValuesExecutor2,
@@ -196,6 +196,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
             NodeBody::HopWindow => HopWindowExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
@@ -226,6 +227,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
             NodeBody::HopWindow => HopWindowExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();

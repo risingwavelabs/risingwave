@@ -107,9 +107,13 @@ mod tests {
 
         // 2. get compact task
         let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
+            .get_compact_task()
             .await
             .unwrap()
+            .unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .await
             .unwrap();
 
         // assert compact_task
@@ -152,10 +156,7 @@ mod tests {
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
-        let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
-            .await
-            .unwrap();
+        let compact_task = hummock_manager_ref.get_compact_task().await.unwrap();
 
         assert!(compact_task.is_none());
     }

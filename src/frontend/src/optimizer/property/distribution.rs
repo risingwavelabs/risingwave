@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
@@ -57,11 +58,15 @@ impl Distribution {
         }
     }
 
-    pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce_if_not_satisfies(
+        &self,
+        plan: PlanRef,
+        required_order: &Order,
+    ) -> Result<PlanRef> {
         if !plan.distribution().satisfies(self) {
-            self.enforce(plan, required_order)
+            Ok(self.enforce(plan, required_order))
         } else {
-            plan
+            Ok(plan)
         }
     }
 

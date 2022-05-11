@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, VNodeBitmap};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::{HummockManager, HummockManagerRef};
@@ -50,10 +50,10 @@ where
     // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
-    let mut compact_task = hummock_manager
-        .get_compact_task(context_id)
+    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
         .await
-        .unwrap()
         .unwrap();
     let test_tables_2 = generate_test_tables(
         epoch,
@@ -83,18 +83,29 @@ where
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
-pub fn generate_test_tables(epoch: u64, table_ids: Vec<HummockSSTableId>) -> Vec<SstableInfo> {
+pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
-    for (i, table_id) in table_ids.into_iter().enumerate() {
+    for (i, sst_id) in sst_ids.into_iter().enumerate() {
         sst_info.push(SstableInfo {
-            id: table_id,
+            id: sst_id,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_id, i + 1, epoch),
-                right: iterator_test_key_of_epoch(table_id, (i + 1) * 10, epoch),
+                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
+                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
                 inf: false,
             }),
             file_size: 1,
-            vnode_bitmap: vec![],
+            vnode_bitmaps: vec![
+                VNodeBitmap {
+                    table_id: (i + 1) as u32,
+                    maplen: 0,
+                    bitmap: vec![],
+                },
+                VNodeBitmap {
+                    table_id: (i + 2) as u32,
+                    maplen: 0,
+                    bitmap: vec![],
+                },
+            ],
         });
     }
     sst_info

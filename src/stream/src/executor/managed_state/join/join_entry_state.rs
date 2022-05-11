@@ -72,7 +72,7 @@ impl<S: StateStore> JoinEntryState<S> {
         pk_data_types: Arc<[DataType]>,
         epoch: u64,
     ) -> Result<Option<Self>> {
-        let all_data = keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = keyspace.scan(None, epoch).await?;
         if !all_data.is_empty() {
             // Insert cached states.
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
@@ -152,7 +152,7 @@ impl<S: StateStore> JoinEntryState<S> {
     async fn populate_cache(&mut self, epoch: u64) -> Result<()> {
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
 
         // Insert cached states.
         let mut cached = Self::fill_cached(

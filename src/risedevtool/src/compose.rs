@@ -39,6 +39,7 @@ pub struct ComposeService {
     pub environment: HashMap<String, String>,
     pub user: Option<String>,
     pub container_name: String,
+    pub network_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -255,8 +256,8 @@ impl Compose for RedPandaConfig {
         ));
 
         command.arg("--advertise-kafka-addr").arg(format!(
-            "PLAINTEXT://redpanda:{},OUTSIDE://localhost:{}",
-            self.internal_port, self.outside_port
+            "PLAINTEXT://{}:{},OUTSIDE://localhost:{}",
+            self.address, self.internal_port, self.outside_port
         ));
 
         let command = get_cmd_args(&command, true)?;
@@ -264,7 +265,10 @@ impl Compose for RedPandaConfig {
         Ok(ComposeService {
             image: image.redpanda.clone(),
             command,
-            expose: vec![self.internal_port.to_string()],
+            expose: vec![
+                self.internal_port.to_string(),
+                self.outside_port.to_string(),
+            ],
             ports: vec![format!("{}:{}", self.outside_port, self.outside_port)],
             ..Default::default()
         })
