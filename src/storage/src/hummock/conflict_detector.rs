@@ -95,7 +95,7 @@ impl ConflictDetector {
             assert!(
                 written_key
                     .as_mut()
-                    .expect(format!("write to an archived epoch: {}", epoch).as_str())
+                    .unwrap_or_else(|| panic!("write to an archived epoch: {}", epoch))
                     .insert(key.clone()),
                 "key {:?} is written again after previously written, value is {:?}",
                 key,
