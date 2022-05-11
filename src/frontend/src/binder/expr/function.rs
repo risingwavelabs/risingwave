@@ -54,6 +54,7 @@ impl Binder {
                 "upper" => ExprType::Upper,
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
+                "concat_ws" => ExprType::ConcatWs,
                 "replace" => ExprType::Replace,
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,

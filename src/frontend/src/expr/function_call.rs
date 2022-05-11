@@ -115,6 +115,7 @@ impl FunctionCall {
                 }
                 align_types(inputs.iter_mut())
             }
+            ExprType::ConcatWs => Ok(DataType::Varchar), // TODO: Validate input types, see below on how to recursively do so.
             _ => infer_type(
                 func_type,
                 inputs.iter().map(|expr| expr.return_type()).collect(),

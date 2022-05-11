@@ -56,6 +56,7 @@ message ExprNode {
     ASCII = 215;
     TRANSLATE = 216;
     COALESCE = 217;
+    CONCAT_WS = 218;
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
