@@ -137,6 +137,7 @@ pub async fn handle_create_table(
 mod tests {
     use std::collections::HashMap;
 
+    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
@@ -168,11 +169,12 @@ mod tests {
             .clone();
         assert_eq!(table.name(), "t");
 
-        // Get all column descs
-        let mut columns = vec![];
-        for catalog in table.columns {
-            columns.append(&mut catalog.column_desc.flatten());
-        }
+        // Get all column descs.
+        let columns = table
+            .columns
+            .iter()
+            .flat_map(|c| c.column_desc.flatten())
+            .collect_vec();
         let columns = columns
             .iter()
             .map(|col| (col.name.as_str(), col.data_type.clone()))

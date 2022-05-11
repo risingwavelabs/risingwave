@@ -13,7 +13,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 use core::fmt;
-use std::sync::Arc;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -76,7 +75,7 @@ pub enum DataType {
     Custom(ObjectName),
     /// Arrays
     Array(Box<DataType>),
-    Struct(Arc<[DataType]>),
+    Struct(Box<Vec<DataType>>),
 }
 
 impl fmt::Display for DataType {

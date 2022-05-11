@@ -244,6 +244,7 @@ pub struct ColumnDef {
     pub data_type: DataType,
     pub collation: Option<ObjectName>,
     pub options: Vec<ColumnOptionDef>,
+    // If the `column_def` is struct type, `sub_defs` contains field columns in struct.
     pub sub_defs: Vec<ColumnDef>,
 }
 

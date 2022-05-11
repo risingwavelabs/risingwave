@@ -304,6 +304,8 @@ impl Binder {
     }
 }
 
+/// Bind `column_def` to `column_desc`, now we not use the `column_id` in `field_descs`,
+/// so use the same `column_id` with outer `column_desc`.
 pub fn bind_column_desc(column_def: &ColumnDef, id: usize) -> Result<ColumnDesc> {
     Ok(ColumnDesc {
         data_type: bind_data_type(&column_def.data_type)?,

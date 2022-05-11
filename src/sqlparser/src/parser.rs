@@ -1962,6 +1962,7 @@ impl Parser {
         Ok(data_type)
     }
 
+    /// Parse struct columns e.g.`<v1 int, v2 int, v3 struct<...>>`.
     pub fn parse_struct_columns(&mut self) -> Result<Vec<ColumnDef>, ParserError> {
         let mut columns = vec![];
         if !self.consume_token(&Token::Lt) || self.consume_token(&Token::Gt) {
@@ -2041,6 +2042,7 @@ impl Parser {
                         Ok(DataType::Text)
                     }
                 }
+                // Make empty struct now, will fill after `parse_struct_columns`.
                 Keyword::STRUCT => Ok(DataType::Struct(vec![].into())),
                 Keyword::BYTEA => Ok(DataType::Bytea),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
