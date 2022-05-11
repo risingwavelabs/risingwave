@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
-    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
+    CompactTask, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
@@ -35,9 +35,7 @@ use tokio::task::JoinHandle;
 
 use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
-use super::iterator::{
-    BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
-};
+use super::iterator::{BoxedForwardHummockIterator, ForwardHummockIterator, MergeIterator};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
 use super::{
@@ -410,21 +408,21 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            match level.get_level_type().unwrap() {
-                LevelType::Nonoverlapping => {
-                    table_iters.push(Box::new(ConcatIterator::new(
-                        level.table_infos.clone(),
+            // match level.get_level_type().unwrap() {
+            // LevelType::Nonoverlapping => {
+            // table_iters.push(Box::new(ConcatIterator::new(
+            // level.table_infos.clone(),
+            // self.context.sstable_store.clone(),
+            // )));
+            // }
+            // LevelType::Overlapping => {
+            {
+                for table_info in &level.table_infos {
+                    let table = self.context.sstable_store.sstable(table_info.id).await?;
+                    table_iters.push(Box::new(SSTableIterator::new(
+                        table,
                         self.context.sstable_store.clone(),
                     )));
-                }
-                LevelType::Overlapping => {
-                    for table_info in &level.table_infos {
-                        let table = self.context.sstable_store.sstable(table_info.id).await?;
-                        table_iters.push(Box::new(SSTableIterator::new(
-                            table,
-                            self.context.sstable_store.clone(),
-                        )));
-                    }
                 }
             }
         }
