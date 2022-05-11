@@ -80,7 +80,7 @@ fn parse_create_table_with_defaults() {
                     ColumnDef::without_sub_defs(
                         "last_name".into(),
                         DataType::Varchar(Some(45)),
-                        None,
+                        Some(ObjectName(vec![Ident::with_quote('"', "es_ES")])),
                         vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
