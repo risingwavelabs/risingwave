@@ -236,6 +236,7 @@ pub struct RedPandaConfig {
     pub id: String,
     pub internal_port: u16,
     pub outside_port: u16,
+    pub address: String,
 }
 
 /// All service configuration

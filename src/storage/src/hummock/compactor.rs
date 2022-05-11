@@ -185,7 +185,7 @@ impl Compactor {
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
-        tracing::debug!(
+        tracing::info!(
             "Ready to handle compaction task: \n{}",
             compact_task_to_string(&compact_task)
         );
@@ -405,7 +405,7 @@ impl Compactor {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         if let Some(vacuum_task) = vacuum_task {
-            tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+            tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
             match Vacuum::vacuum(
                 sstable_store.clone(),
                 vacuum_task,
@@ -414,7 +414,7 @@ impl Compactor {
             .await
             {
                 Ok(_) => {
-                    tracing::debug!("Finish vacuuming SSTs");
+                    tracing::info!("Finish vacuuming SSTs");
                 }
                 Err(e) => {
                     tracing::warn!("Failed to vacuum SSTs. {}", e);

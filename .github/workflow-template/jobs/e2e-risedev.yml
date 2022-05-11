@@ -9,7 +9,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    timeout-minutes: 20 # NOTE: Increase this number when we have more tests.
+    timeout-minutes: 22 # NOTE: Increase this number when we have more tests.
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -98,7 +98,7 @@ jobs:
       # if the degradation is reasonable or to be fixed soon.
 
       - name: e2e, ci-3cn-1fe, streaming
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'

@@ -44,6 +44,7 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
+        let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             input.boxed(),
@@ -52,11 +53,13 @@ async fn test_merger_sum_aggr() {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
                     return_type: DataType::Int64,
+                    append_only,
                 },
                 AggCall {
                     kind: AggKind::Sum,
                     args: AggArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
+                    append_only,
                 },
             ],
             vec![],
@@ -113,6 +116,7 @@ async fn test_merger_sum_aggr() {
     let merger = MergeExecutor::new(schema, vec![], 0, outputs);
 
     // for global aggregator, we need to sum data and sum row count
+    let append_only = false;
     let aggregator = SimpleAggExecutor::new(
         merger.boxed(),
         vec![
@@ -120,11 +124,13 @@ async fn test_merger_sum_aggr() {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only,
             },
         ],
         create_in_memory_keyspace_agg(2),
