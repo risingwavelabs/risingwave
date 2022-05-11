@@ -104,6 +104,13 @@ impl LevelHandler {
     pub fn get_pending_file_count(&self) -> usize {
         self.compacting_files.len()
     }
+
+    pub fn pending_tasks_ids(&self) -> Vec<u64> {
+        self.pending_tasks
+            .iter()
+            .map(|(task_id, _)| *task_id)
+            .collect_vec()
+    }
 }
 
 impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {

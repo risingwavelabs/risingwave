@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::storage::MetaStore;
 
@@ -91,76 +93,79 @@ where
         tracing::info!("Compaction scheduler is stopped");
     }
 
-    async fn pick_and_assign(&self, compaction_group: CompactionGroupId) {
-        // 1. Select a compactor.
-        let compactor = match self.compactor_manager.next_compactor() {
-            None => {
-                tracing::warn!("No compactor is available.");
-                return;
-            }
-            Some(compactor) => compactor,
-        };
-
-        // 2. Pick a compact task and assign to the compactor.
+    async fn pick_and_assign(&self, _compaction_group: CompactionGroupId) {
+        // 1. Pick a compaction task.
         // TODO: specify compaction_group in get_compact_task
-        let mut compact_task = match self
-            .hummock_manager
-            .get_compact_task(compactor.context_id())
-            .await
-        {
+        let compact_task = match self.hummock_manager.get_compact_task().await {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
-                // No compact task available.
+                // No compaction task available.
                 return;
             }
             Err(err) => {
-                tracing::warn!(
-                    "Failed to get compact task for compactor {}. {:#?}",
-                    compactor.context_id(),
-                    err
-                );
-                self.compactor_manager
-                    .remove_compactor(compactor.context_id());
-                self.reschedule_compaction_group(compaction_group);
+                tracing::warn!("Failed to get compaction task: {:#?}.", err);
                 return;
             }
         };
+        tracing::info!(
+            "Picked compaction task. {}",
+            compact_task_to_string(&compact_task)
+        );
 
-        // 3. Send the compact task to the compactor.
-        match compactor.send_task(Some(compact_task.clone()), None).await {
-            Ok(_) => {
-                tracing::debug!(
-                    "Sent compaction task {} to worker {}.",
-                    compact_task_to_string(&compact_task),
-                    compactor.context_id()
-                );
-                // TODO: decide if more compaction task available in compaction_group, then either
-                // reschedule or unset compaction_group's is_scheduled.
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "Failed to send compaction task to worker {}: {}",
-                    compactor.context_id(),
-                    err
-                );
-                compact_task.task_status = false;
-                if let Err(err) = self
-                    .hummock_manager
-                    .report_compact_task(&compact_task)
-                    .await
-                {
+        // 2. Assign the compaction task to a compactor.
+        'send_task: loop {
+            // 2.1 Select a compactor.
+            let compactor = match self.compactor_manager.next_compactor() {
+                None => {
+                    tracing::warn!("No compactor is available.");
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    continue 'send_task;
+                }
+                Some(compactor) => compactor,
+            };
+            // TODO: skip busy compactor
+
+            // 2.2 Send the compaction task to the compactor.
+            let send_task = async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    compactor
+                        .send_task(Some(compact_task.clone()), None)
+                        .await
+                        .is_ok()
+                })
+                .await
+                .unwrap_or(false)
+            };
+            match self
+                .hummock_manager
+                .assign_compaction_task(&compact_task, compactor.context_id(), send_task)
+                .await
+            {
+                Ok(_) => {
+                    // TODO: decide if more compaction task available in compaction_group, then
+                    // either reschedule or unset compaction_group's is_scheduled.
+                    // TODO: timeout assigned compaction task
+                    tracing::info!(
+                        "Assigned compaction task. {}",
+                        compact_task_to_string(&compact_task)
+                    );
+                    break 'send_task;
+                }
+                Err(err) => {
                     tracing::warn!(
-                        "Failed to cancel compaction task for worker {}: {:#?}",
+                        "Failed to assign compaction task to compactor {}: {:#?}",
                         compactor.context_id(),
                         err
                     );
-                    // Either the compactor will reestablish the stream and fetch this unfinished
-                    // compact task, or the compactor will lose connection and
-                    // its assigned compact task will be cancelled eventually.
+                    match err {
+                        Error::InvalidContext(_) | Error::CompactorUnreachable(_) => {
+                            self.compactor_manager
+                                .remove_compactor(compactor.context_id());
+                        }
+                        _ => {}
+                    }
+                    continue 'send_task;
                 }
-                self.compactor_manager
-                    .remove_compactor(compactor.context_id());
-                self.reschedule_compaction_group(compaction_group);
             }
         }
     }
@@ -173,6 +178,7 @@ where
         self.request_tx.clone()
     }
 
+    #[allow(unused)]
     fn reschedule_compaction_group(&self, compaction_group: CompactionGroupId) {
         if let Err(err) = self.request_tx.send(compaction_group) {
             tracing::warn!(

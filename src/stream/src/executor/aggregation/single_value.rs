@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl};
 
 use crate::executor::aggregation::StreamingAggStateImpl;
@@ -45,25 +45,21 @@ impl<T: Array> Clone for StreamingSingleValueAgg<T> {
     }
 }
 
-impl<T: Array> TryFrom<Datum> for StreamingSingleValueAgg<T> {
-    type Error = RwError;
+impl<T: Array> StreamingSingleValueAgg<T> {
+    pub fn new() -> Self {
+        Self::with_row_cnt(None)
+    }
 
     /// This function makes the assumption that if this function gets called, then
     /// we must have row count equal to 1. If the row count is equal to 0,
     /// then `new` will be called instead of this function.
-    fn try_from(x: Datum) -> Result<Self> {
+    pub fn new_with_datum(x: Datum) -> Result<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(T::OwnedItem::try_from(scalar)?);
         }
 
         Ok(Self { row_cnt: 1, result })
-    }
-}
-
-impl<T: Array> StreamingSingleValueAgg<T> {
-    pub fn new() -> Self {
-        Self::with_row_cnt(None)
     }
 
     pub fn with_row_cnt(datum: Datum) -> Self {
