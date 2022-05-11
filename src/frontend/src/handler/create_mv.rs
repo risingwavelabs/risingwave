@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
@@ -50,7 +51,7 @@ pub fn gen_create_mv_plan(
         if select
             .select_items
             .iter()
-            .zip(select.aliases.iter())
+            .zip_eq(select.aliases.iter())
             .any(|(select_item, alias)| {
                 matches!(select_item, ExprImpl::AggCall(_)) && alias.is_none()
             })
