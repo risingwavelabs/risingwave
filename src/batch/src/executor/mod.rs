@@ -29,10 +29,10 @@ use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
     GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2, HashAggExecutor2Builder,
-    HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
-    NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
-    SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2,
-    ValuesExecutor2,
+    HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2,
+    MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2,
+    RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2,
+    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
