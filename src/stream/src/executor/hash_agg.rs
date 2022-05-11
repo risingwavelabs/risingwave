@@ -32,7 +32,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{pk_input_arrays, Executor, PkDataTypes, PkIndicesRef, StreamExecutorResult};
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -245,7 +245,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     match states {
                         Some(s) => s.unwrap(),
                         None => Box::new(
-                            generate_agg_state(
+                            generate_managed_agg_state(
                                 Some(
                                     &key.clone()
                                         .deserialize(key_data_types.iter())

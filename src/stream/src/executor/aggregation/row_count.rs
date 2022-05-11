@@ -30,15 +30,14 @@ use super::StreamingAggStateImpl;
 #[derive(Clone, Debug, Default)]
 pub struct StreamingRowCountAgg {
     row_cnt: i64,
-    append_only: bool,
 }
 
 impl StreamingRowCountAgg {
-    pub fn new(append_only: bool) -> Self {
-        StreamingRowCountAgg::with_row_cnt(None, append_only)
+    pub fn new() -> Self {
+        StreamingRowCountAgg::with_row_cnt(None)
     }
 
-    pub fn with_row_cnt(datum: Datum, append_only: bool) -> Self {
+    pub fn with_row_cnt(datum: Datum) -> Self {
         let mut row_cnt = 0;
         if let Some(cnt) = datum {
             match cnt {
@@ -51,10 +50,7 @@ impl StreamingRowCountAgg {
                 ),
             }
         }
-        Self {
-            row_cnt,
-            append_only,
-        }
+        Self { row_cnt }
     }
 
     pub fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
@@ -73,40 +69,21 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         visibility: Option<&Bitmap>,
         _data: &[&ArrayImpl],
     ) -> Result<()> {
-        if self.is_append_only() {
-            match visibility {
-                None => {
-                    ops.iter().for_each(|op| {
-                        debug_assert!(Op::Insert == *op);
-                    });
-                    self.row_cnt += ops.len() as i64;
-                }
-                Some(visibility) => {
-                    for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
-                        assert_eq!(Op::Insert, *op);
-                        if visible {
-                            self.row_cnt += 1;
-                        }
+        match visibility {
+            None => {
+                for op in ops {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
+                        Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
                     }
                 }
             }
-        } else {
-            match visibility {
-                None => {
-                    for op in ops {
+            Some(visibility) => {
+                for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
+                    if visible {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
                             Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
-                        }
-                    }
-                }
-                Some(visibility) => {
-                    for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
-                        if visible {
-                            match op {
-                                Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
-                                Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
-                            }
                         }
                     }
                 }
@@ -126,10 +103,6 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
     fn reset(&mut self) {
         self.row_cnt = 0;
     }
-
-    fn is_append_only(&self) -> bool {
-        self.append_only
-    }
 }
 
 #[cfg(test)]
@@ -138,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_countable_agg() {
-        let mut state = StreamingRowCountAgg::new(false);
+        let mut state = StreamingRowCountAgg::new();
 
         // when there is no element, output should be `0`.
         assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);

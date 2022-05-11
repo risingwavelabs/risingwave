@@ -91,7 +91,6 @@ impl LocalSimpleAggExecutor {
                     agg_call.args.arg_types(),
                     &agg_call.kind,
                     &agg_call.return_type,
-                    agg_call.append_only,
                     None,
                 )
             })

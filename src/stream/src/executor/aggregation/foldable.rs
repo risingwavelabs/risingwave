@@ -54,7 +54,6 @@ where
     I: Array,
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
-    append_only: bool,
     result: Option<R::OwnedItem>,
     _phantom: PhantomData<(I, S, R)>,
 }
@@ -68,7 +67,6 @@ where
     fn clone(&self) -> Self {
         Self {
             result: self.result.clone(),
-            append_only: self.append_only,
             _phantom: PhantomData,
         }
     }
@@ -258,33 +256,6 @@ where
         }
         Ok(())
     }
-
-    fn apply_batch_append_only_concrete(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        data: &I,
-    ) -> Result<()> {
-        match visibility {
-            None => {
-                for (op, data) in ops.iter().zip_eq(data.iter()) {
-                    assert_eq!(Op::Insert, *op);
-                    self.result = S::accumulate(self.result.as_ref(), data)?
-                }
-            }
-            Some(visibility) => {
-                for ((visible, op), data) in
-                    visibility.iter().zip_eq(ops.iter()).zip_eq(data.iter())
-                {
-                    assert_eq!(Op::Insert, *op);
-                    if visible {
-                        self.result = S::accumulate(self.result.as_ref(), data)?
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 impl<R, I, S> StreamingAggFunction<R::Builder> for StreamingFoldAgg<R, I, S>
@@ -307,7 +278,6 @@ where
     fn default() -> Self {
         Self {
             result: S::initial(),
-            append_only: false,
             _phantom: PhantomData,
         }
     }
@@ -319,15 +289,11 @@ where
     I: Array,
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
-    pub fn new(append_only: bool) -> Self {
-        Self {
-            result: S::initial(),
-            append_only,
-            _phantom: PhantomData,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn new_with_datum(x: Datum, append_only: bool) -> Result<Self> {
+    pub fn new_with_datum(x: Datum) -> Result<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(R::OwnedItem::try_from(scalar)?);
@@ -335,7 +301,6 @@ where
 
         Ok(Self {
             result,
-            append_only,
             _phantom: PhantomData,
         })
     }
@@ -358,11 +323,7 @@ macro_rules! impl_fold_agg {
                 visibility: Option<&Bitmap>,
                 data: &[&ArrayImpl],
             ) -> Result<()> {
-                if self.is_append_only() {
-                    self.apply_batch_append_only_concrete(ops, visibility, data[0].into())
-                } else {
-                    self.apply_batch_concrete(ops, visibility, data[0].into())
-                }
+                self.apply_batch_concrete(ops, visibility, data[0].into())
             }
 
             fn get_output(&self) -> Result<Datum> {
@@ -375,10 +336,6 @@ macro_rules! impl_fold_agg {
 
             fn reset(&mut self) {
                 self.result = S::initial();
-            }
-
-            fn is_append_only(&self) -> bool {
-                self.append_only
             }
         }
     };

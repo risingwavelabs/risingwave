@@ -69,13 +69,6 @@ pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         data: &A,
     ) -> Result<()>;
-
-    fn apply_batch_append_only_concrete(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        data: &A,
-    ) -> Result<()>;
 }
 
 /// `StreamingAggFunction` allows us to get output from a streaming state.
@@ -103,9 +96,6 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 
     /// Reset to initial state
     fn reset(&mut self);
-
-    /// Whether the stream is append-only
-    fn is_append_only(&self) -> bool;
 }
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
@@ -125,7 +115,6 @@ pub fn create_streaming_agg_state(
     input_types: &[DataType],
     agg_type: &AggKind,
     return_type: &DataType,
-    append_only: bool,
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
@@ -139,10 +128,10 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::new_with_datum(datum, append_only)?)
+                        Box::new(<$state_impl>::new_with_datum(datum)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
-                        Box::new(<$state_impl>::new(append_only))
+                        Box::new(<$state_impl>::new())
                     }
                 )*
                 (other_agg, other_input, other_return, _) => panic!(
@@ -261,19 +250,15 @@ pub fn create_streaming_agg_state(
                 // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
                 // final/global Count(*)
                 (AggKind::RowCount, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingRowCountAgg::with_row_cnt(datum, append_only))
+                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
-                (AggKind::RowCount, DataType::Int64, None) => {
-                    Box::new(StreamingRowCountAgg::new(append_only))
-                }
+                (AggKind::RowCount, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.
                 (AggKind::Count, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingRowCountAgg::with_row_cnt(datum, append_only))
+                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
-                (AggKind::Count, DataType::Int64, None) => {
-                    Box::new(StreamingRowCountAgg::new(append_only))
-                }
+                (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         "unsupported aggregate type".to_string(),
@@ -346,7 +331,7 @@ pub fn generate_agg_schema(
 
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
-pub async fn generate_agg_state<S: StateStore>(
+pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
     keyspace: &[Keyspace<S>],
