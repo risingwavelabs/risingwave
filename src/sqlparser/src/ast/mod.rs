@@ -474,7 +474,18 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             },
-            Expr::ConcatWs { sep_expr, string_exprs } => write!(f, "TODO"),
+            Expr::ConcatWs { sep_expr, string_exprs } =>
+                write!(
+                    f,
+                    "CONCAT_WS({}, {})",
+                    sep_expr,
+                    string_exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
             Expr::Row(exprs) => write!(
                 f,
                 "ROW({})",

@@ -2717,6 +2717,41 @@ fn parse_trim() {
 }
 
 #[test]
+fn parse_concat_ws() {
+    verified_only_select(
+        "SELECT CONCAT_WS('abc', '123')",
+    );
+
+    verified_only_select(
+        "SELECT CONCAT_WS(CONCAT_WS('abc', '123'), '123')",
+    );
+
+    let select = verified_only_select(
+        "SELECT CONCAT_WS('abc', '123', ' aaa ')",
+    );
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::ConcatWs{
+            sep_expr: Box::new(Expr::Value(Value::SingleQuotedString("abc".into()))),
+            string_exprs: vec![
+                Expr::Value(Value::SingleQuotedString("123".into())),
+                Expr::Value(Value::SingleQuotedString(" aaa ".into())),
+            ]
+        }),
+        select.projection[0],
+    );
+
+    assert_eq!(
+        ParserError::ParserError("Expected an expression:, found: )".to_owned()),
+        parse_sql_statements("SELECT CONCAT_WS()").unwrap_err()
+    );
+
+    assert_eq!(
+        ParserError::ParserError("Expected ,, found: )".to_owned()),
+        parse_sql_statements("SELECT CONCAT_WS('|')").unwrap_err()
+    );
+}
+
+#[test]
 fn parse_exists_subquery() {
     let expected_inner = verified_query("SELECT 1");
     let sql = "SELECT * FROM t WHERE EXISTS (SELECT 1)";

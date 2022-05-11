@@ -837,10 +837,13 @@ impl Parser {
         }
     }
 
-    /// concat_ws
+    /// CONCAT_WS(SEP TEXT, STR "ANY" [, STR "ANY" [, ...] ])
     pub fn parse_concat_ws_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
+
         let sep_expr = self.parse_expr()?;
+        self.expect_token(&Token::Comma)?;
+
         let string_exprs = self.parse_comma_separated(Parser::parse_expr)?;
         self.expect_token(&Token::RParen)?;
 
