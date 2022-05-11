@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
-use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+use crate::hummock::compaction::overlap_strategy::HashStrategy;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
@@ -126,7 +126,7 @@ impl CompactStatus {
             // TODO: create selector and overlap strategy by configure.
             compaction_selector: Box::new(DynamicLevelSelector::new(
                 config,
-                Arc::new(RangeOverlapStrategy::default()),
+                Arc::new(HashStrategy::default()),
             )),
         }
     }

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use risingwave_pb::hummock::Level;
 
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
-use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::overlap_strategy::{HashStrategy, OverlapStrategy};
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
 use crate::hummock::compaction::{CompactionConfig, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
@@ -64,7 +64,7 @@ impl Default for DynamicLevelSelector {
     fn default() -> Self {
         DynamicLevelSelector::new(
             Arc::new(CompactionConfig::default()),
-            Arc::new(RangeOverlapStrategy::default()),
+            Arc::new(HashStrategy::default()),
         )
     }
 }

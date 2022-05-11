@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
 
 use super::SearchResult;
 use crate::hummock::compaction::compaction_picker::CompactionPicker;
-use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::overlap_strategy::{HashStrategy, OverlapStrategy};
 use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -39,7 +39,7 @@ impl Default for TierCompactionPicker {
         Self {
             compact_task_id: 0,
             target_level: 1,
-            overlap_strategy: Arc::new(RangeOverlapStrategy {}),
+            overlap_strategy: Arc::new(HashStrategy {}),
             config: Arc::new(CompactionConfig::default()),
         }
     }
