@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundSetExpr};
+use crate::expr::ExprImpl;
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
@@ -44,6 +45,22 @@ pub fn gen_create_mv_plan(
         );
         binder.bind_query(*query)?
     };
+
+    if let BoundSetExpr::Select(select) = &bound.body {
+        if select
+            .select_items
+            .iter()
+            .zip(select.aliases.iter())
+            .any(|(select_item, alias)| {
+                matches!(select_item, ExprImpl::AggCall(_)) && alias.is_none()
+            })
+        {
+            return Err(ErrorCode::BindError(
+                "An alias must be specified for an aggregation function".to_string(),
+            )
+            .into());
+        }
+    }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     plan_root.set_required_dist(Distribution::any().clone());
@@ -99,6 +116,13 @@ pub mod tests {
         );
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
+
+        let sql = "create materialized view mv1 as select count(t1.country) from t1";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Bind error: An alias must be specified for an aggregation function"
+        );
 
         let sql = "create materialized view mv1 as select t1.country from t1";
         frontend.run_sql(sql).await.unwrap();
