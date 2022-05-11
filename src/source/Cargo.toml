@@ -8,8 +8,8 @@ anyhow = "1"
 apache-avro = { git = "https://github.com/apache/avro.git", branch = "branch-1.11", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-config = { version = "0.11.0", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.11.0", default-features = false, features = ["rt-tokio", "native-tls"] }
 byteorder = "1"
 bytes = "1"
 chrono = "0.4"

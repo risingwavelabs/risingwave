@@ -221,11 +221,11 @@ pub fn s3_client(
 impl AwsConfigV2 {
     /// Load configuration from environment vars by default. The use of the authentication part is
     /// divided into the next cases:
-    /// 1. Connection is the external data source. for example kinesis Source, S3 Source.
+    /// - Connection is the external data source. for example kinesis Source, S3 Source.
     ///  At this time `RisingWave` is a third party. It is reasonable to use `session_token` or
     ///  `external_id` for security reasons.
-    /// 2. For `RisingWave` storage, internal storage formats are un visible to the client.
-    /// Just follow by default way.
+    /// - For `RisingWave` storage, internal storage formats are un visible to the client.
+    ///  Just follow by default way.
     pub async fn load_config(&self, external_id: Option<String>) -> aws_types::SdkConfig {
         let region = self.build_region().await.unwrap();
         let mut cred_provider = self.build_credential_provider(region.clone()).await;
@@ -310,6 +310,7 @@ mod tests {
     use crate::aws_utils::AwsConfigV2;
 
     #[tokio::test]
+    #[ignore]
     pub async fn test_default_load() {
         let aws_config = AwsConfigV2::default().load_config(None).await;
         println!("aws_config = {:?}", aws_config);
