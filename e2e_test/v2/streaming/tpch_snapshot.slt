@@ -12,7 +12,7 @@ include ../../tpch/insert_supplier.slt.part
 include ../../streaming/tpch/views/q1.slt.part
 include ../../streaming/tpch/views/q2.join_reorder.workaround.slt.part
 include ../../streaming/tpch/views/q3.slt.part
-include ../../streaming/tpch/views/q4.slt.part
+# include ../../streaming/tpch/views/q4.slt.part
 include ../../streaming/tpch/views/q5.slt.part
 include ../../streaming/tpch/views/q6.slt.part
 include ../../streaming/tpch/views/q7.slt.part
