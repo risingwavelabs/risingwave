@@ -116,7 +116,7 @@ async fn test_hummock_compaction_task() {
     let sst_num = 2;
 
     // No compaction task available.
-    let task = hummock_manager.get_compact_task(context_id).await.unwrap();
+    let task = hummock_manager.get_compact_task().await.unwrap();
     assert_eq!(task, None);
 
     // Add some sstables and commit.
@@ -128,7 +128,7 @@ async fn test_hummock_compaction_task() {
         .unwrap();
 
     // No compaction task available. Uncommitted sst won't be compacted.
-    let task = hummock_manager.get_compact_task(context_id).await.unwrap();
+    let task = hummock_manager.get_compact_task().await.unwrap();
     assert_eq!(task, None);
 
     hummock_manager.commit_epoch(epoch).await.unwrap();
@@ -152,10 +152,10 @@ async fn test_hummock_compaction_task() {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager
-        .get_compact_task(context_id)
+    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(
         compact_task
@@ -203,10 +203,10 @@ async fn test_hummock_compaction_task() {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager
-        .get_compact_task(context_id)
+    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
@@ -717,7 +717,7 @@ async fn test_hummock_manager_basic() {
 
     // test delete_version
     hummock_manager
-        .delete_version(FIRST_VERSION_ID)
+        .delete_versions(&[FIRST_VERSION_ID])
         .await
         .unwrap();
     assert_eq!(
@@ -949,11 +949,7 @@ async fn test_print_compact_task() {
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // Get a compaction task.
-    let compact_task = hummock_manager
-        .get_compact_task(context_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()

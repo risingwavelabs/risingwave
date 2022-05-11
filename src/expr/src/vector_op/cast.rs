@@ -213,6 +213,10 @@ pub fn bool_to_str(input: bool) -> Result<String> {
     }
 }
 
+pub fn int32_to_bool(input: i32) -> Result<bool> {
+    Ok(input != 0)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -237,5 +241,13 @@ mod tests {
             str_to_time("AA04:05:06").unwrap_err().to_string(),
             "Parse error: Can't cast string to time (expected format is HH:MM:SS[.MS])".to_string()
         );
+    }
+
+    #[test]
+    fn integer_cast_to_bool() {
+        use super::*;
+        assert!(int32_to_bool(32).unwrap());
+        assert!(int32_to_bool(-32).unwrap());
+        assert!(!int32_to_bool(0).unwrap());
     }
 }

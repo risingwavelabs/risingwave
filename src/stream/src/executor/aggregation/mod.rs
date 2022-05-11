@@ -118,7 +118,8 @@ pub fn create_streaming_agg_state(
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
-        ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
+        ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr,
+            [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
             match (
                 $agg_type_expr,
                 $input_type_expr,
@@ -127,14 +128,14 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::try_from(datum)?)
+                        Box::new(<$state_impl>::new_with_datum(datum)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
                         Box::new(<$state_impl>::new())
                     }
                 )*
                 (other_agg, other_input, other_return, _) => panic!(
-                    "streaming state not implemented: {:?} {:?} {:?}",
+                    "streaming agg state not implemented: {:?} {:?} {:?}",
                     other_agg, other_input, other_return
                 )
             }
@@ -330,7 +331,7 @@ pub fn generate_agg_schema(
 
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
-pub async fn generate_agg_state<S: StateStore>(
+pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
     keyspace: &[Keyspace<S>],

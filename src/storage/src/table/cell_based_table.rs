@@ -438,7 +438,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
             );
 
             // there is no need to deserialize pk in cell-based table
-            if key.len() < self.keyspace.key().len() + 4 {
+            if key.len() < 4 {
                 return Err(StorageError::CellBasedTable(
                     ErrorCode::InternalError("corrupted key".to_owned()).into(),
                 ));
