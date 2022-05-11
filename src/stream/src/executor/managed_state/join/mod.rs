@@ -21,7 +21,7 @@ use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
@@ -61,9 +61,14 @@ impl JoinRow {
         self.degree
     }
 
-    pub fn dec_degree(&mut self) -> u64 {
+    pub fn dec_degree(&mut self) -> RwResult<u64> {
+        if self.degree == 0 {
+            return Err(
+                ErrorCode::InternalError("Tried to decrement zero join row degree".into()).into(),
+            );
+        }
         self.degree -= 1;
-        self.degree
+        Ok(self.degree)
     }
 
     /// Serialize the `JoinRow` into a binary bytes. All values must not be null.
