@@ -293,21 +293,7 @@ where
         Self::default()
     }
 
-    /// Get current state without using an array builder
-    pub fn get_state(&self) -> &Option<R::OwnedItem> {
-        &self.result
-    }
-}
-
-impl<R, I, S> TryFrom<Datum> for StreamingFoldAgg<R, I, S>
-where
-    R: Array,
-    I: Array,
-    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
-{
-    type Error = RwError;
-
-    fn try_from(x: Datum) -> Result<Self> {
+    pub fn new_with_datum(x: Datum) -> Result<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(R::OwnedItem::try_from(scalar)?);
@@ -317,6 +303,11 @@ where
             result,
             _phantom: PhantomData,
         })
+    }
+
+    /// Get current state without using an array builder
+    pub fn get_state(&self) -> &Option<R::OwnedItem> {
+        &self.result
     }
 }
 
@@ -388,7 +379,7 @@ mod tests {
     /// This test uses `Box<dyn StreamingAggStateImpl>` to test a state.
     fn test_primitive_sum_boxed() {
         let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(TestStreamingSumAgg::<I64Array>::new());
+            Box::new(TestStreamingSumAgg::<I64Array>::default());
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
@@ -408,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_primitive_sum_i64() {
-        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        let mut agg = TestStreamingSumAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
@@ -448,7 +439,7 @@ mod tests {
                     )
                 })
                 .unzip();
-            let mut agg = TestStreamingSumAgg::<F64Array>::new();
+            let mut agg = TestStreamingSumAgg::<F64Array>::default();
             agg.apply_batch(
                 &ops,
                 None,
@@ -464,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_primitive_sum_first_deletion() {
-        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        let mut agg = TestStreamingSumAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
@@ -486,7 +477,7 @@ mod tests {
     /// Even if there is no element after some insertions and equal number of deletion operations,
     /// `PrimitiveSummable` should output `0` instead of `None`.
     fn test_primitive_sum_no_none() {
-        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        let mut agg = TestStreamingSumAgg::<I64Array>::default();
 
         assert_eq!(agg.get_output().unwrap(), None);
 
@@ -509,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_primitive_count() {
-        let mut agg = TestStreamingCountAgg::<I64Array>::new();
+        let mut agg = TestStreamingCountAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
@@ -530,7 +521,7 @@ mod tests {
 
     #[test]
     fn test_minimum() {
-        let mut agg = TestStreamingMinAgg::<I64Array>::new();
+        let mut agg = TestStreamingMinAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
@@ -551,7 +542,7 @@ mod tests {
 
     #[test]
     fn test_minimum_float() {
-        let mut agg = TestStreamingMinAgg::<F64Array>::new();
+        let mut agg = TestStreamingMinAgg::<F64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
@@ -572,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_maximum() {
-        let mut agg = TestStreamingMaxAgg::<I64Array>::new();
+        let mut agg = TestStreamingMaxAgg::<I64Array>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
