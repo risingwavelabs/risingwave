@@ -343,6 +343,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             )
             .into())
         }
+        AstDataType::Struct(types) => DataType::Struct {
+            fields: types
+                .iter()
+                .map(bind_data_type)
+                .collect::<Result<Vec<_>>>()?
+                .into(),
+        },
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),
