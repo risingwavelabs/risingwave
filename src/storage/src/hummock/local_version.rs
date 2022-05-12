@@ -69,10 +69,7 @@ impl LocalVersion {
         self.uncommitted_ssts.entry(epoch).or_default().extend(ssts);
     }
 
-    pub fn set_pinned_version(
-        &mut self,
-        new_pinned_version: HummockVersion,
-    ) {
+    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
             self.uncommitted_ssts = self
