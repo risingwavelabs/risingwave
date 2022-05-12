@@ -69,7 +69,12 @@ impl PlanRoot {
         let schema = Schema {
             fields: out_fields
                 .ones()
-                .map(|i| input_schema.fields()[i].clone())
+                .zip_eq(&out_names)
+                .map(|(i, name)| {
+                    let mut f = input_schema.fields()[i].clone();
+                    f.name = name.clone();
+                    f
+                })
                 .collect(),
         };
         Self {
@@ -91,8 +96,7 @@ impl PlanRoot {
     }
 
     /// Get a reference to the plan root's schema.
-    #[allow(dead_code)]
-    fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
