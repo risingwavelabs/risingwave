@@ -171,10 +171,10 @@ impl NexmarkConfig {
         } else {
             RateShape::Square
         };
-        let rate_period = properties.rate_period.unwrap_or(1000);
-        let first_rate = properties.first_event_rate.unwrap_or(1000);
-        let next_rate = properties.next_event_rate.unwrap_or(1000);
-        let us_per_unit = properties.us_per_unit.unwrap_or(1000); // Rate is in μs
+        let rate_period = properties.rate_period.unwrap_or(600);
+        let first_rate = properties.first_event_rate.unwrap_or(10_000);
+        let next_rate = properties.next_event_rate.unwrap_or(first_rate);
+        let us_per_unit = properties.us_per_unit.unwrap_or(1_000_000); // Rate is in μs
         let generators = properties.threads.unwrap_or(1) as f32;
 
         // Calculate inter event delays array.

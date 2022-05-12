@@ -244,6 +244,3 @@ pub struct S3Properties {
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: String,
 }
-
-#[cfg(test)]
-mod tests {}

@@ -27,7 +27,7 @@ use risingwave_common::error::RwError;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::kafka::split::KafkaSplit;
-use crate::utils::KafkaProperties;
+use crate::properties::KafkaProperties;
 use crate::{ConnectorStateV2, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
