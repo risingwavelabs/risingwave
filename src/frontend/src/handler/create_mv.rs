@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::ExprImpl;
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
@@ -48,14 +46,9 @@ pub fn gen_create_mv_plan(
     };
 
     if let BoundSetExpr::Select(select) = &bound.body {
-        if select
-            .select_items
-            .iter()
-            .zip_eq(select.aliases.iter())
-            .any(|(select_item, alias)| {
-                !matches!(select_item, ExprImpl::InputRef(_)) && alias.is_none()
-            })
-        {
+        // `InputRef`'s alias will be implicitly assigned in `bind_project`.
+        // For other expressions, we require the user to explicitly assign an alias.
+        if select.aliases.iter().any(Option::is_none) {
             return Err(ErrorCode::BindError(
                 "An alias must be specified for an expression".to_string(),
             )
