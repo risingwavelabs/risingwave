@@ -169,8 +169,9 @@ impl LocalVersionManager {
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            guard.set_pinned_version(newly_pinned_version, conflict_detector.clone());
+            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
+        guard.set_pinned_version(newly_pinned_version);
 
         self.worker_context
             .version_update_notifier_tx

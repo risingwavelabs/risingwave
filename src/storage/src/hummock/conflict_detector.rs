@@ -56,12 +56,9 @@ impl ConflictDetector {
     pub fn set_watermark(&self, epoch: HummockEpoch) {
         loop {
             let current_watermark = self.get_epoch_watermark();
-            assert!(
-                epoch > current_watermark,
-                "not allowed to set epoch watermark to equal to or lower than current watermark: current is {}, epoch to set {}",
-                current_watermark,
-                epoch
-            );
+            if epoch <= current_watermark{
+                return;
+            }
             if self
                 .epoch_watermark
                 .compare_exchange(current_watermark, epoch)
