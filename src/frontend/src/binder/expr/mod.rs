@@ -102,6 +102,7 @@ impl Binder {
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
+            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
