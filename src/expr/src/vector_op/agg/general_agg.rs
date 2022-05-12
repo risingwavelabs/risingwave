@@ -40,7 +40,12 @@ where
     F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    pub fn new(return_type: DataType, input_col_idx: usize, f: F, init_result: Option<R::OwnedItem>) -> Self {
+    pub fn new(
+        return_type: DataType,
+        input_col_idx: usize,
+        f: F,
+        init_result: Option<R::OwnedItem>,
+    ) -> Self {
         Self {
             return_type,
             input_col_idx,
