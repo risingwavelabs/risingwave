@@ -330,7 +330,7 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(storage_level_sst_num{level_index=~\"L0|L1\"}) by (instance, level_index)",
+					"expr": "sum(storage_level_sst_num) by (instance, level_index)",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "{{instance}}-{{level_index}}",
@@ -3220,7 +3220,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance)) ",
+					"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance)) ",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "hummock_client_ GetNewTableId_p50 compute_node = {{instance}} ",
@@ -3316,7 +3316,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "hummock_client_ GetNewTableId_p90 compute_node = {{instance}} ",
@@ -3412,7 +3412,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "hummock_client_GetNewTableId_p99 compute_node = {{instance}} ",
@@ -3508,7 +3508,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "hummock_client_ AddTables_p50 compute_node = {{instance}} ",
@@ -3604,7 +3604,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "hummock_client_ AddTables_p90 compute_node = {{instance}} ",
@@ -3700,7 +3700,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "hummock_client_ AddTables_p99 compute_node = {{instance}} ",
@@ -3760,258 +3760,6 @@
 						"h": 8,
 						"w": 8,
 						"x": 0,
-						"y": 2
-					},
-					"hiddenSeries": false,
-					"id": 104,
-					"legend": {
-						"avg": false,
-						"current": false,
-						"max": false,
-						"min": false,
-						"show": true,
-						"total": false,
-						"values": false
-					},
-					"lines": true,
-					"linewidth": 1,
-					"nullPointMode": "null",
-					"options": {
-						"alertThreshold": true
-					},
-					"percentage": false,
-					"pluginVersion": "8.3.3",
-					"pointradius": 2,
-					"points": false,
-					"renderer": "flot",
-					"seriesOverrides": [],
-					"spaceLength": 10,
-					"stack": false,
-					"steppedLine": false,
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
-							"interval": "",
-							"legendFormat": "hummock_manager_ GetCompactionTasks_p50",
-							"refId": "A"
-						}
-					],
-					"thresholds": [],
-					"timeRegions": [],
-					"title": "get compation latency p50",
-					"tooltip": {
-						"shared": true,
-						"sort": 0,
-						"value_type": "individual"
-					},
-					"type": "graph",
-					"xaxis": {
-						"mode": "time",
-						"show": true,
-						"values": []
-					},
-					"yaxes": [
-						{
-							"$$hashKey": "object:437",
-							"format": "s",
-							"logBase": 1,
-							"show": true
-						},
-						{
-							"$$hashKey": "object:438",
-							"format": "short",
-							"logBase": 1,
-							"show": true
-						}
-					],
-					"yaxis": {
-						"align": false
-					}
-				},
-				{
-					"aliasColors": {},
-					"bars": false,
-					"dashLength": 10,
-					"dashes": false,
-					"fill": 1,
-					"fillGradient": 0,
-					"gridPos": {
-						"h": 8,
-						"w": 8,
-						"x": 8,
-						"y": 2
-					},
-					"hiddenSeries": false,
-					"id": 105,
-					"legend": {
-						"avg": false,
-						"current": false,
-						"max": false,
-						"min": false,
-						"show": true,
-						"total": false,
-						"values": false
-					},
-					"lines": true,
-					"linewidth": 1,
-					"nullPointMode": "null",
-					"options": {
-						"alertThreshold": true
-					},
-					"percentage": false,
-					"pluginVersion": "8.3.3",
-					"pointradius": 2,
-					"points": false,
-					"renderer": "flot",
-					"seriesOverrides": [],
-					"spaceLength": 10,
-					"stack": false,
-					"steppedLine": false,
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
-							"interval": "",
-							"legendFormat": "hummock_manager_ GetCompactionTasks_p90",
-							"refId": "A"
-						}
-					],
-					"thresholds": [],
-					"timeRegions": [],
-					"title": "get compation latency p90",
-					"tooltip": {
-						"shared": true,
-						"sort": 0,
-						"value_type": "individual"
-					},
-					"type": "graph",
-					"xaxis": {
-						"mode": "time",
-						"show": true,
-						"values": []
-					},
-					"yaxes": [
-						{
-							"$$hashKey": "object:437",
-							"format": "s",
-							"logBase": 1,
-							"show": true
-						},
-						{
-							"$$hashKey": "object:438",
-							"format": "short",
-							"logBase": 1,
-							"show": true
-						}
-					],
-					"yaxis": {
-						"align": false
-					}
-				},
-				{
-					"aliasColors": {},
-					"bars": false,
-					"dashLength": 10,
-					"dashes": false,
-					"fill": 1,
-					"fillGradient": 0,
-					"gridPos": {
-						"h": 8,
-						"w": 8,
-						"x": 16,
-						"y": 2
-					},
-					"hiddenSeries": false,
-					"id": 110,
-					"legend": {
-						"avg": false,
-						"current": false,
-						"max": false,
-						"min": false,
-						"show": true,
-						"total": false,
-						"values": false
-					},
-					"lines": true,
-					"linewidth": 1,
-					"nullPointMode": "null",
-					"options": {
-						"alertThreshold": true
-					},
-					"percentage": false,
-					"pluginVersion": "8.3.3",
-					"pointradius": 2,
-					"points": false,
-					"renderer": "flot",
-					"seriesOverrides": [],
-					"spaceLength": 10,
-					"stack": false,
-					"steppedLine": false,
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
-							"interval": "",
-							"legendFormat": "hummock_manager_ GetCompactionTasks_p99",
-							"refId": "A"
-						}
-					],
-					"thresholds": [],
-					"timeRegions": [],
-					"title": "get compation latency p99",
-					"tooltip": {
-						"shared": true,
-						"sort": 0,
-						"value_type": "individual"
-					},
-					"type": "graph",
-					"xaxis": {
-						"mode": "time",
-						"show": true,
-						"values": []
-					},
-					"yaxes": [
-						{
-							"$$hashKey": "object:437",
-							"format": "s",
-							"logBase": 1,
-							"show": true
-						},
-						{
-							"$$hashKey": "object:438",
-							"format": "short",
-							"logBase": 1,
-							"show": true
-						}
-					],
-					"yaxis": {
-						"align": false
-					}
-				},
-				{
-					"aliasColors": {},
-					"bars": false,
-					"dashLength": 10,
-					"dashes": false,
-					"fill": 1,
-					"fillGradient": 0,
-					"gridPos": {
-						"h": 8,
-						"w": 8,
-						"x": 0,
 						"y": 10
 					},
 					"hiddenSeries": false,
@@ -4058,7 +3806,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ ReportCompactionTasks_p50 compute_node = {{instance}} ",
@@ -4154,7 +3902,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ ReportCompactionTasks_p90 compute_node = {{instance}} ",
@@ -4250,7 +3998,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ ReportCompactionTasks_p99 compute_node = {{instance}} ",
@@ -4360,7 +4108,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_pinVersion_p50 compute_node = {{instance}} ",
@@ -4456,7 +4204,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_pinVersion_p90 compute_node = {{instance}} ",
@@ -4552,7 +4300,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_pinVersion_p99 compute_node = {{instance}} ",
@@ -4648,7 +4396,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_unpinVersion_p50 compute_node = {{instance}} ",
@@ -4744,7 +4492,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_unpinVersion_p90 compute_node = {{instance}} ",
@@ -4840,7 +4588,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_unpinVersion_p99 compute_node = {{instance}} ",
@@ -4977,7 +4725,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.CatalogService/Create\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.CatalogService/Create\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "Create_avg",
@@ -5097,7 +4845,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.CatalogService/Drop\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.CatalogService/Drop\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "Drop_avg",
@@ -5217,7 +4965,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.CatalogService/GetCatalog\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.CatalogService/GetCatalog\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "GetCatalog_avg",
@@ -5350,7 +5098,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.ClusterService/AddWorkerNode\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.ClusterService/AddWorkerNode\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "AddWorkerNode_avg",
@@ -5470,7 +5218,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.ClusterService/ListAllNodes\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.ClusterService/ListAllNodes\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "ListAllNodes_avg",
@@ -5603,7 +5351,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "CreateMaterializedView_avg",
@@ -5723,7 +5471,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "DropMaterializedView_avg",
@@ -5843,7 +5591,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/meta.StreamManagerService/Flush\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/meta.StreamManagerService/Flush\"}[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "Flush_avg",
@@ -5973,7 +5721,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "UnpinVersion_avg",
@@ -6021,7 +5769,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/PinVersion\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "PinVersion_avg",
@@ -6141,7 +5889,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "UnpinSnapshot_avg",
@@ -6189,7 +5937,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/PinSnapshot\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/PinSnapshot\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "PinSnapshot_avg",
@@ -6274,53 +6022,6 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
-							"interval": "",
-							"legendFormat": "GetCompactionTasks_p50",
-							"refId": "A"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "GetCompactionTasks_p90",
-							"refId": "B"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "GetCompactionTasks_p99",
-							"refId": "C"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m]))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "GetCompactionTasks_avg",
-							"refId": "D"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
 							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
 							"hide": false,
 							"interval": "",
@@ -6357,7 +6058,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "ReportCompactionTasks_avg",
@@ -6477,7 +6178,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/AddTables\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "AddTables_avg",
@@ -6525,7 +6226,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m]))",
+							"expr": "sum(irate(meta_grpc_duration_seconds_sum{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) / sum(irate(meta_grpc_duration_seconds_count{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "GetNewTableId_avg",
@@ -6624,7 +6325,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_report_compaction_task_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"expr": "sum(irate(state_store_report_compaction_task_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_counts compute_node = {{instance}} ",
@@ -6715,7 +6416,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
 							"legendFormat": "pin_version_latency_p50 compute_node = {{instance}} ",
 							"refId": "A"
@@ -6726,7 +6427,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_version_latency_p99 compute_node = {{instance}} ",
@@ -6738,7 +6439,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_version_latencyp90 compute_node = {{instance}} ",
@@ -6750,7 +6451,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_pin_version_latency_sum{instance =~\"$compute_node\"}[1m])) / sum(irate(state_store_pin_version_latency_count{instance =~\"$compute_node\"}[1m]))",
+							"expr": "sum(irate(state_store_pin_version_latency_sum[1m])) / sum(irate(state_store_pin_version_latency_count[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_version_latency_avg",
@@ -6762,7 +6463,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_p50 compute_node = {{instance}} ",
@@ -6774,7 +6475,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_p99 compute_node = {{instance}} ",
@@ -6786,7 +6487,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_unpin_version_latency_sum{instance =~\"$compute_node\"}[1m])) / sum(irate(state_store_unpin_version_latency_count{instance =~\"$compute_node\"}[1m]))",
+							"expr": "sum(irate(state_store_unpin_version_latency_sum[1m])) / sum(irate(state_store_unpin_version_latency_count[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_avg",
@@ -6798,7 +6499,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_p90 compute_node = {{instance}} ",
@@ -6883,7 +6584,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_pin_version_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"expr": "sum(irate(state_store_pin_version_counts[1m])) by(instance)",
 							"interval": "",
 							"legendFormat": "pin_version_counts compute_node = {{instance}} ",
 							"refId": "A"
@@ -6894,7 +6595,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_unpin_version_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"expr": "sum(irate(state_store_unpin_version_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_counts compute_node = {{instance}} ",
@@ -6985,7 +6686,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
 							"legendFormat": "pin_snapshot_latency_p50 compute_node = {{instance}} ",
 							"refId": "A"
@@ -6996,7 +6697,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_snapshot_latency_p99 compute_node = {{instance}} ",
@@ -7008,7 +6709,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_snapshot_latencyp90 compute_node = {{instance}} ",
@@ -7032,7 +6733,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_snapshot_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_latency_p50 compute_node = {{instance}} ",
@@ -7044,7 +6745,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_snapshot_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_latency_p99 compute_node = {{instance}} ",
@@ -7068,7 +6769,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_latency_p90 compute_node = {{instance}} ",
@@ -7153,7 +6854,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_pin_snapshot_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"expr": "sum(irate(state_store_pin_snapshot_counts[1m])) by(instance)",
 							"interval": "",
 							"legendFormat": "pin_snapshot_counts compute_node = {{instance}} ",
 							"refId": "A"
@@ -7164,7 +6865,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_unpin_snapshot_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"expr": "sum(irate(state_store_unpin_snapshot_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_counts compute_node = {{instance}} ",
@@ -7255,7 +6956,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le,instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le,instance))",
 							"interval": "",
 							"legendFormat": "pin_snapshot_latency_p50 compute_node = {{instance}} ",
 							"refId": "A"
@@ -7266,7 +6967,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "add_table_latency_p99 compute_node = {{instance}} ",
@@ -7278,7 +6979,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "add_table_latency_p90 compute_node = {{instance}} ",
@@ -7302,7 +7003,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_latency_p50 compute_node = {{instance}} ",
@@ -7314,7 +7015,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_latency_p99 compute_node = {{instance}} ",
@@ -7338,7 +7039,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_latency_p90 compute_node = {{instance}} ",
@@ -7451,7 +7152,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_add_tables_counts{instance =~\"$compute_node\"}[1m]))by(instance)",
+							"expr": "sum(irate(state_store_add_tables_counts[1m]))by(instance)",
 							"interval": "",
 							"legendFormat": "add_tables_counts compute_node = {{instance}} ",
 							"refId": "A"
@@ -7462,7 +7163,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_get_new_table_id_counts{instance =~\"$compute_node\"}[1m]))by(instance)",
+							"expr": "sum(irate(state_store_get_new_table_id_counts[1m]))by(instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_counts compute_node = {{instance}} ",
@@ -7524,7 +7225,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_latency_p50 compute_node = {{instance}}",
@@ -7536,7 +7237,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_latency_p99 compute_node = {{instance}}",
