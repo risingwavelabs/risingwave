@@ -45,13 +45,12 @@ impl fmt::Display for Condition {
             write!(f, "{:?}", expr)?;
         }
         if self.always_true() {
-            write!(f, "always")?;
+            write!(f, "true")?;
         } else {
             for expr in conjunctions {
                 write!(f, " AND {:?}", expr)?;
             }
         }
-
         Ok(())
     }
 }
