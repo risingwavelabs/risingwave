@@ -64,9 +64,6 @@ impl Binder {
             Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_trim(*expr, trim_where)?,
             ))),
-            Expr::ConcatWs { sep_expr, string_exprs } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_concat_ws(*sep_expr, string_exprs)?,
-            ))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
