@@ -95,7 +95,7 @@ impl HopWindowExecutor2 {
 
 impl Executor2 for HopWindowExecutor2 {
     fn schema(&self) -> &Schema {
-        self.child.schema()
+        &self.schema
     }
 
     fn identity(&self) -> &str {
