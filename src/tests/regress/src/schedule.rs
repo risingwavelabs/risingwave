@@ -84,7 +84,6 @@ impl Schedule {
             if line.starts_with("test: ") {
                 schedules.push(
                     line[5..]
-                        .trim()
                         .split_whitespace()
                         .map(ToString::to_string)
                         .collect(),
@@ -278,6 +277,8 @@ impl TestCase {
 }
 
 fn format_diff(expected_output: &String, actual_output: &String) -> String {
+    use std::fmt::Write;
+
     use similar::{ChangeTag, TextDiff};
     let diff = TextDiff::from_lines(expected_output, actual_output);
 
@@ -288,7 +289,7 @@ fn format_diff(expected_output: &String, actual_output: &String) -> String {
             ChangeTag::Insert => "+",
             ChangeTag::Equal => " ",
         };
-        diff_str.push_str(&format!("{}{}", sign, change));
+        write!(diff_str, "{}{}", sign, change).unwrap();
     }
     diff_str
 }

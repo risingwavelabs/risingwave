@@ -15,10 +15,11 @@
 use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
+use futures::executor::block_on;
 use risingwave_hummock_sdk::key::user_key;
 
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base_without_buf, iterator_test_key_of, iterator_test_value_of,
+    gen_iterator_test_sstable_base, iterator_test_key_of, iterator_test_value_of,
     mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
@@ -33,9 +34,11 @@ use crate::monitor::StateStoreMetrics;
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_concat_read_err() {
+    fail::cfg("disable_block_cache", "return").unwrap();
+    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buf(
+    let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x * 2,
@@ -43,7 +46,7 @@ async fn test_failpoint_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buf(
+    let table1 = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| (TEST_KEYS_COUNT + x) * 2,
@@ -51,7 +54,10 @@ async fn test_failpoint_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let mut iter = ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1)], sstable_store);
+    let mut iter = ConcatIterator::new(
+        vec![table0.get_sstable_info(), table1.get_sstable_info()],
+        sstable_store,
+    );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
     let result = iter.seek(iterator_test_key_of(22).as_slice()).await;
@@ -62,7 +68,9 @@ async fn test_failpoint_concat_read_err() {
     assert!(result.is_err());
     let result = iter.seek(iterator_test_key_of(23).as_slice()).await;
     assert!(result.is_err());
+    fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
+    fail::cfg(mem_read_err, "return").unwrap();
     let mut i = 0;
     while iter.is_valid() {
         let key = iter.key();
@@ -86,9 +94,11 @@ async fn test_failpoint_concat_read_err() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_backward_concat_read_err() {
+    fail::cfg("disable_block_cache", "return").unwrap();
+    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buf(
+    let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x * 2,
@@ -96,7 +106,7 @@ async fn test_failpoint_backward_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buf(
+    let table1 = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| (TEST_KEYS_COUNT + x) * 2,
@@ -104,15 +114,19 @@ async fn test_failpoint_backward_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let mut iter =
-        BackwardConcatIterator::new(vec![Arc::new(table1), Arc::new(table0)], sstable_store);
+    let mut iter = BackwardConcatIterator::new(
+        vec![table1.get_sstable_info(), table0.get_sstable_info()],
+        sstable_store.clone(),
+    );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
     let result = iter.seek(iterator_test_key_of(2).as_slice()).await;
     assert!(result.is_err());
     let result = iter.seek(iterator_test_key_of(3).as_slice()).await;
     assert!(result.is_err());
+    fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
+    fail::cfg(mem_read_err, "return").unwrap();
     let mut i = TEST_KEYS_COUNT * 2;
     while iter.is_valid() {
         i -= 1;
@@ -136,9 +150,11 @@ async fn test_failpoint_backward_concat_read_err() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_merge_invalid_key() {
+    fail::cfg("disable_block_cache", "return").unwrap();
+    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buf(
+    let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -146,7 +162,7 @@ async fn test_failpoint_merge_invalid_key() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buf(
+    let table1 = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -154,12 +170,15 @@ async fn test_failpoint_merge_invalid_key() {
         200,
     )
     .await;
-    let tables = vec![Arc::new(table0), Arc::new(table1)];
+    let tables = vec![table0, table1];
     let mut mi = MergeIterator::new(
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Forward>> {
-                Box::new(SSTableIterator::new(table.clone(), sstable_store.clone()))
+                Box::new(SSTableIterator::new(
+                    block_on(sstable_store.sstable(table.id)).unwrap(),
+                    sstable_store.clone(),
+                ))
             }),
         Arc::new(StateStoreMetrics::unused()),
     );
@@ -180,9 +199,11 @@ async fn test_failpoint_merge_invalid_key() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_backward_merge_invalid_key() {
+    fail::cfg("disable_block_cache", "return").unwrap();
+    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buf(
+    let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -190,7 +211,7 @@ async fn test_failpoint_backward_merge_invalid_key() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buf(
+    let table1 = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -198,13 +219,13 @@ async fn test_failpoint_backward_merge_invalid_key() {
         200,
     )
     .await;
-    let tables = vec![Arc::new(table0), Arc::new(table1)];
+    let tables = vec![table0, table1];
     let mut mi = BackwardMergeIterator::new(
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Backward>> {
                 Box::new(BackwardSSTableIterator::new(
-                    table.clone(),
+                    block_on(sstable_store.sstable(table.id)).unwrap(),
                     sstable_store.clone(),
                 ))
             }),
@@ -227,9 +248,11 @@ async fn test_failpoint_backward_merge_invalid_key() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_user_read_err() {
+    fail::cfg("disable_block_cache", "return").unwrap();
+    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buf(
+    let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -237,7 +260,7 @@ async fn test_failpoint_user_read_err() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buf(
+    let table1 = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -247,11 +270,11 @@ async fn test_failpoint_user_read_err() {
     .await;
     let iters: Vec<BoxedForwardHummockIterator> = vec![
         Box::new(SSTableIterator::new(
-            Arc::new(table0),
+            block_on(sstable_store.sstable(table0.id)).unwrap(),
             sstable_store.clone(),
         )),
         Box::new(SSTableIterator::new(
-            Arc::new(table1),
+            block_on(sstable_store.sstable(table1.id)).unwrap(),
             sstable_store.clone(),
         )),
     ];
@@ -283,9 +306,11 @@ async fn test_failpoint_user_read_err() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_backward_user_read_err() {
+    fail::cfg("disable_block_cache", "return").unwrap();
+    fail::cfg("disable_bloom_filter", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buf(
+    let table0 = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -293,7 +318,7 @@ async fn test_failpoint_backward_user_read_err() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buf(
+    let table1 = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -303,11 +328,11 @@ async fn test_failpoint_backward_user_read_err() {
     .await;
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
         Box::new(BackwardSSTableIterator::new(
-            Arc::new(table0),
+            block_on(sstable_store.sstable(table0.id)).unwrap(),
             sstable_store.clone(),
         )),
         Box::new(BackwardSSTableIterator::new(
-            Arc::new(table1),
+            block_on(sstable_store.sstable(table1.id)).unwrap(),
             sstable_store.clone(),
         )),
     ];

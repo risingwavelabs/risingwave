@@ -19,7 +19,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{AnyhowProperties, SplitEnumeratorImpl, SplitImpl};
+use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
@@ -70,8 +70,8 @@ where
             }
         };
 
-        let properties = AnyhowProperties::new(info.properties.clone());
-        SplitEnumeratorImpl::create(&properties)
+        let properties = ConnectorProperties::new(info.properties.clone())?;
+        SplitEnumeratorImpl::create(properties)
             .to_rw_result()?
             .list_splits()
             .await

@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 
@@ -21,6 +22,7 @@ use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
 
@@ -110,17 +112,17 @@ impl PlanTreeNodeBinary for BatchHashJoin {
 impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl ToDistributedBatch for BatchHashJoin {
-    fn to_distributed(&self) -> PlanRef {
+    fn to_distributed(&self) -> Result<PlanRef> {
         let left = self.left().to_distributed_with_required(
             Order::any(),
             &Distribution::HashShard(self.eq_join_predicate().left_eq_indexes()),
-        );
+        )?;
         let right = self.right().to_distributed_with_required(
             Order::any(),
             &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
-        );
+        )?;
 
-        self.clone_with_left_right(left, right).into()
+        Ok(self.clone_with_left_right(left, right).into())
     }
 }
 
@@ -142,5 +144,14 @@ impl ToBatchProst for BatchHashJoin {
                 .collect(),
             condition: None,
         })
+    }
+}
+
+impl ToLocalBatch for BatchHashJoin {
+    fn to_local(&self) -> Result<PlanRef> {
+        let left = self.left().to_local()?;
+        let right = self.right().to_local()?;
+
+        Ok(self.clone_with_left_right(left, right).into())
     }
 }

@@ -121,6 +121,7 @@ pub enum BeParameterStatusMessage<'a> {
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
+    pub notice: Option<String>,
     pub rows_cnt: i32,
 }
 
@@ -188,6 +189,10 @@ impl<'a> BeMessage<'a> {
                 let rows_cnt = cmd.rows_cnt;
                 let stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                if let Some(notice) = &cmd.notice {
+                    tag.push_str(notice);
+                    tag.push('\n');
+                }
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");

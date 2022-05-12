@@ -57,6 +57,7 @@ pub trait PlanNode:
     + ToStream
     + ToDistributedBatch
     + ToProst
+    + ToLocalBatch
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -216,11 +217,13 @@ pub use to_prost::*;
 mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
+mod batch_generate_series;
 mod batch_hash_agg;
 mod batch_hash_join;
 mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
+mod batch_nested_loop_join;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_simple_agg;
@@ -231,6 +234,7 @@ mod logical_agg;
 mod logical_apply;
 mod logical_delete;
 mod logical_filter;
+mod logical_generate_series;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
@@ -257,11 +261,13 @@ mod stream_topn;
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
+pub use batch_generate_series::BatchGenerateSeries;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
+pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
@@ -272,6 +278,7 @@ pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
+pub use logical_generate_series::LogicalGenerateSeries;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
@@ -327,6 +334,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Limit }
             , { Logical, TopN }
             , { Logical, HopWindow }
+            , { Logical, GenerateSeries }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -336,12 +344,14 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Delete }
             , { Batch, SeqScan }
             , { Batch, HashJoin }
+            , { Batch, NestedLoopJoin }
             , { Batch, Values }
             , { Batch, Sort }
             , { Batch, Exchange }
             , { Batch, Limit }
             , { Batch, TopN }
             , { Batch, HopWindow }
+            , { Batch, GenerateSeries }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -378,6 +388,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Limit }
             , { Logical, TopN }
             , { Logical, HopWindow }
+            , { Logical, GenerateSeries }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -396,6 +407,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Filter }
             , { Batch, SeqScan }
             , { Batch, HashJoin }
+            , { Batch, NestedLoopJoin }
             , { Batch, Values }
             , { Batch, Limit }
             , { Batch, Sort }
@@ -404,6 +416,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Insert }
             , { Batch, Delete }
             , { Batch, HopWindow }
+            , { Batch, GenerateSeries }
         }
     };
 }

@@ -333,6 +333,12 @@ command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Start a full RisingWave dev cluster using risedev-playground"
 
+[tasks.kafka]
+category = "RiseDev - Start"
+description = "Start a RisingWave dev cluster alongside with a Kafka instance"
+command = "./risedev"
+args = ["dev", "ci-kafka"]
+
 [tasks.kill-risedev]
 category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster"
@@ -349,6 +355,14 @@ alias = "kill-risedev"
 
 [tasks.k]
 alias = "kill-risedev"
+
+[tasks.down]
+category = "RiseDev - Stop"
+description = "Kill RisingWave dev cluster and clean the data"
+dependencies = [
+  "k",
+  "clean-data"
+]
 
 [tasks.fill-kafka]
 command = "scripts/source/prepare_source.sh"

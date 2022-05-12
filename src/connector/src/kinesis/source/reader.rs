@@ -29,7 +29,7 @@ use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::{ConnectorStateV2, Properties};
+use crate::{ConnectorStateV2, KinesisProperties};
 
 pub struct KinesisSplitReader {
     client: kinesis_client,
@@ -109,13 +109,15 @@ impl SplitReader for KinesisSplitReader {
             return Ok(Some(record_collection));
         }
     }
+}
 
-    /// For Kinesis, state identifier is split_id, stream_name is never changed
-    async fn new(config: Properties, state: ConnectorStateV2) -> Result<Self>
+impl KinesisSplitReader {
+    /// For Kinesis, state identifier is `split_id`, `stream_name` is never changed
+    pub async fn new(config: KinesisProperties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
-        let config = AwsConfigInfo::build(&config)?;
+        let config = AwsConfigInfo::build(config)?;
         let aws_config = config.load().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
         if let Some(endpoint) = &config.endpoint {

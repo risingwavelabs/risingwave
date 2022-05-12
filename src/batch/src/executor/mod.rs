@@ -28,10 +28,11 @@ use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
-    LimitExecutor2, MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2,
-    ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2,
-    StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2, HashAggExecutor2Builder,
+    HashJoinExecutor2Builder, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
+    NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
+    SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2, TopNExecutor2, TraceExecutor2,
+    ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -196,6 +197,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
@@ -226,6 +228,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))
