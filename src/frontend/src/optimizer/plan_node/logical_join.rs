@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -25,6 +25,7 @@ use super::{
     StreamHashJoin, ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
+use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
@@ -422,11 +423,7 @@ impl ToBatch for LogicalJoin {
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            // todo!("nested loop join")
-            Err(RwError::from(ErrorCode::NotImplemented(
-                "nested loop join".to_string(),
-                None.into(),
-            )))
+            Ok(BatchNestedLoopJoin::new(logical_join).into())
         }
     }
 }
