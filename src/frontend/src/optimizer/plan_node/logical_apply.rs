@@ -14,7 +14,6 @@
 //
 use std::fmt;
 
-
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 

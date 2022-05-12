@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};

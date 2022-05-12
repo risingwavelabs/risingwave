@@ -14,12 +14,9 @@
 
 use std::fmt;
 
-
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
-use super::{
-    BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
-};
+use super::{BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
