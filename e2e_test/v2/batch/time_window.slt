@@ -13,7 +13,8 @@ insert into t1 values
     (8, 3, 8, '2022-01-01 11:02:00');
 
 query IITTT
-select * from tumble(t1, created_at, interval '30' minute) order by row_id, window_start;
+select row_id, uid, created_at, window_start, window_end
+from tumble(t1, created_at, interval '30' minute) order by row_id, window_start;
 ----
 1 1 2022-01-01 10:00:00 2022-01-01 10:00:00 2022-01-01 10:30:00
 2 3 2022-01-01 10:05:00 2022-01-01 10:00:00 2022-01-01 10:30:00
@@ -25,7 +26,8 @@ select * from tumble(t1, created_at, interval '30' minute) order by row_id, wind
 8 3 2022-01-01 11:02:00 2022-01-01 11:00:00 2022-01-01 11:30:00
 
 query IITTT
-select * from hop(t1, created_at, interval '15' minute, interval '30' minute) order by row_id, window_start;
+select row_id, uid, created_at, window_start, window_end
+from hop(t1, created_at, interval '15' minute, interval '30' minute) order by row_id, window_start;
 ----
 1 1 2022-01-01 10:00:00 2022-01-01 09:45:00 2022-01-01 10:15:00
 1 1 2022-01-01 10:00:00 2022-01-01 10:00:00 2022-01-01 10:30:00
