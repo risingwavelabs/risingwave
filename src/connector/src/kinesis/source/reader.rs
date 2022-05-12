@@ -286,6 +286,8 @@ mod tests {
     use async_stream::stream;
     use std::error::Error;
     use rand::Rng;
+    use futures::Stream;
+    use std::iter::Iterator;
     use futures_async_stream::{for_await, try_stream};
     use futures_concurrency::prelude::*;
 
@@ -293,10 +295,20 @@ mod tests {
 
     #[try_stream(ok = i32, error = anyhow::Error)]
     async fn stream(i: i32, sleep: u64) {
+        let mut j = i;
         loop {
-            yield i;
-            std::thread::sleep(std::time::Duration::from_millis(sleep));
+            j += 1;
+            yield j;
+            tokio::time::sleep(tokio::time::Duration::from_millis(sleep)).await;
+        }
     }
+
+    // async fn get_chunk(store: &mut Arc<Mutex<Vec<i32>>>, stream: impl Stream<Item = Result<i32>>) {
+    //     #[for_await]
+    //     for msg in stream {
+    //         store.lock().await.push(msg.unwrap());
+    //     }
+    // }
 
     #[tokio::test]
     async fn test_stream() -> Result<()> {
@@ -331,11 +343,31 @@ mod tests {
 
         let s = (s_1, s_2, s_3).merge().into_stream();
 
-        #[for_await]
-        for msg in s {
-            println!("{:?}", msg);
-        }
+        let x: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(Vec::new()));
+        // let _x = Arc::clone(&x);
+        // let handler = tokio::spawn(async move {
+        //     #[for_await]
+        //     for msg in s {
+        //         println!("get msg: {:?}", msg);
+        //         _x.lock().await.push(msg.unwrap());
+        //     }
+        // });
 
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        // let mut v = x.lock().await;
+        // println!("{:?}", v);
+        // v.clear();
+        // drop(v);
+        let v = s.collect().await;
+        println!("{:?}", v);
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        // let v = x.lock().await;
+        let v1 = s.collect().await;
+        println!("{:?}", v1);
+        // handler.abort();
         Ok(())
     }
 }
