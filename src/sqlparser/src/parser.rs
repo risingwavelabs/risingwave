@@ -114,6 +114,9 @@ pub struct Parser {
     tokens: Vec<Token>,
     /// The index of the first unprocessed token in `self.tokens`
     index: usize,
+    /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
+    /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
+    angle_brackets_num: i32,
 }
 
 impl Parser {
@@ -123,7 +126,11 @@ impl Parser {
 
     /// Parse the specified tokens
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, index: 0 }
+        Parser {
+            tokens,
+            index: 0,
+            angle_brackets_num: 0,
+        }
     }
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
@@ -1965,9 +1972,10 @@ impl Parser {
     /// Parse struct columns e.g.`<v1 int, v2 int, v3 struct<...>>`.
     pub fn parse_struct_columns(&mut self) -> Result<Vec<ColumnDef>, ParserError> {
         let mut columns = vec![];
-        if !self.consume_token(&Token::Lt) || self.consume_token(&Token::Gt) {
-            return Ok(columns);
+        if !self.consume_token(&Token::Lt) {
+            return self.expected("'<' after struct", self.peek_token());
         }
+        self.angle_brackets_num += 1;
 
         loop {
             if let Token::Word(_) = self.peek_token() {
@@ -1976,8 +1984,18 @@ impl Parser {
                 return self.expected("column name or constraint definition", self.peek_token());
             }
             let comma = self.consume_token(&Token::Comma);
-            if self.consume_token(&Token::Gt) {
+            if self.angle_brackets_num == 0 {
                 break;
+            } else if self.consume_token(&Token::Gt) {
+                self.angle_brackets_num -= 1;
+                break;
+            } else if self.consume_token(&Token::ShiftRight) {
+                if self.angle_brackets_num >= 1 {
+                    self.angle_brackets_num -= 2;
+                    break;
+                } else {
+                    return parser_err!("too much '>'");
+                }
             } else if !comma {
                 return self.expected("',' or '>' after column definition", self.peek_token());
             }
