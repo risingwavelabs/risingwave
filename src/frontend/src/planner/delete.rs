@@ -38,8 +38,9 @@ impl Planner {
         let dist = Distribution::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
+        let out_names = plan.schema().names();
 
-        let root = PlanRoot::new(plan, dist, order, out_fields);
+        let root = PlanRoot::new(plan, dist, order, out_fields, out_names);
         Ok(root)
     }
 }
