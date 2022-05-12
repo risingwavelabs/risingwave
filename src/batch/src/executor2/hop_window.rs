@@ -14,39 +14,78 @@
 
 use std::num::NonZeroUsize;
 
-use futures::StreamExt;
 use futures_async_stream::try_stream;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::expr_node;
 
-use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-pub struct HopWindowExecutor {
-    pub input: BoxedExecutor,
-    pub info: ExecutorInfo,
-
-    pub time_col_idx: usize,
-    pub window_slide: IntervalUnit,
-    pub window_size: IntervalUnit,
+pub struct HopWindowExecutor2 {
+    child: BoxedExecutor2,
+    identity: String,
+    schema: Schema,
+    time_col_idx: usize,
+    window_slide: IntervalUnit,
+    window_size: IntervalUnit,
 }
 
-impl HopWindowExecutor {
-    pub fn new(
-        input: BoxedExecutor,
-        info: ExecutorInfo,
+impl BoxedExecutor2Builder for HopWindowExecutor2 {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+        ensure!(source.plan_node().get_children().len() == 1);
+        let hop_window_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::HopWindow
+        )?;
+        let time_col = hop_window_node.get_time_col()?.column_idx as usize;
+        let window_slide = hop_window_node.get_window_slide()?.into();
+        let window_size = hop_window_node.get_window_size()?.into();
+        if let Some(child_plan) = source.plan_node.get_children().get(0) {
+            let child = source.clone_for_plan(child_plan).build2()?;
+            let schema = child
+                .schema()
+                .clone()
+                .into_fields()
+                .into_iter()
+                .chain([
+                    Field::with_name(DataType::Timestamp, "window_start"),
+                    Field::with_name(DataType::Timestamp, "window_end"),
+                ])
+                .collect();
+            return Ok(Box::new(HopWindowExecutor2::new(
+                child,
+                schema,
+                time_col,
+                window_slide,
+                window_size,
+                source.plan_node().get_identity().clone(),
+            )));
+        }
+        Err(ErrorCode::InternalError("HopWindow must have one child".to_string()).into())
+    }
+}
+
+impl HopWindowExecutor2 {
+    fn new(
+        child: BoxedExecutor2,
+        schema: Schema,
         time_col_idx: usize,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        identity: String,
     ) -> Self {
-        HopWindowExecutor {
-            input,
-            info,
+        Self {
+            child,
+            identity,
+            schema,
             time_col_idx,
             window_slide,
             window_size,
@@ -54,29 +93,25 @@ impl HopWindowExecutor {
     }
 }
 
-impl Executor for HopWindowExecutor {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef {
-        &self.info.pk_indices
+impl Executor2 for HopWindowExecutor2 {
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     fn identity(&self) -> &str {
-        &self.info.identity
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
     }
 }
 
-impl HopWindowExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self: Box<Self>) {
+impl HopWindowExecutor2 {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
         let Self {
-            input,
+            child,
             time_col_idx,
             window_slide,
             window_size,
@@ -86,14 +121,14 @@ impl HopWindowExecutor {
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
             .ok_or_else(|| {
-                StreamExecutorError::invalid_argument(format!(
+                RwError::from(ErrorCode::InternalError(format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ))
+                )))
             })?
             .get();
 
-        let schema = self.info.schema;
+        let schema = self.schema;
         let time_col_data_type = schema.fields()[time_col_idx].data_type();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
@@ -105,18 +140,17 @@ impl HopWindowExecutor {
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
         // Let's pre calculate (`window_size` - `window_slide`).
         let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
-            StreamExecutorError::invalid_argument(format!(
+            RwError::from(ErrorCode::InternalError(format!(
                 "window_size {} cannot be subtracted by window_slide {}",
                 window_size, window_slide
-            ))
+            )))
         })?;
         let window_size_sub_slide_expr = LiteralExpression::new(
             DataType::Interval,
             Some(ScalarImpl::Interval(window_size_sub_slide)),
         )
         .boxed();
-
-        let hop_start = new_binary_expr(
+        let hop_expr = new_binary_expr(
             expr_node::Type::TumbleStart,
             risingwave_common::types::DataType::Timestamp,
             new_binary_expr(
@@ -127,14 +161,16 @@ impl HopWindowExecutor {
             ),
             window_slide_expr,
         );
+
         let mut window_start_exprs = Vec::with_capacity(units);
         let mut window_end_exprs = Vec::with_capacity(units);
+
         for i in 0..units {
             let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                StreamExecutorError::invalid_argument(format!(
+                RwError::from(ErrorCode::InternalError(format!(
                     "window_slide {} cannot be multiplied by {}",
                     window_slide, i
-                ))
+                )))
             })?;
             let window_start_offset_expr = LiteralExpression::new(
                 DataType::Interval,
@@ -142,10 +178,10 @@ impl HopWindowExecutor {
             )
             .boxed();
             let window_end_offset = window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                StreamExecutorError::invalid_argument(format!(
+                RwError::from(ErrorCode::InternalError(format!(
                     "window_slide {} cannot be multiplied by {}",
                     window_slide, i
-                ))
+                )))
             })?;
             let window_end_offset_expr = LiteralExpression::new(
                 DataType::Interval,
@@ -169,37 +205,23 @@ impl HopWindowExecutor {
         }
 
         #[for_await]
-        for msg in input.execute() {
-            let msg = msg?;
-            let Message::Chunk(chunk) = msg else {
-                // TODO: syn has not supported `let_else`, we desugar here manually.
-                yield std::task::Poll::Ready(msg);
-                continue;
-            };
-            // TODO: compact may be not necessary here.
-            let chunk = chunk.compact().map_err(StreamExecutorError::executor_v1)?;
-            let (data_chunk, ops) = chunk.into_parts();
-            let hop_start = hop_start
-                .eval(&data_chunk)
-                .map_err(StreamExecutorError::eval_error)?;
+        for data_chunk in child.execute() {
+            let data_chunk = data_chunk?;
+            let hop_start = hop_expr.eval(&data_chunk)?;
             let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
             let (origin_cols, visibility) = data_chunk.into_parts();
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
-                let window_start_col = window_start_exprs[i]
-                    .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::eval_error)?;
-                let window_end_col = window_end_exprs[i]
-                    .eval(&hop_start_chunk)
-                    .map_err(StreamExecutorError::eval_error)?;
+                let window_start_col = window_start_exprs[i].eval(&hop_start_chunk)?;
+                let window_end_col = window_end_exprs[i].eval(&hop_start_chunk)?;
                 let mut new_cols = origin_cols.clone();
                 new_cols.extend_from_slice(&[
                     Column::new(window_start_col),
                     Column::new(window_end_col),
                 ]);
-                let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
-                yield Message::Chunk(new_chunk);
+                let new_chunk = DataChunk::new(new_cols, None);
+                yield new_chunk;
             }
         }
     }
@@ -207,13 +229,13 @@ impl HopWindowExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use futures::stream::StreamExt;
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, IntervalUnit};
+    use risingwave_common::types::DataType;
 
-    use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, ExecutorInfo, StreamChunk};
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
 
     #[tokio::test]
     async fn test_execute() {
@@ -221,74 +243,67 @@ mod tests {
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
         let schema = Schema::new(vec![field1, field2, field3]);
-        let pk_indices = vec![0];
 
-        let chunk = StreamChunk::from_pretty(
+        let chunk = DataChunk::from_pretty(
             &"I I TS
-            + 1 1 ^10:00:00
-            + 2 3 ^10:05:00
-            - 3 2 ^10:14:00
-            + 4 1 ^10:22:00
-            - 5 3 ^10:33:00
-            + 6 2 ^10:42:00
-            - 7 1 ^10:51:00
-            + 8 3 ^11:02:00"
+            1 1 ^10:00:00
+            2 3 ^10:05:00
+            3 2 ^10:14:00
+            4 1 ^10:22:00
+            5 3 ^10:33:00
+            6 2 ^10:42:00
+            7 1 ^10:51:00
+            8 3 ^11:02:00"
                 .replace('^', "2022-2-2T"),
         );
 
-        let input =
-            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
+        let mut mock_executor = MockExecutor::new(schema.clone());
+        mock_executor.add(chunk);
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-
-        let executor = super::HopWindowExecutor::new(
-            input,
-            ExecutorInfo {
-                // TODO: the schema is incorrect, but it seems useless here.
-                schema: schema.clone(),
-                pk_indices,
-                identity: "test".to_string(),
-            },
+        let executor = Box::new(HopWindowExecutor2::new(
+            Box::new(mock_executor),
+            schema,
             2,
             window_slide,
             window_size,
-        )
-        .boxed();
+            "test".to_string(),
+        ));
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
 
-        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(
             chunk,
-            StreamChunk::from_pretty(
+            DataChunk::from_pretty(
                 &"I I TS        TS        TS
-                + 1 1 ^10:00:00 ^09:45:00 ^10:15:00
-                + 2 3 ^10:05:00 ^09:45:00 ^10:15:00
-                - 3 2 ^10:14:00 ^09:45:00 ^10:15:00
-                + 4 1 ^10:22:00 ^10:00:00 ^10:30:00
-                - 5 3 ^10:33:00 ^10:15:00 ^10:45:00
-                + 6 2 ^10:42:00 ^10:15:00 ^10:45:00
-                - 7 1 ^10:51:00 ^10:30:00 ^11:00:00
-                + 8 3 ^11:02:00 ^10:45:00 ^11:15:00"
+                1 1 ^10:00:00 ^09:45:00 ^10:15:00
+                2 3 ^10:05:00 ^09:45:00 ^10:15:00
+                3 2 ^10:14:00 ^09:45:00 ^10:15:00
+                4 1 ^10:22:00 ^10:00:00 ^10:30:00
+                5 3 ^10:33:00 ^10:15:00 ^10:45:00
+                6 2 ^10:42:00 ^10:15:00 ^10:45:00
+                7 1 ^10:51:00 ^10:30:00 ^11:00:00
+                8 3 ^11:02:00 ^10:45:00 ^11:15:00"
                     .replace('^', "2022-2-2T"),
             )
         );
 
-        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(
             chunk,
-            StreamChunk::from_pretty(
+            DataChunk::from_pretty(
                 &"I I TS        TS        TS
-                + 1 1 ^10:00:00 ^10:00:00 ^10:30:00
-                + 2 3 ^10:05:00 ^10:00:00 ^10:30:00
-                - 3 2 ^10:14:00 ^10:00:00 ^10:30:00
-                + 4 1 ^10:22:00 ^10:15:00 ^10:45:00
-                - 5 3 ^10:33:00 ^10:30:00 ^11:00:00
-                + 6 2 ^10:42:00 ^10:30:00 ^11:00:00
-                - 7 1 ^10:51:00 ^10:45:00 ^11:15:00
-                + 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
+                1 1 ^10:00:00 ^10:00:00 ^10:30:00
+                2 3 ^10:05:00 ^10:00:00 ^10:30:00
+                3 2 ^10:14:00 ^10:00:00 ^10:30:00
+                4 1 ^10:22:00 ^10:15:00 ^10:45:00
+                5 3 ^10:33:00 ^10:30:00 ^11:00:00
+                6 2 ^10:42:00 ^10:30:00 ^11:00:00
+                7 1 ^10:51:00 ^10:45:00 ^11:15:00
+                8 3 ^11:02:00 ^11:00:00 ^11:30:00"
                     .replace('^', "2022-2-2T"),
             )
         );

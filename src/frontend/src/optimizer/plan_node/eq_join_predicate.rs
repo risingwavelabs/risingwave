@@ -38,10 +38,10 @@ impl fmt::Display for EqJoinPredicate {
             write!(f, "{} = {}", k1, k2)?;
         }
         for (k1, k2) in eq_keys {
-            write!(f, "AND {} = {}", k1, k2)?;
+            write!(f, " AND {} = {}", k1, k2)?;
         }
         if !self.other_cond.always_true() {
-            write!(f, "AND {}", self.other_cond)?;
+            write!(f, " AND {}", self.other_cond)?;
         }
 
         Ok(())
