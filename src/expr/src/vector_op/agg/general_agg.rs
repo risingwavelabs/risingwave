@@ -385,7 +385,7 @@ mod tests {
         let expected = &[Some(3)];
         test_case(input.into(), expected)?;
         let input = I32Array::from_slice(&[]).unwrap();
-        let expected = &[None];
+        let expected = &[Some(0)];
         test_case(input.into(), expected)?;
         let input = I32Array::from_slice(&[None]).unwrap();
         let expected = &[Some(0)];
