@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -419,8 +419,10 @@ impl ToStream for LogicalJoin {
                 Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            // Convert to Nested-loop Join for non-equal joins
-            todo!("nested loop join")
+            Err(RwError::from(ErrorCode::NotImplemented(
+                "stream nested-loop join".to_string(),
+                None.into(),
+            )))
         }
     }
 
