@@ -13,7 +13,7 @@
     LogicalProject { exprs: [$2, 1:Int32], expr_alias: [ ,  ] }
       LogicalJoin { type: LeftOuter, on: true }
         LogicalScan { table: t, columns: [_row_id#0, x] }
-        LogicalProject { exprs: [$1], expr_alias: [x] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
 - sql: |
     create table t(x int);
@@ -22,7 +22,7 @@
     LogicalProject { exprs: [($2 + 1:Int32)], expr_alias: [ ] }
       LogicalJoin { type: LeftOuter, on: true }
         LogicalScan { table: t, columns: [_row_id#0, x] }
-        LogicalProject { exprs: [$1], expr_alias: [x] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
 - sql: |
     create table t(x int);
@@ -32,7 +32,7 @@
       LogicalJoin { type: LeftOuter, on: true }
         LogicalJoin { type: LeftOuter, on: true }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-          LogicalProject { exprs: [$1], expr_alias: [x] }
+          LogicalProject { exprs: [$1], expr_alias: [ ] }
             LogicalScan { table: t, columns: [_row_id#0, x] }
         LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -40,13 +40,13 @@
     create table t(x int);
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
   logical_plan: |
-    LogicalProject { exprs: [($1 + $2)], expr_alias: [v3] }
+    LogicalProject { exprs: [($1 + $2)], expr_alias: [ ] }
       LogicalJoin { type: LeftOuter, on: true }
         LogicalScan { table: t, columns: [_row_id#0, x] }
-        LogicalProject { exprs: [($1 + $2)], expr_alias: [v2] }
+        LogicalProject { exprs: [($1 + $2)], expr_alias: [ ] }
           LogicalJoin { type: LeftOuter, on: true }
             LogicalScan { table: t, columns: [_row_id#0, x] }
-            LogicalProject { exprs: [$1], expr_alias: [v1] }
+            LogicalProject { exprs: [$1], expr_alias: [ ] }
               LogicalScan { table: t, columns: [_row_id#0, x] }
 - sql: |
     select (select 1, 2);
@@ -58,7 +58,7 @@
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
       LogicalJoin { type: LeftSemi, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalProject { exprs: [$1], expr_alias: [x] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
@@ -72,7 +72,7 @@
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
       LogicalJoin { type: LeftAnti, on: true }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalProject { exprs: [$1], expr_alias: [x] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
@@ -84,30 +84,30 @@
     create table t2(x int);
     select x from t1 where exists (select x from t2);
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [x] }
+    LogicalProject { exprs: [$1], expr_alias: [ ] }
       LogicalJoin { type: LeftSemi, on: true }
         LogicalScan { table: t1, columns: [_row_id#0, x] }
-        LogicalProject { exprs: [$1], expr_alias: [x] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalScan { table: t2, columns: [_row_id#0, x] }
 - sql: |
     create table t(x int);
     select x from t where exists (select * from t);
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [x] }
+    LogicalProject { exprs: [$1], expr_alias: [ ] }
       LogicalJoin { type: LeftSemi, on: true }
         LogicalScan { table: t, columns: [_row_id#0, x] }
-        LogicalProject { exprs: [$1], expr_alias: [x] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
     select x from t1 where x > (select x from t2)
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [x] }
+    LogicalProject { exprs: [$1], expr_alias: [ ] }
       LogicalFilter { predicate: ($1 > $2) }
         LogicalJoin { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id#0, x] }
-          LogicalProject { exprs: [$1], expr_alias: [x] }
+          LogicalProject { exprs: [$1], expr_alias: [ ] }
             LogicalScan { table: t2, columns: [_row_id#0, x] }
 - sql: |
     select 1 where 1>0 and exists (values (1))
@@ -137,18 +137,18 @@
     create table t2(x int, y int);
     select x from t1 where y in (select y from t2);
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [x] }
+    LogicalProject { exprs: [$1], expr_alias: [ ] }
       LogicalJoin { type: LeftSemi, on: ($2 = $3) }
         LogicalScan { table: t1, columns: [_row_id#0, x, y] }
-        LogicalProject { exprs: [$2], expr_alias: [y] }
+        LogicalProject { exprs: [$2], expr_alias: [ ] }
           LogicalScan { table: t2, columns: [_row_id#0, x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y not in (select y from t2);
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [x] }
+    LogicalProject { exprs: [$1], expr_alias: [ ] }
       LogicalJoin { type: LeftAnti, on: ($2 = $3) }
         LogicalScan { table: t1, columns: [_row_id#0, x, y] }
-        LogicalProject { exprs: [$2], expr_alias: [y] }
+        LogicalProject { exprs: [$2], expr_alias: [ ] }
           LogicalScan { table: t2, columns: [_row_id#0, x, y] }

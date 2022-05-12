@@ -147,6 +147,7 @@ impl LogicalProject {
                     }
                     None => (format!("expr#{}", id), vec![], String::new()),
                 };
+                // let name = default_name;  // Even this cleanup is unnecessary.
                 let name = alias.clone().unwrap_or(default_name);
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })

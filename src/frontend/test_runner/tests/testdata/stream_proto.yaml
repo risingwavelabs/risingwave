@@ -649,7 +649,7 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: sum_v1
+            name: "agg#1"
           - dataType:
               typeName: INT32
               isNullable: true
@@ -673,7 +673,7 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: sum_v1
+        name: "agg#1"
       - dataType:
           typeName: INT32
           isNullable: true

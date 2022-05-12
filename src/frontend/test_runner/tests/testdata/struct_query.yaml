@@ -32,7 +32,7 @@
     create materialized view t as select * from s;
     select (t).country.city,(t).country,(country).city.address from t;
   logical_plan: |
-    LogicalProject { exprs: [Field($1, 1:Int32), $1, Field(Field($1, 1:Int32), 0:Int32)], expr_alias: [city, country, address] }
+    LogicalProject { exprs: [Field($1, 1:Int32), $1, Field(Field($1, 1:Int32), 0:Int32)], expr_alias: [ ,  ,  ] }
       LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
   create_source:
     row_format: protobuf
@@ -59,7 +59,7 @@
     create materialized view t as select * from s;
     select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
   logical_plan: |
-    LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), Field(Field($1, 1:Int32), 1:Int32), Field($2, 0:Int32), Field($2, 1:Int32), Field($2, 2:Int32), Field(Field($3, 1:Int32), 0:Int32), Field(Field($3, 1:Int32), 1:Int32)], expr_alias: [address, zipcode, address, city, zipcode, address, zipcode] }
+    LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), Field(Field($1, 1:Int32), 1:Int32), Field($2, 0:Int32), Field($2, 1:Int32), Field($2, 2:Int32), Field(Field($3, 1:Int32), 0:Int32), Field(Field($3, 1:Int32), 1:Int32)], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
       LogicalScan { table: t, columns: [id, country1, country2, country3, zipcode, rate, _row_id#0] }
   create_source:
     row_format: protobuf
@@ -88,8 +88,8 @@
     create materialized view t as select * from s;
     select (c).zipcode from (select (t).country.city as c from t);
   logical_plan: |
-    LogicalProject { exprs: [Field($0, 1:Int32)], expr_alias: [zipcode] }
-      LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [c] }
+    LogicalProject { exprs: [Field($0, 1:Int32)], expr_alias: [ ] }
+      LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [ ] }
         LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
   create_source:
     row_format: protobuf
@@ -116,8 +116,8 @@
     create materialized view t as select * from s;
     select (c).zipcode from (select min((t).country.city) as c from t);
   logical_plan: |
-    LogicalProject { exprs: [Field($0, 1:Int32)], expr_alias: [zipcode] }
-      LogicalProject { exprs: [$0], expr_alias: [c] }
+    LogicalProject { exprs: [Field($0, 1:Int32)], expr_alias: [ ] }
+      LogicalProject { exprs: [$0], expr_alias: [ ] }
         LogicalAgg { group_keys: [], agg_calls: [min($0)] }
           LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [ ] }
             LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
@@ -146,9 +146,9 @@
     create materialized view t as select * from s;
     select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [c, id, country, zipcode, rate] }
+    LogicalProject { exprs: [$0, $1, $2, $3, $4], expr_alias: [ ,  ,  ,  ,  ] }
       LogicalJoin { type: Inner, on: (Field($0, 1:Int32) = Field($2, 2:Int32)) }
-        LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [c] }
+        LogicalProject { exprs: [Field($1, 1:Int32)], expr_alias: [ ] }
           LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
         LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id#0] }
   create_source:
