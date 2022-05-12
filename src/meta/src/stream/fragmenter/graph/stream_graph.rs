@@ -457,7 +457,7 @@ impl StreamGraphBuilder {
         let table_id_offset = ctx.table_id_offset;
         match stream_node.get_node_body()? {
             NodeBody::Exchange(_) => {
-                panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
+                panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
             }
             NodeBody::Chain(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
             _ => {
