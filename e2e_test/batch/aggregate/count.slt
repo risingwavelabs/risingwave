@@ -1,6 +1,16 @@
 statement ok
 create table t (v1 int not null, v2 int not null, v3 int not null)
 
+query I
+select count(*) from t
+----
+0
+
+query I
+select count(v1) from t
+----
+0
+
 statement ok
 insert into t values (1,4,2), (2,3,3), (3,4,4), (4,3,5)
 
