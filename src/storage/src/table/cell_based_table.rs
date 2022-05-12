@@ -289,6 +289,8 @@ impl<S: StateStore> CellBasedTable<S> {
         .await
     }
 
+    // streaming_iter is uesed for streaming executors, which is regarded as a short-term iterator
+    // and will not wait for epoch.
     pub async fn streaming_iter(
         &self,
         epoch: u64,
@@ -465,7 +467,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
     }
 }
 
-/// "`CellBasedTableStreamingIter`" used for streaming executor, and will not wait epoch
+/// [`CellBasedTableStreamingIter`] is used for streaming executor, and will not wait for epoch.
 pub struct CellBasedTableStreamingIter<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
@@ -490,24 +492,20 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         Ok(iter)
     }
 
-    pub async fn init_cell_based_item(&mut self) -> StorageResult<()> {
+    pub async fn peek(&mut self) -> StorageResult<Option<&(Vec<u8>, Row)>> {
         if self.cell_based_item.is_none() {
             self.cell_based_item = self.next().await?;
         }
-        Ok(())
-    }
-
-    pub async fn update_current_item(&mut self) -> StorageResult<()> {
-        self.cell_based_item = self.next().await?;
-        Ok(())
+        Ok(self.cell_based_item.as_ref())
     }
 
     /// return a row with its pk.
-    async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
+    pub async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
         loop {
             match self.iter.next().await? {
                 None => {
                     let pk_and_row = self.cell_based_row_deserializer.take();
+                    self.cell_based_item = pk_and_row.clone();
                     return Ok(pk_and_row);
                 }
                 Some((key, value)) => {
@@ -521,6 +519,7 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
                         .cell_based_row_deserializer
                         .deserialize(&key, &value)
                         .map_err(err)?;
+                    self.cell_based_item = pk_and_row.clone();
                     match pk_and_row {
                         Some(pk_row) => return Ok(Some(pk_row)),
                         None => {}
