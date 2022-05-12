@@ -53,11 +53,11 @@ pub fn gen_create_mv_plan(
             .iter()
             .zip_eq(select.aliases.iter())
             .any(|(select_item, alias)| {
-                matches!(select_item, ExprImpl::AggCall(_)) && alias.is_none()
+                !matches!(select_item, ExprImpl::InputRef(_)) && alias.is_none()
             })
         {
             return Err(ErrorCode::BindError(
-                "An alias must be specified for an aggregation function".to_string(),
+                "An alias must be specified for an expression".to_string(),
             )
             .into());
         }
@@ -118,13 +118,6 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select count(t1.country) from t1";
-        let err = frontend.run_sql(sql).await.unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Bind error: An alias must be specified for an aggregation function"
-        );
-
         let sql = "create materialized view mv1 as select t1.country from t1";
         frontend.run_sql(sql).await.unwrap();
 
@@ -173,5 +166,38 @@ pub mod tests {
             "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
         };
         assert_eq!(columns, expected_columns);
+    }
+
+    /// When creating MV, The only thing to allow without explicit alias is `InputRef`.
+    #[tokio::test]
+    async fn test_no_alias() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = "create table t(x varchar)";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Aggregation without alias is forbidden.
+        let sql = "create materialized view mv1 as select count(x) from t";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Bind error: An alias must be specified for an expression"
+        );
+
+        // Literal without alias is forbidden.
+        let sql = "create materialized view mv1 as select 1";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Bind error: An alias must be specified for an expression"
+        );
+
+        // Function without alias is forbidden.
+        let sql = "create materialized view mv1 as select length(x) from t";
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Bind error: An alias must be specified for an expression"
+        );
     }
 }
