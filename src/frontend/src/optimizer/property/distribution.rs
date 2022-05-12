@@ -98,7 +98,9 @@ impl Distribution {
     //  +------+------+
     //  |hash_shard(a)|
     //  +------+------+
-    //
+    // HashShard(a,b) means no records with same (a,b) on the different shards.
+    // HashShard(a) means no records same (a) on the different shards.
+    // then HashShard(a) satisfy HashShard(a, b).
     pub fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => matches!(other, Distribution::Any),
