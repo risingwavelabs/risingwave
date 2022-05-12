@@ -22,6 +22,7 @@ use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
+use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
@@ -149,7 +150,11 @@ impl ToBatchProst for BatchHashJoin {
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
-            condition: None,
+            condition: self
+                .eq_join_predicate
+                .other_cond()
+                .as_expr_unless_true()
+                .map(|x| x.to_expr_proto()),
         })
     }
 }
