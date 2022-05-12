@@ -880,12 +880,7 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![0, 3];
-        println!(
-            "{}",
-            PlanRef::from(agg.clone()).explain_to_string().unwrap()
-        );
         let plan = agg.prune_col(&required_cols);
-        println!("{}", plan.explain_to_string().unwrap());
         // Check the result
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);
