@@ -39,7 +39,7 @@ use crate::filesystem::s3::s3_dir::{
     new_s3_client, new_share_config, AwsCredential, AwsCustomConfig, S3SourceBasicConfig,
     S3SourceConfig, SqsReceiveMsgConfig,
 };
-use crate::{ConnectorState, ConnectorStateV2, Properties};
+use crate::{ConnectorState, ConnectorStateV2, S3Properties};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -340,16 +340,18 @@ impl SplitReader for S3FileReader {
         };
         Ok(Some(msg_vec))
     }
+}
 
+impl S3FileReader {
     /// 1. The config include all information about the connection to S3, for example:
-    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's access_key
-    /// and secret. For now, only static credential is supported.
-    /// 2. The identifier of the State is the Path of S3 - S3://bucket_name/object_key
-    async fn new(props: Properties, state: ConnectorStateV2) -> Result<Self>
+    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's
+    /// `access_key` and secret. For now, only static credential is supported.
+    /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
+    pub async fn new(props: S3Properties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
-        let s3_basic_config = S3SourceBasicConfig::from(props.0);
+        let s3_basic_config = S3SourceBasicConfig::from(props);
         let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
             AwsCredential::Default
         } else {
@@ -387,11 +389,10 @@ impl SplitReader for S3FileReader {
 mod test {
 
     use bytes::Bytes;
-    use maplit::hashmap;
 
     use crate::base::SplitReader;
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
-    use crate::{ConnectorState, ConnectorStateV2, Properties};
+    use crate::{ConnectorState, ConnectorStateV2, S3Properties};
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
@@ -400,12 +401,15 @@ mod test {
     const SMALL_JSON_FILE_NAME: &str = "2022-02-28-09:32:34-example.json";
     const EMPTY_JSON_DATA: &str = r#""#;
 
-    fn test_config_map() -> Properties {
-        Properties::new(hashmap! {
-            "s3.region_name".to_string() => TEST_REGION_NAME.to_string(),
-            "s3.bucket_name".to_string() => BUCKET_NAME.to_string(),
-            "sqs_queue_name".to_string() => "s3-dd-storage-notify-queue".to_string(),
-        })
+    fn test_config_map() -> S3Properties {
+        S3Properties {
+            region_name: TEST_REGION_NAME.to_string(),
+            bucket_name: BUCKET_NAME.to_string(),
+            sqs_queue_name: "s3-dd-storage-notify-queue".to_string(),
+            match_pattern: None,
+            access: "".to_string(),
+            secret: "".to_string(),
+        }
     }
 
     fn new_test_connect_state(file_name: String) -> ConnectorState {
