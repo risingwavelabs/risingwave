@@ -107,18 +107,13 @@ impl PlanRoot {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
-        let (exprs, expr_aliases) = self
+        let exprs = self
             .out_fields
             .ones()
             .zip_eq(self.schema.fields)
-            .map(|(index, field)| {
-                (
-                    InputRef::new(index, field.data_type).into(),
-                    Some(field.name),
-                )
-            })
-            .unzip();
-        LogicalProject::create(self.plan, exprs, expr_aliases)
+            .map(|(index, field)| InputRef::new(index, field.data_type).into())
+            .collect();
+        LogicalProject::create(self.plan, exprs)
     }
 
     /// Apply logical optimization to the plan.
@@ -186,18 +181,13 @@ impl PlanRoot {
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
-            let (exprs, expr_aliases) = self
+            let exprs = self
                 .out_fields
                 .ones()
                 .zip_eq(self.schema.fields.clone())
-                .map(|(index, field)| {
-                    (
-                        InputRef::new(index, field.data_type).into(),
-                        Some(field.name),
-                    )
-                })
-                .unzip();
-            plan = BatchProject::new(LogicalProject::new(plan, exprs, expr_aliases)).into();
+                .map(|(index, field)| InputRef::new(index, field.data_type).into())
+                .collect();
+            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
         }
 
         Ok(plan)
