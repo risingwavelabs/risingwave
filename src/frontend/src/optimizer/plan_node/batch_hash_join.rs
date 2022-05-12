@@ -124,7 +124,7 @@ impl ToDistributedBatch for BatchHashJoin {
             .rewrite_required_distribution(right.distribution())
             .unwrap();
         let mut left = self
-            .right()
+            .left()
             .to_distributed_with_required(Order::any(), &left_dist)?;
         if left.distribution() != &left_dist {
             left = left_dist.enforce(left, Order::any());
