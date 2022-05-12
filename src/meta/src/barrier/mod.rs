@@ -21,7 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -213,7 +213,7 @@ where
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = Epoch::now();
+            let new_epoch = state.prev_epoch.next();
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
@@ -254,7 +254,7 @@ where
                 notifiers.iter_mut().for_each(Notifier::notify_collected);
                 continue;
             }
-            let new_epoch = Epoch::now();
+            let new_epoch = state.prev_epoch.next();
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
