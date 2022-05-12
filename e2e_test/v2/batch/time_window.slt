@@ -49,7 +49,7 @@ from hop(t1, created_at, interval '15' minute, interval '30' minute) order by ro
 query IT
 select sum(v), window_start
 from tumble(t1, created_at, interval '30' minute)
-group by window_start;
+group by window_start order by window_start;
 ----
 10 2022-01-01 10:00:00
 18 2022-01-01 10:30:00
@@ -58,7 +58,7 @@ group by window_start;
 query IIT
 select uid, sum(v), window_start
 from tumble(t1, created_at, interval '30' minute)
-group by window_start, uid;
+group by window_start, uid order by window_start, uid;
 ----
 1 5 2022-01-01 10:00:00
 2 2 2022-01-01 10:00:00
@@ -71,7 +71,7 @@ group by window_start, uid;
 query IT
 select sum(v), window_start
 from hop(t1, created_at, interval '15' minute, interval '30' minute)
-group by window_start;
+group by window_start order by window_start;
 ----
  9 2022-01-01 09:45:00
 10 2022-01-01 10:00:00
@@ -83,7 +83,7 @@ group by window_start;
 query IIT
 select uid, sum(v), window_start
 from hop(t1, created_at, interval '15' minute, interval '30' minute)
-group by window_start, uid;
+group by window_start, uid order by window_start;
 ----
 1 4 2022-01-01 09:45:00
 2 2 2022-01-01 09:45:00
