@@ -73,12 +73,15 @@ pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
 
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(
-        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f").map_err(|_| {
-            parse_error(
-                "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])",
-            )
-        })?,
+    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f") {
+        return Ok(NaiveDateTimeWrapper::new(timestamp));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(elem, "%Y-%m-%d") {
+        return Ok(NaiveDateTimeWrapper::new(date.and_hms(0, 0, 0)));
+    }
+    Err(parse_error(
+        "Can't cast string to timestamp \
+    (expected format is YYYY-MM-DD HH:MM:SS[.MS] OR YYYY-MM-DD)",
     ))
 }
 
@@ -222,7 +225,7 @@ mod tests {
     #[test]
     fn parse_str() {
         use super::*;
-
+        str_to_timestamp("1999-01-08").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         str_to_date("1999-01-08").unwrap();
         str_to_time("04:05:06").unwrap();
@@ -231,7 +234,7 @@ mod tests {
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
                 .to_string(),
-            "Parse error: Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])".to_string()
+            "Parse error: Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] OR YYYY-MM-DD)".to_string()
         );
         assert_eq!(
             str_to_date("1999-01-08AA").unwrap_err().to_string(),
