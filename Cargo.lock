@@ -3475,6 +3475,7 @@ dependencies = [
  "tonic",
  "tower",
  "tower-http",
+ "tracing",
  "twox-hash",
  "value-encoding",
  "workspace-hack",
