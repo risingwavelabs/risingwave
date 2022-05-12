@@ -335,11 +335,9 @@ mod tests {
     use std::io::Result;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use maplit::hashmap;
-
     use super::*;
     use crate::nexmark::NEXMARK_BASE_TIME;
-    use crate::Properties;
+    use crate::NexmarkProperties;
 
     #[test]
     fn test_milli_ts_to_timestamp_string() -> Result<()> {
@@ -354,8 +352,8 @@ mod tests {
 
     #[test]
     fn test_event() -> Result<()> {
-        let properties = Properties::new(hashmap! {});
-        let res = NexmarkConfig::from(&properties);
+        let properties = NexmarkProperties::default();
+        let res = NexmarkConfig::from(properties);
         assert!(res.is_ok());
         let config = res.unwrap();
 

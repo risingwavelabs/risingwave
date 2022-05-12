@@ -287,7 +287,12 @@ impl StreamFragmenter {
                         self.rewrite_stream_node_inner(state, child_node, true)?
                     }
                 }
-                _ => child_node,
+                // For exchanges, reset the flag.
+                NodeBody::Exchange(_) => {
+                    self.rewrite_stream_node_inner(state, child_node, false)?
+                }
+                // Otherwise, recursively visit the children.
+                _ => self.rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
             };
             inputs.push(input);
         }

@@ -125,6 +125,8 @@
   let currentMvs = new Set
   let showAssociateMv = false
 
+  const types = new Set(["source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
+
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
   <div class="flex flex-row items-center">
@@ -166,7 +168,8 @@
   /// Transform a single actor to a d3.hierarchy
   const hierarchyActor = (actor) => {
     /// Find a key ends with `Node`
-    const findTitle = (actorNode) => Object.keys(actorNode).find(x => x.endsWith("Node"))
+
+    const findTitle = (actorNode) => Object.keys(actorNode).find(x => types.has(x))
 
     /// Transform an actor node to a struct that can be parsed by d3.hierarchy
     const hierarchyActorNode = (node) => {
@@ -331,8 +334,8 @@
       actors.forEach(actor => {
         const fragmentId = fragmentIdOf(actor)
 
-        if (actor.nodes.chainNode) {
-          let upstreamActorIds = actor.nodes.input[0].mergeNode.upstreamActorId
+        if (actor.nodes.chain) {
+          let upstreamActorIds = actor.nodes.input[0].merge.upstreamActorId
           if (upstreamActorIds.length != 0) {
             let upstreamFragmentId = fragmentIdOf(actorMap.get(upstreamActorIds[0]))
             actorNodes.get(upstreamFragmentId).parents.push(fragmentId)
