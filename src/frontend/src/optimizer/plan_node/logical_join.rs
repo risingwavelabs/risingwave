@@ -328,90 +328,64 @@ impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let left_len = self.left().schema().len();
-        let right_len = self.right().schema().len();
-        let output_column_cnt = Self::out_column_num(left_len, right_len, self.join_type());
+        let left_len = self.left.schema().fields.len();
 
-        let upstream_required_cols = FixedBitSet::from_iter(required_cols.iter().copied());
+        let total_len = self.left().schema().len() + self.right().schema().len();
+        let mut resized_required_cols = FixedBitSet::with_capacity(total_len);
 
-        let join_condition_required_cols: FixedBitSet = {
-            let mut join_condition_visitor =
-                CollectInputRef::new(FixedBitSet::with_capacity(left_len + right_len));
-            self.on.visit_expr(&mut join_condition_visitor);
-            let condition: FixedBitSet = join_condition_visitor.into();
-            let on2o_col_mapping = self.on2o_col_mapping();
-            on2o_col_mapping.rewrite_bitset(&condition)
-        };
-        let total_required_cols = {
-            let mut tmp = upstream_required_cols.clone();
-            tmp.union_with(&join_condition_required_cols);
-            tmp.ones().collect_vec()
-        };
-        // let total_len = self.left().schema().len() + self.right().schema().len();
-        // let mut resized_required_cols = FixedBitSet::with_capacity(total_len);
+        required_cols.iter().for_each(|&i| {
+            if self.is_right_join() {
+                resized_required_cols.insert(left_len + i);
+            } else {
+                resized_required_cols.insert(i);
+            }
+        });
 
-        // required_cols.ones().for_each(|i| {
-        //     if self.is_right_join() {
-        //         resized_required_cols.insert(left_len + i);
-        //     } else {
-        //         resized_required_cols.insert(i);
-        //     }
-        // });
+        let mut visitor = CollectInputRef::new(resized_required_cols);
+        self.on.visit_expr(&mut visitor);
+        let left_right_required_cols = FixedBitSet::from(visitor).ones().collect_vec();
 
-        // let mut visitor = CollectInputRef::new(resized_required_cols);
-        // self.on.visit_expr(&mut visitor);
-        // let left_right_required_cols = visitor.collect();
+        let mut on = self.on.clone();
+        let mut mapping =
+            ColIndexMapping::with_remaining_columns(&left_right_required_cols, total_len);
+        on = on.rewrite_expr(&mut mapping);
 
-        let (left_required_cols, right_required_cols): (Vec<_>, Vec<_>) = {
-            let o2l_mapping = self.o2l_col_mapping();
-            let o2r_mapping = self.o2r_col_mapping();
-            total_required_cols.iter().partition_map(|&idx_in_output| {
-                if let Some(idx_in_left) = o2l_mapping.try_map(idx_in_output) {
-                    Either::Left(idx_in_left)
-                } else {
-                    Either::Right(o2r_mapping.map(idx_in_output))
-                }
-            })
-        };
-        let (join, _) = self.rewrite_with_left_right(
+        let mut left_required_cols = Vec::new();
+        let mut right_required_cols = Vec::new();
+        FixedBitSet::with_capacity(self.right.schema().fields().len());
+        left_right_required_cols.iter().for_each(|&i| {
+            if i < left_len {
+                left_required_cols.push(i);
+            } else {
+                right_required_cols.push(i - left_len);
+            }
+        });
+
+        let join = LogicalJoin::new(
             self.left.prune_col(&left_required_cols),
-            ColIndexMapping::with_remaining_columns(
-                &left_required_cols,
-                self.left().schema().len(),
-            ),
             self.right.prune_col(&right_required_cols),
-            ColIndexMapping::with_remaining_columns(
-                &right_required_cols,
-                self.right().schema().len(),
-            ),
+            self.join_type,
+            on,
         );
-        if join_condition_required_cols.is_subset(&upstream_required_cols) {
+
+        let required_inputs_in_output = if self.is_left_join() {
+            left_required_cols
+        } else if self.is_right_join() {
+            right_required_cols
+        } else {
+            left_right_required_cols
+        };
+        if required_cols == required_inputs_in_output {
             join.into()
         } else {
-            let mapping =
-                ColIndexMapping::with_remaining_columns(&total_required_cols, self.schema().len());
-            let remaining_cols: Vec<_> =
-                required_cols.iter().map(|&idx| mapping.map(idx)).collect();
-            let src_size = join.schema().len();
-
-            // let required_inputs_in_output = if self.is_left_join() {
-            //     left_required_cols
-            // } else if self.is_right_join() {
-            //     right_required_cols
-            // } else {
-            //     left_right_required_cols
-            // };
-            // if required_cols == &required_inputs_in_output {
-            //     join.into()
-            // } else {
-            //     let mapping =
-            // ColIndexMapping::with_remaining_columns(&required_inputs_in_output);
-            //     let mut remaining_columns =
-            // FixedBitSet::with_capacity(join.schema().fields().len());
-            //     remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            let mapping = ColIndexMapping::with_remaining_columns(
+                &required_inputs_in_output,
+                self.schema().len(),
+            );
+            let remaining_columns = required_cols.iter().map(|&i| mapping.map(i)).collect_vec();
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_cols, src_size),
+                ColIndexMapping::with_remaining_columns(&remaining_columns, self.schema().len()),
             )
         }
     }
@@ -644,10 +618,8 @@ mod tests {
             let offset = if join.is_right_join() { 3 } else { 0 };
 
             // Perform the prune
-            let mut required_cols = FixedBitSet::with_capacity(3);
+            let mut required_cols = vec![0];
             // key 0 is never used in the join (always key 1)
-            required_cols.extend(vec![0]);
-            // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has been wrapped in a projection
             let as_plan = plan.as_logical_project().unwrap();
@@ -656,8 +628,7 @@ mod tests {
             assert_eq!(as_plan.schema().fields()[0], fields[offset]);
 
             // Perform the prune
-            let mut required_cols = FixedBitSet::with_capacity(3);
-            required_cols.extend(vec![0, 1, 2]);
+            let mut required_cols = vec![0, 1, 2];
             // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has not been wrapped in a projection
