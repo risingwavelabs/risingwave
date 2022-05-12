@@ -95,12 +95,15 @@ pub(crate) fn gen_materialized_source_plan(
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         required_cols.toggle(0);
+        let mut out_names = source_node.schema().names();
+        out_names.remove(0);
 
         PlanRoot::new(
             source_node,
             Distribution::HashShard(vec![0]),
             Order::any().clone(),
             required_cols,
+            out_names,
         )
         .gen_create_mv_plan(source.name.clone())?
     };
