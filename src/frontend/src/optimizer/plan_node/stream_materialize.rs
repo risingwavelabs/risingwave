@@ -48,6 +48,8 @@ impl StreamMaterialize {
         let schema = Self::derive_schema(input.schema())?;
         let pk_indices = input.pk_indices();
 
+        // Materialize executor won't change the append-only behavior of the stream, so it depends
+        // on input's `append_only`.
         Ok(PlanBase::new_stream(
             ctx,
             schema,
@@ -111,8 +113,18 @@ impl StreamMaterialize {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
+
+        let mut col_names = HashSet::new();
+        for name in &out_names {
+            if name == crate::binder::UNNAMED_COLUMN {
+                continue;
+            }
+            if !col_names.insert(name) {
+                return Err(
+                    InternalError(format!("column {} specified more than once", name)).into(),
+                );
+            }
+        }
         let mut out_name_iter = out_names.into_iter();
         let mut columns = schema
             .fields()
@@ -124,28 +136,14 @@ impl StreamMaterialize {
                     is_hidden: !user_cols.contains(i),
                 };
                 if !c.is_hidden {
-                    let s = out_name_iter.next().unwrap();
-                    if !s.is_empty() && s != "?column?" {
-                        c.column_desc.name = s;
+                    let name = out_name_iter.next().unwrap();
+                    if name != crate::binder::UNNAMED_COLUMN {
+                        c.column_desc.name = name;
                     }
                 }
                 c
             })
             .collect_vec();
-
-        let mut col_names = HashSet::new();
-        for c in &columns {
-            if c.is_hidden {
-                continue;
-            }
-            if !col_names.insert(c.column_desc.name.clone()) {
-                return Err(InternalError(format!(
-                    "column {} specified more than once",
-                    c.column_desc.name
-                ))
-                .into());
-            }
-        }
 
         // Since the `field.into()` only generate same ColumnId,
         // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
