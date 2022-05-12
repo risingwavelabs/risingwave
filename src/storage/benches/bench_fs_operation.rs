@@ -16,7 +16,7 @@ use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::io::{Read, Write};
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -81,10 +81,8 @@ fn gen_test_payload() -> Vec<u8> {
     ret
 }
 
-fn gen_tokio_files(
-    path: &PathBuf,
-) -> impl IntoIterator<Item = impl Future<Output = tokio::fs::File>> {
-    let path = path.clone();
+fn gen_tokio_files(path: &Path) -> impl IntoIterator<Item = impl Future<Output = tokio::fs::File>> {
+    let path = path.to_path_buf();
     (0..BENCH_SIZE).map(move |i| {
         let file_path = path.join(format!("{}.txt", i));
         async move {
@@ -100,7 +98,7 @@ fn gen_tokio_files(
     })
 }
 
-fn run_tokio_bench<R>(c: &mut Criterion, name: &str, path: &PathBuf, mut func: R)
+fn run_tokio_bench<R>(c: &mut Criterion, name: &str, path: &Path, mut func: R)
 where
     R: for<'b> FnMut(tokio::fs::File, &'b mut BenchStats, &'b Vec<u8>) -> BoxFuture<'b, ()>,
 {
@@ -122,7 +120,7 @@ where
     println!("Bench tokio {}: {}", name, stats);
 }
 
-fn run_tokio_bench_read<R>(c: &mut Criterion, name: &str, path: &PathBuf, func: R)
+fn run_tokio_bench_read<R>(c: &mut Criterion, name: &str, path: &Path, func: R)
 where
     R: Fn(tokio::fs::File) -> BoxFuture<'static, Vec<u8>> + Sync + Send + Clone + 'static,
 {
@@ -185,8 +183,8 @@ fn criterion_tokio(c: &mut Criterion) {
     });
 }
 
-fn gen_std_files(path: &PathBuf) -> impl IntoIterator<Item = std::fs::File> {
-    let path = path.clone();
+fn gen_std_files(path: &Path) -> impl IntoIterator<Item = std::fs::File> {
+    let path = path.to_path_buf();
     (0..BENCH_SIZE).map(move |i| {
         let file_path = path.join(format!("{}.txt", i));
         #[cfg(target_os = "macos")]
@@ -209,7 +207,7 @@ fn gen_std_files(path: &PathBuf) -> impl IntoIterator<Item = std::fs::File> {
     })
 }
 
-fn run_std_bench<R>(c: &mut Criterion, name: &str, path: &PathBuf, mut func: R)
+fn run_std_bench<R>(c: &mut Criterion, name: &str, path: &Path, mut func: R)
 where
     R: FnMut(std::fs::File, &mut BenchStats, &Vec<u8>),
 {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::{Error, ErrorKind};
 use std::path::PathBuf;
 
 use bytes::Bytes;
@@ -32,11 +33,7 @@ pub(super) mod utils {
         if let Some(dir) = path.parent() {
             // `create_dir_all` will not error even if the directory already exists.
             create_dir_all(dir).await.map_err(|e| {
-                ObjectError::internal(format!(
-                    "unable to create dir: {:?}. Err: {:?}",
-                    dir.to_str(),
-                    e
-                ))
+                ObjectError::disk(format!("unable to create dir: {:?}.", dir.to_str(),), e)
             })?;
         }
         Ok(())
@@ -56,18 +53,14 @@ pub(super) mod utils {
             .open(path)
             .await
             .map_err(|err| {
-                ObjectError::internal(format!(
-                    "Failed to open file {:?}. Err: {:?}",
-                    path.to_str(),
-                    err
-                ))
+                ObjectError::disk(format!("Failed to open file {:?}", path.to_str(),), err)
             })
     }
 
     pub async fn get_metadata(file: &File) -> ObjectResult<Metadata> {
         file.metadata()
             .await
-            .map_err(|err| ObjectError::internal(format!("Failed to get metadata. Err: {:?}", err)))
+            .map_err(|err| ObjectError::disk("Failed to get metadata.".to_string(), err))
     }
 }
 
@@ -86,7 +79,10 @@ impl LocalDiskObjectStore {
 
     pub fn new_file_path(&self, path: &str) -> ObjectResult<PathBuf> {
         if path.starts_with('/') {
-            return Err(ObjectError::internal("path should not start with /"));
+            return Err(ObjectError::disk(
+                "".to_string(),
+                std::io::Error::new(std::io::ErrorKind::Other, "path should not start with /"),
+            ));
         };
         let mut ret = PathBuf::from(&self.path_prefix);
         ret.push(path);
@@ -111,12 +107,12 @@ impl ObjectStore for LocalDiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let mut file =
             utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
-        file.write_all(&obj).await.map_err(|e| {
-            ObjectError::internal(format!("failed to write {}, err: {:?}", path, e))
-        })?;
-        file.flush().await.map_err(|e| {
-            ObjectError::internal(format!("failed to flush {}, err: {:?}", path, e))
-        })?;
+        file.write_all(&obj)
+            .await
+            .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
+        file.flush()
+            .await
+            .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
         Ok(())
     }
 
@@ -129,10 +125,7 @@ impl ObjectStore for LocalDiskObjectStore {
                 let metadata = utils::get_metadata(&file).await?;
                 let mut buf = Vec::with_capacity(metadata.len() as usize);
                 file.read_to_end(&mut buf).await.map_err(|e| {
-                    ObjectError::internal(format!(
-                        "failed to read the whole file {}, err: {:?}",
-                        path, e
-                    ))
+                    ObjectError::disk(format!("failed to read the whole file {}", path), e)
                 })?;
                 Ok(Bytes::from(buf))
             }
@@ -145,11 +138,17 @@ impl ObjectStore for LocalDiskObjectStore {
         let metadata = utils::get_metadata(&file).await?;
         for block_loc in &block_locs {
             if block_loc.offset + block_loc.size > metadata.len() as usize {
-                return Err(ObjectError::internal(format!(
-                    "block location {:?} is out of bounds for file of len {}",
-                    block_loc,
-                    metadata.len()
-                )));
+                return Err(ObjectError::disk(
+                    "".to_string(),
+                    Error::new(
+                        ErrorKind::Other,
+                        format!(
+                            "block location {:?} is out of bounds for file of len {}",
+                            block_loc,
+                            metadata.len()
+                        ),
+                    ),
+                ));
             }
         }
         let mut ret = Vec::with_capacity(block_locs.len());
@@ -159,26 +158,18 @@ impl ObjectStore for LocalDiskObjectStore {
             file.seek(std::io::SeekFrom::Start(block_loc.offset as u64))
                 .await
                 .map_err(|err| {
-                    ObjectError::internal(format!(
-                        "Failed to seek to offset {}. Err: {:?}",
-                        block_loc.offset, err
-                    ))
+                    ObjectError::disk(
+                        format!("Failed to seek to offset {}.", block_loc.offset),
+                        err,
+                    )
                 })?;
-            let read_size = file.read_exact(&mut buf).await.map_err(|err| {
-                ObjectError::internal(format!(
-                    "Failed to read from offset {}. Err: {:?}",
-                    block_loc.offset, err
-                ))
+            file.read_exact(&mut buf).await.map_err(|err| {
+                ObjectError::disk(
+                    format!("Failed to read from offset {}.", block_loc.offset),
+                    err,
+                )
             })?;
 
-            if read_size != buf.len() {
-                return Err(ObjectError::internal(format!(
-                    "Failed to read from offset {}. Read {} bytes, expected {}",
-                    block_loc.offset,
-                    read_size,
-                    buf.len()
-                )));
-            }
             ret.push(Bytes::from(buf));
         }
         Ok(ret)
@@ -196,9 +187,7 @@ impl ObjectStore for LocalDiskObjectStore {
     async fn delete(&self, path: &str) -> ObjectResult<()> {
         tokio::fs::remove_file(self.new_file_path(path)?.as_path())
             .await
-            .map_err(|e| {
-                ObjectError::internal(format!("failed to delete {}, err: {:?}", path, e))
-            })?;
+            .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
         Ok(())
     }
 }
