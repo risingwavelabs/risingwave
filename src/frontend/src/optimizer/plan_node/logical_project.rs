@@ -24,9 +24,7 @@ use super::{
     BatchProject, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamProject,
     ToBatch, ToStream,
 };
-use crate::expr::{
-    as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
-};
+use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
