@@ -34,7 +34,8 @@ impl Epoch {
         Self(Self::physical_now() << EPOCH_PHYSICAL_SHIFT_BITS)
     }
 
-    pub fn next(&self) -> Epoch {
+    #[must_use]
+    pub fn next(self) -> Self {
         let physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
         match physical_now.cmp(&prev_physical_time) {
