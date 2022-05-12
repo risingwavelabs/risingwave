@@ -13,153 +13,243 @@
 // limitations under the License.
 
 use std::fmt::{Display, Formatter};
-use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::future::Future;
+use std::io::{Read, Write};
+use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use tokio::io::AsyncReadExt;
+use criterion::{criterion_group, criterion_main, Criterion};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use libc::F_NOCACHE;
+use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::task::spawn_blocking;
 
 #[derive(Default)]
 struct BenchStats {
-    total_time_read_millis: f64,
-    total_read_count: usize,
-    total_time_write_millis: f64,
-    total_write_count: usize,
+    total_time_millis: u128,
+    total_count: usize,
 }
 
 impl Display for BenchStats {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Write {} times, avg {}ms. Read {} times, avg {}ms",
-            self.total_write_count,
-            self.total_time_write_millis / self.total_write_count as f64,
-            self.total_read_count,
-            self.total_time_read_millis / self.total_read_count as f64
-        )?;
-        Ok(())
+            "op {} times, avg time: {} ms",
+            self.total_count,
+            self.total_time_millis as f64 / self.total_count as f64
+        )
+    }
+}
+
+struct Timer<'a> {
+    stats: &'a mut BenchStats,
+    start_time: SystemTime,
+}
+
+impl Drop for Timer<'_> {
+    fn drop(&mut self) {
+        let end_time = SystemTime::now();
+        let duration = end_time
+            .duration_since(self.start_time)
+            .unwrap()
+            .as_millis();
+        self.stats.total_time_millis += duration;
+        self.stats.total_count += 1;
     }
 }
 
 impl BenchStats {
-    fn add_read_time(&mut self, time: f64) {
-        self.total_time_read_millis += time;
-        self.total_read_count += 1;
-    }
-
-    fn add_write_time(&mut self, time: f64) {
-        self.total_time_write_millis += time;
-        self.total_write_count += 1;
+    fn start_timer(&mut self) -> Timer {
+        Timer {
+            stats: self,
+            start_time: SystemTime::now(),
+        }
     }
 }
 
 const BENCH_SIZE: usize = 10;
+const PAYLOAD_SIZE: usize = 1_000_000;
 fn gen_test_payload() -> Vec<u8> {
     let mut ret = Vec::new();
-    for i in 0..1_000_000 {
+    for i in 0..PAYLOAD_SIZE {
         ret.extend(format!("{:08}", i).as_bytes());
     }
     ret
 }
 
-async fn run_tokio_fs(payload: &[u8], stats: &mut BenchStats) {
-    use tempfile::tempdir;
-    use tokio::fs::OpenOptions;
-    use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-
-    let temp_dir = tempdir().unwrap();
-
-    for i in 0..BENCH_SIZE {
-        let mut path = PathBuf::from(temp_dir.path());
-        path.push(format!("{}.txt", i));
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&path)
-            .await
-            .unwrap();
-        let start_time = SystemTime::now();
-        file.write_all(payload).await.unwrap();
-        stats.add_write_time(
-            SystemTime::now()
-                .duration_since(start_time)
+fn gen_tokio_files(
+    path: &PathBuf,
+) -> impl IntoIterator<Item = impl Future<Output = tokio::fs::File>> {
+    let path = path.clone();
+    (0..BENCH_SIZE).map(move |i| {
+        let file_path = path.join(format!("{}.txt", i));
+        async move {
+            tokio::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .custom_flags(F_NOCACHE)
+                .open(file_path)
+                .await
                 .unwrap()
-                .as_millis() as f64,
-        );
-        file.seek(SeekFrom::Start(0)).await.unwrap();
-        let mut buffer = Vec::with_capacity(payload.len());
-        let start_time = SystemTime::now();
-        file.read_to_end(&mut buffer).await.unwrap();
-        stats.add_read_time(
-            SystemTime::now()
-                .duration_since(start_time)
-                .unwrap()
-                .as_millis() as f64,
-        );
-        assert_eq!(buffer, payload);
-    }
+        }
+    })
 }
 
-fn run_std_fs(payload: &[u8], stats: &mut BenchStats) {
-    use tempfile::tempdir;
-    let temp_dir = tempdir().unwrap();
-
-    for i in 0..BENCH_SIZE {
-        let mut path = PathBuf::from(temp_dir.path());
-        path.push(format!("{}.txt", i));
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&path)
-            .unwrap();
-        let start_time = SystemTime::now();
-        file.write_all(payload).unwrap();
-        stats.add_write_time(
-            SystemTime::now()
-                .duration_since(start_time)
-                .unwrap()
-                .as_millis() as f64,
-        );
-        file.seek(SeekFrom::Start(0)).unwrap();
-        let mut buffer = Vec::with_capacity(payload.len());
-        let start_time = SystemTime::now();
-        file.read_to_end(&mut buffer).unwrap();
-        stats.add_read_time(
-            SystemTime::now()
-                .duration_since(start_time)
-                .unwrap()
-                .as_millis() as f64,
-        );
-        assert_eq!(buffer, payload);
-    }
-}
-
-fn criterion_benchmark(c: &mut Criterion) {
-    let payload = gen_test_payload();
+fn run_tokio_bench<R>(c: &mut Criterion, name: &str, path: &PathBuf, mut func: R)
+where
+    R: for<'b> FnMut(tokio::fs::File, &'b mut BenchStats, &'b Vec<u8>) -> BoxFuture<'b, ()>,
+{
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut tokio_stats = BenchStats::default();
-    c.bench_with_input(
-        BenchmarkId::new("fs_operation", "tokio"),
-        &payload,
-        |b, payload| {
-            b.iter(|| runtime.block_on(run_tokio_fs(payload, &mut tokio_stats)));
-        },
-    );
-    println!("tokio stat: {}", tokio_stats);
-    let mut std_stats = BenchStats::default();
-    c.bench_with_input(
-        BenchmarkId::new("fs_operation", "std"),
-        &payload,
-        |b, payload| {
-            b.iter(|| run_std_fs(payload, &mut std_stats));
-        },
-    );
-    println!("std stat: {}", std_stats);
+    let mut stats = BenchStats::default();
+    let payload = Arc::new(gen_test_payload());
+
+    c.bench_function(format!("fs_operation/tokio/{}", name).as_str(), |b| {
+        b.iter(|| {
+            runtime.block_on(async {
+                for file_future in gen_tokio_files(path) {
+                    let file = file_future.await;
+                    func(file, &mut stats, payload.as_ref()).await;
+                }
+            });
+        })
+    });
+
+    println!("Bench tokio {}: {}", name, stats);
 }
 
-criterion_group!(benches, criterion_benchmark);
+fn run_tokio_bench_read<R>(c: &mut Criterion, name: &str, path: &PathBuf, func: R)
+where
+    R: Fn(tokio::fs::File) -> BoxFuture<'static, Vec<u8>> + Sync + Send + Clone + 'static,
+{
+    run_tokio_bench(c, name, path, move |file, stats, payload| {
+        let func = func.clone();
+        async move {
+            let buffer = {
+                let _timer = stats.start_timer();
+                func(file).await
+            };
+            assert_eq!(buffer, *payload);
+        }
+        .boxed()
+    })
+}
+
+fn criterion_tokio(c: &mut Criterion) {
+    let payload_size = gen_test_payload().len();
+    let tokio_path = TempDir::new().unwrap().into_path();
+    run_tokio_bench(c, "write", &tokio_path, |mut file, stats, payload| {
+        async move {
+            let _timer = stats.start_timer();
+            file.write_all(payload).await.unwrap();
+        }
+        .boxed()
+    });
+    run_tokio_bench_read(c, "read", &tokio_path, move |mut file| {
+        async move {
+            let mut buffer = Vec::with_capacity(payload_size);
+            file.read_to_end(&mut buffer).await.unwrap();
+            buffer
+        }
+        .boxed()
+    });
+    run_tokio_bench_read(c, "blocking-read", &tokio_path, move |file| {
+        async move {
+            let mut file = file.into_std().await;
+            spawn_blocking(move || {
+                let mut buffer = Vec::with_capacity(payload_size);
+                file.read_to_end(&mut buffer).unwrap();
+                buffer
+            })
+            .await
+            .unwrap()
+        }
+        .boxed()
+    });
+    run_tokio_bench_read(c, "blocking-pread", &tokio_path, move |file| {
+        async move {
+            let file = file.into_std().await;
+            spawn_blocking(move || {
+                let mut buffer = vec![0; payload_size];
+                file.read_exact_at(&mut buffer, 0).unwrap();
+                buffer
+            })
+            .await
+            .unwrap()
+        }
+        .boxed()
+    });
+}
+
+fn gen_std_files(path: &PathBuf) -> impl IntoIterator<Item = std::fs::File> {
+    let path = path.clone();
+    (0..BENCH_SIZE).map(move |i| {
+        let file_path = path.join(format!("{}.txt", i));
+        #[cfg(target_os = "macos")]
+        let ret = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .custom_flags(F_NOCACHE)
+            .open(file_path)
+            .unwrap();
+
+        #[cfg(not(target_os = "macos"))]
+        let ret = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(file_path)
+            .unwrap();
+        ret
+    })
+}
+
+fn run_std_bench<R>(c: &mut Criterion, name: &str, path: &PathBuf, mut func: R)
+where
+    R: FnMut(std::fs::File, &mut BenchStats, &Vec<u8>),
+{
+    let mut stats = BenchStats::default();
+    let payload = Arc::new(gen_test_payload());
+
+    c.bench_function(format!("fs_operation/std/{}", name).as_str(), |b| {
+        b.iter(|| {
+            for file in gen_std_files(path) {
+                func(file, &mut stats, payload.as_ref());
+            }
+        });
+    });
+
+    println!("Bench std {}: {}", name, stats);
+}
+
+fn criterion_std(c: &mut Criterion) {
+    let std_path = TempDir::new().unwrap().into_path();
+    run_std_bench(c, "write", &std_path, |mut file, stats, payload| {
+        let _timer = stats.start_timer();
+        file.write_all(payload).unwrap();
+    });
+    run_std_bench(c, "read", &std_path, |mut file, stats, payload| {
+        let mut buffer = Vec::with_capacity(payload.len());
+        {
+            let _timer = stats.start_timer();
+            file.read_to_end(&mut buffer).unwrap();
+        }
+        assert_eq!(buffer, *payload);
+    });
+    run_std_bench(c, "pread", &std_path, |file, stats, payload| {
+        let mut buffer = vec![0; payload.len()];
+        {
+            let _timer = stats.start_timer();
+            file.read_exact_at(&mut buffer, 0).unwrap();
+        }
+        assert_eq!(buffer, *payload);
+    });
+}
+
+criterion_group!(benches, criterion_tokio, criterion_std);
 criterion_main!(benches);
