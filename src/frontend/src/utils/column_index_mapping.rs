@@ -336,6 +336,21 @@ impl ColIndexMapping {
         }
         ret
     }
+
+    pub fn rewrite_bitset2(&self, bitset: &FixedBitSet) -> FixedBitSet {
+        assert_eq!(bitset.len(), self.source_size());
+        let mut ret = FixedBitSet::with_capacity(self.target_size());
+        let mut z = vec![];
+        for i in bitset.ones() {
+            let ni = self.map(i);
+            ret.insert(ni);
+            z.push(ni);
+        }
+        for i in 1..z.len() {
+            assert!(z[i - 1] < z[i]);
+        }
+        ret
+    }
 }
 
 impl ExprRewriter for ColIndexMapping {
