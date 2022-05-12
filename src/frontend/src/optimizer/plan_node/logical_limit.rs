@@ -18,8 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    BatchLimit, BatchLimit, ColPrunable, ColPrunable, PlanBase, PlanBase, PlanNode, PlanRef,
-    PlanRef, PlanTreeNodeUnary, PlanTreeNodeUnary, ToBatch, ToBatch, ToStream, ToStream,
+    BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
 };
 use crate::utils::ColIndexMapping;
 
