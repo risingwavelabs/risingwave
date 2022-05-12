@@ -64,6 +64,7 @@ impl PlanRoot {
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
+        assert_eq!(out_fields.count_ones(..), out_names.len());
 
         let schema = Schema {
             fields: out_fields
