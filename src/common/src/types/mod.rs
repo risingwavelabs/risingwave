@@ -328,6 +328,7 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 pub fn get_data_type_from_datum(datum: &Datum) -> Result<DataType> {
     match datum {
+        // TODO: Predicate data type from None Datum
         None => Err(internal_error(
             "cannot get data type from None Datum".to_string(),
         )),
