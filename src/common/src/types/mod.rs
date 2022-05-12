@@ -23,6 +23,7 @@ use crate::error::{internal_error, ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
+
 use std::fmt::{Debug, Display, Formatter};
 
 pub use native_type::*;
@@ -34,8 +35,11 @@ mod decimal;
 pub mod interval;
 
 mod ordered_float;
+
 use chrono::{Datelike, Timelike};
-pub use chrono_wrapper::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+pub use chrono_wrapper::{
+    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
+};
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
@@ -521,6 +525,7 @@ impl From<f32> for ScalarImpl {
         Self::Float32(f.into())
     }
 }
+
 impl From<f64> for ScalarImpl {
     fn from(f: f64) -> Self {
         Self::Float64(f.into())

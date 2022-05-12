@@ -21,7 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{ConnectorStateV2, Properties, SplitReaderImpl};
+use risingwave_connector::{ConnectorProperties, ConnectorStateV2, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
@@ -31,7 +31,7 @@ use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSour
 /// simply loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
-    pub config: Properties,
+    pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
 }
@@ -73,7 +73,7 @@ impl ConnectorSource {
             splits
         );
 
-        let reader = SplitReaderImpl::create(Properties::new(self.config.0.clone()), splits)
+        let reader = SplitReaderImpl::create(self.config.clone(), splits)
             .await
             .to_rw_result()?;
 
