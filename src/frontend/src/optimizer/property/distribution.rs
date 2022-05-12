@@ -86,13 +86,14 @@ impl Distribution {
     //     |Anyshard|   |single|  |broadcast|
     //     +---+----+   +------+  +---------+
     //         ^
-    //  +------+------+
-    //  |hash_shard(a)|
-    //  +------+------+
-    //         ^
     // +-------+-------+
     // |hash_shard(a,b)|
     // +---------------+
+    //         ^
+    //  +------+------+
+    //  |hash_shard(a)|
+    //  +------+------+
+    //
     pub fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => matches!(other, Distribution::Any),
@@ -102,9 +103,9 @@ impl Distribution {
             Distribution::HashShard(keys) => match other {
                 Distribution::Any => true,
                 Distribution::AnyShard => true,
-                Distribution::HashShard(other_keys) => other_keys
+                Distribution::HashShard(other_keys) => keys
                     .iter()
-                    .all(|other_key| keys.iter().any(|key| key == other_key)),
+                    .all(|key| other_keys.iter().any(|other_key| key == other_key)),
                 _ => false,
             },
         }
@@ -134,8 +135,8 @@ mod tests {
     use super::Distribution;
 
     fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
-        assert!(uni.satisfies(sub));
-        assert!(!sub.satisfies(uni));
+        assert!(!uni.satisfies(sub));
+        assert!(sub.satisfies(uni));
     }
 
     fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
