@@ -434,7 +434,7 @@
                       BatchHashJoin { type: Inner, predicate: $2 = $3 }
                         BatchProject { exprs: [$2, $3, $5], expr_alias: [ ,  ,  ] }
                           BatchExchange { order: [], dist: HashShard([5]) }
-                            BatchHashJoin { type: Inner, predicate: $1 = $4AND $0 = $5 }
+                            BatchHashJoin { type: Inner, predicate: $1 = $4 AND $0 = $5 }
                               BatchProject { exprs: [$0, $3, $4, $5], expr_alias: [ ,  ,  ,  ] }
                                 BatchExchange { order: [], dist: HashShard([3, 0]) }
                                   BatchHashJoin { type: Inner, predicate: $1 = $2 }
@@ -469,7 +469,7 @@
                     StreamHashJoin { type: Inner, predicate: $2 = $7 }
                       StreamProject { exprs: [$2, $3, $8, $4, $5, $6, $9], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
                         StreamExchange { dist: HashShard([8]) }
-                          StreamHashJoin { type: Inner, predicate: $1 = $7AND $0 = $8 }
+                          StreamHashJoin { type: Inner, predicate: $1 = $7 AND $0 = $8 }
                             StreamProject { exprs: [$0, $5, $6, $7, $2, $3, $8], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
                               StreamExchange { dist: HashShard([5, 0]) }
                                 StreamHashJoin { type: Inner, predicate: $1 = $4 }
@@ -817,7 +817,7 @@
                       BatchHashJoin { type: Inner, predicate: $0 = $6 }
                         BatchProject { exprs: [$0, $3, $4, $5, $6, $9], expr_alias: [ ,  ,  ,  ,  ,  ] }
                           BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchHashJoin { type: Inner, predicate: $2 = $8AND $1 = $7 }
+                            BatchHashJoin { type: Inner, predicate: $2 = $8 AND $1 = $7 }
                               BatchExchange { order: [], dist: HashShard([2, 1]) }
                                 BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $7], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
                                   BatchHashJoin { type: Inner, predicate: $2 = $6 }
@@ -850,7 +850,7 @@
                     StreamHashJoin { type: Inner, predicate: $0 = $10 }
                       StreamProject { exprs: [$0, $3, $4, $5, $6, $12, $7, $8, $9, $13], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamHashJoin { type: Inner, predicate: $2 = $11AND $1 = $10 }
+                          StreamHashJoin { type: Inner, predicate: $2 = $11 AND $1 = $10 }
                             StreamExchange { dist: HashShard([2, 1]) }
                               StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $9, $6, $7, $10], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
                                 StreamHashJoin { type: Inner, predicate: $2 = $8 }
@@ -1165,7 +1165,7 @@
               BatchExchange { order: [], dist: HashShard([1]) }
                 BatchHashAgg { group_keys: [$0], aggs: [count($1)] }
                   BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
-                    BatchHashJoin { type: LeftOuter, predicate: $0 = $2AND Not(Like($3, '%:1%:2%':Varchar)) }
+                    BatchHashJoin { type: LeftOuter, predicate: $0 = $2 AND Not(Like($3, '%:1%:2%':Varchar)) }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchScan { table: customer, columns: [c_custkey] }
                       BatchExchange { order: [], dist: HashShard([1]) }
@@ -1178,7 +1178,7 @@
             StreamExchange { dist: HashShard([2]) }
               StreamHashAgg { group_keys: [$0], aggs: [count, count($1)] }
                 StreamProject { exprs: [$0, $2, $1, $5], expr_alias: [ ,  ,  ,  ] }
-                  StreamHashJoin { type: LeftOuter, predicate: $0 = $3AND Not(Like($4, '%:1%:2%':Varchar)) }
+                  StreamHashJoin { type: LeftOuter, predicate: $0 = $3 AND Not(Like($4, '%:1%:2%':Varchar)) }
                     StreamExchange { dist: HashShard([0]) }
                       StreamTableScan { table: customer, columns: [c_custkey, _row_id#0], pk_indices: [1] }
                     StreamExchange { dist: HashShard([1]) }
@@ -1644,7 +1644,7 @@
                   BatchProject { exprs: [$2, $3, $6], expr_alias: [ ,  ,  ] }
                     BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5], aggs: [sum($6)] }
                       BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
-                        BatchHashJoin { type: LeftOuter, predicate: $1 = $7AND $2 = $8 }
+                        BatchHashJoin { type: LeftOuter, predicate: $1 = $7 AND $2 = $8 }
                           BatchExchange { order: [], dist: HashShard([1, 2]) }
                             BatchHashJoin { type: LeftSemi, predicate: $1 = $6 }
                               BatchExchange { order: [], dist: HashShard([1]) }
@@ -1677,7 +1677,7 @@
                   StreamProject { exprs: [$2, $3, $7, $0, $1, $4, $5], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
                     StreamHashAgg { group_keys: [$0, $1, $2, $3, $4, $5], aggs: [count, sum($6)] }
                       StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $9], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
-                        StreamHashJoin { type: LeftOuter, predicate: $1 = $7AND $2 = $8 }
+                        StreamHashJoin { type: LeftOuter, predicate: $1 = $7 AND $2 = $8 }
                           StreamExchange { dist: HashShard([1, 2]) }
                             StreamHashJoin { type: LeftSemi, predicate: $1 = $6 }
                               StreamExchange { dist: HashShard([1]) }
