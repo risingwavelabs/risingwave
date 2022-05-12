@@ -50,6 +50,7 @@ pub struct PlanRoot {
     required_dist: Distribution,
     required_order: Order,
     out_fields: FixedBitSet,
+    out_names: Vec<String>,
     schema: Schema,
 }
 
@@ -59,6 +60,7 @@ impl PlanRoot {
         required_dist: Distribution,
         required_order: Order,
         out_fields: FixedBitSet,
+        out_names: Vec<String>,
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
@@ -74,6 +76,7 @@ impl PlanRoot {
             required_dist,
             required_order,
             out_fields,
+            out_names,
             schema,
         }
     }
@@ -235,6 +238,7 @@ impl PlanRoot {
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            self.out_names.clone(),
             None,
         )
     }
@@ -251,6 +255,7 @@ impl PlanRoot {
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            self.out_names.clone(),
             Some(index_on),
         )
     }
@@ -284,11 +289,13 @@ mod tests {
         )
         .into();
         let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
+        let out_names = vec!["v1".into()];
         let root = PlanRoot::new(
             values,
             Distribution::any().clone(),
             Order::any().clone(),
             out_fields,
+            out_names,
         );
         let subplan = root.as_subplan();
         assert_eq!(

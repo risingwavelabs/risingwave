@@ -58,19 +58,6 @@ impl StreamMaterialize {
     }
 
     fn derive_schema(schema: &Schema) -> Result<Schema> {
-        let mut col_names = HashSet::new();
-        for field in schema.fields() {
-            if is_row_id_column_name(&field.name) {
-                continue;
-            }
-            if !col_names.insert(field.name.clone()) {
-                return Err(InternalError(format!(
-                    "column {} specified more than once",
-                    field.name
-                ))
-                .into());
-            }
-        }
         let mut row_id_count = 0;
         let fields = schema
             .fields()
@@ -107,6 +94,7 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        out_names: Vec<String>,
         is_index_on: Option<TableId>,
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
@@ -125,15 +113,39 @@ impl StreamMaterialize {
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
+        let mut out_name_iter = out_names.into_iter();
         let mut columns = schema
             .fields()
             .iter()
             .enumerate()
-            .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc::from_field_without_column_id(field),
-                is_hidden: !user_cols.contains(i),
+            .map(|(i, field)| {
+                let mut c = ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    is_hidden: !user_cols.contains(i),
+                };
+                if !c.is_hidden {
+                    let s = out_name_iter.next().unwrap();
+                    if !s.is_empty() && s != "?column?" {
+                        c.column_desc.name = s;
+                    }
+                }
+                c
             })
             .collect_vec();
+
+        let mut col_names = HashSet::new();
+        for c in &columns {
+            if c.is_hidden {
+                continue;
+            }
+            if !col_names.insert(c.column_desc.name.clone()) {
+                return Err(InternalError(format!(
+                    "column {} specified more than once",
+                    c.column_desc.name
+                ))
+                .into());
+            }
+        }
 
         // Since the `field.into()` only generate same ColumnId,
         // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
