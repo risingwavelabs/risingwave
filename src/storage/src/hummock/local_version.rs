@@ -22,6 +22,7 @@ use risingwave_pb::hummock::{HummockVersion, Level, SstableInfo};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
+use crate::hummock::conflict_detector::ConflictDetector;
 
 pub type UncommittedSsts = BTreeMap<HummockEpoch, Vec<SstableInfo>>;
 
@@ -52,14 +53,6 @@ impl LocalVersion {
         self.shared_buffer.get(&epoch)
     }
 
-    pub fn get_first_epoch(&self) -> Option<HummockEpoch> {
-        let epoch = self
-            .shared_buffer
-            .first_key_value()
-            .map(|(&epoch, _)| epoch);
-        epoch
-    }
-
     pub fn iter_shared_buffer(
         &self,
     ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)> {
@@ -77,7 +70,11 @@ impl LocalVersion {
         self.uncommitted_ssts.entry(epoch).or_default().extend(ssts);
     }
 
-    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
+    pub fn set_pinned_version(
+        &mut self,
+        new_pinned_version: HummockVersion,
+        conflict_detector: Arc<ConflictDetector>,
+    ) {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
             self.uncommitted_ssts = self
@@ -88,6 +85,7 @@ impl LocalVersion {
                 .split_off(&(new_pinned_version.max_committed_epoch + 1));
             // buffer_to_release = older part, self.shared_buffer = new part
             std::mem::swap(&mut buffer_to_release, &mut self.shared_buffer);
+            conflict_detector.set_watermark(new_pinned_version.max_committed_epoch);
         }
 
         // update pinned version

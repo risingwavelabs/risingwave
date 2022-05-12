@@ -67,6 +67,7 @@ impl ConflictDetector {
                 .compare_exchange(current_watermark, epoch)
                 .is_ok()
             {
+                self.epoch_history.retain(|x, _| x > &(epoch));
                 return;
             }
         }
@@ -105,7 +106,7 @@ impl ConflictDetector {
     }
 
     /// Archives an epoch. An archived epoch cannot be written anymore.
-    pub fn archive_epoch(&self, epoch: HummockEpoch, first_epoch: Option<HummockEpoch>) {
+    pub fn archive_epoch(&self, epoch: HummockEpoch) {
         assert!(
             epoch > self.get_epoch_watermark(),
             "write to an archived epoch: {} , c_epoch :{}",
@@ -120,12 +121,6 @@ impl ConflictDetector {
             );
         }
         self.epoch_history.insert(epoch, None);
-        if let Some(first_epoch) = first_epoch {
-            if first_epoch - 1 != self.get_epoch_watermark() {
-                self.set_watermark(first_epoch - 1);
-                self.epoch_history.retain(|x, _| x > &(first_epoch - 1));
-            }
-        }
     }
 }
 
@@ -203,7 +198,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233, Some(233));
+        detector.archive_epoch(233);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -228,7 +223,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233, Some(233));
+        detector.archive_epoch(233);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -252,19 +247,10 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.check_conflict_and_track_write_batch(
-            once((
-                Bytes::from("key1"),
-                HummockValue::Delete(Default::default()),
-            ))
-            .collect_vec()
-            .as_slice(),
-            234,
-        );
         assert!(detector.epoch_history.get(&233).unwrap().is_some());
-        detector.archive_epoch(233, Some(233));
+        detector.archive_epoch(233);
         assert!(detector.epoch_history.get(&233).unwrap().is_none());
-        detector.archive_epoch(233, Some(234));
+        detector.set_watermark(233);
         assert!(detector.epoch_history.get(&233).is_none());
     }
 
@@ -281,7 +267,7 @@ mod test {
             .as_slice(),
             233,
         );
-        detector.archive_epoch(233, Some(233));
+        detector.set_watermark(233);
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),

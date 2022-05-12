@@ -168,7 +168,9 @@ impl LocalVersionManager {
             return false;
         }
 
-        guard.set_pinned_version(newly_pinned_version);
+        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+            guard.set_pinned_version(newly_pinned_version, conflict_detector.clone());
+        }
 
         self.worker_context
             .version_update_notifier_tx
@@ -348,8 +350,7 @@ impl LocalVersionManager {
                             shared_buffer.write().succeed_upload_task(task_id);
                         }
                         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-                            let first_epoch = guard.get_first_epoch();
-                            conflict_detector.archive_epoch(epoch, first_epoch);
+                            conflict_detector.archive_epoch(epoch);
                         }
                     }
                     Err(_) => {
