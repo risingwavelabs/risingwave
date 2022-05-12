@@ -145,25 +145,6 @@ impl LogicalJoin {
         Self::o2r_col_mapping_inner(left_len, right_len, join_type).inverse()
     }
 
-    pub fn l2on_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::identity(self.left().schema().len())
-    }
-
-    pub fn on2l_col_mapping(&self) -> ColIndexMapping {
-        self.l2on_col_mapping().inverse()
-    }
-
-    pub fn r2on_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_shift_offset(
-            self.right().schema().len(),
-            self.left().schema().len().try_into().unwrap(),
-        )
-    }
-
-    pub fn on2r_col_mapping(&self) -> ColIndexMapping {
-        self.r2on_col_mapping().inverse()
-    }
-
     pub fn o2l_col_mapping(&self) -> ColIndexMapping {
         Self::o2l_col_mapping_inner(
             self.left().schema().len(),
@@ -194,27 +175,6 @@ impl LogicalJoin {
             self.right().schema().len(),
             self.join_type(),
         )
-    }
-
-    pub fn on2o_col_mapping(&self) -> ColIndexMapping {
-        let l2o = self.l2o_col_mapping();
-        let r2o = self.r2o_col_mapping();
-        let left_len = self.left().schema().len();
-        let right_len = self.right().schema().len();
-        let on2o: Vec<Option<usize>> = (0..left_len + right_len)
-            .map(|i| {
-                if i < left_len {
-                    l2o.try_map(i)
-                } else {
-                    r2o.try_map(i - left_len)
-                }
-            })
-            .collect_vec();
-        ColIndexMapping::new(on2o)
-    }
-
-    pub fn o2on_col_mapping(&self) -> ColIndexMapping {
-        self.on2o_col_mapping().inverse()
     }
 
     pub(super) fn derive_schema(
