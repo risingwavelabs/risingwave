@@ -14,11 +14,11 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
+
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
+    BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
 };
 use crate::utils::ColIndexMapping;
 

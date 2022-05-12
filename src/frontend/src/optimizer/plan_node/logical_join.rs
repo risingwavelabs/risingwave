@@ -15,7 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::{Either, Itertools};
+use itertools::{Itertools};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
@@ -618,7 +618,7 @@ mod tests {
             let offset = if join.is_right_join() { 3 } else { 0 };
 
             // Perform the prune
-            let mut required_cols = vec![0];
+            let required_cols = vec![0];
             // key 0 is never used in the join (always key 1)
             let plan = join.prune_col(&required_cols);
             // Check that the join has been wrapped in a projection
@@ -628,7 +628,7 @@ mod tests {
             assert_eq!(as_plan.schema().fields()[0], fields[offset]);
 
             // Perform the prune
-            let mut required_cols = vec![0, 1, 2];
+            let required_cols = vec![0, 1, 2];
             // should not panic here
             let plan = join.prune_col(&required_cols);
             // Check that the join has not been wrapped in a projection

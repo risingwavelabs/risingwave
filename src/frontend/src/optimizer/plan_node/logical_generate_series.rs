@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
+
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};

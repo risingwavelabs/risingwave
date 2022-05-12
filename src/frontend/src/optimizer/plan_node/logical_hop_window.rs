@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
