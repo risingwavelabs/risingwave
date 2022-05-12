@@ -21,7 +21,7 @@ use crate::binder::Binder;
 use crate::expr::Literal;
 
 impl Binder {
-    pub(super) fn bind_value(&mut self, value: Value) -> Result<Literal> {
+    pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s, b) => self.bind_number(s, b),
             Value::SingleQuotedString(s) => self.bind_string(s),

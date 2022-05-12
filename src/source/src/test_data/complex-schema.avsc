@@ -1,0 +1,66 @@
+{
+  "name": "user",
+  "type": "record",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int",
+      "doc": "Segment ID. Alternatively pair of code and member_id can be used.",
+      "default": 0
+    },
+    {
+      "name": "code",
+      "type": "string",
+      "doc": "Segment code. Requires segment.member_id.",
+      "default": ""
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "doc": "Defines when segment becomes 'live'. Timestamp in seconds from epoch. 0 enables segment immediately",
+      "default": 0
+    },
+    {
+      "name": "domain",
+      "type": {
+        "name": "domain",
+        "type": "enum",
+        "doc": "Mobile device domain.",
+        "symbols": [
+          "idfa",
+          "sha1udid",
+          "md5udid",
+          "openudid",
+          "aaid",
+          "windowsadid",
+          "rida"
+        ]
+      }
+    },
+    {
+      "name": "xfa",
+      "type": "record",
+      "doc": "Xandr synthetic ID record.",
+      "fields": [
+        {
+          "name": "device_model_id",
+          "type": "int",
+          "doc": "Device atlas device model.",
+          "default": 0
+        },
+        {
+          "name": "device_make_id",
+          "type": "int",
+          "doc": "Device atlas device make.",
+          "default": 0
+        },
+        {
+          "name": "ip",
+          "type": "string",
+          "default": "",
+          "doc": "Residential IP address."
+        }
+      ]
+    }
+  ]
+}
