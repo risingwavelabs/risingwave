@@ -259,12 +259,7 @@ impl ColPrunable for LogicalProject {
         // Rewrite each InputRef with new index.
         let (exprs, expr_alias) = required_cols
             .ones()
-            .map(|id| {
-                (
-                    mapping.rewrite_expr(self.exprs[id].clone()),
-                    None,
-                )
-            })
+            .map(|id| (mapping.rewrite_expr(self.exprs[id].clone()), None))
             .unzip();
 
         // Reconstruct the LogicalProject.
