@@ -12,26 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 
-use super::NEXMARK_CONFIG_SPLIT_NUM;
 use crate::base::SplitEnumerator;
 use crate::nexmark::split::NexmarkSplit;
-use crate::utils::AnyhowProperties;
+use crate::NexmarkProperties;
 
 pub struct NexmarkSplitEnumerator {
     split_num: i32,
 }
 
 impl NexmarkSplitEnumerator {
-    pub fn new(properties: &AnyhowProperties) -> anyhow::Result<NexmarkSplitEnumerator> {
-        let split_num = properties
-            .get_nexmark(NEXMARK_CONFIG_SPLIT_NUM)
-            .unwrap_or_else(|_| "1".to_string())
-            .parse::<i32>()
-            .map_err(|e| anyhow!(e))?;
-
+    pub fn new(properties: &NexmarkProperties) -> anyhow::Result<NexmarkSplitEnumerator> {
+        let split_num = properties.split_num.unwrap_or(1);
         Ok(Self { split_num })
     }
 }
