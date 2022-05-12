@@ -400,8 +400,6 @@ impl ToStream for LogicalJoin {
         let r2l =
             predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
 
-        dbg!(r2l.clone());
-        dbg!(right.distribution().clone());
         let left_dist = r2l
             .rewrite_required_distribution(right.distribution())
             .unwrap();
