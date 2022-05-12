@@ -275,8 +275,12 @@ pub struct StructValue {
 }
 
 impl fmt::Display for StructValue {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{{}}}",
+            self.fields.iter().map(|f| format!("{:?}", f)).join(", ")
+        )
     }
 }
 
@@ -295,6 +299,10 @@ impl Ord for StructValue {
 impl StructValue {
     pub fn new(fields: Vec<Datum>) -> Self {
         Self { fields }
+    }
+
+    pub fn fields(&self) -> &[Datum] {
+        &self.fields
     }
 }
 
