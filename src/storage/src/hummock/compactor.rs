@@ -35,12 +35,15 @@ use tokio::task::JoinHandle;
 
 use super::group_builder::KeyValueGroupingImpl::VirtualNode;
 use super::group_builder::{GroupedSstableBuilder, VirtualNodeGrouping};
-use super::iterator::{BoxedForwardHummockIterator, ForwardHummockIterator, MergeIterator};
+use super::iterator::{
+    BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
+};
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
 use super::{
     HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
 };
+use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreMetrics;
 
@@ -408,15 +411,12 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            // match level.get_level_type().unwrap() {
-            // LevelType::Nonoverlapping => {
-            // table_iters.push(Box::new(ConcatIterator::new(
-            // level.table_infos.clone(),
-            // self.context.sstable_store.clone(),
-            // )));
-            // }
-            // LevelType::Overlapping => {
-            {
+            if can_concat(&level.get_table_infos().iter().collect_vec()) {
+                table_iters.push(Box::new(ConcatIterator::new(
+                    level.table_infos.clone(),
+                    self.context.sstable_store.clone(),
+                )));
+            } else {
                 for table_info in &level.table_infos {
                     let table = self.context.sstable_store.sstable(table_info.id).await?;
                     table_iters.push(Box::new(SSTableIterator::new(
