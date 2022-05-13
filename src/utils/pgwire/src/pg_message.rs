@@ -68,9 +68,10 @@ impl FeMessage {
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
             b'X' => Ok(FeMessage::Terminate),
-            _ => Ok(FeMessage::ReadError(PsqlError::ReadError(
-                "Do not support this tag regular message yet".to_string(),
-            ))),
+            _ => Ok(FeMessage::ReadError(PsqlError::ReadError(format!(
+                "Unsupported tag of regular message: {}",
+                val
+            )))),
         }
     }
 }
