@@ -73,7 +73,7 @@
     insert into t select timestamp '2020-01-01 01:02:03', 11, 4.5 from t;
   batch_plan: |
     BatchInsert { table: t }
-      BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32], expr_alias: [ ,  ,  ] }
+      BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
         BatchScan { table: t, columns: [] }
 - sql: |
     /* insert into select with cast error */

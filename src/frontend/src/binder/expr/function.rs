@@ -107,11 +107,13 @@ impl Binder {
         if inputs.len() == 1 {
             // Rewrite round(Decimal) to round(Decimal, 0).
             let input = inputs.pop().unwrap();
-            if input.return_type() == DataType::Decimal {
-                vec![input, Literal::new(Some(0.into()), DataType::Int32).into()]
-            } else {
-                vec![input]
-            }
+            vec![
+                input
+                    .clone()
+                    .cast_implicit(DataType::Decimal)
+                    .unwrap_or(input),
+                Literal::new(Some(0.into()), DataType::Int32).into(),
+            ]
         } else if inputs.len() == 2 {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();
