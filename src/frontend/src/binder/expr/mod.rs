@@ -64,6 +64,11 @@ impl Binder {
             Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_trim(*expr, trim_where)?,
             ))),
+            Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+            } => self.bind_substring(*expr, substring_from, substring_for),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
@@ -217,6 +222,25 @@ impl Binder {
             None => ExprType::Trim,
         };
         FunctionCall::new(func_type, inputs)
+    }
+
+    fn bind_substring(
+        &mut self,
+        expr: Expr,
+        substring_from: Option<Box<Expr>>,
+        substring_for: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![
+            self.bind_expr(expr)?,
+            match substring_from {
+                Some(expr) => self.bind_expr(*expr)?,
+                None => ExprImpl::literal_int(1),
+            },
+        ];
+        if let Some(expr) = substring_for {
+            args.push(self.bind_expr(*expr)?);
+        }
+        FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
     }
 
     /// Bind `expr (not) between low and high`
