@@ -66,7 +66,7 @@ impl ConflictDetector {
             {
                 self.epoch_history.retain(|x, value| {
                     if x <= &(epoch) {
-                        assert!(value.is_none(), "epoch is not sync : {}", epoch);
+                        assert!(value.is_none(), "epoch is not write : {}", x);
                     }
                     x > &(epoch)
                 });

@@ -145,12 +145,6 @@ impl SharedBufferUploader {
             return Ok(vec![]);
         }
 
-        if let Some(detector) = &self.write_conflict_detector {
-            for batch in batches {
-                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
-            }
-        }
-
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
@@ -186,6 +180,12 @@ impl SharedBufferUploader {
             .add_tables(epoch, uploaded_sst_info.clone())
             .await
             .map_err(HummockError::meta_error)?;
+
+        if let Some(detector) = &self.write_conflict_detector {
+            for batch in batches {
+                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
+            }
+        }
 
         Ok(uploaded_sst_info)
     }
