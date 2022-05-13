@@ -1830,4 +1830,25 @@
       cntrycode
     order by
       cntrycode;
-  binder_error: 'Feature is not yet implemented: unsupported expression Substring { expr: Identifier(Ident { value: "c_phone", quote_style: None }), substring_from: Some(Value(Number("1", false))), substring_for: Some(Value(Number("2", false))) }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  batch_plan: |
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
+              BatchExchange { order: [], dist: AnyShard }
+                BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
+                  BatchExchange { order: [], dist: Single }
+                    BatchProject { exprs: [$1, $2] }
+                      BatchHashJoin { type: LeftAnti, predicate: $0 = $3 }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                            BatchScan { table: customer, columns: [c_custkey, c_phone, c_acctbal] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: orders, columns: [o_custkey] }
+                  BatchProject { exprs: [($0 / $1)] }
+                    BatchSimpleAgg { aggs: [sum($0), count($0)] }
+                      BatchExchange { order: [], dist: Single }
+                        BatchProject { exprs: [$1] }
+                          BatchFilter { predicate: ($1 > 0.00:Decimal) AND In(Substr($0, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                            BatchScan { table: customer, columns: [c_phone, c_acctbal] }
