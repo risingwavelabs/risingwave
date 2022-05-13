@@ -2922,7 +2922,7 @@
 					"expr": "sum(rate(state_store_write_batch_tuple_counts[1m])) by (instance)",
 					"interval": "",
 					"intervalFactor": 2,
-					"legendFormat": "write_batch_kv_pair_count compute_node = {{instance}} ",
+					"legendFormat": "write_batch_kv_pair_count - {{instance}} ",
 					"refId": "A"
 				}
 			],
@@ -3223,7 +3223,7 @@
 					"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance)) ",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "hummock_client_ GetNewTableId_p50 compute_node = {{instance}} ",
+					"legendFormat": "hummock_client_ GetNewTableId_p50 - {{instance}} ",
 					"refId": "B"
 				}
 			],
@@ -3319,7 +3319,7 @@
 					"expr": "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "hummock_client_ GetNewTableId_p90 compute_node = {{instance}} ",
+					"legendFormat": "hummock_client_ GetNewTableId_p90 - {{instance}} ",
 					"refId": "B"
 				}
 			],
@@ -3415,7 +3415,7 @@
 					"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "hummock_client_GetNewTableId_p99 compute_node = {{instance}} ",
+					"legendFormat": "hummock_client_GetNewTableId_p99 - {{instance}} ",
 					"refId": "B"
 				}
 			],
@@ -3511,7 +3511,7 @@
 					"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "hummock_client_ AddTables_p50 compute_node = {{instance}} ",
+					"legendFormat": "hummock_client_ AddTables_p50 - {{instance}} ",
 					"refId": "B"
 				}
 			],
@@ -3607,7 +3607,7 @@
 					"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "hummock_client_ AddTables_p90 compute_node = {{instance}} ",
+					"legendFormat": "hummock_client_ AddTables_p90 - {{instance}} ",
 					"refId": "B"
 				}
 			],
@@ -3703,7 +3703,7 @@
 					"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "hummock_client_ AddTables_p99 compute_node = {{instance}} ",
+					"legendFormat": "hummock_client_ AddTables_p99 - {{instance}} ",
 					"refId": "B"
 				}
 			],
@@ -3809,7 +3809,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_ ReportCompactionTasks_p50 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_ ReportCompactionTasks_p50 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -3905,7 +3905,7 @@
 							"expr": "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_ ReportCompactionTasks_p90 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_ ReportCompactionTasks_p90 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4001,7 +4001,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_ ReportCompactionTasks_p99 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_ ReportCompactionTasks_p99 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4099,7 +4099,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "hummock_manager_pinVersion_p50 compute_node = {{instance}} ",
+							"legendFormat": "hummock_manager_pinVersion_p50 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -4111,7 +4111,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_pinVersion_p50 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_pinVersion_p50 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4195,7 +4195,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "hummock_manager_pinVersion_p90 compute_node = {{instance}} ",
+							"legendFormat": "hummock_manager_pinVersion_p90 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -4207,7 +4207,7 @@
 							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_pinVersion_p90 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_pinVersion_p90 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4291,7 +4291,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "hummock_manager_pinVersion_p99 compute_node = {{instance}} ",
+							"legendFormat": "hummock_manager_pinVersion_p99 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -4303,7 +4303,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_pinVersion_p99 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_pinVersion_p99 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4387,7 +4387,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "hummock_manager_unpinVersion_p50 compute_node = {{instance}} ",
+							"legendFormat": "hummock_manager_unpinVersion_p50 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -4399,7 +4399,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_unpinVersion_p50 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_unpinVersion_p50 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4483,7 +4483,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "hummock_manager_unpinVersion_p90 compute_node = {{instance}} ",
+							"legendFormat": "hummock_manager_unpinVersion_p90 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -4495,7 +4495,7 @@
 							"expr": "histogram_quantile(0.9, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_unpinVersion_p90 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_unpinVersion_p90 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -4579,7 +4579,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "hummock_manager_unpinVersion_p99 compute_node = {{instance}} ",
+							"legendFormat": "hummock_manager_unpinVersion_p99 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -4591,7 +4591,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "hummock_client_unpinVersion_p99 compute_node = {{instance}} ",
+							"legendFormat": "hummock_client_unpinVersion_p99 - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -6328,7 +6328,7 @@
 							"expr": "sum(irate(state_store_report_compaction_task_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "report_compaction_task_counts compute_node = {{instance}} ",
+							"legendFormat": "report_compaction_task_counts - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -6418,7 +6418,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "pin_version_latency_p50 compute_node = {{instance}} ",
+							"legendFormat": "pin_version_latency_p50 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -6430,7 +6430,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "pin_version_latency_p99 compute_node = {{instance}} ",
+							"legendFormat": "pin_version_latency_p99 - {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -6442,7 +6442,7 @@
 							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "pin_version_latencyp90 compute_node = {{instance}} ",
+							"legendFormat": "pin_version_latencyp90 - {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -6466,7 +6466,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_version_latency_p50 compute_node = {{instance}} ",
+							"legendFormat": "unpin_version_latency_p50 - {{instance}} ",
 							"refId": "E"
 						},
 						{
@@ -6478,7 +6478,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_version_latency_p99 compute_node = {{instance}} ",
+							"legendFormat": "unpin_version_latency_p99 - {{instance}} ",
 							"refId": "F"
 						},
 						{
@@ -6502,7 +6502,7 @@
 							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_version_latency_p90 compute_node = {{instance}} ",
+							"legendFormat": "unpin_version_latency_p90 - {{instance}} ",
 							"refId": "H"
 						}
 					],
@@ -6586,7 +6586,7 @@
 							"exemplar": true,
 							"expr": "sum(irate(state_store_pin_version_counts[1m])) by(instance)",
 							"interval": "",
-							"legendFormat": "pin_version_counts compute_node = {{instance}} ",
+							"legendFormat": "pin_version_counts - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -6598,7 +6598,7 @@
 							"expr": "sum(irate(state_store_unpin_version_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_version_counts compute_node = {{instance}} ",
+							"legendFormat": "unpin_version_counts - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -6688,7 +6688,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "pin_snapshot_latency_p50 compute_node = {{instance}} ",
+							"legendFormat": "pin_snapshot_latency_p50 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -6700,7 +6700,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "pin_snapshot_latency_p99 compute_node = {{instance}} ",
+							"legendFormat": "pin_snapshot_latency_p99 - {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -6712,7 +6712,7 @@
 							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "pin_snapshot_latencyp90 compute_node = {{instance}} ",
+							"legendFormat": "pin_snapshot_latencyp90 - {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -6736,7 +6736,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_snapshot_latency_p50 compute_node = {{instance}} ",
+							"legendFormat": "unpin_snapshot_latency_p50 - {{instance}} ",
 							"refId": "E"
 						},
 						{
@@ -6748,7 +6748,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_snapshot_latency_p99 compute_node = {{instance}} ",
+							"legendFormat": "unpin_snapshot_latency_p99 - {{instance}} ",
 							"refId": "F"
 						},
 						{
@@ -6772,7 +6772,7 @@
 							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_snapshot_latency_p90 compute_node = {{instance}} ",
+							"legendFormat": "unpin_snapshot_latency_p90 - {{instance}} ",
 							"refId": "H"
 						}
 					],
@@ -6856,7 +6856,7 @@
 							"exemplar": true,
 							"expr": "sum(irate(state_store_pin_snapshot_counts[1m])) by(instance)",
 							"interval": "",
-							"legendFormat": "pin_snapshot_counts compute_node = {{instance}} ",
+							"legendFormat": "pin_snapshot_counts - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -6868,7 +6868,7 @@
 							"expr": "sum(irate(state_store_unpin_snapshot_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "unpin_snapshot_counts compute_node = {{instance}} ",
+							"legendFormat": "unpin_snapshot_counts - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -6958,7 +6958,7 @@
 							"exemplar": true,
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le,instance))",
 							"interval": "",
-							"legendFormat": "pin_snapshot_latency_p50 compute_node = {{instance}} ",
+							"legendFormat": "pin_snapshot_latency_p50 - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -6970,7 +6970,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "add_table_latency_p99 compute_node = {{instance}} ",
+							"legendFormat": "add_table_latency_p99 - {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -6982,7 +6982,7 @@
 							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "add_table_latency_p90 compute_node = {{instance}} ",
+							"legendFormat": "add_table_latency_p90 - {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -7006,7 +7006,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_new_table_id_latency_p50 compute_node = {{instance}} ",
+							"legendFormat": "get_new_table_id_latency_p50 - {{instance}} ",
 							"refId": "E"
 						},
 						{
@@ -7018,7 +7018,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_new_table_id_latency_p99 compute_node = {{instance}} ",
+							"legendFormat": "get_new_table_id_latency_p99 - {{instance}} ",
 							"refId": "F"
 						},
 						{
@@ -7042,7 +7042,7 @@
 							"expr": "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_new_table_id_latency_p90 compute_node = {{instance}} ",
+							"legendFormat": "get_new_table_id_latency_p90 - {{instance}} ",
 							"refId": "H"
 						}
 					],
@@ -7154,7 +7154,7 @@
 							"exemplar": true,
 							"expr": "sum(irate(state_store_add_tables_counts[1m]))by(instance)",
 							"interval": "",
-							"legendFormat": "add_tables_counts compute_node = {{instance}} ",
+							"legendFormat": "add_tables_counts - {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -7166,7 +7166,7 @@
 							"expr": "sum(irate(state_store_get_new_table_id_counts[1m]))by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_new_table_id_counts compute_node = {{instance}} ",
+							"legendFormat": "get_new_table_id_counts - {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -7228,7 +7228,7 @@
 							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "report_compaction_task_latency_p50 compute_node = {{instance}}",
+							"legendFormat": "report_compaction_task_latency_p50 - {{instance}}",
 							"refId": "E"
 						},
 						{
@@ -7240,7 +7240,7 @@
 							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "report_compaction_task_latency_p99 compute_node = {{instance}}",
+							"legendFormat": "report_compaction_task_latency_p99 - {{instance}}",
 							"refId": "F"
 						},
 						{
@@ -7264,7 +7264,7 @@
 							"expr": "histogram_quantile(0.90, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "report_compaction_task_latency_p90 compute_node = {{instance}}",
+							"legendFormat": "report_compaction_task_latency_p90 - {{instance}}",
 							"refId": "H"
 						}
 					],
