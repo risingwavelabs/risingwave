@@ -112,6 +112,6 @@ pub mod test_utils {
 }
 
 /// The column name stored in [`BindContext`] for a column without an alias.
-const UNNAMED_COLUMN: &str = "?column?";
+pub const UNNAMED_COLUMN: &str = "?column?";
 /// The table name stored in [`BindContext`] for a subquery without an alias.
 const UNNAMED_SUBQUERY: &str = "?subquery?";

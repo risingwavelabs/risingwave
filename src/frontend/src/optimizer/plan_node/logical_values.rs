@@ -15,11 +15,10 @@
 use std::sync::Arc;
 use std::{fmt, vec};
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
-use super::{BatchValues, ColPrunable, PlanBase, PlanNode, PlanRef, ToBatch, ToStream};
+use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::session::OptimizerContextRef;
 
@@ -69,17 +68,15 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ColPrunable for LogicalValues {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let rows = self
             .rows
             .iter()
-            .map(|row| required_cols.ones().map(|i| row[i].clone()).collect())
+            .map(|row| required_cols.iter().map(|i| row[*i].clone()).collect())
             .collect();
         let fields = required_cols
-            .ones()
-            .map(|i| self.schema().fields[i].clone())
+            .iter()
+            .map(|i| self.schema().fields[*i].clone())
             .collect();
         Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
     }
@@ -147,7 +144,7 @@ mod tests {
             ctx,
         );
 
-        let required_cols = FixedBitSet::from_iter([0, 2].into_iter());
+        let required_cols = vec![0, 2];
         let pruned = values.prune_col(&required_cols);
 
         let values = pruned.as_logical_values().unwrap();

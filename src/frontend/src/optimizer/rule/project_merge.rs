@@ -34,14 +34,7 @@ impl Rule for ProjectMergeRule {
             .cloned()
             .map(|expr| subst.rewrite_expr(expr))
             .collect();
-        Some(
-            LogicalProject::new(
-                inner_project.input(),
-                exprs,
-                outer_project.expr_alias().to_owned(),
-            )
-            .into(),
-        )
+        Some(LogicalProject::new(inner_project.input(), exprs).into())
     }
 }
 
