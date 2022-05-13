@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use anyhow::anyhow;
 use async_trait::async_trait;
 
 use crate::base::SplitEnumerator;
@@ -26,7 +23,8 @@ pub struct DatagenSplitEnumerator {}
 
 impl DatagenSplitEnumerator {
     pub fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
-        todo!()
+        let _ = properties;
+        Ok(DatagenSplitEnumerator {})
     }
 }
 
@@ -35,6 +33,12 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     type Split = DatagenSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {
-        Ok(vec![])
+        let split = vec![DatagenSplit {
+            topic: "Mock Topic".to_string(),
+            partition: 0,
+            start_offset: Some(0),
+            stop_offset: None,
+        }];
+        Ok(split)
     }
 }

@@ -12,22 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-use anyhow::{ Result};
+use anyhow::Result;
 use async_trait::async_trait;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::RwError;
-use crate::{ConnectorStateV2, SplitImpl, DatagenProperties, SourceMessage, SplitReader};
+
+use super::generator::DatagenEventGenerator;
+use crate::{ConnectorStateV2, DatagenProperties, SourceMessage, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
-pub struct DatagenSplitReader {}
+pub struct DatagenSplitReader {
+    generator: DatagenEventGenerator,
+}
 
 #[async_trait]
 impl SplitReader for DatagenSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        todo!()
+        self.generator.next().await
     }
 }
 
@@ -36,6 +36,13 @@ impl DatagenSplitReader {
     where
         Self: Sized,
     {
-        todo!()
+        let _ = properties;
+        let _ = state;
+        Ok(DatagenSplitReader {
+            generator: DatagenEventGenerator {
+                last_offset: 0,
+                batch_chunk_size: 5,
+            },
+        })
     }
 }
