@@ -23,6 +23,7 @@ use std::time::SystemTime;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::BoxFuture;
 use futures::FutureExt;
+#[cfg(target_os = "macos")]
 use libc::F_NOCACHE;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
