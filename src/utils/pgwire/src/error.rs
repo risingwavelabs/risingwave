@@ -19,6 +19,8 @@ use thiserror::Error;
 pub enum PsqlError {
     #[error("Encode error {0}.")]
     CancelError(String),
+    #[error("Read sql error: {0}.")]
+    ReadError(String),
 }
 
 impl PsqlError {
