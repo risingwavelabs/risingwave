@@ -12,21 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::DefaultHasher;
+use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{Error, ErrorKind};
+use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bytes::Bytes;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use futures::future::join_all;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::hummock::{CachableEntry, HummockError, LruCache};
 use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
 
 pub(super) mod utils {
     use std::fs::Metadata;
     use std::path::Path;
 
-    use tokio::fs::{create_dir_all, File, OpenOptions};
+    use tokio::fs::{create_dir_all, OpenOptions};
+    use tokio::task::spawn_blocking;
 
+    use super::OpenReadFileHolder;
     use crate::object::{ObjectError, ObjectResult};
 
     pub async fn ensure_file_dir_exists(path: &Path) -> ObjectResult<()> {
@@ -44,7 +53,7 @@ pub(super) mod utils {
         enable_read: bool,
         enable_write: bool,
         create_new: bool,
-    ) -> ObjectResult<File> {
+    ) -> ObjectResult<tokio::fs::File> {
         ensure_file_dir_exists(path).await?;
         OpenOptions::new()
             .read(enable_read)
@@ -57,22 +66,46 @@ pub(super) mod utils {
             })
     }
 
-    pub async fn get_metadata(file: &File) -> ObjectResult<Metadata> {
-        file.metadata()
-            .await
-            .map_err(|err| ObjectError::disk("Failed to get metadata.".to_string(), err))
+    pub async fn asyncify<F, T>(f: F) -> ObjectResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> ObjectResult<T> + Send + 'static,
+    {
+        spawn_blocking(f).await.map_err(|e| {
+            ObjectError::internal(format!("Fail to join a blocking-spawned task: {}", e))
+        })?
+    }
+
+    pub async fn get_metadata(file: OpenReadFileHolder) -> ObjectResult<Metadata> {
+        asyncify(move || {
+            file.value()
+                .metadata()
+                .map_err(|err| ObjectError::disk("Failed to get metadata.".to_string(), err))
+        })
+        .await
     }
 }
 
+pub type OpenReadFileHolder = Arc<CachableEntry<PathBuf, File>>;
+
 pub struct LocalDiskObjectStore {
     path_prefix: String,
+    opened_read_file_cache: Arc<LruCache<PathBuf, File>>,
     compactor_shutdown_sender: parking_lot::Mutex<Option<UnboundedSender<()>>>,
 }
+
+const OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS: usize = 2;
+const OPENED_FILE_CACHE_DEFAULT_CAPACITY: usize = 64;
 
 impl LocalDiskObjectStore {
     pub fn new(path_prefix: &str) -> LocalDiskObjectStore {
         LocalDiskObjectStore {
             path_prefix: path_prefix.to_string(),
+            opened_read_file_cache: Arc::new(LruCache::new(
+                OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS,
+                OPENED_FILE_CACHE_DEFAULT_CAPACITY,
+                OPENED_FILE_CACHE_DEFAULT_CAPACITY,
+            )),
             compactor_shutdown_sender: parking_lot::Mutex::new(None),
         }
     }
@@ -91,6 +124,36 @@ impl LocalDiskObjectStore {
 
     pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
         *self.compactor_shutdown_sender.lock() = Some(shutdown_sender);
+    }
+
+    pub async fn get_read_file(&self, path: &str) -> ObjectResult<OpenReadFileHolder> {
+        let path = self.new_file_path(path)?;
+        let hash = {
+            let mut hasher = DefaultHasher::default();
+            path.hash(&mut hasher);
+            hasher.finish()
+        };
+        let entry = self
+            .opened_read_file_cache
+            .lookup_with_request_dedup(hash, path.clone(), || async {
+                let file = utils::open_file(&path, true, false, false)
+                    .await
+                    .map_err(HummockError::object_io_error)?
+                    .into_std()
+                    .await;
+                Ok((file, 1))
+            })
+            .await
+            .map_err(|e| {
+                ObjectError::disk(
+                    "".to_string(),
+                    std::io::Error::new(
+                        ErrorKind::Other,
+                        format!("Failed to open file {:?}. Err{:?}", path.to_str(), e),
+                    ),
+                )
+            })?;
+        Ok(Arc::new(entry))
     }
 }
 
@@ -117,25 +180,33 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        let mut file =
-            utils::open_file(self.new_file_path(path)?.as_path(), true, false, false).await?;
         match block_loc {
             Some(block_loc) => Ok(self.readv(path, vec![block_loc]).await?.pop().unwrap()),
             None => {
-                let metadata = utils::get_metadata(&file).await?;
-                let mut buf = Vec::with_capacity(metadata.len() as usize);
-                file.read_to_end(&mut buf).await.map_err(|e| {
-                    ObjectError::disk(format!("failed to read the whole file {}", path), e)
-                })?;
-                Ok(Bytes::from(buf))
+                let file_holder = self.get_read_file(path).await?;
+                let metadata = utils::get_metadata(file_holder.clone()).await?;
+                let path_owned = path.to_owned();
+                utils::asyncify(move || {
+                    let mut buf = vec![0; metadata.len() as usize];
+                    file_holder
+                        .value()
+                        .read_exact_at(&mut buf, 0)
+                        .map_err(|e| {
+                            ObjectError::disk(
+                                format!("failed to read the whole file {}", path_owned),
+                                e,
+                            )
+                        })?;
+                    Ok(Bytes::from(buf))
+                })
+                .await
             }
         }
     }
 
     async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
-        let mut file =
-            utils::open_file(self.new_file_path(path)?.as_path(), true, false, false).await?;
-        let metadata = utils::get_metadata(&file).await?;
+        let file_holder = self.get_read_file(path).await?;
+        let metadata = utils::get_metadata(file_holder.clone()).await?;
         for block_loc in &block_locs {
             if block_loc.offset + block_loc.size > metadata.len() as usize {
                 return Err(ObjectError::disk(
@@ -153,32 +224,36 @@ impl ObjectStore for LocalDiskObjectStore {
         }
         let mut ret = Vec::with_capacity(block_locs.len());
         // TODO: may want to sort and reorder the location to improve serial read.
-        for block_loc in &block_locs {
-            let mut buf = vec![0; block_loc.size as usize];
-            file.seek(std::io::SeekFrom::Start(block_loc.offset as u64))
-                .await
-                .map_err(|err| {
-                    ObjectError::disk(
-                        format!("Failed to seek to offset {}.", block_loc.offset),
-                        err,
-                    )
-                })?;
-            file.read_exact(&mut buf).await.map_err(|err| {
-                ObjectError::disk(
-                    format!("Failed to read from offset {}.", block_loc.offset),
-                    err,
-                )
-            })?;
-
-            ret.push(Bytes::from(buf));
+        for block_loc in block_locs {
+            let file_holder = file_holder.clone();
+            let path_owned = path.to_owned();
+            let future = utils::asyncify(move || {
+                let mut buf = vec![0; block_loc.size as usize];
+                file_holder
+                    .value()
+                    .read_exact_at(&mut buf, block_loc.offset as u64)
+                    .map_err(|e| {
+                        ObjectError::disk(
+                            format!(
+                                "failed to read  file {} at offset {} for size {}",
+                                path_owned, block_loc.offset, block_loc.size
+                            ),
+                            e,
+                        )
+                    })?;
+                Ok(Bytes::from(buf))
+            });
+            ret.push(future)
         }
-        Ok(ret)
+        Ok(join_all(ret)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let file =
-            utils::open_file(self.new_file_path(path)?.as_path(), true, false, false).await?;
-        let metadata = utils::get_metadata(&file).await?;
+        let file_holder = self.get_read_file(path).await?;
+        let metadata = utils::get_metadata(file_holder).await?;
         Ok(ObjectMetadata {
             total_size: metadata.len() as usize,
         })
