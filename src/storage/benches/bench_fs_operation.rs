@@ -89,14 +89,25 @@ fn gen_tokio_files(path: &Path) -> impl IntoIterator<Item = impl Future<Output =
     (0..BENCH_SIZE).map(move |i| {
         let file_path = path.join(format!("{}.txt", i));
         async move {
-            tokio::fs::OpenOptions::new()
+            #[cfg(target_os = "macos")]
+            let ret = tokio::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .custom_flags(F_NOCACHE)
                 .open(file_path)
                 .await
-                .unwrap()
+                .unwrap();
+
+            #[cfg(not(target_os = "macos"))]
+            let ret = tokio::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(file_path)
+                .await
+                .unwrap();
+            ret
         }
     })
 }
