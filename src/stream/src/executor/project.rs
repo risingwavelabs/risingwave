@@ -12,40 +12,196 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-use risingwave_common::try_match_expand;
-use risingwave_expr::expr::build_from_prost;
-use risingwave_pb::stream_plan;
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_storage::StateStore;
+use std::fmt::{Debug, Formatter};
 
-use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{BoxedExecutor, Executor, ProjectExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_expr::expr::BoxedExpression;
 
-pub struct ProjectExecutorBuilder;
+use super::{
+    Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
+    StreamExecutorResult,
+};
+use crate::executor::error::StreamExecutorError;
 
-impl ExecutorBuilder for ProjectExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
-        node: &stream_plan::StreamNode,
-        _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::ProjectNode)?;
-        let project_exprs = node
-            .get_select_list()
-            .iter()
-            .map(build_from_prost)
-            .collect::<Result<Vec<_>>>()?;
+pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 
-        Ok(ProjectExecutor::new_from_v1(
-            params.input.remove(0),
-            params.pk_indices,
-            project_exprs,
-            params.executor_id,
-            params.op_info,
-        )
-        .boxed())
+impl ProjectExecutor {
+    pub fn new(
+        input: Box<dyn Executor>,
+        pk_indices: PkIndices,
+        exprs: Vec<BoxedExpression>,
+        execuotr_id: u64,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema: input.schema().to_owned(),
+            pk_indices,
+            identity: "Project".to_owned(),
+        };
+        SimpleExecutorWrapper {
+            input,
+            inner: SimpleProjectExecutor::new(info, exprs, execuotr_id),
+        }
+    }
+}
+
+/// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
+/// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
+/// or update element into next operator according to the result of the expression.
+pub struct SimpleProjectExecutor {
+    info: ExecutorInfo,
+
+    /// Expressions of the current projection.
+    exprs: Vec<BoxedExpression>,
+}
+
+impl SimpleProjectExecutor {
+    pub fn new(input_info: ExecutorInfo, exprs: Vec<BoxedExpression>, executor_id: u64) -> Self {
+        let schema = Schema {
+            fields: exprs
+                .iter()
+                .map(|e| Field::unnamed(e.return_type()))
+                .collect_vec(),
+        };
+        Self {
+            info: ExecutorInfo {
+                schema,
+                pk_indices: input_info.pk_indices,
+                identity: format!("ProjectExecutor {:X}", executor_id),
+            },
+            exprs,
+        }
+    }
+}
+
+impl Debug for SimpleProjectExecutor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectExecutor")
+            .field("exprs", &self.exprs)
+            .finish()
+    }
+}
+
+impl SimpleExecutor for SimpleProjectExecutor {
+    fn map_filter_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+
+        let (ops, columns, visibility) = chunk.into_inner();
+        let data_chunk = {
+            let data_chunk_builder = DataChunk::builder().columns(columns);
+            if let Some(visibility) = visibility {
+                data_chunk_builder.visibility(visibility).build()
+            } else {
+                data_chunk_builder.build()
+            }
+        };
+
+        let projected_columns = self
+            .exprs
+            .iter_mut()
+            .map(|expr| {
+                expr.eval(&data_chunk)
+                    .map(Column::new)
+                    .map_err(StreamExecutorError::eval_error)
+            })
+            .collect::<Result<Vec<Column>, _>>()?;
+
+        let new_chunk = StreamChunk::new(ops, projected_columns, None);
+        Ok(Some(new_chunk))
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.info.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.info.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use super::super::test_utils::MockSource;
+    use super::super::*;
+    use super::*;
+
+    #[tokio::test]
+    async fn test_projection() {
+        let chunk1 = StreamChunk::from_pretty(
+            " I I
+            + 1 4
+            + 2 5
+            + 3 6",
+        );
+        let chunk2 = StreamChunk::from_pretty(
+            " I I
+            + 7 8
+            - 3 6",
+        );
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
+
+        let left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let right_expr = InputRefExpression::new(DataType::Int64, 1);
+        let test_expr = new_binary_expr(
+            Type::Add,
+            DataType::Int64,
+            Box::new(left_expr),
+            Box::new(right_expr),
+        );
+
+        let project = Box::new(ProjectExecutor::new(
+            Box::new(source),
+            vec![],
+            vec![test_expr],
+            1,
+        ));
+        let mut project = project.execute();
+
+        let msg = project.next().await.unwrap().unwrap();
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 5
+                + 7
+                + 9"
+            )
+        );
+
+        let msg = project.next().await.unwrap().unwrap();
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I
+                + 15
+                -  9"
+            )
+        );
+
+        assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }

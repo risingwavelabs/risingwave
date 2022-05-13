@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -20,17 +21,17 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{ConnectorStateV2, Properties, SplitImpl, SplitReaderImpl};
+use risingwave_connector::{ConnectorProperties, ConnectorStateV2, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
 /// processing. [`ConnectorSource`] introduces schema at this level while [`SplitReaderImpl`]
 /// simply loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
-    pub config: Properties,
+    pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub parser: Arc<SourceParserImpl>,
 }
@@ -63,7 +64,7 @@ impl ConnectorSource {
     /// Create a new stream reader.
     pub async fn stream_reader(
         &self,
-        splits: Vec<SplitImpl>,
+        splits: ConnectorStateV2,
         column_ids: Vec<ColumnId>,
     ) -> Result<ConnectorStreamReader> {
         log::debug!(
@@ -72,12 +73,9 @@ impl ConnectorSource {
             splits
         );
 
-        let reader = SplitReaderImpl::create(
-            Properties::new(self.config.0.clone()),
-            ConnectorStateV2::Splits(splits),
-        )
-        .await
-        .to_rw_result()?;
+        let reader = SplitReaderImpl::create(self.config.clone(), splits)
+            .await
+            .to_rw_result()?;
 
         let columns = self.get_target_columns(column_ids)?;
 
@@ -99,14 +97,21 @@ impl SourceChunkBuilder for ConnectorStreamReader {}
 
 #[async_trait]
 impl StreamSourceReader for ConnectorStreamReader {
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
         match self.reader.next().await.to_rw_result()? {
-            None => Ok(StreamChunk::default()),
+            None => Ok(StreamChunkWithState {
+                chunk: StreamChunk::default(),
+                split_offset_mapping: None,
+            }),
             Some(batch) => {
                 let mut events = Vec::with_capacity(batch.len());
+                let mut split_offset_mapping: HashMap<String, String> = HashMap::new();
 
                 for msg in batch {
                     if let Some(content) = msg.payload {
+                        *split_offset_mapping
+                            .entry(msg.split_id.clone())
+                            .or_insert_with(|| "".to_string()) = msg.offset.to_string();
                         events.push(self.parser.parse(content.as_ref(), &self.columns)?);
                     }
                 }
@@ -117,11 +122,14 @@ impl StreamSourceReader for ConnectorStreamReader {
                     rows.extend(event.rows);
                     ops.extend(event.ops);
                 }
-                Ok(StreamChunk::new(
-                    ops,
-                    Self::build_columns(&self.columns, rows.as_ref())?,
-                    None,
-                ))
+                Ok(StreamChunkWithState {
+                    chunk: StreamChunk::new(
+                        ops,
+                        Self::build_columns(&self.columns, rows.as_ref())?,
+                        None,
+                    ),
+                    split_offset_mapping: Some(split_offset_mapping),
+                })
             }
         }
     }

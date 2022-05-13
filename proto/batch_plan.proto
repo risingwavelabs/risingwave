@@ -139,6 +139,12 @@ message GenerateInt32SeriesNode {
   int32 step = 3;
 }
 
+message GenerateTimeSeriesNode {
+  string start = 1;
+  string stop = 2;
+  data.IntervalUnit step = 3;
+}
+
 // Task is a running instance of Stage.
 message TaskId {
   string query_id = 1;
@@ -166,7 +172,7 @@ message ExchangeNode {
 }
 
 message MergeSortExchangeNode {
-  ExchangeNode exchange_node = 1;
+  ExchangeNode exchange = 1;
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
@@ -196,6 +202,7 @@ message PlanNode {
     SortMergeJoinNode sort_merge_join = 22;
     GenerateInt32SeriesNode generate_int32_series = 23;
     HopWindowNode hop_window = 25;
+    GenerateTimeSeriesNode generate_time_series = 26;
   }
   string identity = 24;
 }

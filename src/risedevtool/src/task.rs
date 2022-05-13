@@ -29,6 +29,7 @@ mod task_configure_grpc_node;
 mod task_configure_minio;
 mod task_etcd_ready_check;
 mod task_kafka_ready_check;
+mod utils;
 mod zookeeper_service;
 
 use std::env;
@@ -44,6 +45,7 @@ use indicatif::ProgressBar;
 use isahc::prelude::*;
 use isahc::Request;
 use tempfile::TempDir;
+pub use utils::*;
 
 pub use self::compactor_service::*;
 pub use self::compute_node_service::*;

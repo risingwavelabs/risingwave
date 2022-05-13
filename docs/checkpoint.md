@@ -34,7 +34,7 @@ To guarantee consistency, RisingWave introduces Chandy-Lamport algorithm as its 
 
 ## Checkpoint on Storage
 
-As mentioned before, during the checkpointing, every operator writes their changes of this epoch into storage. For the storage layer, these data are still uncommited i.e. not persisted to the shared storage, but need to be visible to that operator locally.
+As mentioned before, during the checkpointing, every operator writes their changes of this epoch into storage. For the storage layer, these data are still uncommitted i.e. not persisted to the shared storage, but need to be visible to that operator locally.
 
 A local shared buffer is introduced to stage these uncommitted write batches. Once the checkpoint barriers have pass through all actors, the storage manager can notify all compute nodes to 'commit' their buffered write batches into the shared storage.
 

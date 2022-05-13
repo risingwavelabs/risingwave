@@ -23,7 +23,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::ColumnOrder;
-use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -48,6 +48,8 @@ impl StreamMaterialize {
         let schema = Self::derive_schema(input.schema())?;
         let pk_indices = input.pk_indices();
 
+        // Materialize executor won't change the append-only behavior of the stream, so it depends
+        // on input's `append_only`.
         Ok(PlanBase::new_stream(
             ctx,
             schema,
@@ -58,19 +60,6 @@ impl StreamMaterialize {
     }
 
     fn derive_schema(schema: &Schema) -> Result<Schema> {
-        let mut col_names = HashSet::new();
-        for field in schema.fields() {
-            if is_row_id_column_name(&field.name) {
-                continue;
-            }
-            if !col_names.insert(field.name.clone()) {
-                return Err(InternalError(format!(
-                    "column {} specified more than once",
-                    field.name
-                ))
-                .into());
-            }
-        }
         let mut row_id_count = 0;
         let fields = schema
             .fields()
@@ -107,6 +96,7 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        out_names: Vec<String>,
         is_index_on: Option<TableId>,
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
@@ -117,21 +107,36 @@ impl StreamMaterialize {
             } else {
                 input.pk_indices().to_vec()
             })
-            .enforce_if_not_satisfies(input, Order::any()),
+            .enforce_if_not_satisfies(input, Order::any())?,
         };
 
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
+
+        let mut col_names = HashSet::new();
+        for name in &out_names {
+            if !col_names.insert(name) {
+                return Err(
+                    InternalError(format!("column {} specified more than once", name)).into(),
+                );
+            }
+        }
+        let mut out_name_iter = out_names.into_iter();
         let mut columns = schema
             .fields()
             .iter()
             .enumerate()
-            .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc::from_field_without_column_id(field),
-                is_hidden: !user_cols.contains(i),
+            .map(|(i, field)| {
+                let mut c = ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    is_hidden: !user_cols.contains(i),
+                };
+                if !c.is_hidden {
+                    let name = out_name_iter.next().unwrap();
+                    c.column_desc.name = name;
+                }
+                c
             })
             .collect_vec();
 
@@ -250,7 +255,7 @@ impl ToStreamProst for StreamMaterialize {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::MaterializeNode(MaterializeNode {
+        ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_ref_id: None,

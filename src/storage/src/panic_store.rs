@@ -27,7 +27,7 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 pub struct PanicStateStore;
 
 impl StateStore for PanicStateStore {
-    type Iter<'a> = PanicStateStoreIter;
+    type Iter = PanicStateStoreIter;
 
     define_state_store_associated_type!();
 
@@ -52,18 +52,18 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            panic!("should not reverse scan from the state store!");
+            panic!("should not backward scan from the state store!");
         }
     }
 
@@ -97,13 +97,13 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            panic!("should not create reverse iter from the panic state store!");
+            panic!("should not create backward iter from the panic state store!");
         }
     }
 

@@ -153,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::new());
+        let source_manager = Arc::new(MemSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -217,10 +217,10 @@ mod tests {
         // Read
         let chunk = reader.next().await?;
 
-        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        assert_eq!(chunk.chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.chunk.columns()[0]
                 .array()
                 .as_int64()
                 .iter()
@@ -229,7 +229,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.chunk.columns()[1]
                 .array()
                 .as_int64()
                 .iter()

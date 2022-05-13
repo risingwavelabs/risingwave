@@ -105,21 +105,21 @@ async fn distribute_execute(
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
-        let plan = Planner::new(context.into())
-            .plan(stmt)?
-            .gen_batch_query_plan();
+        let root = Planner::new(context.into()).plan(stmt)?;
 
-        info!(
-            "Generated distributed plan: {:?}",
-            plan.explain_to_string()?
-        );
-
-        let pg_descs = plan
+        let pg_descs = root
             .schema()
             .fields()
             .iter()
             .map(to_pg_field)
             .collect::<Vec<PgFieldDescriptor>>();
+
+        let plan = root.gen_batch_query_plan()?;
+
+        info!(
+            "Generated distributed plan: {:?}",
+            plan.explain_to_string()?
+        );
 
         let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
         let query = plan_fragmenter.split(plan)?;

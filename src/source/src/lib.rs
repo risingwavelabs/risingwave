@@ -28,6 +28,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -46,6 +47,7 @@ pub mod connector_source;
 mod manager;
 
 mod common;
+mod row_id;
 mod table_v2;
 
 extern crate core;
@@ -66,6 +68,7 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
     Connector(ConnectorStreamReader),
@@ -73,7 +76,7 @@ pub enum SourceStreamReaderImpl {
 
 #[async_trait]
 impl StreamSourceReader for SourceStreamReaderImpl {
-    async fn next(&mut self) -> Result<StreamChunk> {
+    async fn next(&mut self) -> Result<StreamChunkWithState> {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await,
             SourceStreamReaderImpl::Connector(c) => c.next().await,
@@ -81,9 +84,18 @@ impl StreamSourceReader for SourceStreamReaderImpl {
     }
 }
 
+/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
+/// current design, one connector source can have multiple split reader. The keys are unique
+/// `split_id` and values are the latest offset for each split.
+#[derive(Clone, Debug)]
+pub struct StreamChunkWithState {
+    pub chunk: StreamChunk,
+    pub split_offset_mapping: Option<HashMap<String, String>>,
+}
+
 #[async_trait]
 pub trait StreamSourceReader: Send + Sync + 'static {
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunk>;
+    async fn next(&mut self) -> Result<StreamChunkWithState>;
 }

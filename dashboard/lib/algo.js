@@ -68,7 +68,7 @@ export function graphBfs(root, step, neighborListKey) {
 
 /**
  * Group nodes in the same connected component. The method will not
- * change the input. The ouput contains the original references.
+ * change the input. The output contains the original references.
  * @param {Array<{nextNodes: []}>} nodes 
  * @returns {Array<Array<any>>} A list of groups containing 
  * nodes in the same connected component

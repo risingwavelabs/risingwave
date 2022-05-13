@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarRefImpl, ToOwnedDatum};
 
 use crate::expr::{BoxedExpression, Expression};
 
@@ -77,10 +77,13 @@ impl Expression for CaseExpression {
             if let Some((_, t)) = when_thens
                 .iter()
                 .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))
-                .find(|(w, _)| *w.unwrap().into_scalar_impl().as_bool())
+                .find(|(w, _)| {
+                    *w.unwrap_or(ScalarRefImpl::Bool(false))
+                        .into_scalar_impl()
+                        .as_bool()
+                })
             {
-                let t = Some(t.unwrap().into_scalar_impl());
-                output_array.append_datum(&t)?;
+                output_array.append_datum(&t.to_owned_datum())?;
             } else if let Some(els) = els.as_mut() {
                 let t = els.datum_at(idx);
                 output_array.append_datum(&t)?;

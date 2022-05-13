@@ -17,13 +17,7 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 use crate::executor::join::JoinType::Inner;
 
 mod chunked_data;
-mod hash_join;
-pub use hash_join::*;
-
-mod hash_join_state;
-pub mod nested_loop_join;
 pub mod row_level_iter;
-pub mod sort_merge_join;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(super) enum JoinType {
     Inner,

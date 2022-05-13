@@ -55,7 +55,7 @@ pub(super) fn handle_explain(
                 binder.bind(stmt)?
             };
             let logical = planner.plan(bound)?;
-            logical.gen_batch_query_plan()
+            logical.gen_batch_query_plan()?
         }
     };
 

@@ -28,10 +28,10 @@ use risingwave_storage::storage_value::{StorageValue, ValueMeta};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
+use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::PkDataTypes;
-use crate::executor_v2::aggregation::{AggArgs, AggCall};
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
@@ -302,14 +302,11 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-            let all_data = self
-                .keyspace
-                .scan_strip_prefix(self.top_n_count, epoch)
-                .await?;
+            let all_data = self.keyspace.scan(self.top_n_count, epoch).await?;
 
-            for (raw_key, raw_value) in all_data {
-                let mut deserializer = value_encoding::Deserializer::new(raw_value);
-                let value = deserialize_cell(&mut deserializer, &self.data_type)?;
+            for (raw_key, mut raw_value) in all_data {
+                // let mut deserializer = value_encoding::Deserializer::new(raw_value);
+                let value = deserialize_cell(&mut raw_value, &self.data_type)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -398,12 +395,12 @@ where
     #[allow(dead_code)]
     pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
         let epoch = u64::MAX;
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
         let mut result = vec![];
 
-        for (raw_key, raw_value) in all_data {
-            let mut deserializer = value_encoding::Deserializer::new(raw_value);
-            let value = deserialize_cell(&mut deserializer, &self.data_type)?;
+        for (raw_key, mut raw_value) in all_data {
+            // let mut deserializer = value_encoding::Deserializer::new(raw_value);
+            let value = deserialize_cell(&mut raw_value, &self.data_type)?;
             let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));

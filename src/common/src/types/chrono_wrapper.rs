@@ -16,17 +16,17 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
-
+use crate::util::value_encoding::error::ValueEncodingError;
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 
 macro_rules! impl_chrono_wrapper {
-    ($({ $variant_name:ident, $chrono:ty, $array:ident, $builder:ident }),*) => {
+    ($({ $variant_name:ident, $chrono:ty, $_array:ident, $_builder:ident }),*) => {
         $(
             #[derive(Clone, Copy, Debug, Eq, PartialOrd, Ord)]
             #[repr(transparent)]
@@ -98,6 +98,13 @@ impl NaiveDateWrapper {
         ))
     }
 
+    pub fn new_with_days_value_encoding(days: i32) -> Result<Self> {
+        Ok(NaiveDateWrapper::new(
+            NaiveDate::from_num_days_from_ce_opt(days)
+                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+        ))
+    }
+
     /// Converted to the number of days since 1970.1.1 for compatibility with existing Java
     /// frontend. TODO: Save days directly when using Rust frontend.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
@@ -117,6 +124,13 @@ impl NaiveTimeWrapper {
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or(memcomparable::Error::InvalidNaiveTimeEncoding(secs, nano))?,
+        ))
+    }
+
+    pub fn new_with_secs_nano_value_encoding(secs: u32, nano: u32) -> Result<Self> {
+        Ok(NaiveTimeWrapper::new(
+            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
+                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -148,6 +162,14 @@ impl NaiveDateTimeWrapper {
         }))
     }
 
+    pub fn new_with_secs_nsecs_value_encoding(secs: i64, nsecs: u32) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new({
+            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
+                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
+            )?
+        }))
+    }
+
     /// Although `NaiveDateTime` takes 12 bytes, we drop 4 bytes in protobuf encoding.
     /// Converted to microsecond timestamps for compatibility with existing Java frontend.
     /// TODO: Consider another way to save when using Rust frontend. Nanosecond timestamp can only
@@ -162,6 +184,21 @@ impl NaiveDateTimeWrapper {
         let secs = timestamp_micro / 1_000_000;
         let nsecs = (timestamp_micro % 1_000_000) as u32 * 1000;
         Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
+    }
+
+    pub fn parse_from_str(s: &str) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+        ))
+    }
+
+    pub fn sub(&self, rhs: NaiveDateTimeWrapper) -> Duration {
+        self.0 - rhs.0
+    }
+
+    pub fn add(&self, duration: Duration) -> Self {
+        NaiveDateTimeWrapper::new(self.0 + duration)
     }
 }
 

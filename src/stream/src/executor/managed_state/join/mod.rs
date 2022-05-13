@@ -16,16 +16,16 @@ mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
+use bytes::{Buf, BufMut};
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::{Keyspace, StateStore};
-use serde::{Deserialize, Serialize};
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
@@ -61,9 +61,14 @@ impl JoinRow {
         self.degree
     }
 
-    pub fn dec_degree(&mut self) -> u64 {
+    pub fn dec_degree(&mut self) -> RwResult<u64> {
+        if self.degree == 0 {
+            return Err(
+                ErrorCode::InternalError("Tried to decrement zero join row degree".into()).into(),
+            );
+        }
         self.degree -= 1;
-        self.degree
+        Ok(self.degree)
     }
 
     /// Serialize the `JoinRow` into a binary bytes. All values must not be null.
@@ -74,11 +79,12 @@ impl JoinRow {
         for v in &self.row.0 {
             vec.extend_from_slice(&serialize_cell(v)?)
         }
-        let mut serializer = memcomparable::Serializer::new(vec![]);
 
         // Serialize degree.
-        self.degree.serialize(&mut serializer)?;
-        vec.extend_from_slice(&serializer.into_inner());
+        let mut degree_buf: Vec<u8> = vec![];
+        degree_buf.put_u64_le(self.degree);
+        vec.extend_from_slice(&degree_buf);
+
         Ok(vec)
     }
 }
@@ -95,14 +101,13 @@ impl JoinRowDeserializer {
     }
 
     /// Deserialize the row from a memcomparable bytes.
-    pub fn deserialize(&self, data: &[u8]) -> RwResult<JoinRow> {
+    pub fn deserialize(&self, mut data: &[u8]) -> RwResult<JoinRow> {
         let mut values = vec![];
         values.reserve(self.data_types.len());
-        let mut deserializer = value_encoding::Deserializer::new(data);
         for ty in &self.data_types {
-            values.push(deserialize_cell(&mut deserializer, ty)?);
+            values.push(deserialize_cell(&mut data, ty)?);
         }
-        let degree = u64::deserialize(deserializer.memcom_de())?;
+        let degree = data.get_u64_le();
         Ok(JoinRow {
             row: Row(values),
             degree,
@@ -217,10 +222,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             Some(_) => Ok(self.inner.get_mut(key)),
             None => {
                 let keyspace = self.get_state_keyspace(key)?;
-                let all_data = keyspace
-                    .scan_strip_prefix(None, self.current_epoch)
-                    .await
-                    .unwrap();
+                let all_data = keyspace.scan(None, self.current_epoch).await.unwrap();
                 let total_count = all_data.len();
                 if total_count > 0 {
                     let state = JoinEntryState::new(

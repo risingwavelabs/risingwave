@@ -106,6 +106,15 @@ impl FunctionCall {
                 align_types(inputs.iter_mut())?;
                 Ok(DataType::Boolean)
             }
+            ExprType::Coalesce => {
+                if inputs.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "Coalesce function must contain at least 1 argument".into(),
+                    )
+                    .into());
+                }
+                align_types(inputs.iter_mut())
+            }
             _ => infer_type(
                 func_type,
                 inputs.iter().map(|expr| expr.return_type()).collect(),

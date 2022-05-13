@@ -1,19 +1,19 @@
 [package]
 edition = "2021"
 name = "risingwave_connector"
-version = "0.1.5"
+version = "0.1.6"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.40"
-aws-smithy-types = "0.40"
-aws-types = { version = "0.10", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-kinesis = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.11", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.41"
+aws-smithy-types = "0.41"
+aws-types = { version = "0.11", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -23,9 +23,9 @@ farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 globset = "0.4.8"
 http = "0.2"
+http-serde = "1.1.0"
 hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
 log = "0.4"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
@@ -33,7 +33,8 @@ num-traits = "0.2"
 paste = "1"
 prost = "0.10"
 protobuf = "2"
-pulsar = { git = "https://github.com/shanicky/pulsar-rs.git", rev = "3b6353943833057f4379a354c1754a4e86fa57ff", default-features = false, features = ["tokio-runtime"] }
+pulsar = { git = "https://github.com/singularity-data/pulsar-rs.git", rev = "8d4789eea780d520136e1cc2535a1fec9385c53d", default-features = false, features = ["tokio-runtime"] }
+rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
@@ -52,6 +53,7 @@ tonic = "0.7"
 twox-hash = "1"
 url = "2"
 urlencoding = "2"
+
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 [dev-dependencies]
 rand = "0.8"

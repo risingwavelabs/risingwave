@@ -18,14 +18,13 @@ use std::string::String;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
 
 use super::{
-    BatchProject, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamProject,
-    ToBatch, ToStream,
+    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
 };
-use crate::expr::{
-    as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
-};
+use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
@@ -35,14 +34,13 @@ use crate::utils::ColIndexMapping;
 pub struct LogicalProject {
     pub base: PlanBase,
     exprs: Vec<ExprImpl>,
-    expr_alias: Vec<Option<String>>,
     input: PlanRef,
 }
 
 impl LogicalProject {
-    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
+    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(&exprs, &expr_alias, input.schema());
+        let schema = Self::derive_schema(&exprs, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
@@ -50,12 +48,7 @@ impl LogicalProject {
             assert!(!expr.has_agg_call());
         }
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
-        LogicalProject {
-            base,
-            exprs,
-            expr_alias,
-            input,
-        }
+        LogicalProject { base, exprs, input }
     }
 
     /// get the Mapping of columnIndex from output column index to input column index
@@ -84,12 +77,8 @@ impl LogicalProject {
         Self::i2o_col_mapping_inner(self.input.schema().len(), self.exprs())
     }
 
-    pub fn create(
-        input: PlanRef,
-        exprs: Vec<ExprImpl>,
-        expr_alias: Vec<Option<String>>,
-    ) -> PlanRef {
-        Self::new(input, exprs, expr_alias).into()
+    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
+        Self::new(input, exprs).into()
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
@@ -99,13 +88,6 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
-        assert_eq!(
-            input.schema().fields().len(),
-            mapping.source_size(),
-            "invalid mapping given:\n----input: {:?}\n----mapping: {:?}",
-            input,
-            mapping
-        );
         if mapping.target_size() == 0 {
             // The mapping is empty, so the parent actually doesn't need the output of the input.
             // This can happen when the parent node only selects constant expressions.
@@ -123,30 +105,23 @@ impl LogicalProject {
             .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
             .collect();
 
-        let alias = vec![None; exprs.len()];
-        LogicalProject::new(input, exprs, alias).into()
+        LogicalProject::new(input, exprs).into()
     }
 
-    fn derive_schema(
-        exprs: &[ExprImpl],
-        expr_alias: &[Option<String>],
-        input_schema: &Schema,
-    ) -> Schema {
+    fn derive_schema(exprs: &[ExprImpl], input_schema: &Schema) -> Schema {
         let o2i = Self::o2i_col_mapping_inner(input_schema.len(), exprs);
         let fields = exprs
             .iter()
-            .zip_eq(expr_alias.iter())
             .enumerate()
-            .map(|(id, (expr, alias))| {
+            .map(|(id, expr)| {
                 // Get field info from o2i.
-                let (default_name, sub_fields, type_name) = match o2i.try_map(id) {
+                let (name, sub_fields, type_name) = match o2i.try_map(id) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
                     None => (format!("expr#{}", id), vec![], String::new()),
                 };
-                let name = alias.clone().unwrap_or(default_name);
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
             .collect();
@@ -166,23 +141,8 @@ impl LogicalProject {
         &self.exprs
     }
 
-    /// Get a reference to the logical project's expr alias.
-    pub fn expr_alias(&self) -> &[Option<String>] {
-        self.expr_alias.as_ref()
-    }
-
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        f.debug_struct(name)
-            .field("exprs", self.exprs())
-            .field(
-                "expr_alias",
-                &self
-                    .expr_alias()
-                    .iter()
-                    .map(as_alias_display)
-                    .collect::<Vec<_>>(),
-            )
-            .finish()
+        f.debug_struct(name).field("exprs", self.exprs()).finish()
     }
 
     pub fn is_identity(&self) -> bool {
@@ -190,17 +150,15 @@ impl LogicalProject {
             && self
                 .exprs
                 .iter()
-                .zip_eq(self.expr_alias.iter())
                 .zip_eq(self.input.schema().fields())
                 .enumerate()
-                .all(|(i, ((expr, alias), field))| {
-                    alias.as_ref().map(|alias| alias == &field.name).unwrap_or(true) &&
+                .all(|(i, (expr, field))| {
                     matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
                 })
     }
 
-    pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>, PlanRef) {
-        (self.exprs, self.expr_alias, self.input)
+    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
+        (self.exprs, self.input)
     }
 }
 
@@ -210,7 +168,7 @@ impl PlanTreeNodeUnary for LogicalProject {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
+        Self::new(input, self.exprs.clone())
     }
 
     fn rewrite_with_input(
@@ -224,7 +182,7 @@ impl PlanTreeNodeUnary for LogicalProject {
             .into_iter()
             .map(|expr| input_col_change.rewrite_expr(expr))
             .collect();
-        let proj = Self::new(input, exprs, self.expr_alias().to_vec());
+        let proj = Self::new(input, exprs);
         // change the input columns index will not change the output column index
         let out_col_change = ColIndexMapping::identity(self.schema().len());
         (proj, out_col_change)
@@ -240,50 +198,53 @@ impl fmt::Display for LogicalProject {
 }
 
 impl ColPrunable for LogicalProject {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        // Check.
-        self.must_contain_columns(required_cols);
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let input_col_num = self.input().schema().len();
+        let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
         // Record each InputRef's index.
-        let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
-        required_cols.ones().for_each(|id| {
-            visitor.visit_expr(&self.exprs[id]);
+        let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
+        required_cols.iter().for_each(|i| {
+            if let ExprImpl::InputRef(ref input_ref) = self.exprs[*i] {
+                let input_idx = input_ref.index;
+                input_required_appeared.put(input_idx);
+            } else {
+                input_ref_collector.visit_expr(&self.exprs[*i]);
+            }
         });
+        let input_required_cols = {
+            let mut tmp = FixedBitSet::from(input_ref_collector);
+            tmp.union_with(&input_required_appeared);
+            tmp
+        };
 
-        let child_required_cols = visitor.collect();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
-
+        let input_required_cols = input_required_cols.ones().collect_vec();
+        let new_input = self.input.prune_col(&input_required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         // Rewrite each InputRef with new index.
-        let (exprs, expr_alias) = required_cols
-            .ones()
-            .map(|id| {
-                (
-                    mapping.rewrite_expr(self.exprs[id].clone()),
-                    self.expr_alias[id].clone(),
-                )
-            })
-            .unzip();
+        let exprs = required_cols
+            .iter()
+            .map(|&id| mapping.rewrite_expr(self.exprs[id].clone()))
+            .collect();
 
         // Reconstruct the LogicalProject.
-        LogicalProject::new(
-            self.input.prune_col(&child_required_cols),
-            exprs,
-            expr_alias,
-        )
-        .into()
+        LogicalProject::new(new_input, exprs).into()
     }
 }
 
 impl ToBatch for LogicalProject {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchProject::new(new_logical).into()
+        Ok(BatchProject::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalProject {
-    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
+    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> Result<PlanRef> {
         let input_required = match required_dist {
             Distribution::HashShard(_) => self
                 .o2i_col_mapping()
@@ -292,39 +253,34 @@ impl ToStream for LogicalProject {
             Distribution::AnyShard => Distribution::AnyShard,
             _ => Distribution::Any,
         };
-        let new_input = self.input().to_stream_with_dist_required(&input_required);
+        let new_input = self.input().to_stream_with_dist_required(&input_required)?;
         let new_logical = self.clone_with_input(new_input);
         let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }
 
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef> {
         self.to_stream_with_dist_required(Distribution::any())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let input_pk = input.pk_indices();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();
-        let (exprs, expr_alias) = proj
-            .exprs()
-            .iter()
-            .cloned()
-            .zip_eq(proj.expr_alias().iter().cloned())
-            .map(|(a, b)| (a, b))
-            .chain(col_need_to_add.map(|idx| {
-                (
-                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into(),
-                    None,
-                )
-            }))
-            .unzip();
-        let proj = Self::new(input, exprs, expr_alias);
+        let exprs =
+            proj.exprs()
+                .iter()
+                .cloned()
+                .chain(col_need_to_add.map(|idx| {
+                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into()
+                }))
+                .collect();
+        let proj = Self::new(input, exprs);
         // the added columns is at the end, so it will not change the exists column index
-        (proj.into(), out_col_change)
+        Ok((proj.into(), out_col_change))
     }
 }
 #[cfg(test)]
@@ -381,13 +337,10 @@ mod tests {
                     .unwrap(),
                 )),
             ],
-            vec![None; 3],
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(3);
-        required_cols.insert(1);
-        required_cols.insert(2);
+        let required_cols = vec![1, 2];
         let plan = project.prune_col(&required_cols);
 
         // Check the result

@@ -25,27 +25,25 @@ use crate::write_batch::WriteBatch;
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<u64>> + Send;
+pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]
 macro_rules! define_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
-        type ReverseScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
+        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
-        type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
-        type ReverseIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
+        type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
+        type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
     }
 }
 
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter<'a>: StateStoreIter<Item = (Bytes, Bytes)>
-    where
-        Self: 'a;
+    type Iter: StateStoreIter<Item = (Bytes, Bytes)>;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
 
@@ -54,7 +52,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: 'static + Send,
         B: 'static + Send;
 
-    type ReverseScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
+    type BackwardScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
         R: 'static + Send,
         B: 'static + Send;
@@ -67,12 +65,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type SyncFuture<'a>: EmptyFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter<'a>>> + Send
+    type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
     where
         R: 'static + Send,
         B: 'static + Send;
 
-    type ReverseIterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter<'a>>> + Send
+    type BackwardIterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
     where
         R: 'static + Send,
         B: 'static + Send;
@@ -96,12 +94,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    fn reverse_scan<R, B>(
+    fn backward_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'_, R, B>
+    ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
@@ -136,10 +134,10 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    /// Opens and returns a reversed iterator for given `key_range`.
+    /// Opens and returns a backward iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;

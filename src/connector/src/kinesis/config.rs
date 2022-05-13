@@ -24,16 +24,7 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use serde::{Deserialize, Serialize};
 
-use crate::Properties;
-
-const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
-const KINESIS_STREAM_REGION: &str = "kinesis.stream.region";
-const KINESIS_ENDPOINT: &str = "kinesis.endpoint";
-const KINESIS_CREDENTIALS_ACCESS_KEY: &str = "kinesis.credentials.access";
-const KINESIS_CREDENTIALS_SECRET_ACCESS_KEY: &str = "kinesis.credentials.secret";
-const KINESIS_CREDENTIALS_SESSION_TOKEN: &str = "kinesis.credentials.session_token";
-const KINESIS_ASSUMEROLE_ARN: &str = "kinesis.assumerole.arn";
-const KINESIS_ASSUMEROLE_EXTERNAL_ID: &str = "kinesis.assumerole.external_id";
+use crate::KinesisProperties;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AwsAssumeRole {
@@ -100,16 +91,16 @@ impl AwsConfigInfo {
         Ok(config_loader.load().await)
     }
 
-    pub fn build(properties: &Properties) -> risingwave_common::error::Result<Self> {
-        let stream_name = properties.get_kinesis(KINESIS_STREAM_NAME)?;
-        let region = properties.get_kinesis(KINESIS_STREAM_REGION)?;
+    pub fn build(properties: KinesisProperties) -> risingwave_common::error::Result<Self> {
+        let stream_name = properties.stream_name;
+        let region = properties.stream_region;
 
         let mut credentials: Option<AwsCredentials> = None;
         let mut assume_role: Option<AwsAssumeRole> = None;
 
         let (access_key, secret_key) = (
-            properties.0.get(KINESIS_CREDENTIALS_ACCESS_KEY),
-            properties.0.get(KINESIS_CREDENTIALS_SECRET_ACCESS_KEY),
+            properties.credentials_access_key,
+            properties.credentials_secret_access_key,
         );
         if access_key.is_some() ^ secret_key.is_some() {
             return Err(
@@ -117,23 +108,23 @@ impl AwsConfigInfo {
             );
         } else if let (Some(access), Some(secret)) = (access_key, secret_key) {
             credentials = Some(AwsCredentials {
-                access_key_id: access.clone(),
-                secret_access_key: secret.clone(),
-                session_token: properties.0.get(KINESIS_CREDENTIALS_SESSION_TOKEN).cloned(),
+                access_key_id: access,
+                secret_access_key: secret,
+                session_token: properties.session_token.clone(),
             });
         }
 
-        if let Some(assume_role_arn) = properties.0.get(KINESIS_ASSUMEROLE_ARN) {
+        if let Some(assume_role_arn) = properties.assume_role_arn {
             assume_role = Some(AwsAssumeRole {
-                arn: assume_role_arn.clone(),
-                external_id: properties.0.get(KINESIS_ASSUMEROLE_EXTERNAL_ID).cloned(),
+                arn: assume_role_arn,
+                external_id: properties.assume_role_externeal_id.clone(),
             })
         }
 
         Ok(Self {
             stream_name,
             region: Some(region),
-            endpoint: properties.0.get(KINESIS_ENDPOINT).cloned(),
+            endpoint: properties.endpoint.clone(),
             assume_role,
             credentials,
         })

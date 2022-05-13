@@ -37,7 +37,7 @@ impl Binder {
             .get_column_binding_index(table_name, column_name)
         {
             let column = &self.context.columns[index];
-            return Ok(InputRef::new(column.index, column.desc.data_type.clone()).into());
+            return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
@@ -50,7 +50,7 @@ impl Binder {
                     let column = &context.columns[index];
                     return Ok(CorrelatedInputRef::new(
                         column.index,
-                        column.desc.data_type.clone(),
+                        column.field.data_type.clone(),
                         depth,
                     )
                     .into());

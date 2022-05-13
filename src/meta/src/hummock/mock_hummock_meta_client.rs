@@ -45,7 +45,7 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task(self.context_id)
+            .get_compact_task()
             .await
             .unwrap_or(None)
     }
@@ -57,12 +57,14 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .pin_version(self.context_id, last_pinned)
             .await
+            .map_err(|e| e.into())
     }
 
     async fn unpin_version(&self, pinned_version_id: &[HummockVersionId]) -> Result<()> {
         self.hummock_manager
             .unpin_version(self.context_id, pinned_version_id)
             .await
+            .map_err(|e| e.into())
     }
 
     async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
@@ -70,6 +72,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .pin_snapshot(self.context_id, last_pinned)
             .await
             .map(|e| e.epoch)
+            .map_err(|e| e.into())
     }
 
     async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
@@ -82,10 +85,14 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .unpin_snapshot(self.context_id, snapshots)
             .await
+            .map_err(|e| e.into())
     }
 
     async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
-        self.hummock_manager.get_new_table_id().await
+        self.hummock_manager
+            .get_new_table_id()
+            .await
+            .map_err(|e| e.into())
     }
 
     async fn add_tables(
@@ -96,21 +103,29 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .add_tables(self.context_id, sstables, epoch)
             .await
+            .map_err(|e| e.into())
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         self.hummock_manager
-            .report_compact_task(compact_task)
+            .report_compact_task(&compact_task)
             .await
             .map(|_| ())
+            .map_err(|e| e.into())
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager.commit_epoch(epoch).await
+        self.hummock_manager
+            .commit_epoch(epoch)
+            .await
+            .map_err(|e| e.into())
     }
 
     async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager.abort_epoch(epoch).await
+        self.hummock_manager
+            .abort_epoch(epoch)
+            .await
+            .map_err(|e| e.into())
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {

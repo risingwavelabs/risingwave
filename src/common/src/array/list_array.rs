@@ -288,6 +288,10 @@ impl ListValue {
     pub fn new(values: Vec<Datum>) -> Self {
         Self { values }
     }
+
+    pub fn values(&self) -> &[Datum] {
+        &self.values
+    }
 }
 
 #[derive(Copy, Clone)]

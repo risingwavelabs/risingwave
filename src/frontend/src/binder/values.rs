@@ -13,19 +13,27 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::array::StructValue;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Values;
+use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::types::{get_data_type_from_datum, DataType, Datum, Scalar};
+use risingwave_sqlparser::ast::{Expr, Values};
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl};
+use crate::expr::{align_types, ExprImpl, Literal};
 
 #[derive(Debug)]
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,
+}
+
+impl BoundValues {
+    /// The schema returned of this [`BoundValues`].
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl Binder {
@@ -72,6 +80,34 @@ impl Binder {
             rows: bound,
             schema,
         })
+    }
+
+    /// Bind row to `struct_value` for nested column,
+    /// e.g. Row(1,2,(1,2,3)).
+    /// Only accept value and row expr in row.
+    pub fn bind_row(&mut self, exprs: &[Expr]) -> Result<Literal> {
+        let datums = exprs
+            .iter()
+            .map(|e| match e {
+                Expr::Value(value) => Ok(self.bind_value(value.clone())?.get_data().clone()),
+                Expr::Row(expr) => Ok(self.bind_row(expr)?.get_data().clone()),
+                _ => Err(ErrorCode::NotImplemented(
+                    format!("unsupported expression {:?}", e),
+                    TrackingIssue::none(),
+                )
+                .into()),
+            })
+            .collect::<Result<Vec<Datum>>>()?;
+        let value = StructValue::new(datums);
+        let data_type = DataType::Struct {
+            fields: value
+                .fields()
+                .iter()
+                .map(get_data_type_from_datum)
+                .collect::<Result<Vec<_>>>()?
+                .into(),
+        };
+        Ok(Literal::new(Some(value.to_scalar_value()), data_type))
     }
 }
 

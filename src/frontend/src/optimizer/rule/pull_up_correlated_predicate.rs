@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::{Either, Itertools};
-use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -29,20 +28,17 @@ pub struct PullUpCorrelatedPredicate {}
 impl Rule for PullUpCorrelatedPredicate {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        if !matches!(apply.join_type(), JoinType::LeftOuter | JoinType::LeftSemi) {
-            return None;
-        }
+        let (apply_left, apply_right, apply_on, join_type) = apply.clone().decompose();
 
-        let right = apply.right();
-        let project = right.as_logical_project()?;
-        let (mut proj_exprs, mut proj_expr_alias, _) = project.clone().decompose();
+        let project = apply_right.as_logical_project()?;
+        let (mut proj_exprs, _) = project.clone().decompose();
 
         let input = project.input();
         let filter = input.as_logical_filter()?;
 
         let mut rewriter = Rewriter {
             input_refs: vec![],
-            index: proj_exprs.len() + apply.left().schema().fields().len(),
+            index: proj_exprs.len() + apply_left.schema().fields().len(),
         };
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -60,7 +56,6 @@ impl Rule for PullUpCorrelatedPredicate {
                 });
         // Append `InputRef`s in the predicate expression to be pulled to the project, so that they
         // are accessible by the expression after it is pulled.
-        proj_expr_alias.extend(vec![None; rewriter.input_refs.len()].into_iter());
         proj_exprs.extend(
             rewriter
                 .input_refs
@@ -75,13 +70,13 @@ impl Rule for PullUpCorrelatedPredicate {
             },
         );
 
-        let project = LogicalProject::new(filter, proj_exprs, proj_expr_alias);
+        let project = LogicalProject::new(filter, proj_exprs);
 
         // Merge these expressions with LogicalApply into LogicalJoin.
-        let on = Condition {
+        let on = apply_on.and(Condition {
             conjunctions: cor_exprs,
-        };
-        Some(LogicalJoin::new(apply.left(), project.into(), apply.join_type(), on).into())
+        });
+        Some(LogicalJoin::new(apply_left, project.into(), join_type, on).into())
     }
 }
 

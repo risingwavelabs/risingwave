@@ -35,7 +35,6 @@ pub struct InsertExecutor2 {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-    worker_id: u32,
 
     child: BoxedExecutor2,
     schema: Schema,
@@ -51,13 +50,11 @@ impl InsertExecutor2 {
         table_id: TableId,
         source_manager: SourceManagerRef,
         child: BoxedExecutor2,
-        worker_id: u32,
         frontend_v2: bool,
     ) -> Self {
         Self {
             table_id,
             source_manager,
-            worker_id,
             child,
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
@@ -99,9 +96,7 @@ impl InsertExecutor2 {
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder
-                    .append(Some(source.next_row_id(self.worker_id)))
-                    .unwrap();
+                builder.append(Some(source_desc.next_row_id())).unwrap();
             }
 
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
@@ -171,7 +166,6 @@ impl BoxedExecutor2Builder for InsertExecutor2 {
             table_id,
             source.global_batch_env().source_manager_ref(),
             child,
-            source.global_batch_env().worker_id(),
             insert_node.frontend_v2,
         )))
     }
@@ -183,7 +177,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::array::{Array, I32Array, I64Array, StructArray};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
@@ -197,16 +191,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::new());
+        let source_manager = Arc::new(MemSourceManager::default());
         let store = MemoryStateStore::new();
 
+        // Make struct field
+        let struct_field = Field::unnamed(DataType::Struct {
+            fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+        });
+
         // Schema for mock executor.
-        let schema = schema_test_utils::ii();
+        let mut schema = schema_test_utils::ii();
+        schema.fields.push(struct_field.clone());
         let mut mock_executor = MockExecutor::new(schema.clone());
 
         // Schema of the table
-        let schema = schema_test_utils::iii();
-
+        let mut schema = schema_test_utils::iii();
+        schema.fields.push(struct_field);
         let table_columns: Vec<_> = schema
             .fields
             .iter()
@@ -222,7 +222,19 @@ mod tests {
 
         let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
-        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        let array = StructArray::from_slices(
+            &[true, false, false, false, false],
+            vec![
+                array! { I32Array, [Some(1),None,None,None,None] }.into(),
+                array! { I32Array, [Some(2),None,None,None,None] }.into(),
+                array! { I32Array, [Some(3),None,None,None,None] }.into(),
+            ],
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+        )
+        .map(|x| Arc::new(x.into()))
+        .unwrap();
+        let col3 = Column::new(array);
+        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2, col3]).build();
         mock_executor.add(data_chunk.clone());
 
         // Create the table.
@@ -233,7 +245,7 @@ mod tests {
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
-            .stream_reader(vec![0.into(), 1.into(), 2.into()])
+            .stream_reader(vec![0.into(), 1.into(), 2.into(), 3.into()])
             .await?;
 
         // Insert
@@ -241,7 +253,6 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
-            0,
             false,
         ));
         let handle = tokio::spawn(async move {
@@ -266,7 +277,7 @@ mod tests {
         let chunk = reader.next().await?;
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.chunk.columns()[0]
                 .array()
                 .as_int64()
                 .iter()
@@ -275,7 +286,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.chunk.columns()[1]
                 .array()
                 .as_int64()
                 .iter()
@@ -283,15 +294,18 @@ mod tests {
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
-        // Row id column
-        assert_eq!(
-            chunk.columns()[2]
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
-        );
+        let array: ArrayImpl = StructArray::from_slices(
+            &[true, false, false, false, false],
+            vec![
+                array! { I32Array, [Some(1),None,None,None,None] }.into(),
+                array! { I32Array, [Some(2),None,None,None,None] }.into(),
+                array! { I32Array, [Some(3),None,None,None,None] }.into(),
+            ],
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+        )
+        .unwrap()
+        .into();
+        assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.

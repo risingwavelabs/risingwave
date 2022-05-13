@@ -16,7 +16,8 @@ use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
+    UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -63,6 +64,11 @@ impl Binder {
             Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_trim(*expr, trim_where)?,
             ))),
+            Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+            } => self.bind_substring(*expr, substring_from, substring_for),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
@@ -78,6 +84,11 @@ impl Binder {
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::InSubquery {
+                expr,
+                subquery,
+                negated,
+            } => self.bind_in_subquery(*expr, *subquery, negated),
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
@@ -96,6 +107,7 @@ impl Binder {
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
+            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -141,6 +153,24 @@ impl Binder {
             )
         } else {
             Ok(in_expr.into())
+        }
+    }
+
+    pub(super) fn bind_in_subquery(
+        &mut self,
+        expr: Expr,
+        subquery: Query,
+        negated: bool,
+    ) -> Result<ExprImpl> {
+        let bound_expr = self.bind_expr(expr)?;
+        let bound_subquery = self.bind_subquery_expr(subquery, SubqueryKind::In(bound_expr))?;
+        if negated {
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![bound_subquery], DataType::Boolean)
+                    .into(),
+            )
+        } else {
+            Ok(bound_subquery)
         }
     }
 
@@ -192,6 +222,25 @@ impl Binder {
             None => ExprType::Trim,
         };
         FunctionCall::new(func_type, inputs)
+    }
+
+    fn bind_substring(
+        &mut self,
+        expr: Expr,
+        substring_from: Option<Box<Expr>>,
+        substring_for: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![
+            self.bind_expr(expr)?,
+            match substring_from {
+                Some(expr) => self.bind_expr(*expr)?,
+                None => ExprImpl::literal_int(1),
+            },
+        ];
+        if let Some(expr) = substring_for {
+            args.push(self.bind_expr(*expr)?);
+        }
+        FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
     }
 
     /// Bind `expr (not) between low and high`

@@ -141,30 +141,6 @@ impl Scalar for bool {
     }
 }
 
-impl ScalarPartialOrd for IntervalUnit {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for NaiveDateWrapper {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for NaiveTimeWrapper {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for NaiveDateTimeWrapper {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
 /// Implement `Scalar` and `ScalarRef` for `String`.
 /// `String` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for bool {
@@ -323,6 +299,40 @@ impl ScalarImpl {
             };
         }
         for_all_scalar_variants! { impl_all_get_ident, self }
+    }
+
+    pub(crate) fn data_type(&self) -> Result<DataType> {
+        let data_type = match self {
+            ScalarImpl::Int16(_) => DataType::Int16,
+            ScalarImpl::Int32(_) => DataType::Int32,
+            ScalarImpl::Int64(_) => DataType::Int64,
+            ScalarImpl::Float32(_) => DataType::Float32,
+            ScalarImpl::Float64(_) => DataType::Float64,
+            ScalarImpl::Utf8(_) => DataType::Varchar,
+            ScalarImpl::Bool(_) => DataType::Boolean,
+            ScalarImpl::Decimal(_) => DataType::Decimal,
+            ScalarImpl::Interval(_) => DataType::Interval,
+            ScalarImpl::NaiveDate(_) => DataType::Date,
+            ScalarImpl::NaiveDateTime(_) => DataType::Timestamp,
+            ScalarImpl::NaiveTime(_) => DataType::Time,
+            ScalarImpl::Struct(data) => {
+                let types = data
+                    .fields()
+                    .iter()
+                    .map(get_data_type_from_datum)
+                    .collect::<Result<Vec<_>>>()?;
+                DataType::Struct {
+                    fields: types.into(),
+                }
+            }
+            ScalarImpl::List(data) => {
+                let data = data.values().get(0).ok_or_else(|| {
+                    internal_error("cannot get data type from empty list".to_string())
+                })?;
+                get_data_type_from_datum(data)?
+            }
+        };
+        Ok(data_type)
     }
 }
 

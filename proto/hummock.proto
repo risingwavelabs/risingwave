@@ -22,9 +22,17 @@ message SstableIdInfo {
   uint64 meta_delete_timestamp = 4;
 }
 
+message VNodeBitmap {
+  uint32 table_id = 1;
+  uint32 maplen = 2;
+  bytes bitmap = 3;
+}
+
 message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
+  uint64 file_size = 3;
+  repeated VNodeBitmap vnode_bitmaps = 4;
 }
 
 enum LevelType {
@@ -33,8 +41,9 @@ enum LevelType {
 }
 
 message Level {
-  LevelType level_type = 1;
-  repeated SstableInfo table_infos = 2;
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
 }
 
 message UncommittedEpoch {
@@ -109,11 +118,6 @@ message UnpinSnapshotResponse {
   common.Status status = 1;
 }
 
-message LevelEntry {
-  uint32 level_idx = 1;
-  Level level = 2;
-}
-
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
@@ -134,7 +138,7 @@ message CompactMetrics {
 
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
-  repeated LevelEntry input_ssts = 1;
+  repeated Level input_ssts = 1;
   // In ideal case, the compaction will generate `splits.len()` tables which have key range
   // corresponding to that in [`splits`], respectively
   repeated KeyRange splits = 2;
@@ -144,22 +148,32 @@ message CompactTask {
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
   uint64 task_id = 5;
-  // compacion output will be added to [`target_level`] of LSM after compaction
+  // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool is_target_ultimate_and_leveling = 7;
   CompactMetrics metrics = 8;
   bool task_status = 9;
+  repeated CompactionGroup.PrefixPair prefix_pairs = 10;
+  // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
+  // with data for more than one relational state tables, here a vector is required.
+  repeated common.ParallelUnitMapping vnode_mappings = 11;
+}
+
+message CompactionGroup {
+  message PrefixPair {
+    // key value with `prefix` belongs to compaction group `group_id`
+    uint64 group_id = 1;
+    bytes prefix = 2;
+  }
 }
 
 message LevelHandler {
-  message KeyRangeTaskId {
-    KeyRange key_range = 1;
-    uint64 task_id = 2;
-    uint64 ssts = 3;
+  message SstTask {
+    uint64 task_id = 1;
+    repeated uint64 ssts = 2;
   }
-  LevelType level_type = 1;
-  map<uint64, uint64> compacting_ssts = 2;
-  repeated KeyRangeTaskId key_ranges = 3;
+  uint32 level = 1;
+  repeated SstTask tasks = 3;
 }
 
 message CompactStatus {

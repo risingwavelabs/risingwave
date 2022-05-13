@@ -22,15 +22,15 @@ use futures::channel::mpsc::Sender;
 use futures::{SinkExt, Stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Op;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::common::ActorInfo;
 use tracing::event;
 
-use super::{Barrier, Message, Mutation, Result, StreamChunk, StreamConsumer};
-use crate::executor_v2::BoxedExecutor;
+use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
@@ -68,7 +68,10 @@ impl LocalOutput {
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         // local channel should never fail
-        self.ch.send(message).await.unwrap();
+        self.ch
+            .send(message)
+            .await
+            .map_err(|_| internal_error("failed to send"))?;
         Ok(())
     }
 
@@ -106,7 +109,10 @@ impl Output for RemoteOutput {
             _ => message,
         };
         // local channel should never fail
-        self.ch.send(message).await.unwrap();
+        self.ch
+            .send(message)
+            .await
+            .map_err(|_| internal_error("failed to send"))?;
         Ok(())
     }
 
@@ -821,47 +827,6 @@ impl Dispatcher for SimpleDispatcher {
 }
 
 #[cfg(test)]
-mod sender_consumer {
-    use super::*;
-    use crate::executor::ExecutorV1;
-
-    /// `SenderConsumer` consumes data from input executor and send it into a channel.
-    pub struct SenderConsumer {
-        input: Box<dyn ExecutorV1>,
-        channel: BoxedOutput,
-    }
-
-    impl SenderConsumer {
-        pub fn new(input: Box<dyn ExecutorV1>, channel: BoxedOutput) -> Self {
-            Self { input, channel }
-        }
-    }
-
-    impl StreamConsumer for SenderConsumer {
-        type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
-
-        fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-            #[try_stream]
-            async move {
-                loop {
-                    let msg = self.input.next().await?;
-                    let barrier = msg.as_barrier().cloned();
-
-                    self.channel.send(msg).await?;
-
-                    if let Some(barrier) = barrier {
-                        yield barrier;
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-pub use sender_consumer::SenderConsumer;
-
-#[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
@@ -878,7 +843,7 @@ mod tests {
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
-    use crate::executor_v2::receiver::ReceiverExecutor;
+    use crate::executor::receiver::ReceiverExecutor;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]

@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -83,28 +82,27 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
-        let mut all_cols = FixedBitSet::with_capacity(self.input.schema().len());
-        all_cols.insert_range(..);
-        self.clone_with_input(self.input.prune_col(&all_cols))
+    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
+        self.clone_with_input(self.input.prune_col(&required_cols))
             .into()
     }
 }
 
 impl ToBatch for LogicalInsert {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchInsert::new(new_logical).into()
+        Ok(BatchInsert::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalInsert {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef> {
         unreachable!("insert should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
         unreachable!("delete should always be converted to batch plan");
     }
 }

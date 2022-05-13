@@ -23,8 +23,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
+use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
 use super::*;
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
@@ -72,7 +72,7 @@ impl<S: StateStore> JoinEntryState<S> {
         pk_data_types: Arc<[DataType]>,
         epoch: u64,
     ) -> Result<Option<Self>> {
-        let all_data = keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = keyspace.scan(None, epoch).await?;
         if !all_data.is_empty() {
             // Insert cached states.
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
@@ -152,7 +152,7 @@ impl<S: StateStore> JoinEntryState<S> {
     async fn populate_cache(&mut self, epoch: u64) -> Result<()> {
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
 
         // Insert cached states.
         let mut cached = Self::fill_cached(
