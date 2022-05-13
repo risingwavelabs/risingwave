@@ -123,6 +123,11 @@ pub enum ErrorCode {
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
 
+    /// This error occurs when the meta node receives heartbeat from a previous removed worker
+    /// node. Currently we don't support re-register, and the worker node need a full restart.
+    #[error("Unknown worker")]
+    UnknownWorker,
+
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
     #[error("End of the stream")]
@@ -289,6 +294,7 @@ impl ErrorCode {
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,
             ErrorCode::BindError(_) => 23,
+            ErrorCode::UnknownWorker => 24,
             ErrorCode::UnknownError(_) => 101,
         }
     }

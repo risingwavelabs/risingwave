@@ -23,7 +23,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::Properties;
+use risingwave_connector::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
@@ -33,10 +33,6 @@ use crate::table_v2::TableSourceV2;
 use crate::{SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
-
-const KINESIS_SOURCE: &str = "kinesis";
-const KAFKA_SOURCE: &str = "kafka";
-const NEXMARK_SOURCE: &str = "nexmark";
 
 /// The local source manager on the compute node.
 pub trait SourceManager: Debug + Sync + Send {
@@ -114,9 +110,8 @@ impl SourceManager for MemSourceManager {
             )));
         }
 
-        let properties = Properties::new(info.properties.clone());
         let parser =
-            SourceParserImpl::create(&format, &properties, info.row_schema_location.as_str())?;
+            SourceParserImpl::create(&format, &info.properties, info.row_schema_location.as_str())?;
 
         let columns = info
             .columns
@@ -140,19 +135,8 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = info.row_id_index as usize;
 
-        match properties.get_connector_type()?.as_str() {
-            // TODO support more connector here
-            KINESIS_SOURCE | KAFKA_SOURCE | NEXMARK_SOURCE => {}
-            other => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "source type {} not supported",
-                    other
-                ))));
-            }
-        };
-
         let source = SourceImpl::Connector(ConnectorSource {
-            config: properties,
+            config: ConnectorProperties::new(info.properties)?,
             columns: columns.clone(),
             parser,
         });

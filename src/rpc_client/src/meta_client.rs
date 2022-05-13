@@ -17,7 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
@@ -31,9 +31,9 @@ use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
-    CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
-    DropMaterializedViewRequest, DropMaterializedViewResponse, DropSourceRequest,
-    DropSourceResponse,
+    CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
+    DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
+    DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -220,6 +220,18 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
+        let request = DropDatabaseRequest { database_id };
+        let resp = self.inner.drop_database(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_schema(&self, schema_id: u32) -> Result<CatalogVersion> {
+        let request = DropSchemaRequest { schema_id };
+        let resp = self.inner.drop_schema(request).await?;
+        Ok(resp.version)
+    }
+
     /// Unregister the current node to the cluster.
     pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
@@ -274,6 +286,12 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        if err
+                            .to_string()
+                            .contains(&ErrorCode::UnknownWorker.to_string())
+                        {
+                            panic!("Already removed by the meta node. Need to restart the worker");
+                        }
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -465,6 +483,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
+            ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }

@@ -15,12 +15,14 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::InputRefDisplay;
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -84,12 +86,12 @@ impl PlanTreeNodeUnary for BatchHashAgg {
 }
 impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
-    fn to_distributed(&self) -> PlanRef {
+    fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             Order::any(),
             &Distribution::HashShard(self.group_keys().to_vec()),
-        );
-        self.clone_with_input(new_input).into()
+        )?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -108,5 +110,12 @@ impl ToBatchProst for BatchHashAgg {
                 .map(|index| *index as u32)
                 .collect(),
         })
+    }
+}
+
+impl ToLocalBatch for BatchHashAgg {
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

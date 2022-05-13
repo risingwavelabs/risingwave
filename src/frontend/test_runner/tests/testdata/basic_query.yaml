@@ -67,7 +67,7 @@
     create table t(a Boolean);
     select * from t where (NULL IS NULL) IS TRUE AND FALSE IS FALSE AND a;
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [a] }
+    LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: $1 }
         LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
@@ -75,7 +75,7 @@
     create table t(a Boolean);
     select * from t where (NULL IS NOT TRUE) IS NOT FALSE AND a IS NOT TRUE;
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [a] }
+    LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: IsNotTrue($1) }
         LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
@@ -83,7 +83,7 @@
     create table t(a double precision);
     select * from t where (a IS NOT NULL AND 3.14 IS NOT NULL) OR (NULL IS NOT NULL);
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [a] }
+    LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: IsNotNull($1) }
         LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
@@ -97,15 +97,14 @@
       StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: select 1
   batch_plan: |
-    BatchProject { exprs: [1:Int32], expr_alias: [ ] }
+    BatchProject { exprs: [1:Int32] }
       BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select a from t as t2(a);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0], expr_alias: [a] }
-        BatchScan { table: t, columns: [v1] }
+      BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;

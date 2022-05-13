@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+use crate::dummy_connector::DummySplitReader;
 use crate::kafka::source::KafkaSplitReader;
 use crate::kinesis::source::reader::KinesisSplitReader;
+use crate::kinesis::split::KinesisOffset;
 use crate::nexmark::source::reader::NexmarkSplitReader;
 
 pub enum SourceOffset {
@@ -31,9 +35,9 @@ use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
 use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
-use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
-use crate::utils::AnyhowProperties;
-use crate::{kafka, kinesis, nexmark, pulsar, Properties};
+use crate::pulsar::source::reader::PulsarSplitReader;
+use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
+use crate::{kafka, kinesis, nexmark, pulsar, ConnectorProperties};
 
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
@@ -50,22 +54,96 @@ pub struct SourceMessage {
 }
 
 /// The metadata of a split.
-pub trait SourceSplit: Sized {
+pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
-    fn to_string(&self) -> Result<String>;
+    fn to_json_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
 /// The persistent state of the connector.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectorState {
     pub identifier: Bytes,
     pub start_offset: String,
     pub end_offset: String,
 }
 
+impl ConnectorState {
+    pub fn from_hashmap(state: HashMap<String, String>) -> Vec<Self> {
+        if state.is_empty() {
+            return vec![];
+        }
+        let mut connector_states: Vec<Self> = Vec::with_capacity(state.len());
+        connector_states.extend(state.iter().map(|(split, offset)| Self {
+            identifier: Bytes::from(split.to_owned()),
+            start_offset: offset.clone(),
+            end_offset: "".to_string(),
+        }));
+        connector_states
+    }
+}
+
+impl From<SplitImpl> for ConnectorState {
+    fn from(split: SplitImpl) -> Self {
+        match split {
+            SplitImpl::Kafka(kafka) => Self {
+                identifier: Bytes::from(kafka.partition.to_string()),
+                start_offset: kafka.start_offset.unwrap().to_string(),
+                end_offset: if let Some(end_offset) = kafka.stop_offset {
+                    end_offset.to_string()
+                } else {
+                    "".to_string()
+                },
+            },
+            SplitImpl::Kinesis(kinesis) => Self {
+                identifier: Bytes::from(kinesis.shard_id),
+                start_offset: match kinesis.start_position {
+                    KinesisOffset::SequenceNumber(s) => s,
+                    _ => "".to_string(),
+                },
+                end_offset: match kinesis.end_position {
+                    KinesisOffset::SequenceNumber(s) => s,
+                    _ => "".to_string(),
+                },
+            },
+            SplitImpl::Pulsar(pulsar) => Self {
+                identifier: Bytes::from(pulsar.topic.to_string()),
+                start_offset: match pulsar.start_offset {
+                    PulsarEnumeratorOffset::MessageId(id) => id,
+                    _ => "".to_string(),
+                },
+                end_offset: "".to_string(),
+            },
+            SplitImpl::Nexmark(nex_mark) => Self {
+                identifier: Bytes::from(nex_mark.id()),
+                start_offset: match nex_mark.start_offset {
+                    Some(s) => s.to_string(),
+                    _ => "".to_string(),
+                },
+                end_offset: "".to_string(),
+            },
+        }
+    }
+}
+
+impl SplitMetaData for ConnectorState {
+    fn id(&self) -> String {
+        String::from_utf8(self.identifier.to_vec()).unwrap()
+    }
+
+    fn to_json_bytes(&self) -> Bytes {
+        Bytes::from(serde_json::to_string(self).unwrap())
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ConnectorStateV2 {
+    // ConnectorState should change to Vec<ConnectorState> because there can be multiple readers
+    // in a source executor
     State(ConnectorState),
     Splits(Vec<SplitImpl>),
     None,
@@ -74,17 +152,14 @@ pub enum ConnectorStateV2 {
 #[async_trait]
 pub trait SplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
-    /// `state` is used to recover from the formerly persisted state.
-    /// If the reader is newly created via CREATE SOURCE, the state will be none.
-    async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
-    where
-        Self: Sized;
 }
 
 pub enum SplitReaderImpl {
     Kafka(KafkaSplitReader),
     Kinesis(KinesisSplitReader),
+    Dummy(DummySplitReader),
     Nexmark(NexmarkSplitReader),
+    Pulsar(PulsarSplitReader),
 }
 
 impl SplitReaderImpl {
@@ -92,16 +167,32 @@ impl SplitReaderImpl {
         match self {
             Self::Kafka(r) => r.next().await,
             Self::Kinesis(r) => r.next().await,
+            Self::Dummy(r) => r.next().await,
             Self::Nexmark(r) => r.next().await,
+            Self::Pulsar(r) => r.next().await,
         }
     }
 
-    pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
-        let upstream_type = config.get_connector_type()?;
-        let connector = match upstream_type.as_str() {
-            KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
-            KINESIS_SOURCE => Self::Kinesis(KinesisSplitReader::new(config, state).await?),
-            NEXMARK_SOURCE => Self::Nexmark(NexmarkSplitReader::new(config, state).await?),
+    pub async fn create(config: ConnectorProperties, state: ConnectorStateV2) -> Result<Self> {
+        if let ConnectorStateV2::Splits(s) = &state {
+            if s.is_empty() {
+                return Ok(Self::Dummy(DummySplitReader {}));
+            }
+        }
+
+        let connector = match config {
+            ConnectorProperties::Kafka(props) => {
+                Self::Kafka(KafkaSplitReader::new(props, state).await?)
+            }
+            ConnectorProperties::Kinesis(props) => {
+                Self::Kinesis(KinesisSplitReader::new(props, state).await?)
+            }
+            ConnectorProperties::Nexmark(props) => {
+                Self::Nexmark(NexmarkSplitReader::new(*props, state).await?)
+            }
+            ConnectorProperties::Pulsar(props) => {
+                Self::Pulsar(PulsarSplitReader::new(props, state).await?)
+            }
             _other => {
                 todo!()
             }
@@ -114,7 +205,7 @@ impl SplitReaderImpl {
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator {
-    type Split: SourceSplit + Send + Sync;
+    type Split: SplitMetaData + Send + Sync;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
@@ -149,12 +240,12 @@ impl SplitImpl {
         }
     }
 
-    pub fn to_string(&self) -> Result<String> {
+    pub fn to_json_bytes(&self) -> Bytes {
         match self {
-            SplitImpl::Kafka(k) => k.to_string(),
-            SplitImpl::Pulsar(p) => p.to_string(),
-            SplitImpl::Kinesis(k) => k.to_string(),
-            SplitImpl::Nexmark(n) => n.to_string(),
+            SplitImpl::Kafka(k) => k.to_json_bytes(),
+            SplitImpl::Pulsar(p) => p.to_json_bytes(),
+            SplitImpl::Kinesis(k) => k.to_json_bytes(),
+            SplitImpl::Nexmark(n) => n.to_json_bytes(),
         }
     }
 
@@ -162,7 +253,7 @@ impl SplitImpl {
         match self {
             SplitImpl::Kafka(_) => KAFKA_SPLIT_TYPE,
             SplitImpl::Pulsar(_) => PULSAR_SPLIT_TYPE,
-            SplitImpl::Kinesis(_) => PULSAR_SPLIT_TYPE,
+            SplitImpl::Kinesis(_) => KINESIS_SPLIT_TYPE,
             SplitImpl::Nexmark(_) => NEXMARK_SPLIT_TYPE,
         }
         .to_string()
@@ -201,18 +292,17 @@ impl SplitEnumeratorImpl {
         }
     }
 
-    pub fn create(properties: &AnyhowProperties) -> Result<SplitEnumeratorImpl> {
-        let source_type = properties.get_connector_type()?;
-        match source_type.as_str() {
-            KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
-            PULSAR_SOURCE => {
-                PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
+    pub fn create(properties: ConnectorProperties) -> Result<Self> {
+        match properties {
+            ConnectorProperties::Kafka(props) => KafkaSplitEnumerator::new(props).map(Self::Kafka),
+            ConnectorProperties::Pulsar(props) => {
+                PulsarSplitEnumerator::new(props).map(Self::Pulsar)
             }
-            KINESIS_SOURCE => todo!(),
-            NEXMARK_SOURCE => {
-                NexmarkSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Nexmark)
+            ConnectorProperties::Kinesis(_) => todo!(),
+            ConnectorProperties::S3(_) => todo!(),
+            ConnectorProperties::Nexmark(props) => {
+                NexmarkSplitEnumerator::new(&props).map(Self::Nexmark)
             }
-            _ => Err(anyhow!("unsupported source type: {}", source_type)),
         }
     }
 }

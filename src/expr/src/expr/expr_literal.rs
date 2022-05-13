@@ -103,6 +103,7 @@ fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> b
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
+                    | (DataType::Struct { .. }, ScalarImpl::Struct(_))
             )
         }
         None => true,

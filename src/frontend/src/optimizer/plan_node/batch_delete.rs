@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 use risingwave_pb::plan_common::TableRefId;
@@ -21,6 +22,7 @@ use risingwave_pb::plan_common::TableRefId;
 use super::{
     LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchDelete` implements [`LogicalDelete`]
@@ -62,9 +64,9 @@ impl PlanTreeNodeUnary for BatchDelete {
 impl_plan_tree_node_for_unary! { BatchDelete }
 
 impl ToDistributedBatch for BatchDelete {
-    fn to_distributed(&self) -> PlanRef {
-        let new_input = self.input().to_distributed();
-        self.clone_with_input(new_input).into()
+    fn to_distributed(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_distributed()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
 
@@ -77,5 +79,12 @@ impl ToBatchProst for BatchDelete {
             }
             .into(),
         })
+    }
+}
+
+impl ToLocalBatch for BatchDelete {
+    fn to_local(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_local()?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

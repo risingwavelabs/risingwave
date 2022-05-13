@@ -29,7 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
+use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
@@ -50,6 +50,7 @@ pub struct PlanRoot {
     required_dist: Distribution,
     required_order: Order,
     out_fields: FixedBitSet,
+    out_names: Vec<String>,
     schema: Schema,
 }
 
@@ -59,14 +60,21 @@ impl PlanRoot {
         required_dist: Distribution,
         required_order: Order,
         out_fields: FixedBitSet,
+        out_names: Vec<String>,
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
+        assert_eq!(out_fields.count_ones(..), out_names.len());
 
         let schema = Schema {
             fields: out_fields
                 .ones()
-                .map(|i| input_schema.fields()[i].clone())
+                .zip_eq(&out_names)
+                .map(|(i, name)| {
+                    let mut f = input_schema.fields()[i].clone();
+                    f.name = name.clone();
+                    f
+                })
                 .collect(),
         };
         Self {
@@ -74,6 +82,7 @@ impl PlanRoot {
             required_dist,
             required_order,
             out_fields,
+            out_names,
             schema,
         }
     }
@@ -87,8 +96,7 @@ impl PlanRoot {
     }
 
     /// Get a reference to the plan root's schema.
-    #[allow(dead_code)]
-    fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> &Schema {
         &self.schema
     }
 
@@ -99,18 +107,13 @@ impl PlanRoot {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
-        let (exprs, expr_aliases) = self
+        let exprs = self
             .out_fields
             .ones()
             .zip_eq(self.schema.fields)
-            .map(|(index, field)| {
-                (
-                    InputRef::new(index, field.data_type).into(),
-                    Some(field.name),
-                )
-            })
-            .unzip();
-        LogicalProject::create(self.plan, exprs, expr_aliases)
+            .map(|(index, field)| InputRef::new(index, field.data_type).into())
+            .collect();
+        LogicalProject::create(self.plan, exprs)
     }
 
     /// Apply logical optimization to the plan.
@@ -141,7 +144,13 @@ impl PlanRoot {
         };
 
         // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
+        //
+        // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
+        // they shouldn't be a part of output columns, so we use `out_fields` to control the
+        // visibility of these expressions. To avoid these expressions being pruned, we can't
+        // use `self.out_fields` as `required_cols` here.
+        let required_cols = (0..self.plan.schema().len()).collect_vec();
+        plan = plan.prune_col(&required_cols);
 
         plan = {
             let rules = vec![
@@ -159,23 +168,36 @@ impl PlanRoot {
     /// Optimize and generate a batch query plan.
     /// Currently only used by test runner (Have distributed plan but not schedule yet).
     /// Will be removed after dist execution.
-    pub fn gen_batch_query_plan(&self) -> PlanRef {
+    pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order);
+        plan = plan.to_batch_with_order_required(&self.required_order)?;
 
         // Convert to distributed plan
-        plan.to_distributed_with_required(&self.required_order, &self.required_dist)
+        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            let exprs = self
+                .out_fields
+                .ones()
+                .zip_eq(self.schema.fields.clone())
+                .map(|(index, field)| InputRef::new(index, field.data_type).into())
+                .collect();
+            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
+        }
+
+        Ok(plan)
     }
 
     /// Generate create index or create materialize view plan.
-    fn gen_stream_plan(&mut self) -> PlanRef {
+    fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
-                let (plan, out_col_change) = plan.logical_rewrite_for_stream();
+                let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
                 self.required_dist = out_col_change
                     .rewrite_required_distribution(&self.required_dist)
                     .unwrap();
@@ -190,7 +212,7 @@ impl PlanRoot {
                 .required_dist
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
             _ => unreachable!(),
-        };
+        }?;
 
         // Rewrite joins with index to delta join
         let plan = {
@@ -199,17 +221,18 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
-        plan
+        Ok(plan)
     }
 
     /// Optimize and generate a create materialize view plan.
     pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan();
+        let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            self.out_names.clone(),
             None,
         )
     }
@@ -220,12 +243,13 @@ impl PlanRoot {
         mv_name: String,
         index_on: TableId,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan();
+        let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            self.out_names.clone(),
             Some(index_on),
         )
     }
@@ -259,11 +283,13 @@ mod tests {
         )
         .into();
         let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
+        let out_names = vec!["v1".into()];
         let root = PlanRoot::new(
             values,
             Distribution::any().clone(),
             Order::any().clone(),
             out_fields,
+            out_names,
         );
         let subplan = root.as_subplan();
         assert_eq!(

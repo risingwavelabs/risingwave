@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
@@ -21,19 +22,27 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
 
 use super::SearchResult;
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::compaction_picker::CompactionPicker;
+use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::CompactionConfig;
 use crate::hummock::level_handler::LevelHandler;
-
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 16;
-const DEFAULT_LEVEL0_TRIGGER_NUMBER: usize = 4;
 
 pub struct TierCompactionPicker {
     compact_task_id: u64,
-    max_compaction_bytes: u64,
-    level0_max_file_number: usize,
-    level0_trigger_number: usize,
-    overlap_strategy: Box<dyn OverlapStrategy>,
+    target_level: usize,
+    overlap_strategy: Arc<dyn OverlapStrategy>,
+    config: Arc<CompactionConfig>,
+}
+
+impl Default for TierCompactionPicker {
+    fn default() -> Self {
+        Self {
+            compact_task_id: 0,
+            target_level: 1,
+            overlap_strategy: Arc::new(RangeOverlapStrategy {}),
+            config: Arc::new(CompactionConfig::default()),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -43,29 +52,35 @@ pub struct TargetFilesInfo {
     compaction_bytes: u64,
 }
 
-impl TierCompactionPicker {
-    pub fn new(
-        compact_task_id: u64,
-        overlap_strategy: Box<dyn OverlapStrategy>,
-    ) -> TierCompactionPicker {
-        TierCompactionPicker {
-            compact_task_id,
-            // TODO: set it by cluster configure or vertical group configure.
-            max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
-            level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
-            level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
-            overlap_strategy,
+impl TargetFilesInfo {
+    fn add_tables(&mut self, new_add_tables: Vec<SstableInfo>) {
+        for table in new_add_tables {
+            if self.table_ids.contains(&table.id) {
+                continue;
+            }
+            self.table_ids.insert(table.id);
+            self.compaction_bytes += table.file_size;
+            self.tables.push(table);
         }
     }
 
-    pub fn pick_compaction(
+    fn calc_inc_compaction_size(&self, new_add_tables: &[SstableInfo]) -> u64 {
+        new_add_tables
+            .iter()
+            .filter(|table| !self.table_ids.contains(&table.id))
+            .map(|table| table.file_size)
+            .sum()
+    }
+}
+
+impl CompactionPicker for TierCompactionPicker {
+    fn pick_compaction(
         &self,
-        levels: Vec<Level>,
+        levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Option<SearchResult> {
         let select_level = 0;
-        // TODO: After support dynamic-leveled-compaction, use base-level as target-level.
-        let target_level = 1;
+        let target_level = self.target_level;
 
         let next_task_id = self.compact_task_id;
         if levels[select_level].table_infos.is_empty() {
@@ -116,36 +131,43 @@ impl TierCompactionPicker {
             split_ranges: splits,
         })
     }
+}
+
+impl TierCompactionPicker {
+    pub fn new(
+        compact_task_id: u64,
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+    ) -> TierCompactionPicker {
+        TierCompactionPicker {
+            compact_task_id,
+            target_level,
+            overlap_strategy,
+            config,
+        }
+    }
 
     fn pick_target_level_overlap_files(
         &self,
-        select_table: &SstableInfo,
+        select_tables: &[SstableInfo],
         level: &Level,
         level_handlers: &LevelHandler,
-        input_ssts: &mut TargetFilesInfo,
-    ) -> bool {
+    ) -> Option<Vec<SstableInfo>> {
         if level.table_infos.is_empty() {
-            return true;
+            return Some(vec![]);
         }
-        let mut new_add_tables = vec![];
         // pick up files in L1 which are overlap with L0 to target level input.
-        for table in &level.table_infos {
-            if !self.overlap_strategy.check_overlap(select_table, table) {
-                continue;
-            }
-            if level_handlers.is_pending_compact(&table.id) {
-                return false;
-            }
-            if !input_ssts.table_ids.contains(&table.id) {
-                new_add_tables.push(table.clone());
-            }
+        let new_add_tables = self
+            .overlap_strategy
+            .check_base_level_overlap(select_tables, &level.table_infos);
+        if new_add_tables
+            .iter()
+            .any(|table| level_handlers.is_pending_compact(&table.id))
+        {
+            return None;
         }
-        for table in new_add_tables {
-            input_ssts.table_ids.insert(table.id);
-            input_ssts.compaction_bytes += table.file_size;
-            input_ssts.tables.push(table);
-        }
-        true
+        Some(new_add_tables)
     }
 
     fn pick_intra_l0_compaction(
@@ -153,7 +175,7 @@ impl TierCompactionPicker {
         level0: &Level,
         level0_handler: &mut LevelHandler,
     ) -> Option<SearchResult> {
-        if level0.table_infos.len() < self.level0_max_file_number {
+        if level0.table_infos.len() < self.config.level0_max_file_number {
             return None;
         }
 
@@ -165,7 +187,7 @@ impl TierCompactionPicker {
             sst_idx += 1;
         }
 
-        if level0.table_infos.len() - sst_idx < self.level0_trigger_number {
+        if sst_idx >= level0.table_infos.len() {
             return None;
         }
 
@@ -175,13 +197,13 @@ impl TierCompactionPicker {
             if level0_handler.is_pending_compact(&table.id) {
                 break;
             }
-            if compaction_bytes >= self.max_compaction_bytes {
+            if compaction_bytes >= self.config.max_compaction_bytes {
                 break;
             }
             compaction_bytes += table.file_size;
             select_level_inputs.push(table.clone());
         }
-        if select_level_inputs.len() < self.level0_trigger_number {
+        if select_level_inputs.len() < self.config.level0_trigger_number {
             return None;
         }
         level0_handler.add_pending_task(self.compact_task_id, &select_level_inputs);
@@ -207,53 +229,75 @@ impl TierCompactionPicker {
         select_level_handler: &LevelHandler,
         target_level_handler: &LevelHandler,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
+        let mut info = self.overlap_strategy.create_overlap_info();
         for idx in 0..select_level.table_infos.len() {
             let select_table = select_level.table_infos[idx].clone();
             if select_level_handler.is_pending_compact(&select_table.id) {
+                info.update(&select_table);
                 continue;
             }
-            if select_level.table_infos[..idx]
-                .iter()
-                .any(|table| self.overlap_strategy.check_overlap(table, &select_table))
-            {
+            if info.check_overlap(&select_table) {
+                info.update(&select_table);
                 continue;
             }
 
             let mut target_level_ssts = TargetFilesInfo::default();
-            if !self.pick_target_level_overlap_files(
-                &select_table,
+            let mut select_info = self.overlap_strategy.create_overlap_info();
+            let mut select_compaction_bytes = select_table.file_size;
+            select_info.update(&select_table);
+            let mut select_level_ssts = vec![select_table];
+            match self.pick_target_level_overlap_files(
+                &select_level_ssts,
                 target_level,
                 target_level_handler,
-                &mut target_level_ssts,
             ) {
-                break;
+                None => break,
+                Some(tables) => {
+                    target_level_ssts.add_tables(tables);
+                }
             }
-            let mut select_compaction_bytes = select_table.file_size;
-            let mut select_level_ssts = vec![select_table];
             // try expand more L0 files if the currenct compaction job is too small.
             for other in &select_level.table_infos[idx + 1..] {
-                if select_compaction_bytes + target_level_ssts.compaction_bytes
-                    >= self.max_compaction_bytes
-                    || select_level_handler.is_pending_compact(&other.id)
-                {
+                if select_level_handler.is_pending_compact(&other.id) {
                     break;
                 }
-                if select_level.table_infos[..idx]
+                if select_compaction_bytes >= self.config.max_compaction_bytes {
+                    break;
+                }
+
+                if info.check_overlap(other) {
+                    break;
+                }
+
+                select_level_ssts.push(other.clone());
+                select_info.update(other);
+                if select_level.table_infos[0..idx]
                     .iter()
-                    .any(|table| self.overlap_strategy.check_overlap(table, other))
+                    .any(|table| select_info.check_overlap(table))
                 {
+                    select_level_ssts.pop().unwrap();
                     break;
                 }
-                if !self.pick_target_level_overlap_files(
-                    other,
+
+                match self.pick_target_level_overlap_files(
+                    &select_level_ssts,
                     target_level,
                     target_level_handler,
-                    &mut target_level_ssts,
                 ) {
-                    break;
+                    None => {
+                        select_level_ssts.pop().unwrap();
+                        break;
+                    }
+                    Some(tables) => {
+                        // we only extend L0 files when it does not overlap with multiple files.
+                        if target_level_ssts.calc_inc_compaction_size(&tables) > other.file_size {
+                            select_level_ssts.pop().unwrap();
+                            break;
+                        }
+                        target_level_ssts.add_tables(tables);
+                    }
                 }
                 select_compaction_bytes += other.file_size;
-                select_level_ssts.push(other.clone());
             }
             target_level_ssts.tables.sort_by(|a, b| {
                 let r1 = KeyRange::from(a.key_range.as_ref().unwrap());
@@ -267,14 +311,15 @@ impl TierCompactionPicker {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
+    use itertools::Itertools;
     use risingwave_pb::hummock::KeyRange as RawKeyRange;
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
-    fn generate_table(
+    pub fn generate_table(
         id: u64,
         table_prefix: u64,
         left: usize,
@@ -289,13 +334,18 @@ mod tests {
                 inf: false,
             }),
             file_size: 1,
-            vnode_bitmap: vec![],
+            vnode_bitmaps: vec![],
         }
     }
 
     #[test]
     fn test_compact_l0_to_l1() {
-        let picker = TierCompactionPicker::new(0, Box::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(
+            0,
+            1,
+            Arc::new(CompactionConfig::default()),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         let mut levels = vec![
             Level {
                 level_idx: 0,
@@ -318,7 +368,7 @@ mod tests {
         ];
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let ret = picker
-            .pick_compaction(levels.clone(), &mut levels_handler)
+            .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 2);
@@ -335,7 +385,7 @@ mod tests {
         // pick table 5 and 0. but skip table 6 because [0_key_test_000100, 1_key_test_000333] will
         // be conflict with the previous job.
         let ret = picker
-            .pick_compaction(levels.clone(), &mut levels_handler)
+            .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 3);
         assert_eq!(levels_handler[1].get_pending_file_count(), 3);
@@ -344,25 +394,230 @@ mod tests {
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
-        let mut picker = TierCompactionPicker::new(1, Box::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(
+            1,
+            1,
+            Arc::new(CompactionConfig::default()),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         levels[0]
             .table_infos
             .push(generate_table(8, 1, 222, 233, 3));
-        let ret = picker.pick_compaction(levels.clone(), &mut levels_handler);
+        let ret = picker.pick_compaction(&levels, &mut levels_handler);
         assert!(ret.is_none());
 
         // compact L0 to L0
-        picker.level0_trigger_number = 2;
-        picker.level0_max_file_number = 2;
+        let config = CompactionConfig {
+            level0_max_file_number: 2,
+            level0_trigger_number: 2,
+            ..Default::default()
+        };
+        let picker = TierCompactionPicker::new(
+            1,
+            1,
+            Arc::new(config),
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         levels[0]
             .table_infos
             .push(generate_table(9, 1, 100, 200, 3));
         let ret = picker
-            .pick_compaction(levels.clone(), &mut levels_handler)
+            .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
         assert_eq!(ret.select_level.table_infos[0].id, 7);
         assert_eq!(ret.select_level.table_infos[1].id, 8);
         assert_eq!(ret.select_level.table_infos[2].id, 9);
         assert!(ret.target_level.table_infos.is_empty());
+    }
+
+    #[test]
+    fn test_selecting_key_range_overlap() {
+        // When picking L0->L1, all L1 files overlapped with selecting_key_range should be picked.
+
+        let picker = TierCompactionPicker::default();
+
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 200, 2),
+                    generate_table(2, 1, 400, 500, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+
+                level_type: LevelType::Nonoverlapping as i32,
+
+                table_infos: vec![
+                    generate_table(3, 1, 0, 50, 1),
+                    generate_table(4, 1, 150, 200, 1),
+                    generate_table(5, 1, 250, 300, 1),
+                    generate_table(6, 1, 1000, 200, 1),
+                ],
+            },
+        ];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+
+        assert_eq!(levels_handler[1].get_pending_file_count(), 2);
+
+        assert_eq!(
+            ret.select_level
+                .table_infos
+                .iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            vec![1, 2]
+        );
+
+        assert_eq!(
+            ret.target_level
+                .table_infos
+                .iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            vec![4, 5]
+        );
+    }
+
+    #[test]
+    fn test_compacting_key_range_overlap_l0() {
+        // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
+
+        // compacting_key_range.
+        let picker = TierCompactionPicker::default();
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 200, 2),
+                    generate_table(2, 1, 450, 500, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![],
+            },
+        ];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let _ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 0);
+
+        levels[0]
+            .table_infos
+            .push(generate_table(3, 1, 250, 300, 3));
+
+        assert!(picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .is_none());
+    }
+
+    #[test]
+    fn test_compacting_key_range_overlap_l1() {
+        // When picking L0->L1, L0's selecting_key_range should not be overlapped with any L1 files
+        // under compaction.
+
+        let picker = TierCompactionPicker::default();
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![generate_table(1, 1, 200, 250, 2)],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![generate_table(2, 1, 150, 300, 2)],
+            },
+        ];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let _ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+
+        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 1);
+
+        levels[0]
+            .table_infos
+            .push(generate_table(3, 1, 100, 110, 3));
+
+        levels[0]
+            .table_infos
+            .push(generate_table(4, 1, 400, 500, 3));
+
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+
+        // Will be trival move. The second file can not be picked up because the range of files
+        // [3,4] would be overlap with file [0]
+        assert!(ret.target_level.table_infos.is_empty());
+        assert_eq!(ret.target_level.level_idx, 1);
+        assert_eq!(
+            ret.select_level
+                .table_infos
+                .iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            vec![3]
+        );
+    }
+
+    #[test]
+    fn test_compacting_key_range_overlap_intra_l0() {
+        // When picking L0->L0, L0's selecting_key_range should not be overlapped with L0's
+        // compacting_key_range.
+        let picker = TierCompactionPicker::default();
+        let mut levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![
+                    generate_table(1, 1, 100, 160, 2),
+                    generate_table(2, 1, 190, 250, 2),
+                ],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![generate_table(3, 1, 200, 300, 2)],
+            },
+        ];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let _ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+
+        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 1);
+
+        levels[0]
+            .table_infos
+            .push(generate_table(4, 1, 170, 180, 3));
+
+        assert!(picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .is_none());
     }
 }

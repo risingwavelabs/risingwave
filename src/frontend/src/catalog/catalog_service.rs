@@ -73,6 +73,10 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
 
     async fn drop_source(&self, source_id: u32) -> Result<()>;
+
+    async fn drop_database(&self, database_id: u32) -> Result<()>;
+
+    async fn drop_schema(&self, schema_id: u32) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -152,6 +156,16 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_source(&self, source_id: u32) -> Result<()> {
         let version = self.meta_client.drop_source(source_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_schema(&self, schema_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_schema(schema_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_database(&self, database_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_database(database_id).await?;
         self.wait_version(version).await
     }
 }

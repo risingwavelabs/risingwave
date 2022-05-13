@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchExchange` imposes a particular distribution on its input
@@ -60,7 +62,7 @@ impl PlanTreeNodeUnary for BatchExchange {
 impl_plan_tree_node_for_unary! {BatchExchange}
 
 impl ToDistributedBatch for BatchExchange {
-    fn to_distributed(&self) -> PlanRef {
+    fn to_distributed(&self) -> Result<PlanRef> {
         unreachable!()
     }
 }
@@ -82,5 +84,11 @@ impl ToBatchProst for BatchExchange {
                 column_orders: self.base.order.to_protobuf(&self.base.schema),
             })
         }
+    }
+}
+
+impl ToLocalBatch for BatchExchange {
+    fn to_local(&self) -> Result<PlanRef> {
+        unreachable!()
     }
 }

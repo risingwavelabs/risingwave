@@ -26,12 +26,16 @@ pub use builder::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
+use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+pub mod group_builder;
 mod utils;
+
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 
@@ -45,12 +49,12 @@ const VERSION: u32 = 1;
 #[derive(Clone, Debug)]
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
-    pub id: u64,
+    pub id: HummockSSTableId,
     pub meta: SstableMeta,
 }
 
 impl Sstable {
-    pub fn new(id: u64, meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
         Self { id, meta }
     }
 
@@ -59,7 +63,11 @@ impl Sstable {
     }
 
     pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
-        if self.has_bloom_filter() {
+        let enable_bloom_filter: fn() -> bool = || {
+            fail_point!("disable_bloom_filter", |_| false);
+            true
+        };
+        if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = farmhash::fingerprint32(user_key);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             bloom.surely_not_have_hash(hash)
@@ -86,7 +94,7 @@ impl Sstable {
                 inf: false,
             }),
             file_size: self.meta.estimated_size as u64,
-            vnode_bitmap: vec![],
+            vnode_bitmaps: vec![],
         }
     }
 }
@@ -131,7 +139,6 @@ impl BlockMeta {
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
-    pub bitmap: Vec<u8>,
     pub estimated_size: u32,
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
@@ -147,7 +154,6 @@ impl SstableMeta {
     /// | N (4B) |
     /// | block meta 0 | ... | block meta N-1 |
     /// | bloom filter len (4B) | bloom filter |
-    /// | bitmap len (4B) | bitmap |
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
@@ -160,7 +166,6 @@ impl SstableMeta {
             block_meta.encode(&mut buf);
         }
         put_length_prefixed_slice(&mut buf, &self.bloom_filter);
-        put_length_prefixed_slice(&mut buf, &self.bitmap);
         buf.put_u32_le(self.estimated_size as u32);
         buf.put_u32_le(self.key_count as u32);
         put_length_prefixed_slice(&mut buf, &self.smallest_key);
@@ -198,7 +203,6 @@ impl SstableMeta {
             block_metas.push(BlockMeta::decode(buf));
         }
         let bloom_filter = get_length_prefixed_slice(buf);
-        let bitmap = get_length_prefixed_slice(buf);
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -207,7 +211,6 @@ impl SstableMeta {
         Ok(Self {
             block_metas,
             bloom_filter,
-            bitmap,
             estimated_size,
             key_count,
             smallest_key,
@@ -226,8 +229,6 @@ impl SstableMeta {
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
-            + 4 // bitmap len
-            + self.bitmap.len()
             + 4 // estimated size
             + 4 // key count
             + 4 // key len
@@ -260,7 +261,6 @@ mod tests {
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),
-            bitmap: b"".to_vec(),
             estimated_size: 123,
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),

@@ -71,7 +71,6 @@ mod tests {
     }
 
     #[tokio::test]
-    // TODO(soundOfDestiny): re-enable the test case
     async fn test_compaction_same_key_not_split() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -108,9 +107,13 @@ mod tests {
 
         // 2. get compact task
         let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
+            .get_compact_task()
             .await
             .unwrap()
+            .unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .await
             .unwrap();
 
         // assert compact_task
@@ -153,10 +156,7 @@ mod tests {
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
-        let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
-            .await
-            .unwrap();
+        let compact_task = hummock_manager_ref.get_compact_task().await.unwrap();
 
         assert!(compact_task.is_none());
     }

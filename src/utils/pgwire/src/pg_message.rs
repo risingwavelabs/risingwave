@@ -19,6 +19,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
 use crate::types::Row;
@@ -30,6 +31,8 @@ pub enum FeMessage {
     Query(FeQueryMessage),
     CancelQuery,
     Terminate,
+    /// For error in read function of `FeStartupMessage` and `FeMessage`.
+    ReadError(PsqlError),
 }
 
 pub struct FeStartupMessage {}
@@ -65,9 +68,10 @@ impl FeMessage {
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
             b'X' => Ok(FeMessage::Terminate),
-            _ => {
-                unimplemented!("Do not support other tags regular message yet")
-            }
+            _ => Ok(FeMessage::ReadError(PsqlError::ReadError(format!(
+                "Unsupported tag of regular message: {}",
+                val
+            )))),
         }
     }
 }
@@ -88,10 +92,10 @@ impl FeStartupMessage {
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => Ok(FeMessage::CancelQuery),
-            _ => unimplemented!(
+            _ => Ok(FeMessage::ReadError(PsqlError::ReadError(format!(
                 "Unsupported protocol number in start up msg {:?}",
                 protocol_num
-            ),
+            )))),
         }
     }
 }
@@ -121,6 +125,7 @@ pub enum BeParameterStatusMessage<'a> {
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
+    pub notice: Option<String>,
     pub rows_cnt: i32,
 }
 
@@ -188,6 +193,10 @@ impl<'a> BeMessage<'a> {
                 let rows_cnt = cmd.rows_cnt;
                 let stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                if let Some(notice) = &cmd.notice {
+                    tag.push_str(notice);
+                    tag.push('\n');
+                }
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");

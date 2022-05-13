@@ -33,8 +33,12 @@ mod filesystem;
 mod kafka;
 pub mod kinesis;
 mod nexmark;
+mod properties;
 mod pulsar;
-mod utils;
+
 pub use base::*;
-pub use utils::{AnyhowProperties, Properties};
+pub use properties::*;
+
+pub mod aws_utils;
+pub mod dummy_connector;
 pub mod state;

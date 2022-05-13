@@ -455,7 +455,7 @@ where
                             split_type: splits.first().unwrap().get_type(),
                             stream_source_splits: splits
                                 .iter()
-                                .map(|split| split.to_string().unwrap().as_bytes().to_vec())
+                                .map(|split| split.to_json_bytes().to_vec())
                                 .collect(),
                         });
                     }
@@ -603,13 +603,21 @@ where
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
-        self.barrier_manager
+        let table_id = table_fragments.table_id();
+        if let Err(err) = self
+            .barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
                 table_sink_map,
                 dispatches,
             })
-            .await?;
+            .await
+        {
+            self.fragment_manager
+                .cancel_create_table_fragments(&table_id)
+                .await?;
+            return Err(err);
+        }
 
         Ok(())
     }

@@ -105,6 +105,8 @@ pub(crate) fn gen_create_index_plan(
         let mut required_cols = FixedBitSet::with_capacity(scan_node.schema().len());
         required_cols.toggle_range(..);
         required_cols.toggle(0);
+        let mut out_names = scan_node.schema().names();
+        out_names.remove(0);
 
         PlanRoot::new(
             scan_node.into(),
@@ -116,6 +118,7 @@ pub(crate) fn gen_create_index_plan(
                     .collect(),
             ),
             required_cols,
+            out_names,
         )
         .gen_create_index_plan(index_name.to_string(), table.id())?
     };

@@ -93,6 +93,7 @@ pub struct CreateSource {
     row_format: String,
     name: String,
     file: Option<String>,
+    materialized: Option<bool>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -200,11 +201,16 @@ impl TestCase {
         match self.create_source.clone() {
             Some(source) => {
                 if let Some(content) = source.file {
+                    let materialized = if let Some(true) = source.materialized {
+                        "materialized".to_string()
+                    } else {
+                        "".to_string()
+                    };
                     let sql = format!(
-                        r#"CREATE SOURCE {}
+                        r#"CREATE {} SOURCE {}
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
-                        source.name, source.row_format
+                        materialized, source.name, source.row_format
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
@@ -274,8 +280,7 @@ impl TestCase {
                     create_mv::handle_create_mv(context, name, query).await?;
                 }
                 Statement::Drop(drop_statement) => {
-                    let table_object_name = ObjectName(vec![drop_statement.name]);
-                    drop_table::handle_drop_table(context, table_object_name).await?;
+                    drop_table::handle_drop_table(context, drop_statement.object_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -327,7 +332,7 @@ impl TestCase {
         }
 
         if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
-            let batch_plan = logical_plan.gen_batch_query_plan();
+            let batch_plan = logical_plan.gen_batch_query_plan()?;
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_plan.is_some() {
