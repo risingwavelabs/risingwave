@@ -135,7 +135,7 @@ impl ColIndexMapping {
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = vec![1, 3];
-    /// let mapping = ColIndexMapping::with_remaining_columns(&remaining_cols, 5);
+    /// let mapping = ColIndexMapping::with_remaining_columns(&remaining_cols, 4);
     /// assert_eq!(mapping.map(1), 0);
     /// assert_eq!(mapping.map(3), 1);
     /// assert_eq!(mapping.try_map(0), None);
