@@ -251,15 +251,21 @@ pub struct S3Properties {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
-    #[serde(rename = "datagen.max.chunk.size", default = "default_max_chunk_size")]
-    pub max_chunk_size: u64,
+    #[serde(
+        rename = "datagen.max.chunk.size",
+        default = "default_datagen_max_chunk_size"
+    )]
+    pub max_chunk_size: String,
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
     )]
-    pub rows_per_second: u64,
+    pub rows_per_second: String,
 }
 
-fn default_rows_per_second() -> u64 {
-    1
+fn default_rows_per_second() -> String {
+    "1".to_string()
+}
+fn default_datagen_max_chunk_size() -> String {
+    "5".to_string()
 }

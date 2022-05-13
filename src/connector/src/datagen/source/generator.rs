@@ -21,13 +21,17 @@ use crate::SourceMessage;
 
 #[derive(Clone, Debug)]
 pub struct DatagenEventGenerator {
-    pub last_offset: i32,
-    pub batch_chunk_size: i32,
+    pub last_offset: u64,
+    pub batch_chunk_size: u64,
+    pub rows_per_second: u64,
 }
 
 impl DatagenEventGenerator {
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        sleep(Duration::from_secs(5)).await;
+        sleep(Duration::from_secs(
+            self.batch_chunk_size / self.rows_per_second,
+        ))
+        .await;
         let mut res = vec![];
         for i in 0..self.batch_chunk_size {
             res.push(SourceMessage {
@@ -43,11 +47,11 @@ impl DatagenEventGenerator {
 
 #[derive(Serialize, Deserialize)]
 struct Event {
-    v1: i32,
-    v2: i32,
+    v1: u64,
+    v2: u64,
 }
 impl Event {
-    pub fn new(i: i32) -> Self {
+    pub fn new(i: u64) -> Self {
         Self { v1: i, v2: i }
     }
 }
