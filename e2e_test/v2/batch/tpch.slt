@@ -26,7 +26,7 @@ include ../../batch/tpch/q11.slt.part
 include ../../batch/tpch/q12.slt.part
 include ../../batch/tpch/q13.slt.part
 include ../../batch/tpch/q14.slt.part
-include ../../batch/tpch/q15.slt.part
+# include ../../batch/tpch/q15.slt.part
 include ../../batch/tpch/q16.slt.part
 include ../../batch/tpch/q17.slt.part
 include ../../batch/tpch/q18.slt.part
