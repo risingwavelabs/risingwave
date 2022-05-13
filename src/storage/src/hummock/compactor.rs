@@ -200,11 +200,13 @@ impl Compactor {
         );
         let start_time = Instant::now();
 
-        compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
-            left: vec![],
-            right: vec![],
-            inf: false,
-        }];
+        if !compact_task.vnode_mappings.is_empty() {
+            compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
+                left: vec![],
+                right: vec![],
+                inf: false,
+            }]
+        };
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
