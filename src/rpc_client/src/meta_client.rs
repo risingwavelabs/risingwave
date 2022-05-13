@@ -17,7 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
@@ -286,6 +286,12 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        if err
+                            .to_string()
+                            .contains(&ErrorCode::UnknownWorker.to_string())
+                        {
+                            panic!("Already removed by the meta node. Need to restart the worker");
+                        }
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);

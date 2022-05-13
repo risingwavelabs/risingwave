@@ -363,8 +363,7 @@ impl LogicalAgg {
             .transpose()?;
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
-        let expr_alias = vec![None; expr_handler.project.len()];
-        let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
+        let logical_project = LogicalProject::create(input, expr_handler.project);
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
         let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
