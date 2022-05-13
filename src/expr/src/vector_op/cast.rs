@@ -34,7 +34,7 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
 const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.MS] or HH:MM)";
-const PARSE_ERROR_STR_TO_DATA: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
+const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 
 #[inline(always)]
 pub fn num_up<T, R>(n: T) -> Result<R>
@@ -61,7 +61,7 @@ pub fn str_to_str(n: &str) -> Result<String> {
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(
         NaiveDate::parse_from_str(elem, "%Y-%m-%d")
-            .map_err(|_| parse_error(PARSE_ERROR_STR_TO_DATA))?,
+            .map_err(|_| parse_error(PARSE_ERROR_STR_TO_DATE))?,
     ))
 }
 
