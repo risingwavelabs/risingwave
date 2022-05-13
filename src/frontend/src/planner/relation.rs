@@ -151,10 +151,8 @@ impl Planner {
         match (args.next(), args.next()) {
             (Some(window_size @ ExprImpl::Literal(_)), None) => {
                 let mut exprs = Vec::with_capacity(cols.len() + 2);
-                let mut expr_aliases = Vec::with_capacity(cols.len() + 2);
                 for (idx, col) in cols.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col.data_type().clone()).into());
-                    expr_aliases.push(None);
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
@@ -169,10 +167,8 @@ impl Planner {
                         .into();
                 exprs.push(window_start);
                 exprs.push(window_end);
-                expr_aliases.push(Some("window_start".to_string()));
-                expr_aliases.push(Some("window_end".to_string()));
                 let base = self.plan_relation(input)?;
-                let project = LogicalProject::create(base, exprs, expr_aliases);
+                let project = LogicalProject::create(base, exprs);
                 Ok(project)
             }
             _ => Err(ErrorCode::BindError(

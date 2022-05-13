@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -395,12 +395,21 @@ impl ToStream for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
-        let left = self
-            .left()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.left_eq_indexes()))?;
         let right = self
             .right()
             .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()))?;
+
+        let r2l =
+            predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+
+        let left_dist = r2l
+            .rewrite_required_distribution(right.distribution())
+            .unwrap();
+
+        let mut left = self.left().to_stream_with_dist_required(&left_dist)?;
+        if left.distribution() != &left_dist {
+            left = left_dist.enforce(left, Order::any());
+        }
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
@@ -421,8 +430,10 @@ impl ToStream for LogicalJoin {
                 Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            // Convert to Nested-loop Join for non-equal joins
-            todo!("nested loop join")
+            Err(RwError::from(ErrorCode::NotImplemented(
+                "stream nested-loop join".to_string(),
+                None.into(),
+            )))
         }
     }
 

@@ -95,6 +95,10 @@ where
             FeMessage::Terminate => {
                 self.process_terminate();
             }
+            FeMessage::ReadError(err) => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
+                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
+            }
         }
         self.flush().await?;
         Ok(false)

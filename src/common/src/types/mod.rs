@@ -19,8 +19,7 @@ use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{ErrorCode, Result, RwError};
-
+use crate::error::{internal_error, ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
@@ -326,6 +325,16 @@ for_all_scalar_variants! { scalar_impl_enum }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
+
+pub fn get_data_type_from_datum(datum: &Datum) -> Result<DataType> {
+    match datum {
+        // TODO: Predicate data type from None Datum
+        None => Err(internal_error(
+            "cannot get data type from None Datum".to_string(),
+        )),
+        Some(scalar) => scalar.data_type(),
+    }
+}
 
 /// Convert a [`Datum`] to a [`DatumRef`].
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {

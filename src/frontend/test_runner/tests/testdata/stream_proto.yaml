@@ -339,7 +339,7 @@
 - sql: |
     /* test simple agg */
     create table t (v1 int);
-    select sum(v1) from t;
+    select sum(v1) as sum from t;
   stream_plan_proto: |
     ---
     input:
@@ -475,7 +475,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "agg#1"
+          name: sum
     orderColumnIds:
       - 0
       - 1
@@ -649,7 +649,7 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: sum_v1
+            name: "agg#1"
           - dataType:
               typeName: INT32
               isNullable: true
@@ -673,7 +673,7 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: sum_v1
+        name: "agg#1"
       - dataType:
           typeName: INT32
           isNullable: true
