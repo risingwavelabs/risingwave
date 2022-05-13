@@ -18,7 +18,7 @@ use anyhow::{ Result};
 use async_trait::async_trait;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
-use crate::{ConnectorStateV2, SplitImpl};
+use crate::{ConnectorStateV2, SplitImpl, DatagenProperties, SourceMessage, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
