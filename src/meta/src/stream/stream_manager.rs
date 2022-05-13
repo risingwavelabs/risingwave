@@ -37,7 +37,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::{ActorId, DispatcherId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -57,7 +57,7 @@ pub struct CreateMaterializedViewContext {
     /// Temporary source info used during `create_materialized_source`
     pub affiliated_source: Option<Source>,
     /// Consistent hash mapping, used in hash dispatcher.
-    pub hash_mapping: Vec<ParallelUnitId>,
+    pub hash_mappings: HashMap<FragmentId, Vec<ParallelUnitId>>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// TODO: remove this when we deprecate Java frontend.
@@ -110,15 +110,14 @@ where
         &self,
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
-        hash_mapping: &Vec<ParallelUnitId>,
         dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
-            hash_mapping: &'a Vec<ParallelUnitId>,
-
+            /// Mapping from relational state table id to vnode mappings.
+            vnode_mappings: &'a HashMap<u32, Vec<ParallelUnitId>>,
             /// Records what's the correspoding actor of each parallel unit of one table.
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
             /// Records what's the actors on each worker of one table.
@@ -148,6 +147,15 @@ where
 
                 // get upstream table id
                 let table_id = TableId::from(&chain.table_ref_id);
+                let hash_mapping =
+                    self.vnode_mappings
+                        .get(&table_id.table_id)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "relational state table {} should have a vnode mapping",
+                                table_id
+                            )
+                        });
 
                 let (upstream_actor_id, parallel_unit_id) = {
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
@@ -215,7 +223,7 @@ where
                 let batch_stream_node = &mut stream_node.input[1];
                 if let Some(NodeBody::BatchPlan(ref mut batch_query)) = batch_stream_node.node_body
                 {
-                    let (original_indices, data) = compress_data(self.hash_mapping);
+                    let (original_indices, data) = compress_data(hash_mapping);
                     batch_query.hash_mapping = Some(ParallelUnitMapping {
                         original_indices,
                         data,
@@ -245,8 +253,10 @@ where
             .get_tables_node_actors(dependent_table_ids)
             .await?;
 
+        let vnode_mappings = &self.cluster_manager.get_all_table_mappings().await;
+
         let mut env = Env {
-            hash_mapping,
+            vnode_mappings,
             upstream_parallel_unit_info,
             tables_node_actors,
             locations,
@@ -287,7 +297,7 @@ where
             table_sink_map,
             dependent_table_ids,
             affiliated_source,
-            hash_mapping,
+            hash_mappings,
             table_id_offset: _,
             is_legacy_frontend,
         }: CreateMaterializedViewContext,
@@ -324,7 +334,6 @@ where
             self.resolve_chain_node(
                 &mut table_fragments,
                 &dependent_table_ids,
-                &hash_mapping,
                 &mut dispatches,
                 &mut upstream_node_actors,
                 &locations,
@@ -339,25 +348,27 @@ where
         // if parallel units are not aligned between upstream nodes.
 
         // Fill hash dispatcher's mapping with scheduled locations.
+        let mut downstream_fragment_id = &0u32;
         table_fragments
             .fragments
             .iter_mut()
-            .for_each(|(_, fragment)| {
+            .for_each(|(fragment_id, fragment)| {
                 fragment.actors.iter_mut().for_each(|actor| {
                     actor.dispatcher.iter_mut().for_each(|dispatcher| {
                         if dispatcher.get_type().unwrap() == DispatcherType::Hash {
+                            // Dispatcher in the last fragment will have no hash mapping, since the
+                            // type is always broadcast.
+                            let hash_mapping = hash_mappings.get(downstream_fragment_id).unwrap();
                             let downstream_actors = &dispatcher.downstream_actor_id;
 
                             // Theoretically, a hash dispatcher should have
-                            // `self.hash_parallel_count` as the number
-                            // of its downstream actors. However,
-                            // since the frontend optimizer is still WIP, there
-                            // exists some unoptimized situation where a hash
-                            // dispatcher has ONLY ONE downstream actor, which
-                            // makes it behave like a simple dispatcher. As an
-                            // expedient, we specially compute the consistent hash mapping here. The
-                            // `if` branch could be removed after the optimizer
-                            // has been fully implemented.
+                            // `self.hash_parallel_count` as the number of its downstream actors.
+                            // However, since the frontend optimizer is still WIP, there exists some
+                            // unoptimized situation where a hash dispatcher has ONLY ONE downstream
+                            // actor, which makes it behave like a simple dispatcher. As a
+                            // workaround, we specially compute the consistent hash mapping here.
+                            // The `if` branch could be removed after the optimizer has been fully
+                            // implemented.
                             let streaming_hash_mapping = if downstream_actors.len() == 1 {
                                 vec![downstream_actors[0]; hash_mapping.len()]
                             } else {
@@ -388,7 +399,8 @@ where
                             });
                         }
                     });
-                })
+                });
+                downstream_fragment_id = fragment_id;
             });
 
         let actor_info = locations

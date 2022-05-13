@@ -591,12 +591,15 @@ where
                     .collect::<HashSet<u32>>();
                 compact_task.vnode_mappings.reserve_exact(table_ids.len());
                 for table_id in table_ids {
-                    let vnode_mapping = self
-                        .cluster_manager
-                        .get_table_hash_mapping(&table_id)
-                        .await?;
-                    let compressed_mapping = compressed_hash_mapping(table_id, &vnode_mapping);
-                    compact_task.vnode_mappings.push(compressed_mapping);
+                    let vnode_mapping =
+                        self.cluster_manager.get_table_hash_mapping(&table_id).await;
+                    // TODO: After introducing different compaction strategies in meta, this should
+                    // be refined. Specifically, relational state tables in hash compaction should
+                    // always have a vnode mapping. Range compaction needs no vnode mappings.
+                    if let Some(vnode_mapping) = vnode_mapping {
+                        let compressed_mapping = compressed_hash_mapping(table_id, &vnode_mapping);
+                        compact_task.vnode_mappings.push(compressed_mapping);
+                    }
                 }
 
                 commit_multi_var!(self, None, compact_status)?;

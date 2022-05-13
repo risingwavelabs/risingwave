@@ -332,27 +332,25 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
-    /// Get default hash mapping, which uses all hash parallel units in the cluster.
-    pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-        self.hash_mapping_manager.get_default_mapping().await
+    // /// Get default vnode hash mapping, which uses all hash parallel units in the cluster.
+    // pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
+    //     self.hash_mapping_manager.get_default_mapping().await
+    // }
+
+    /// Get vnode hash mapping for a specific relational state table.
+    pub async fn get_table_hash_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
+        self.hash_mapping_manager.get_table_mapping(table_id).await
     }
 
-    /// Get hash mapping for a specific relational state table. If the mapping does not exist yet,
-    /// then build one and return the mapping.
-    pub async fn get_table_hash_mapping(&self, table_id: &TableId) -> Result<Vec<ParallelUnitId>> {
-        match self.hash_mapping_manager.get_table_mapping(table_id).await {
-            Some(mapping) => Ok(mapping),
-            None => {
-                self.hash_mapping_manager
-                    .build_table_mapping(*table_id)
-                    .await?;
-                Ok(self
-                    .hash_mapping_manager
-                    .get_table_mapping(table_id)
-                    .await
-                    .unwrap())
-            }
-        }
+    /// Build vnode hash mapping for a specific relational state table.
+    pub async fn build_table_hash_mapping(&self, table_id: TableId) -> Result<()> {
+        self.hash_mapping_manager
+            .build_table_mapping(table_id)
+            .await
+    }
+
+    pub async fn get_all_table_mappings(&self) -> HashMap<TableId, Vec<ParallelUnitId>> {
+        self.hash_mapping_manager.get_all_table_mappings().await
     }
 
     async fn generate_cn_parallel_units(

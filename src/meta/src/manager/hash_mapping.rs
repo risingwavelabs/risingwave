@@ -103,6 +103,10 @@ where
         let mut core = self.core.lock().await;
         core.build_table_mapping(table_id)
     }
+
+    pub async fn get_all_table_mappings(&self) -> HashMap<TableId, Vec<ParallelUnitId>> {
+        self.core.lock().await.table_mappings.clone()
+    }
 }
 
 /// [`HashMappingManagerCore`] contains the core logic for mapping change when one or more nodes

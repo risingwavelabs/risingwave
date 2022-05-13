@@ -18,7 +18,6 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan_common::TableRefId;
@@ -409,20 +408,14 @@ where
         );
 
         // Resolve fragments.
-        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let parallel_degree = self
-            .cluster_manager
-            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
-            .await;
         let mut ctx = CreateMaterializedViewContext {
             affiliated_source,
-            hash_mapping,
             ..Default::default()
         };
         let graph = StreamFragmenter::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
-            parallel_degree as u32,
+            self.cluster_manager.clone(),
             false,
             &stream_node,
             &mut ctx,

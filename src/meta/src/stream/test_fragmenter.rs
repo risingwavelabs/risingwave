@@ -14,9 +14,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -33,6 +35,7 @@ use risingwave_pb::stream_plan::{
     SimpleAggNode, SourceNode, StreamNode,
 };
 
+use crate::cluster::ClusterManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::fragmenter::StreamFragmenter;
@@ -271,12 +274,23 @@ async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let parallel_degree = 4;
+    let cluster_manager = Arc::new(
+        ClusterManager::new(env.clone(), Duration::new(0, 0))
+            .await
+            .unwrap(),
+    );
+    let fake_host_address = HostAddress {
+        host: "127.0.0.1".to_string(),
+        port: 1234,
+    };
+    cluster_manager
+        .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+        .await?;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::generate_graph(
         env.id_gen_manager_ref(),
         fragment_manager,
-        parallel_degree,
+        cluster_manager,
         false,
         &stream_node,
         &mut ctx,
@@ -286,8 +300,8 @@ async fn test_fragmenter() -> Result<()> {
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    assert_eq!(actors.len(), 9);
-    assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(actors.len(), 7);
+    assert_eq!(source_actor_ids, vec![5, 6, 7]);
     assert_eq!(sink_actor_ids, vec![1]);
 
     let mut expected_downstream = HashMap::new();
@@ -295,22 +309,18 @@ async fn test_fragmenter() -> Result<()> {
     expected_downstream.insert(2, vec![1]);
     expected_downstream.insert(3, vec![1]);
     expected_downstream.insert(4, vec![1]);
-    expected_downstream.insert(5, vec![1]);
-    expected_downstream.insert(6, vec![2, 3, 4, 5]);
-    expected_downstream.insert(7, vec![2, 3, 4, 5]);
-    expected_downstream.insert(8, vec![2, 3, 4, 5]);
-    expected_downstream.insert(9, vec![2, 3, 4, 5]);
+    expected_downstream.insert(5, vec![2, 3, 4]);
+    expected_downstream.insert(6, vec![2, 3, 4]);
+    expected_downstream.insert(7, vec![2, 3, 4]);
 
     let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(1, vec![2, 3, 4, 5]);
-    expected_upstream.insert(2, vec![6, 7, 8, 9]);
-    expected_upstream.insert(3, vec![6, 7, 8, 9]);
-    expected_upstream.insert(4, vec![6, 7, 8, 9]);
-    expected_upstream.insert(5, vec![6, 7, 8, 9]);
+    expected_upstream.insert(1, vec![2, 3, 4]);
+    expected_upstream.insert(2, vec![5, 6, 7]);
+    expected_upstream.insert(3, vec![5, 6, 7]);
+    expected_upstream.insert(4, vec![5, 6, 7]);
+    expected_upstream.insert(5, vec![]);
     expected_upstream.insert(6, vec![]);
     expected_upstream.insert(7, vec![]);
-    expected_upstream.insert(8, vec![]);
-    expected_upstream.insert(9, vec![]);
 
     for actor in actors {
         assert_eq!(

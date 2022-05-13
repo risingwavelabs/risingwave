@@ -14,6 +14,7 @@
 
 mod graph;
 use graph::*;
+use risingwave_pb::common::ParallelUnitType;
 mod rewrite;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -29,10 +30,11 @@ use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
+    DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamActor, StreamNode,
 };
 
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
+use crate::cluster::ClusterManagerRef;
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{FragmentId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
@@ -112,7 +114,7 @@ impl StreamFragmenter {
     pub async fn generate_graph<S>(
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        parallel_degree: u32,
+        cluster_manager: ClusterManagerRef<S>,
         is_legacy_frontend: bool,
         stream_node: &StreamNode,
         ctx: &mut CreateMaterializedViewContext,
@@ -120,11 +122,20 @@ impl StreamFragmenter {
     where
         S: MetaStore,
     {
+        let parallel_degree = cluster_manager
+            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
+            .await as u32;
         Self {
             parallel_degree,
             is_legacy_frontend,
         }
-        .generate_graph_inner(id_gen_manager, fragment_manager, stream_node, ctx)
+        .generate_graph_inner(
+            id_gen_manager,
+            fragment_manager,
+            cluster_manager,
+            stream_node,
+            ctx,
+        )
         .await
     }
 
@@ -136,6 +147,7 @@ impl StreamFragmenter {
         self,
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         stream_node: &StreamNode,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>>
@@ -212,6 +224,9 @@ impl StreamFragmenter {
 
             stream_graph_builder.build(ctx, start_actor_id, actor_len)?
         };
+
+        self.build_vnode_mapping(&stream_graph, cluster_manager, ctx)
+            .await?;
 
         // Serialize the graph
         let stream_graph = stream_graph
@@ -560,6 +575,75 @@ impl StreamFragmenter {
             return Err(ErrorCode::InternalError("graph is not a DAG".into()).into());
         }
 
+        Ok(())
+    }
+
+    /// Build vnode mapping for all relational state tables in the stream graph. All relational
+    /// state tables in one fragment should have identical vnode mappings. Also, set the vnode
+    /// mappings into context.
+    async fn build_vnode_mapping<S>(
+        &self,
+        stream_graph: &HashMap<LocalFragmentId, Vec<StreamActor>>,
+        cluster_manager: ClusterManagerRef<S>,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<()>
+    where
+        S: MetaStore,
+    {
+        let mut fragment_to_relational_state_tables = HashMap::new();
+        macro_rules! add_fragment_mapping {
+            ($fragment_id:expr, $table_id:expr) => {
+                fragment_to_relational_state_tables
+                    .entry($fragment_id.as_global_id())
+                    .or_insert(
+                        cluster_manager
+                            .get_table_hash_mapping(&$table_id)
+                            .await
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "relational state table {} should have a vnode mapping",
+                                    $table_id
+                                )
+                            }),
+                    );
+            };
+        }
+        for (fragment_id, actors) in stream_graph {
+            for actor in actors {
+                match actor.get_nodes()?.get_node_body()? {
+                    NodeBody::Materialize(node) => {
+                        let table_id = node.get_table_ref_id()?.get_table_id() as u32;
+                        cluster_manager.build_table_hash_mapping(table_id).await?;
+                        add_fragment_mapping!(fragment_id, table_id);
+                    }
+                    NodeBody::GlobalSimpleAgg(node) => {
+                        let table_ids = node.get_table_ids();
+                        for table_id in table_ids {
+                            cluster_manager.build_table_hash_mapping(*table_id).await?;
+                            add_fragment_mapping!(fragment_id, *table_id);
+                        }
+                    }
+                    NodeBody::HashAgg(node) => {
+                        let table_ids = node.get_table_ids();
+                        for table_id in table_ids {
+                            cluster_manager.build_table_hash_mapping(*table_id).await?;
+                            add_fragment_mapping!(fragment_id, *table_id);
+                        }
+                    }
+                    NodeBody::HashJoin(node) => {
+                        cluster_manager
+                            .build_table_hash_mapping(node.left_table_id)
+                            .await?;
+                        cluster_manager
+                            .build_table_hash_mapping(node.right_table_id)
+                            .await?;
+                        add_fragment_mapping!(fragment_id, node.left_table_id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        ctx.hash_mappings = fragment_to_relational_state_tables;
         Ok(())
     }
 }

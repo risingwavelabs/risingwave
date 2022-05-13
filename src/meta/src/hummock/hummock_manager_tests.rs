@@ -111,9 +111,16 @@ async fn test_hummock_pin_unpin() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
+
+    for table_id in 1..sst_num + 2 {
+        cluster_manager
+            .build_table_hash_mapping(table_id as u32)
+            .await
+            .unwrap();
+    }
 
     // No compaction task available.
     let task = hummock_manager.get_compact_task().await.unwrap();
