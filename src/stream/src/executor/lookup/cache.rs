@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
-
+use madsim::collections::BTreeSet;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
 
