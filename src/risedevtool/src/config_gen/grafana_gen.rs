@@ -69,7 +69,7 @@ datasources:
     tlsAuthWithCACert: false
     version: 1
     editable: true
-    isDefault: true
+    isDefault: false
     "#,
         );
         Ok(yml)
