@@ -64,7 +64,12 @@ impl ConflictDetector {
                 .compare_exchange(current_watermark, epoch)
                 .is_ok()
             {
-                self.epoch_history.retain(|x, _| x > &(epoch));
+                self.epoch_history.retain(|x, value| {
+                    if x <= &(epoch) {
+                        assert!(value.is_none(), "epoch is not sync : {}", epoch);
+                    }
+                    x > &(epoch)
+                });
                 return;
             }
         }
