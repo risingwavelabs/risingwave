@@ -15,7 +15,9 @@
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::io::{Read, Write};
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::os::unix::fs::FileExt;
+#[cfg(target_os = "macos")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
