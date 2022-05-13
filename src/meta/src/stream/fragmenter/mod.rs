@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod graph;
+use async_recursion::async_recursion;
 use graph::*;
 use risingwave_pb::common::ParallelUnitType;
 mod rewrite;
@@ -30,7 +31,7 @@ use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamActor, StreamNode,
+    DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
 };
 
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
@@ -225,8 +226,20 @@ impl StreamFragmenter {
             stream_graph_builder.build(ctx, start_actor_id, actor_len)?
         };
 
-        self.build_vnode_mapping(&stream_graph, cluster_manager, ctx)
-            .await?;
+        let mut fragment_to_relational_state_tables = HashMap::new();
+        for (fragment_id, actors) in &stream_graph {
+            for actor in actors {
+                let stream_node = actor.get_nodes()?;
+                self.build_vnode_mapping(
+                    fragment_id,
+                    stream_node,
+                    cluster_manager.clone(),
+                    &mut fragment_to_relational_state_tables,
+                )
+                .await?;
+            }
+        }
+        ctx.hash_mappings = fragment_to_relational_state_tables;
 
         // Serialize the graph
         let stream_graph = stream_graph
@@ -579,18 +592,18 @@ impl StreamFragmenter {
     }
 
     /// Build vnode mapping for all relational state tables in the stream graph. All relational
-    /// state tables in one fragment should have identical vnode mappings. Also, set the vnode
-    /// mappings into context.
+    /// state tables in one fragment should have identical vnode mappings.
+    #[async_recursion]
     async fn build_vnode_mapping<S>(
         &self,
-        stream_graph: &HashMap<LocalFragmentId, Vec<StreamActor>>,
+        fragment_id: &LocalFragmentId,
+        stream_node: &StreamNode,
         cluster_manager: ClusterManagerRef<S>,
-        ctx: &mut CreateMaterializedViewContext,
+        fragment_to_relational_state_tables: &mut HashMap<FragmentId, Vec<u32>>,
     ) -> Result<()>
     where
         S: MetaStore,
     {
-        let mut fragment_to_relational_state_tables = HashMap::new();
         macro_rules! add_fragment_mapping {
             ($fragment_id:expr, $table_id:expr) => {
                 fragment_to_relational_state_tables
@@ -608,42 +621,72 @@ impl StreamFragmenter {
                     );
             };
         }
-        for (fragment_id, actors) in stream_graph {
-            for actor in actors {
-                match actor.get_nodes()?.get_node_body()? {
-                    NodeBody::Materialize(node) => {
-                        let table_id = node.get_table_ref_id()?.get_table_id() as u32;
-                        cluster_manager.build_table_hash_mapping(table_id).await?;
-                        add_fragment_mapping!(fragment_id, table_id);
-                    }
-                    NodeBody::GlobalSimpleAgg(node) => {
-                        let table_ids = node.get_table_ids();
-                        for table_id in table_ids {
-                            cluster_manager.build_table_hash_mapping(*table_id).await?;
-                            add_fragment_mapping!(fragment_id, *table_id);
-                        }
-                    }
-                    NodeBody::HashAgg(node) => {
-                        let table_ids = node.get_table_ids();
-                        for table_id in table_ids {
-                            cluster_manager.build_table_hash_mapping(*table_id).await?;
-                            add_fragment_mapping!(fragment_id, *table_id);
-                        }
-                    }
-                    NodeBody::HashJoin(node) => {
-                        cluster_manager
-                            .build_table_hash_mapping(node.left_table_id)
-                            .await?;
-                        cluster_manager
-                            .build_table_hash_mapping(node.right_table_id)
-                            .await?;
-                        add_fragment_mapping!(fragment_id, node.left_table_id);
-                    }
-                    _ => {}
-                }
+        match stream_node.get_node_body()? {
+            NodeBody::Materialize(node) => {
+                let table_id = node.get_table_ref_id()?.get_table_id() as u32;
+                println!(
+                    "fragment {}: Materialize with table {}",
+                    fragment_id.as_global_id(),
+                    table_id
+                );
+                cluster_manager.build_table_hash_mapping(table_id).await?;
+                add_fragment_mapping!(fragment_id, table_id);
             }
+            NodeBody::GlobalSimpleAgg(node) => {
+                print!(
+                    "fragment {}: GlobalSimpleAgg with tables ",
+                    fragment_id.as_global_id()
+                );
+                let table_ids = node.get_table_ids();
+                for table_id in table_ids {
+                    print!("{} ", table_id);
+                    cluster_manager.build_table_hash_mapping(*table_id).await?;
+                    add_fragment_mapping!(fragment_id, *table_id);
+                }
+                println!();
+            }
+            NodeBody::HashAgg(node) => {
+                print!(
+                    "fragment {}: HashAgg with tables ",
+                    fragment_id.as_global_id()
+                );
+                let table_ids = node.get_table_ids();
+                for table_id in table_ids {
+                    print!("{} ", table_id);
+                    cluster_manager.build_table_hash_mapping(*table_id).await?;
+                    add_fragment_mapping!(fragment_id, *table_id);
+                }
+                println!();
+            }
+            NodeBody::HashJoin(node) => {
+                println!(
+                    "fragment {}: HashJoin with left table {} and right table {}",
+                    fragment_id.as_global_id(),
+                    node.left_table_id,
+                    node.right_table_id
+                );
+                cluster_manager
+                    .build_table_hash_mapping(node.left_table_id)
+                    .await?;
+                cluster_manager
+                    .build_table_hash_mapping(node.right_table_id)
+                    .await?;
+                add_fragment_mapping!(fragment_id, node.left_table_id);
+            }
+            _ => {}
         }
-        ctx.hash_mappings = fragment_to_relational_state_tables;
+
+        let input_nodes = stream_node.get_input();
+        for input_node in input_nodes {
+            self.build_vnode_mapping(
+                fragment_id,
+                input_node,
+                cluster_manager.clone(),
+                fragment_to_relational_state_tables,
+            )
+            .await?;
+        }
+        // dbg!(&fragment_to_relational_state_tables.keys());
         Ok(())
     }
 }
