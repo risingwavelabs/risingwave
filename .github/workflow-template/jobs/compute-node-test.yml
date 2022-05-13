@@ -46,6 +46,7 @@ jobs:
       - name: Run rust doc check
         run: |
           cargo doc --document-private-items --no-deps
+          cargo test --doc
 
       - name: Run rust failpoints test
         run: |
