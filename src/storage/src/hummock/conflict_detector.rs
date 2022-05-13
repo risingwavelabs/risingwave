@@ -111,16 +111,13 @@ impl ConflictDetector {
     pub fn archive_epoch(&self, epoch: HummockEpoch) {
         assert!(
             epoch > self.get_epoch_watermark(),
-            "write to an archived epoch: {} , c_epoch :{}",
+            "write to an archived epoch: {} , current_epoch :{}",
             epoch,
             self.get_epoch_watermark(),
         );
-        if self.epoch_history.contains_key(&epoch) {
-            assert!(
-                self.epoch_history.get(&epoch).is_some(),
-                "epoch has been archived: epoch is {}",
-                epoch
-            );
+
+        if let Some(written_key) = self.epoch_history.get(&epoch){
+            assert!(written_key.is_some(), "epoch has been archived: epoch is {}", epoch);
         }
         self.epoch_history.insert(epoch, None);
     }
