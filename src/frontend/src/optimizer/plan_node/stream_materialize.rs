@@ -116,9 +116,6 @@ impl StreamMaterialize {
 
         let mut col_names = HashSet::new();
         for name in &out_names {
-            if name == crate::binder::UNNAMED_COLUMN {
-                continue;
-            }
             if !col_names.insert(name) {
                 return Err(
                     InternalError(format!("column {} specified more than once", name)).into(),
@@ -137,9 +134,7 @@ impl StreamMaterialize {
                 };
                 if !c.is_hidden {
                     let name = out_name_iter.next().unwrap();
-                    if name != crate::binder::UNNAMED_COLUMN {
-                        c.column_desc.name = name;
-                    }
+                    c.column_desc.name = name;
                 }
                 c
             })
