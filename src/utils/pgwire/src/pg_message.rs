@@ -43,11 +43,14 @@ pub struct FeQueryMessage {
 }
 
 impl FeQueryMessage {
-    pub fn get_sql(&self) -> &str {
+    pub fn get_sql(&self) -> Result<&str> {
         // Why there is a \0..
         match std::str::from_utf8(&self.sql_bytes[..]) {
-            Ok(v) => v.trim_end_matches('\0'),
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+            Ok(v) => Ok(v.trim_end_matches('\0')),
+            Err(e) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Invalid UTF-8 sequence: {}", e),
+            )),
         }
     }
 }
