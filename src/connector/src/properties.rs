@@ -25,6 +25,7 @@ pub enum ConnectorProperties {
     Kinesis(KinesisProperties),
     Nexmark(Box<NexmarkProperties>),
     S3(S3Properties),
+    Datagen(DatagenProperties),
 }
 
 impl ConnectorProperties {
@@ -47,6 +48,9 @@ impl ConnectorProperties {
                 "nexmark" => Ok(Self::Nexmark(Box::new(
                     NexmarkProperties::deserialize(json_value).unwrap(),
                 ))),
+                "datagen" => Ok(Self::Datagen(
+                    DatagenProperties::deserialize(json_value).unwrap(),
+                )),
                 _ => Err(RwError::from(ProtocolError(format!(
                     "connector '{}' is not supported",
                     connector,
@@ -243,4 +247,19 @@ pub struct S3Properties {
     pub access: String,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DatagenProperties {
+    #[serde(rename = "datagen.max.chunk.size", default = "default_max_chunk_size")]
+    pub max_chunk_size: u64,
+    #[serde(
+        rename = "datagen.rows.per.second",
+        default = "default_rows_per_second"
+    )]
+    pub rows_per_second: u64,
+}
+
+fn default_rows_per_second() -> u64 {
+    1
 }

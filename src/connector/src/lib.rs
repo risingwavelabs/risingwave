@@ -29,6 +29,7 @@
 #![feature(binary_heap_drain_sorted)]
 
 pub mod base;
+mod datagen;
 mod filesystem;
 mod kafka;
 pub mod kinesis;

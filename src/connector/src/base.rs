@@ -31,6 +31,7 @@ pub enum SourceOffset {
     String(String),
 }
 
+use crate::datagen::{self, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader};
 use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
@@ -122,6 +123,14 @@ impl From<SplitImpl> for ConnectorState {
                 },
                 end_offset: "".to_string(),
             },
+            SplitImpl::Datagen(dategen) => Self {
+                identifier: Bytes::from(dategen.id()),
+                start_offset: match dategen.start_offset {
+                    Some(s) => s.to_string(),
+                    _ => "".to_string(),
+                },
+                end_offset: "".to_string(),
+            },
         }
     }
 }
@@ -160,6 +169,7 @@ pub enum SplitReaderImpl {
     Dummy(DummySplitReader),
     Nexmark(NexmarkSplitReader),
     Pulsar(PulsarSplitReader),
+    Datagen(DatagenSplitReader),
 }
 
 impl SplitReaderImpl {
@@ -170,6 +180,7 @@ impl SplitReaderImpl {
             Self::Dummy(r) => r.next().await,
             Self::Nexmark(r) => r.next().await,
             Self::Pulsar(r) => r.next().await,
+            Self::Datagen(r) => r.next().await,
         }
     }
 
@@ -193,6 +204,9 @@ impl SplitReaderImpl {
             ConnectorProperties::Pulsar(props) => {
                 Self::Pulsar(PulsarSplitReader::new(props, state).await?)
             }
+            ConnectorProperties::Datagen(props) => {
+                Self::Datagen(DatagenSplitReader::new(props, state).await?)
+            }
             _other => {
                 todo!()
             }
@@ -214,6 +228,7 @@ pub enum SplitEnumeratorImpl {
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
     Kinesis(kinesis::enumerator::client::KinesisSplitEnumerator),
     Nexmark(nexmark::enumerator::NexmarkSplitEnumerator),
+    Datagen(datagen::enumerator::DatagenSplitEnumerator),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +237,7 @@ pub enum SplitImpl {
     Pulsar(pulsar::PulsarSplit),
     Kinesis(kinesis::split::KinesisSplit),
     Nexmark(nexmark::NexmarkSplit),
+    Datagen(datagen::DatagenSplit),
 }
 
 const PULSAR_SPLIT_TYPE: &str = "pulsar";
@@ -229,6 +245,7 @@ const S3_SPLIT_TYPE: &str = "s3";
 const KINESIS_SPLIT_TYPE: &str = "kinesis";
 const KAFKA_SPLIT_TYPE: &str = "kafka";
 const NEXMARK_SPLIT_TYPE: &str = "nexmark";
+const DATAGEN_SPLIT_TYPE: &str = "datagen";
 
 impl SplitImpl {
     pub fn id(&self) -> String {
@@ -237,6 +254,7 @@ impl SplitImpl {
             SplitImpl::Pulsar(p) => p.id(),
             SplitImpl::Kinesis(k) => k.id(),
             SplitImpl::Nexmark(n) => n.id(),
+            SplitImpl::Datagen(d) => d.id(),
         }
     }
 
@@ -246,6 +264,7 @@ impl SplitImpl {
             SplitImpl::Pulsar(p) => p.to_json_bytes(),
             SplitImpl::Kinesis(k) => k.to_json_bytes(),
             SplitImpl::Nexmark(n) => n.to_json_bytes(),
+            SplitImpl::Datagen(d) => d.to_json_bytes(),
         }
     }
 
@@ -255,6 +274,7 @@ impl SplitImpl {
             SplitImpl::Pulsar(_) => PULSAR_SPLIT_TYPE,
             SplitImpl::Kinesis(_) => KINESIS_SPLIT_TYPE,
             SplitImpl::Nexmark(_) => NEXMARK_SPLIT_TYPE,
+            SplitImpl::Datagen(_) => DATAGEN_SPLIT_TYPE,
         }
         .to_string()
     }
@@ -265,6 +285,7 @@ impl SplitImpl {
             PULSAR_SPLIT_TYPE => PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar),
             KINESIS_SPLIT_TYPE => KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis),
             NEXMARK_SPLIT_TYPE => NexmarkSplit::restore_from_bytes(bytes).map(SplitImpl::Nexmark),
+            DATAGEN_SPLIT_TYPE => DatagenSplit::restore_from_bytes(bytes).map(SplitImpl::Datagen),
             other => Err(anyhow!("split type {} not supported", other)),
         }
     }
@@ -289,6 +310,10 @@ impl SplitEnumeratorImpl {
                 .list_splits()
                 .await
                 .map(|ss| ss.into_iter().map(SplitImpl::Nexmark).collect_vec()),
+            SplitEnumeratorImpl::Datagen(d) => d
+                .list_splits()
+                .await
+                .map(|ss| ss.into_iter().map(SplitImpl::Datagen).collect_vec()),
         }
     }
 
@@ -302,6 +327,9 @@ impl SplitEnumeratorImpl {
             ConnectorProperties::S3(_) => todo!(),
             ConnectorProperties::Nexmark(props) => {
                 NexmarkSplitEnumerator::new(&props).map(Self::Nexmark)
+            }
+            ConnectorProperties::Datagen(props) => {
+                DatagenSplitEnumerator::new(props).map(Self::Datagen)
             }
         }
     }
