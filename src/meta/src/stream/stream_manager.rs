@@ -347,18 +347,43 @@ where
         // chain node on the same node as upstreams. However, this constraint will easily be broken
         // if parallel units are not aligned between upstream nodes.
 
+        // Record actor -> fragment mapping for finding out downstream fragments.
+        let mut actor_to_fragment_mapping = HashMap::new();
+        for (fragment_id, fragment) in &table_fragments.fragments {
+            for actor in &fragment.actors {
+                actor_to_fragment_mapping.insert(actor.actor_id, *fragment_id);
+            }
+        }
+
         // Fill hash dispatcher's mapping with scheduled locations.
-        let mut downstream_fragment_id = &0u32;
         table_fragments
             .fragments
             .iter_mut()
-            .for_each(|(fragment_id, fragment)| {
+            .for_each(|(_, fragment)| {
                 fragment.actors.iter_mut().for_each(|actor| {
                     actor.dispatcher.iter_mut().for_each(|dispatcher| {
                         if dispatcher.get_type().unwrap() == DispatcherType::Hash {
                             // Dispatcher in the last fragment will have no hash mapping, since the
                             // type is always broadcast.
-                            let hash_mapping = hash_mappings.get(downstream_fragment_id).unwrap();
+                            let downstream_actor_id =
+                                dispatcher.downstream_actor_id.first().unwrap_or_else(|| {
+                                    panic!(
+                                        "hash dispatcher should have at least one downstream actor"
+                                    );
+                                });
+                            let downstream_fragment_id = actor_to_fragment_mapping
+                                .get(downstream_actor_id)
+                                .unwrap_or_else(|| {
+                                    panic!("actor {} should have a fragment", downstream_actor_id);
+                                });
+                            let hash_mapping = hash_mappings
+                                .get(downstream_fragment_id)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "fragment {} should have a vnode mapping",
+                                        downstream_fragment_id
+                                    );
+                                });
                             let downstream_actors = &dispatcher.downstream_actor_id;
 
                             // Theoretically, a hash dispatcher should have
@@ -400,7 +425,6 @@ where
                         }
                     });
                 });
-                downstream_fragment_id = fragment_id;
             });
 
         let actor_info = locations
