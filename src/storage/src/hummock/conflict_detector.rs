@@ -116,8 +116,12 @@ impl ConflictDetector {
             self.get_epoch_watermark(),
         );
 
-        if let Some(written_key) = self.epoch_history.get(&epoch){
-            assert!(written_key.is_some(), "epoch has been archived: epoch is {}", epoch);
+        if let Some(written_key) = self.epoch_history.get(&epoch) {
+            assert!(
+                written_key.is_some(),
+                "epoch has been archived: epoch is {}",
+                epoch
+            );
         }
         self.epoch_history.insert(epoch, None);
     }
