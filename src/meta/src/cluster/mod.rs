@@ -332,11 +332,6 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
-    // /// Get default vnode hash mapping, which uses all hash parallel units in the cluster.
-    // pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-    //     self.hash_mapping_manager.get_default_mapping().await
-    // }
-
     /// Get vnode hash mapping for a specific relational state table.
     pub async fn get_table_hash_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
         self.hash_mapping_manager.get_table_mapping(table_id).await
