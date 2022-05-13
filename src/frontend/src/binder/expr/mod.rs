@@ -58,7 +58,7 @@ impl Binder {
                 subquery,
                 negated,
             } => self.bind_in_subquery(*expr, *subquery, negated),
-            // special syntax
+            // special syntax (except date/time or string)
             Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
             Expr::IsNull(expr) => self.bind_is_operator(ExprType::IsNull, *expr),
             Expr::IsNotNull(expr) => self.bind_is_operator(ExprType::IsNotNull, *expr),
@@ -83,7 +83,9 @@ impl Binder {
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
+            // special syntax for date/time
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            // special syntaxt for string
             Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
             Expr::Substring {
                 expr,
