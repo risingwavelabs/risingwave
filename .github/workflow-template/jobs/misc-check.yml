@@ -26,7 +26,6 @@ jobs:
 
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
-        with:
 
       - name: Check protobuf code format
         run: |

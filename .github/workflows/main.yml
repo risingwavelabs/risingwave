@@ -693,7 +693,6 @@ jobs:
           ./.github/workflow-template/generate.sh --check
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
-        with:
       - name: Check protobuf code format
         run: |
           buf format -d --exit-code
