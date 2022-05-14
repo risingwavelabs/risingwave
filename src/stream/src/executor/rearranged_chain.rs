@@ -152,7 +152,7 @@ impl RearrangedChainExecutor {
                 .unwrap();
 
             // 3. Spawn the background task.
-            let upstream_poll_handle = tokio::spawn(Self::rearrange(
+            let upstream_poll_handle = madsim::task::spawn(Self::rearrange(
                 upstream,
                 upstream_tx,
                 rearranged_barrier_tx,
@@ -215,7 +215,7 @@ impl RearrangedChainExecutor {
 
             // Now we take back the remaining upstream.
             // If there's any error in the rearrangement task, it will be thrown.
-            let remaining_upstream = upstream_poll_handle.await.unwrap()?;
+            let remaining_upstream = upstream_poll_handle.await?;
 
             // 8. Assemble the remaining messages.
             // Note that there may still be some messages in `rearranged`. However the rearranged

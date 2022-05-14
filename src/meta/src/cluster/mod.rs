@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
@@ -217,10 +217,11 @@ where
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_id(worker_id) {
-            core.update_worker_ttl(worker.key().unwrap(), self.max_heartbeat_interval)
+            core.update_worker_ttl(worker.key().unwrap(), self.max_heartbeat_interval);
+            Ok(())
+        } else {
+            Err(ErrorCode::UnknownWorker.into())
         }
-
-        Ok(())
     }
 
     pub async fn start_heartbeat_checker(

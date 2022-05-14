@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{Receiver, Sender};
+use madsim::collections::HashMap;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;

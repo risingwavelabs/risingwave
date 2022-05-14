@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 
+use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -416,7 +416,7 @@ mod tests {
         )
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_top_n_state() {
         let store = MemoryStateStore::new();
         let data_types = vec![DataType::Varchar, DataType::Int64];

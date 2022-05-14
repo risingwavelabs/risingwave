@@ -188,7 +188,7 @@ mod tests {
     use super::super::*;
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_filter() {
         let chunk1 = StreamChunk::from_pretty(
             " I I

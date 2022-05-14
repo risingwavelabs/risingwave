@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
+use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
@@ -305,7 +304,7 @@ mod tests {
         managed_state
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_string_agg_state() {
         let keyspace = create_in_memory_keyspace();
         let store = keyspace.state_store();
