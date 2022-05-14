@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -93,7 +93,10 @@ impl BoxedExecutor2Builder for GenerateSeriesExecutor2Wraper {
                     identity,
                 }))
             }
-            _ => todo!(),
+            _ => Err(ErrorCode::InternalError(
+                "the parameters of Generate Series Function are incorrect".to_string(),
+            )
+            .into()),
         }
     }
 }

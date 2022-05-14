@@ -104,13 +104,14 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::try_match_expand;
     use risingwave_common::types::DataType;
+    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
 
     #[tokio::test]
     async fn test_generate_time_series() {
-        let start_time = NaiveDateTimeWrapper::parse_from_str("2008-03-01 00:00:00").unwrap();
-        let stop_time = NaiveDateTimeWrapper::parse_from_str("2008-03-09 00:00:00").unwrap();
+        let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
+        let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
         let one_minute_step = IntervalUnit::from_minutes(1);
         let one_hour_step = IntervalUnit::from_minutes(60);
         let one_day_step = IntervalUnit::from_days(1);
