@@ -53,6 +53,8 @@ impl Rule for FilterJoinRule {
                 let join = input.as_logical_join()?;
                 (filter.predicate().clone(), join.clone())
             }
+            // This rule also handles the case where there's no filter above the join. 
+            // We pushdown the predicates within the on-clause.
             None => {
                 let join = plan.as_logical_join()?;
                 (Condition::true_cond(), join.clone())
