@@ -66,7 +66,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::Describe { name } => describe::handle_describe(context, name).await,
         // TODO: support complex sql for `show columns from <table>`
-        Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
+        // Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
         Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
         Statement::Drop(DropStatement {
             object_type,

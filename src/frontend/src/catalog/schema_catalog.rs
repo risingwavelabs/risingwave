@@ -31,6 +31,7 @@ pub struct SchemaCatalog {
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
+    index_id_by_table_id: HashMap<TableId, Vec<TableId>>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
 }
@@ -39,10 +40,24 @@ impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &ProstTable) {
         let name = prost.name.clone();
         let id = prost.id.into();
-        let table = prost.into();
+        let table: TableCatalog = prost.into();
 
+        if let Some(table_id) = &table.is_index_on {
+            self.create_index(id, *table_id);
+        }
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
+    }
+
+    pub fn create_index(&mut self, index_id: TableId, table_id: TableId) {
+        match self.index_id_by_table_id.get_mut(&table_id) {
+            None => {
+                self.index_id_by_table_id.insert(table_id, vec![index_id]);
+            }
+            Some(ids) => {
+                ids.push(index_id);
+            }
+        }
     }
 
     pub fn drop_table(&mut self, id: TableId) {
@@ -123,6 +138,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             name: schema.name.clone(),
             table_by_name: HashMap::new(),
             table_name_by_id: HashMap::new(),
+            index_id_by_table_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
         }
