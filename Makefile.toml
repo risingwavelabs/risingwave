@@ -274,8 +274,6 @@ dependencies = [
   "download-kafka",
   "build-risingwave",
   "post-build-risingwave",
-  "build-frontend",
-  "post-build-frontend",
   "extract-dashboard-artifact",
   "export-dashboard-v2",
   "prepare-config",
