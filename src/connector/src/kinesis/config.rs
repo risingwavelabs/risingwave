@@ -143,7 +143,7 @@ pub fn kinesis_demo_properties() -> HashMap<String, String> {
     properties
 }
 
-pub async fn build_client(config: &KinesisProperties) -> Result<Client> {
+pub async fn build_client(config: KinesisProperties) -> Result<Client> {
     let config = AwsConfigInfo::build(config)?;
     let aws_config = config.load().await?;
     let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);

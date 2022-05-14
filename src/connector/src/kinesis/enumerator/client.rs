@@ -21,7 +21,6 @@ use crate::KinesisProperties;
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::kinesis::*;
-use crate::{AnyhowProperties, Properties};
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
@@ -29,9 +28,9 @@ pub struct KinesisSplitEnumerator {
 }
 
 impl KinesisSplitEnumerator {
-    pub async fn new(properties: &AnyhowProperties) -> Result<Self> {
-        let client = build_client(&Properties::from(properties)).await?;
-        let stream_name = properties.get(KINESIS_STREAM_NAME)?;
+    pub async fn new(properties: KinesisProperties) -> Result<Self> {
+        let client = build_client(properties.clone()).await?;
+        let stream_name = properties.stream_name.clone();
         Ok(Self {
             stream_name,
             client,
@@ -78,12 +77,6 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 end_position: KinesisOffset::None,
             })
             .collect())
-    }
-}
-
-impl KinesisSplitEnumerator {
-    pub async fn new(props: KinesisProperties) -> anyhow::Result<Self>{
-        todo!();
     }
 }
 

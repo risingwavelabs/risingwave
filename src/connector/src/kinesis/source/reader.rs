@@ -122,11 +122,11 @@ impl KinesisSplitReader {
     where
         Self: Sized,
     {
-        let client = build_client(&config).await?;
+        let client = build_client(config.clone()).await?;
 
         let mut split_reader = KinesisSplitReader {
             client,
-            stream_name: config.get(KINESIS_STREAM_NAME)?,
+            stream_name: config.stream_name.clone(),
             shard_id: String::from(""),
             latest_sequence_num: "".to_string(),
             shard_iter: None,
@@ -359,14 +359,14 @@ mod tests {
         // println!("{:?}", v);
         // v.clear();
         // drop(v);
-        let v = s.collect().await;
-        println!("{:?}", v);
+        // let v = s.collect().await;
+        // println!("{:?}", v);
 
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
         // let v = x.lock().await;
-        let v1 = s.collect().await;
-        println!("{:?}", v1);
+        // let v1 = s.collect().await;
+        // println!("{:?}", v1);
         // handler.abort();
         Ok(())
     }
