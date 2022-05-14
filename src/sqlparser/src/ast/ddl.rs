@@ -244,12 +244,17 @@ pub struct ColumnDef {
     pub data_type: DataType,
     pub collation: Option<ObjectName>,
     pub options: Vec<ColumnOptionDef>,
-    // If the `column_def` is struct type, `sub_defs` contains field columns in struct.
-    pub sub_defs: Vec<ColumnDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct StructColumnDef {
+    pub name: Ident,
+    pub data_type: DataType,
 }
 
 impl ColumnDef {
-    pub fn without_sub_defs(
+    pub fn new(
         name: Ident,
         data_type: DataType,
         collation: Option<ObjectName>,
@@ -260,7 +265,6 @@ impl ColumnDef {
             data_type,
             collation,
             options,
-            sub_defs: vec![],
         }
     }
 }
@@ -268,12 +272,19 @@ impl ColumnDef {
 impl fmt::Display for ColumnDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.name, self.data_type)?;
-        if !self.sub_defs.is_empty() {
-            write!(f, " <{}>", display_comma_separated(&self.sub_defs))?;
-        }
+        // if !self.sub_defs.is_empty() {
+        //     write!(f, " <{}>", display_comma_separated(&self.sub_defs))?;
+        // }
         for option in &self.options {
             write!(f, " {}", option)?;
         }
+        Ok(())
+    }
+}
+
+impl fmt::Display for StructColumnDef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.name, self.data_type)?;
         Ok(())
     }
 }

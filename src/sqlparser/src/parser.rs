@@ -22,9 +22,9 @@ use alloc::{
 };
 use core::fmt;
 
-use itertools::Itertools;
 use log::debug;
 
+use crate::ast::ddl::StructColumnDef;
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -1557,22 +1557,6 @@ impl Parser {
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
         let name = self.parse_identifier()?;
         let data_type = self.parse_data_type()?;
-        let (data_type, sub_defs) = {
-            if let DataType::Struct(_) = data_type {
-                let defs: Vec<ColumnDef> = self.parse_struct_columns()?;
-                (
-                    DataType::Struct(
-                        defs.iter()
-                            .map(|d| d.data_type.clone())
-                            .collect_vec()
-                            .into(),
-                    ),
-                    defs,
-                )
-            } else {
-                (data_type, vec![])
-            }
-        };
 
         let collation = if self.parse_keyword(Keyword::COLLATE) {
             Some(self.parse_object_name()?)
@@ -1602,7 +1586,6 @@ impl Parser {
             data_type,
             collation,
             options,
-            sub_defs,
         })
     }
 
@@ -1970,7 +1953,7 @@ impl Parser {
     }
 
     /// Parse struct columns e.g.`<v1 int, v2 int, v3 struct<...>>`.
-    pub fn parse_struct_columns(&mut self) -> Result<Vec<ColumnDef>, ParserError> {
+    pub fn parse_struct_data_type(&mut self) -> Result<Vec<StructColumnDef>, ParserError> {
         let mut columns = vec![];
         if !self.consume_token(&Token::Lt) {
             return self.expected("'<' after struct", self.peek_token());
@@ -1979,9 +1962,11 @@ impl Parser {
 
         loop {
             if let Token::Word(_) = self.peek_token() {
-                columns.push(self.parse_column_def()?);
+                let name = self.parse_identifier()?;
+                let data_type = self.parse_data_type()?;
+                columns.push(StructColumnDef { name, data_type })
             } else {
-                return self.expected("column name or constraint definition", self.peek_token());
+                return self.expected("struct field name", self.peek_token());
             }
             let comma = self.consume_token(&Token::Comma);
             if self.angle_brackets_num == 0 {
@@ -2061,7 +2046,7 @@ impl Parser {
                     }
                 }
                 // Make empty struct now, will fill after `parse_struct_columns`.
-                Keyword::STRUCT => Ok(DataType::Struct(vec![].into())),
+                Keyword::STRUCT => Ok(DataType::Struct(self.parse_struct_data_type()?)),
                 Keyword::BYTEA => Ok(DataType::Bytea),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
                     let (precision, scale) = self.parse_optional_precision_scale()?;

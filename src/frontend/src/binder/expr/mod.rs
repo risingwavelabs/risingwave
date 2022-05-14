@@ -17,8 +17,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
-    UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, StructColumnDef,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -307,16 +307,29 @@ impl Binder {
 
 /// Bind `column_def` to `column_desc`, now we not use the `column_id` in `field_descs`,
 /// so use the same `column_id` with outer `column_desc`.
-pub fn bind_column_desc(column_def: &ColumnDef, id: usize) -> Result<ColumnDesc> {
+pub fn bind_column_desc(column_def: &StructColumnDef) -> Result<ColumnDesc> {
+    let field_descs = {
+        if let AstDataType::Struct(defs) = &column_def.data_type {
+            defs.iter()
+                .map(|f| {
+                    Ok(ColumnDesc {
+                        data_type: bind_data_type(&f.data_type)?,
+                        column_id: ColumnId::new(0),
+                        name: f.name.value.clone(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            vec![]
+        }
+    };
     Ok(ColumnDesc {
         data_type: bind_data_type(&column_def.data_type)?,
-        column_id: ColumnId::new((id + 1) as i32),
+        column_id: ColumnId::new(0),
         name: column_def.name.value.clone(),
-        field_descs: column_def
-            .sub_defs
-            .iter()
-            .map(|f| bind_column_desc(f, id))
-            .collect::<Result<Vec<_>>>()?,
+        field_descs,
         type_name: "".to_string(),
     })
 }
@@ -349,7 +362,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Struct(types) => DataType::Struct {
             fields: types
                 .iter()
-                .map(bind_data_type)
+                .map(|f| bind_data_type(&f.data_type))
                 .collect::<Result<Vec<_>>>()?
                 .into(),
         },

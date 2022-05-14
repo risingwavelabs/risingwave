@@ -17,14 +17,15 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use super::create_source::make_prost_source;
-use crate::binder::expr::bind_column_desc;
+use crate::binder::expr::{bind_column_desc, bind_data_type};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
@@ -42,7 +43,22 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
             check_valid_column_name(&column.name.value)?;
-            column_descs.push(bind_column_desc(&column, i)?);
+            let fields = {
+                if let AstDataType::Struct(defs) = &column.data_type {
+                    defs.iter()
+                        .map(bind_column_desc)
+                        .collect::<Result<Vec<_>>>()?
+                } else {
+                    vec![]
+                }
+            };
+            column_descs.push(ColumnDesc {
+                data_type: bind_data_type(&column.data_type)?,
+                column_id: ColumnId::new((i + 1) as i32),
+                name: column.name.value,
+                field_descs: fields,
+                type_name: "".to_string(),
+            });
         }
         column_descs
     };

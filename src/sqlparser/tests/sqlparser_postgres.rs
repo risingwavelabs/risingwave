@@ -48,7 +48,7 @@ fn parse_create_table_with_defaults() {
             assert_eq!(
                 columns,
                 vec![
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "customer_id".into(),
                         DataType::Int(None),
                         None,
@@ -59,7 +59,7 @@ fn parse_create_table_with_defaults() {
                             ))
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "store_id".into(),
                         DataType::SmallInt(None),
                         None,
@@ -68,7 +68,7 @@ fn parse_create_table_with_defaults() {
                             option: ColumnOption::NotNull,
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "first_name".into(),
                         DataType::Varchar(Some(45)),
                         None,
@@ -77,7 +77,7 @@ fn parse_create_table_with_defaults() {
                             option: ColumnOption::NotNull,
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "last_name".into(),
                         DataType::Varchar(Some(45)),
                         Some(ObjectName(vec![Ident::with_quote('"', "es_ES")])),
@@ -86,13 +86,8 @@ fn parse_create_table_with_defaults() {
                             option: ColumnOption::NotNull,
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
-                        "email".into(),
-                        DataType::Varchar(Some(50)),
-                        None,
-                        vec![],
-                    ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new("email".into(), DataType::Varchar(Some(50)), None, vec![],),
+                    ColumnDef::new(
                         "address_id".into(),
                         DataType::SmallInt(None),
                         None,
@@ -101,7 +96,7 @@ fn parse_create_table_with_defaults() {
                             option: ColumnOption::NotNull
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "activebool".into(),
                         DataType::Boolean,
                         None,
@@ -116,7 +111,7 @@ fn parse_create_table_with_defaults() {
                             }
                         ],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "create_date".into(),
                         DataType::Date,
                         None,
@@ -131,7 +126,7 @@ fn parse_create_table_with_defaults() {
                             }
                         ],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "last_update".into(),
                         DataType::Timestamp(false),
                         None,
@@ -146,7 +141,7 @@ fn parse_create_table_with_defaults() {
                             }
                         ],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "active".into(),
                         DataType::Int(None),
                         None,

@@ -17,7 +17,8 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::ObjectName;
+use crate::ast::ddl::StructColumnDef;
+use crate::ast::{display_comma_separated, ObjectName};
 
 /// SQL data types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -75,7 +76,7 @@ pub enum DataType {
     Custom(ObjectName),
     /// Arrays
     Array(Box<DataType>),
-    Struct(Box<Vec<DataType>>),
+    Struct(Vec<StructColumnDef>),
 }
 
 impl fmt::Display for DataType {
@@ -119,7 +120,10 @@ impl fmt::Display for DataType {
             DataType::Bytea => write!(f, "BYTEA"),
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
-            DataType::Struct(_) => write!(f, "STRUCT"),
+            DataType::Struct(defs) => {
+                write!(f, "STRUCT")?;
+                write!(f, " <{}>", display_comma_separated(defs))
+            }
         }
     }
 }

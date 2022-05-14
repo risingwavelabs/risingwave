@@ -1250,7 +1250,7 @@ fn parse_create_table() {
             assert_eq!(
                 columns,
                 vec![
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "name".into(),
                         DataType::Varchar(Some(100)),
                         None,
@@ -1259,7 +1259,7 @@ fn parse_create_table() {
                             option: ColumnOption::NotNull
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "lat".into(),
                         DataType::Double,
                         None,
@@ -1268,8 +1268,8 @@ fn parse_create_table() {
                             option: ColumnOption::Null
                         }],
                     ),
-                    ColumnDef::without_sub_defs("lng".into(), DataType::Double, None, vec![],),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new("lng".into(), DataType::Double, None, vec![],),
+                    ColumnDef::new(
                         "constrained".into(),
                         DataType::Int(None),
                         None,
@@ -1296,7 +1296,7 @@ fn parse_create_table() {
                             }
                         ],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "ref".into(),
                         DataType::Int(None),
                         None,
@@ -1310,7 +1310,7 @@ fn parse_create_table() {
                             }
                         }],
                     ),
-                    ColumnDef::without_sub_defs(
+                    ColumnDef::new(
                         "ref2".into(),
                         DataType::Int(None),
                         None,

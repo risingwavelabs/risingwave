@@ -12,7 +12,7 @@
 
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
-mod ddl;
+pub(crate) mod ddl;
 mod operator;
 mod query;
 mod statement;
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::DataType;
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, StructColumnDef, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
