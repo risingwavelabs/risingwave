@@ -339,32 +339,59 @@
 - sql: |
     /* test simple agg */
     create table t (v1 int);
-    select sum(v1) from t;
+    select sum(v1) as sum from t;
   stream_plan_proto: |
     ---
     input:
       - input:
           - input:
               - input:
-                  - merge: {}
-                  - pkIndices:
+                  - input:
+                      - merge: {}
+                      - pkIndices:
+                          - 1
+                        appendOnly: true
+                        batchPlan:
+                          tableRefId:
+                            tableId: 2
+                          columnDescs:
+                            - columnType:
+                                typeName: INT32
+                                isNullable: true
+                              columnId: 1
+                              name: v1
+                            - columnType:
+                                typeName: INT64
+                                isNullable: true
+                              name: "_row_id#0"
+                          distributionKeys:
+                            - 1
+                    pkIndices:
                       - 1
-                    appendOnly: true
-                    batchPlan:
+                    fields:
+                      - dataType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v1
+                      - dataType:
+                          typeName: INT64
+                          isNullable: true
+                        name: "_row_id#0"
+                    chain:
                       tableRefId:
                         tableId: 2
-                      columnDescs:
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
-                        - columnType:
+                      upstreamFields:
+                        - dataType:
                             typeName: INT64
                             isNullable: true
                           name: "_row_id#0"
-                      distributionKeys:
+                        - dataType:
+                            typeName: INT32
+                            isNullable: true
+                          name: v1
+                      columnIds:
                         - 1
+                        - 0
                 pkIndices:
                   - 1
                 fields:
@@ -376,84 +403,83 @@
                       typeName: INT64
                       isNullable: true
                     name: "_row_id#0"
-                chain:
-                  tableRefId:
-                    tableId: 2
-                  upstreamFields:
-                    - dataType:
-                        typeName: INT64
-                        isNullable: true
-                      name: "_row_id#0"
-                    - dataType:
-                        typeName: INT32
-                        isNullable: true
-                      name: v1
-                  columnIds:
-                    - 1
-                    - 0
+                exchange:
+                  strategy:
+                    type: SIMPLE
             pkIndices:
+              - 0
               - 1
             fields:
               - dataType:
-                  typeName: INT32
+                  typeName: INT64
                   isNullable: true
-                name: v1
+                name: "agg#0"
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "_row_id#0"
-            exchange:
-              strategy:
-                type: SIMPLE
+                name: "agg#1"
+            globalSimpleAgg:
+              aggCalls:
+                - type: COUNT
+                  returnType:
+                    typeName: INT64
+                    isNullable: true
+                - type: SUM
+                  args:
+                    - input: {}
+                      type:
+                        typeName: INT32
+                        isNullable: true
+                  returnType:
+                    typeName: INT64
+                    isNullable: true
         pkIndices:
-          - 0
           - 1
+          - 0
         fields:
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "agg#0"
+            name: sum
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "agg#1"
-        globalSimpleAgg:
-          aggCalls:
-            - type: COUNT
+            name: "agg#0"
+        project:
+          selectList:
+            - exprType: INPUT_REF
               returnType:
                 typeName: INT64
                 isNullable: true
-            - type: SUM
-              args:
-                - input: {}
-                  type:
-                    typeName: INT32
-                    isNullable: true
+              inputRef:
+                columnIdx: 1
+            - exprType: INPUT_REF
               returnType:
                 typeName: INT64
                 isNullable: true
+              inputRef: {}
     pkIndices:
-      - 0
       - 1
+      - 0
     fields:
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "agg#0"
+        name: sum
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "agg#1"
+        name: "agg#0"
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef: {}
+          inputRef:
+            columnIdx: 1
           returnType:
             typeName: INT64
             isNullable: true
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
+          inputRef: {}
           returnType:
             typeName: INT64
             isNullable: true
@@ -468,23 +494,23 @@
           columnType:
             typeName: INT64
             isNullable: true
-          name: "agg#0"
-        isHidden: true
+          name: sum
       - columnDesc:
           columnType:
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "agg#1"
+          name: "agg#0"
+        isHidden: true
     orderColumnIds:
-      - 0
       - 1
+      - 0
     orders:
       - ASCENDING
       - ASCENDING
     pk:
-      - 0
       - 1
+      - 0
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
