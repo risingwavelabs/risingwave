@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
@@ -53,7 +53,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 tracing = { version = "0.1" }

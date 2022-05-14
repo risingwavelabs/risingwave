@@ -8,8 +8,6 @@ import "hummock.proto";
 import "plan_common.proto";
 import "stream_plan.proto";
 
-option java_multiple_files = true;
-option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
 // will be deprecated and replaced by catalog.Table and catalog.Source

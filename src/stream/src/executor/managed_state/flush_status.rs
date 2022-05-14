@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, hash_map};
+use madsim::collections::{btree_map, hash_map};
 
 macro_rules! impl_flush_status {
     ([], $( { $entry_type:ty, $struct_name:ident } ),*) => {

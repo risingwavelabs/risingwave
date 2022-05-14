@@ -6,8 +6,6 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
-option java_multiple_files = true;
-option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
