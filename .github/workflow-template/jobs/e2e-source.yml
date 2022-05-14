@@ -120,7 +120,7 @@ jobs:
       #   timeout-minutes: 1
       #   run: |
       #     ~/cargo-make/makers clean-data
-      #     RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
+      #     RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3cn-1fe
       #     psql --version
       #     RUST_LOG=info target/debug/risingwave_regress_test -h 127.0.0.1 \
       #       -p ${{ env.RW_PORT }} \

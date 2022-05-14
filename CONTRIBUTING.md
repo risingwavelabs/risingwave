@@ -137,7 +137,7 @@ After that, you can modify `risedev.yml` to compose the cluster. For example, we
 
 Now we can run `./risedev d`. The new dev cluster will contain components from RisingWave, as well as MinIO to persist storage data, and Grafana to monitor the cluster. RiseDev will automatically configure the components to use the available storage service and monitor target.
 
-You may also add multiple compute nodes in the cluster. The `ci-3node` config is an example.
+You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
 ### Start Playground with RiseDev
 
@@ -232,8 +232,8 @@ some unexpected decode error, try `./risedev clean-data` first.
 Basically, CI is using the following two configuration to run the full e2e test suite:
 
 ```shell
-./risedev dev ci-3node
-./risedev dev ci-1node
+./risedev dev ci-3cn-1fe
+./risedev dev ci-1cn-1fe
 ```
 
 We may adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
