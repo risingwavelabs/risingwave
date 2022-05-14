@@ -106,7 +106,6 @@ The configurator will write an env file to risedev-components.user.env.
 RISEDEV_CONFIGURED=true
 ENABLE_MINIO=true
 ENABLE_BUILD_RUST=true
-ENABLE_BUILD_FRONTEND=true
 ```
 
 This environment file will then be read by cargo-make, which decides whether or not to run a step.

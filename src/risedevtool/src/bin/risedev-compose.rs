@@ -80,7 +80,6 @@ fn main() -> Result<()> {
             }
             ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&docker_image_config)?),
             ServiceConfig::MetaNode(c) => (c.address.clone(), c.compose(&docker_image_config)?),
-            ServiceConfig::Frontend(_) => return Err(anyhow!("not supported")),
             ServiceConfig::FrontendV2(c) => (c.address.clone(), c.compose(&docker_image_config)?),
             ServiceConfig::Compactor(c) => (c.address.clone(), c.compose(&docker_image_config)?),
             ServiceConfig::Grafana(_) => {
