@@ -33,7 +33,8 @@ impl Binder {
     ) -> Result<BoundGenerateSeriesFunction> {
         let args = args.into_iter();
 
-        // generate_series ( start timestamp, stop timestamp, step interval )
+        // generate_series ( start timestamp, stop timestamp, step interval ) or
+        // generate_series ( start i32, stop i32, step i32 )
         if args.len() != 3 {
             return Err(ErrorCode::BindError(
                 "the length of args of generate series funciton should be 3".to_string(),

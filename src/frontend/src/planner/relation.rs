@@ -17,7 +17,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
@@ -95,33 +95,10 @@ impl Planner {
             DataType::Timestamp,
             "generate_series",
         )]);
+
         let mut args = table_function.args.into_iter();
-        let start;
-        let stop;
 
-        let Some((ExprImpl::Literal(start_time), ExprImpl::Literal(stop_time),ExprImpl::Literal(step_interval))) = args.next_tuple() else {
-            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
-        };
-
-        if let Some(ScalarImpl::Utf8(start_time)) = &*start_time.get_data() {
-            start = NaiveDateTimeWrapper::parse_from_str(start_time)?;
-        } else {
-            return Err(ErrorCode::BindError(
-                "Invalid arguments for Generate series function".to_string(),
-            )
-            .into());
-        };
-
-        if let Some(ScalarImpl::Utf8(stop_time)) = &*stop_time.get_data() {
-            stop = NaiveDateTimeWrapper::parse_from_str(stop_time)?;
-        } else {
-            return Err(ErrorCode::BindError(
-                "Invalid arguments for Generate series functionn".to_string(),
-            )
-            .into());
-        };
-
-        let Some(ScalarImpl::Interval(step)) = *step_interval.get_data() else {
+        let Some((start,stop,step)) = args.next_tuple() else {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
