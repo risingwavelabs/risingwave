@@ -122,7 +122,7 @@ impl fmt::Display for DataType {
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {
                 write!(f, "STRUCT")?;
-                write!(f, " <{}>", display_comma_separated(defs))
+                write!(f, "<{}>", display_comma_separated(defs))
             }
         }
     }
