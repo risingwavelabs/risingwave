@@ -1,20 +1,8 @@
 SHELL := /bin/bash
-.PHONY: all java java_test java_build java_check rust
-all: java rust
 
-java: java_test
+.PHONY: all rust
 
-java_test:
-	cd legacy && ./gradlew test
-
-java_build:
-	cd legacy && ./gradlew build
-
-java_check:
-	cd legacy && ./gradlew check
-
-java_coverage_report:
-	cd legacy && ./gradlew jacocoRootReport
+all: rust
 
 rust:
 	echo "This command is deprecated. Use ./risedev check instead."

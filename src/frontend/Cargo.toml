@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_frontend"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -47,7 +47,7 @@ tokio = { version = "1", features = [
     "signal",
     "fs",
 ] }
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 uuid = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

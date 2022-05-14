@@ -30,9 +30,9 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, FrontendServiceV2,
-    GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
-    ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendServiceV2, GrafanaService,
+    JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig,
+    Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -120,7 +120,6 @@ fn task_main(
             ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
             ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
             ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
@@ -201,24 +200,6 @@ fn task_main(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
                     c.address, c.port, c.address, c.dashboard_port
                 ));
-            }
-            ServiceConfig::Frontend(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = FrontendService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
-                task.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("api postgres://{}:{}/", c.address, c.port));
-
-                writeln!(
-                    log_buffer,
-                    "* Run {} to start Postgres interactive shell.",
-                    style(format!("psql -h localhost -p {}", c.port))
-                        .blue()
-                        .bold()
-                )?;
             }
             ServiceConfig::FrontendV2(c) => {
                 let mut ctx =
