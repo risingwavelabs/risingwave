@@ -19,7 +19,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundGenerateSeriesFunction {
@@ -41,6 +41,7 @@ impl Binder {
             )
             .into());
         }
+
         // Todo(d2lark) check 2 or 3 args are same type
         let columns = [(
             false,
@@ -60,6 +61,23 @@ impl Binder {
             .flatten_ok()
             .try_collect()?;
 
+        type_check(&exprs)?;
+
         Ok(BoundGenerateSeriesFunction { args: exprs })
+    }
+}
+
+fn type_check(exprs: &Vec<ExprImpl>) -> Result<()> {
+    let mut exprs = exprs.iter();
+    let Some((ExprImpl::Literal(start), ExprImpl::Literal(stop),ExprImpl::Literal(step))) = exprs.next_tuple() else {
+        return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into())
+    };
+    match (start.return_type(), stop.return_type(), step.return_type()) {
+        (DataType::Int32, DataType::Int32, DataType::Int32)
+        | (DataType::Timestamp, DataType::Timestamp, DataType::Interval) => Ok(()),
+        _ => Err(ErrorCode::BindError(
+            "Invalid arguments for Generate series function".to_string(),
+        )
+        .into()),
     }
 }
