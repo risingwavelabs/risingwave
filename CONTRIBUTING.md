@@ -38,7 +38,6 @@ If you have questions, please [create a Github issue](https://github.com/singula
 
 ## Code Structure
 
-- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
 - The `src` folder contains all of the kernal components, refer to [src/README.md](src/README.md) for more details.
 - The `docker` folder contains Dockerfiles to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
@@ -230,9 +229,6 @@ some unexpected decode error, try `./risedev clean-data` first.
 
 ### End-to-End Testing on CI
 
-As we are in the process of deprecating the legacy Java frontend, CI runs e2e tests with the legacy Java frontend.
-We also have some special settings with environment variable to workaround some problems.
-
 Basically, CI is using the following two configuration to run the full e2e test suite:
 
 ```shell
@@ -282,8 +278,6 @@ service in `risedev.yml`.
 You may use RisingWave Dashboard to see actors in the system. It will be started along with meta node.
 
 ### Logging
-
-The Java frontend uses `logback.xml` to configure its logging config.
 
 The Rust components use `tokio-tracing` to handle both logging and tracing. The default log level is set as:
 

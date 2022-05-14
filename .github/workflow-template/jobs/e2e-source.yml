@@ -3,7 +3,6 @@ jobs:
     name: e2e-test-source
     needs:
       - compute-node-build-dev
-      - frontend-check
     runs-on: ubuntu-latest
     timeout-minutes: 15 # NOTE: Increase this number when we have more tests.
     env:
@@ -76,12 +75,6 @@ jobs:
         with:
           name: risingwave-dev
           path: ./target/debug
-
-      - uses: actions/download-artifact@v2
-        name: Download frontend binary
-        with:
-          name: risingwave-fe-runnable.jar
-          path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
         name: Download playground binary
