@@ -107,18 +107,13 @@ impl PlanRoot {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
-        let (exprs, expr_aliases) = self
+        let exprs = self
             .out_fields
             .ones()
             .zip_eq(self.schema.fields)
-            .map(|(index, field)| {
-                (
-                    InputRef::new(index, field.data_type).into(),
-                    Some(field.name),
-                )
-            })
-            .unzip();
-        LogicalProject::create(self.plan, exprs, expr_aliases)
+            .map(|(index, field)| InputRef::new(index, field.data_type).into())
+            .collect();
+        LogicalProject::create(self.plan, exprs)
     }
 
     /// Apply logical optimization to the plan.
@@ -154,8 +149,7 @@ impl PlanRoot {
         // they shouldn't be a part of output columns, so we use `out_fields` to control the
         // visibility of these expressions. To avoid these expressions being pruned, we can't
         // use `self.out_fields` as `required_cols` here.
-        let mut required_cols = FixedBitSet::with_capacity(self.plan.schema().len());
-        required_cols.insert_range(..);
+        let required_cols = (0..self.plan.schema().len()).collect_vec();
         plan = plan.prune_col(&required_cols);
 
         plan = {
@@ -186,18 +180,13 @@ impl PlanRoot {
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
-            let (exprs, expr_aliases) = self
+            let exprs = self
                 .out_fields
                 .ones()
                 .zip_eq(self.schema.fields.clone())
-                .map(|(index, field)| {
-                    (
-                        InputRef::new(index, field.data_type).into(),
-                        Some(field.name),
-                    )
-                })
-                .unzip();
-            plan = BatchProject::new(LogicalProject::new(plan, exprs, expr_aliases)).into();
+                .map(|(index, field)| InputRef::new(index, field.data_type).into())
+                .collect();
+            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
         }
 
         Ok(plan)

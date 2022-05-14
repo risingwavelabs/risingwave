@@ -25,8 +25,7 @@ impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
         let mut input = self.plan_query(insert.source)?.as_subplan();
         if !insert.cast_exprs.is_empty() {
-            let aliases = vec![None; insert.cast_exprs.len()];
-            input = LogicalProject::create(input, insert.cast_exprs, aliases);
+            input = LogicalProject::create(input, insert.cast_exprs);
         }
         // `columns` not used by backend yet.
         let plan: PlanRef = LogicalInsert::create(

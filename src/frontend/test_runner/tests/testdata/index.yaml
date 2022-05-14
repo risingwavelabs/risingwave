@@ -36,7 +36,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v4, _row_id#0(hidden), _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
       StreamExchange { dist: HashShard([1, 2]) }
-        StreamProject { exprs: [$3, $1, $4], expr_alias: [v4,  ,  ] }
+        StreamProject { exprs: [$3, $1, $4] }
           StreamDeltaJoin { type: Inner, predicate: $0 = $2 }
             StreamIndexScan { index: iii_index_1, columns: [v1, _row_id#0], pk_indices: [1] }
             StreamIndexScan { index: iii_index_2, columns: [v3, v4, _row_id#0], pk_indices: [2] }

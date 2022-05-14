@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
+use madsim::collections::HashMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -113,7 +112,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the amount of rows is expected.

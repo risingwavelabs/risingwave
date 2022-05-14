@@ -14,7 +14,6 @@
 //
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
@@ -108,7 +107,7 @@ impl PlanTreeNodeBinary for LogicalApply {
 impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _: &FixedBitSet) -> PlanRef {
+    fn prune_col(&self, _: &[usize]) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }

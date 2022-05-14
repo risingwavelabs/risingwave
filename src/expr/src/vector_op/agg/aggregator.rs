@@ -131,7 +131,7 @@ pub fn create_agg_state_unary(
     use crate::expr::data_types::*;
 
     macro_rules! gen_arms {
-        [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
+        [$(($agg:ident, $fn:expr, $in:tt, $ret:tt, $init_result:expr)),* $(,)?] => {
             match (
                 input_type,
                 agg_type,
@@ -144,6 +144,7 @@ pub fn create_agg_state_unary(
                             return_type,
                             input_col_idx,
                             $fn,
+                            $init_result,
                         ))
                     },
                     ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
@@ -168,48 +169,48 @@ pub fn create_agg_state_unary(
     }
 
     let state: Box<dyn Aggregator> = gen_arms![
-        (Count, count, int16, int64),
-        (Count, count, int32, int64),
-        (Count, count, int64, int64),
-        (Count, count, float32, int64),
-        (Count, count, float64, int64),
-        (Count, count, decimal, int64),
-        (Count, count_str, varchar, int64),
-        (Count, count, boolean, int64),
-        (Sum, sum, int16, int64),
-        (Sum, sum, int32, int64),
-        (Sum, sum, int64, decimal),
-        (Sum, sum, float32, float32),
-        (Sum, sum, float64, float64),
-        (Sum, sum, decimal, decimal),
-        (Min, min, int16, int16),
-        (Min, min, int32, int32),
-        (Min, min, int64, int64),
-        (Min, min, float32, float32),
-        (Min, min, float64, float64),
-        (Min, min, decimal, decimal),
-        (Min, min, boolean, boolean), // TODO(#359): remove once unnecessary
-        (Min, min_str, varchar, varchar),
-        (Max, max, int16, int16),
-        (Max, max, int32, int32),
-        (Max, max, int64, int64),
-        (Max, max, float32, float32),
-        (Max, max, float64, float64),
-        (Max, max, decimal, decimal),
-        (Max, max, boolean, boolean), // TODO(#359): remove once unnecessary
-        (Max, max_str, varchar, varchar),
+        (Count, count, int16, int64, Some(0)),
+        (Count, count, int32, int64, Some(0)),
+        (Count, count, int64, int64, Some(0)),
+        (Count, count, float32, int64, Some(0)),
+        (Count, count, float64, int64, Some(0)),
+        (Count, count, decimal, int64, Some(0)),
+        (Count, count_str, varchar, int64, Some(0)),
+        (Count, count, boolean, int64, Some(0)),
+        (Sum, sum, int16, int64, None),
+        (Sum, sum, int32, int64, None),
+        (Sum, sum, int64, decimal, None),
+        (Sum, sum, float32, float32, None),
+        (Sum, sum, float64, float64, None),
+        (Sum, sum, decimal, decimal, None),
+        (Min, min, int16, int16, None),
+        (Min, min, int32, int32, None),
+        (Min, min, int64, int64, None),
+        (Min, min, float32, float32, None),
+        (Min, min, float64, float64, None),
+        (Min, min, decimal, decimal, None),
+        (Min, min, boolean, boolean, None), // TODO(#359): remove once unnecessary
+        (Min, min_str, varchar, varchar, None),
+        (Max, max, int16, int16, None),
+        (Max, max, int32, int32, None),
+        (Max, max, int64, int64, None),
+        (Max, max, float32, float32, None),
+        (Max, max, float64, float64, None),
+        (Max, max, decimal, decimal, None),
+        (Max, max, boolean, boolean, None), // TODO(#359): remove once unnecessary
+        (Max, max_str, varchar, varchar, None),
         // Global Agg
-        (Sum, sum, int64, int64),
+        (Sum, sum, int64, int64, None),
         // We remark that SingleValue does not produce a runtime error when it receives zero row.
         // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
-        (SingleValue, SingleValue::new(), int16, int16),
-        (SingleValue, SingleValue::new(), int32, int32),
-        (SingleValue, SingleValue::new(), int64, int64),
-        (SingleValue, SingleValue::new(), float32, float32),
-        (SingleValue, SingleValue::new(), float64, float64),
-        (SingleValue, SingleValue::new(), decimal, decimal),
-        (SingleValue, SingleValue::new(), boolean, boolean),
-        (SingleValue, SingleValue::new(), varchar, varchar),
+        (SingleValue, SingleValue::new(), int16, int16, None),
+        (SingleValue, SingleValue::new(), int32, int32, None),
+        (SingleValue, SingleValue::new(), int64, int64, None),
+        (SingleValue, SingleValue::new(), float32, float32, None),
+        (SingleValue, SingleValue::new(), float64, float64, None),
+        (SingleValue, SingleValue::new(), decimal, decimal, None),
+        (SingleValue, SingleValue::new(), boolean, boolean, None),
+        (SingleValue, SingleValue::new(), varchar, varchar, None),
     ];
     Ok(state)
 }
