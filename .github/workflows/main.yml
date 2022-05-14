@@ -449,23 +449,7 @@ jobs:
         run: |
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
-      - name: regress test batch 3-node
-        timeout-minutes: 1
-        run: |
-          ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
-          psql --version
-          RUST_LOG=info target/debug/risingwave_regress_test -h 127.0.0.1 \
-            -p ${{ env.RW_PORT }} \
-            --input `pwd`/src/tests/regress/data \
-            --output `pwd`/src/tests/regress/output \
-            --schedule `pwd`/src/tests/regress/data/schedule
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
-      - name: e2e test w/ Rust frontend ci-3node, source with kafka
+      - name: e2e test w/ Rust frontend - source with kafka
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
