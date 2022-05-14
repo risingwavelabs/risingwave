@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
@@ -81,7 +80,7 @@ impl fmt::Display for LogicalGenerateSeries {
 
 // the leaf node don't need colprunable
 impl ColPrunable for LogicalGenerateSeries {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
     }

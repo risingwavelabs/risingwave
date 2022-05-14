@@ -7,9 +7,6 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
-option java_multiple_files = true;
-// TODO: java_package will be removed later, so we don't rename it to batch_plan here.
-option java_package = "com.risingwave.proto.plan";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {

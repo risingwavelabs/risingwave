@@ -14,7 +14,6 @@
 
 use std::{fmt, vec};
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -83,10 +82,9 @@ impl fmt::Display for LogicalDelete {
 }
 
 impl ColPrunable for LogicalDelete {
-    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
-        let mut all_cols = FixedBitSet::with_capacity(self.input.schema().len());
-        all_cols.insert_range(..);
-        self.clone_with_input(self.input.prune_col(&all_cols))
+    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
+        self.clone_with_input(self.input.prune_col(&required_cols))
             .into()
     }
 }

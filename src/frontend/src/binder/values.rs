@@ -16,12 +16,12 @@ use itertools::Itertools;
 use risingwave_common::array::StructValue;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::{get_data_type_from_datum, DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Scalar};
 use risingwave_sqlparser::ast::{Expr, Values};
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl, Literal};
+use crate::expr::{align_types, Expr as _, ExprImpl, Literal};
 
 #[derive(Debug)]
 pub struct BoundValues {
@@ -86,27 +86,27 @@ impl Binder {
     /// e.g. Row(1,2,(1,2,3)).
     /// Only accept value and row expr in row.
     pub fn bind_row(&mut self, exprs: &[Expr]) -> Result<Literal> {
-        let datums = exprs
+        let literals = exprs
             .iter()
             .map(|e| match e {
-                Expr::Value(value) => Ok(self.bind_value(value.clone())?.get_data().clone()),
-                Expr::Row(expr) => Ok(self.bind_row(expr)?.get_data().clone()),
+                Expr::Value(value) => Ok(self.bind_value(value.clone())?),
+                Expr::Row(expr) => Ok(self.bind_row(expr)?),
                 _ => Err(ErrorCode::NotImplemented(
                     format!("unsupported expression {:?}", e),
                     TrackingIssue::none(),
                 )
                 .into()),
             })
-            .collect::<Result<Vec<Datum>>>()?;
-        let value = StructValue::new(datums);
+            .collect::<Result<Vec<_>>>()?;
         let data_type = DataType::Struct {
-            fields: value
-                .fields()
+            fields: literals
                 .iter()
-                .map(get_data_type_from_datum)
-                .collect::<Result<Vec<_>>>()?
+                .map(|l| l.return_type())
+                .collect_vec()
                 .into(),
         };
+        let value = StructValue::new(literals.iter().map(|f| f.get_data().clone()).collect_vec());
+
         Ok(Literal::new(Some(value.to_scalar_value()), data_type))
     }
 }
@@ -119,7 +119,6 @@ mod tests {
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
-    use crate::expr::Expr as _;
 
     #[test]
     fn test_bind_values() {
