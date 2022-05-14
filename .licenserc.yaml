@@ -5,8 +5,6 @@ header:
 
   paths:
     - 'src/**/*.rs'
-    # - 'legacy/**/*.java'
-    # - 'legacy/**/*.kt'
     - 'dashboard/**/*.js'
     - 'src/**/*.html'
 

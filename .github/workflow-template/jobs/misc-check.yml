@@ -26,8 +26,6 @@ jobs:
 
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
-        with:
-          ignore_paths: legacy # we assume legacy folder has no script. gradle wrapper also won't pass shellcheck.
 
       - name: Check protobuf code format
         run: |

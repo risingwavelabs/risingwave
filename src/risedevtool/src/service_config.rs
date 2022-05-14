@@ -244,7 +244,6 @@ pub struct RedPandaConfig {
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
-    Frontend(FrontendConfig),
     FrontendV2(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
@@ -263,7 +262,6 @@ impl ServiceConfig {
         match self {
             Self::ComputeNode(c) => &c.id,
             Self::MetaNode(c) => &c.id,
-            Self::Frontend(c) => &c.id,
             Self::FrontendV2(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
