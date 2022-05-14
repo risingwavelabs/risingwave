@@ -345,7 +345,7 @@
 - sql: |
     select * from s where s.v3 = (1,2,(1,2,3));
   logical_plan: |
-    LogicalProject { exprs: [$1, $2, $3], expr_alias: [v1, v2, v3] }
+    LogicalProject { exprs: [$1, $2, $3] }
       LogicalFilter { predicate: ($3 = {1, 2, {1, 2, 3}}:Struct { fields: [Int32, Int32, Struct { fields: [Int32, Int32, Int32] }] }) }
         LogicalScan { table: s, columns: [_row_id#0, v1, v2, v3] }
   create_source:
