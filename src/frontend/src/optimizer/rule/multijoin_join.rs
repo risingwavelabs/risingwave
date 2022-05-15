@@ -37,6 +37,7 @@ impl MultiJoinJoinRule {
 }
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
@@ -115,7 +116,7 @@ mod tests {
             multi_join
                 .inputs()
                 .iter()
-                .zip(vec![mid.schema(), left.schema(), right.schema()])
+                .zip_eq(vec![mid.schema(), left.schema(), right.schema()])
         {
             assert_eq!(input.schema(), schema);
         }
