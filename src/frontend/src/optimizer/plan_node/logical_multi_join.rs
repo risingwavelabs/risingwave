@@ -103,29 +103,47 @@ impl PlanTreeNode for LogicalMultiJoin {
         vec
     }
 
-    fn clone_with_inputs(&self, _inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
-        todo!()
+    fn clone_with_inputs(
+        &self,
+        _inputs: &[crate::optimizer::PlanRef],
+    ) -> crate::optimizer::PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
 
 impl ToStream for LogicalMultiJoin {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 
     fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
 
 impl ToBatch for LogicalMultiJoin {
     fn to_batch(&self) -> Result<PlanRef> {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
 
 impl ColPrunable for LogicalMultiJoin {
     fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
