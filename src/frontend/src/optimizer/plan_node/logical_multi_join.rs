@@ -13,11 +13,15 @@
 // limitations under the License.
 
 use std::fmt;
+use std::collections::{HashMap,HashSet};
 
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use super::{
+    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ToBatch, ToStream,
+};
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -103,7 +107,10 @@ impl PlanTreeNode for LogicalMultiJoin {
         vec
     }
 
-    fn clone_with_inputs(&self, _inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
+    fn clone_with_inputs(
+        &self,
+        _inputs: &[crate::optimizer::PlanRef],
+    ) -> crate::optimizer::PlanRef {
         todo!()
     }
 }
@@ -259,7 +266,7 @@ impl LogicalMultiJoin {
         println!("OTHER CONDITIONS: {:?}", non_eq_cond);
 
         // Iterate over all join conditions, whose keys represent edges on the join graph
-        for (k, _) in join_conditions.iter() {
+        for (k, _) in &join_conditions {
             labels.add_edge(k.0, k.1);
         }
 
@@ -285,8 +292,8 @@ impl LogicalMultiJoin {
             // Sorted so that
             // conditions.sort_by(|(_, c1), (_, c2)| selectivity_heuristic(c1, c2));
 
-            let (mut join, join_ordering_start_index) = if conditions.len() > 0 {
-                let (edge, mut condition) = conditions.remove(0);
+            let (mut join, join_ordering_start_index) = if !conditions.is_empty() {
+                let (edge, condition) = conditions.remove(0);
                 let join_ordering_start_index = join_ordering.len();
                 join_ordering.append(&mut vec![edge.0, edge.1]);
 
@@ -306,7 +313,7 @@ impl LogicalMultiJoin {
                 break;
             };
 
-            while conditions.len() > 0 {
+            while !conditions.is_empty() {
                 let mut found = vec![];
                 for (idx, (edge, condition)) in conditions.iter().enumerate() {
                     // If the eq join condition is on the existing join, add it to the existing
@@ -350,7 +357,7 @@ impl LogicalMultiJoin {
                     }
                 }
                 // This ensures conditions.len() is strictly decreasing per iteration
-                if found.len() == 0 {
+                if found.is_empty() {
                     panic!("Must find {:?}, {:?}", conditions, join_ordering);
                 }
                 let mut idx = 0;
@@ -398,8 +405,7 @@ impl LogicalMultiJoin {
 
         if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
             Ok(
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering))
-                    .into(),
+                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering)),
             )
         } else {
             Ok(output)
@@ -418,7 +424,7 @@ impl LogicalMultiJoin {
         for &input_index in ordering {
             map.extend(
                 (offsets[input_index]..offsets[input_index] + input_num_cols[input_index])
-                    .map(|i| Some(i)),
+                    .map(Some),
             )
         }
         ColIndexMapping::with_target_size(map, max_len)

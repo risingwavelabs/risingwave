@@ -193,7 +193,6 @@ impl Condition {
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
             } else {
-                let mut is_eq_cond = false;
                 if let Some(columns) = Self::as_eq_cond(&expr) {
                     eq_keys.push(columns);
                 } else {

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan_common::JoinType;
+
 
 use super::super::plan_node::*;
 use super::Rule;
-use crate::expr::{ExprImpl, ExprType};
+
 use crate::optimizer::rule::BoxedRule;
-use crate::utils::{ColIndexMapping, Condition};
+
 
 /// Pushes predicates above and within a join node into the join node and/or its children nodes.
 ///
