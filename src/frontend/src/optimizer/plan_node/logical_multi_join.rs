@@ -459,11 +459,13 @@ impl ToStream for LogicalMultiJoin {
         todo!()
     }
 }
+
 impl ToBatch for LogicalMultiJoin {
     fn to_batch(&self) -> Result<PlanRef> {
         todo!()
     }
 }
+
 impl ColPrunable for LogicalMultiJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         todo!()
