@@ -65,3 +65,9 @@ CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT, v3 STRUCT<v1 INT, v2 INT>>)
 CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT, v3 STRUCT<v1 INT, v2 INT>>)
 =>
 CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "T", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None), collation: None, options: [] }, ColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Struct([StructColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None) }, StructColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Int(None) }, StructColumnDef { name: Ident { value: "v3", quote_style: None }, data_type: Struct([StructColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None) }, StructColumnDef { name: Ident { value: "v2", quote_style: None }, data_type: Int(None) }]) }]), collation: None, options: [] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
+
+CREATE TABLE T (a STRUCT<v1 INT>)
+---
+CREATE TABLE T (a STRUCT<v1 INT>)
+=>
+CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "T", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "a", quote_style: None }, data_type: Struct([StructColumnDef { name: Ident { value: "v1", quote_style: None }, data_type: Int(None) }]), collation: None, options: [] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
