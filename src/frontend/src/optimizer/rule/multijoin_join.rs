@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use super::super::plan_node::*;
 use super::Rule;
-
 use crate::optimizer::rule::BoxedRule;
-
 
 /// Merges adjacent inner joins into a single `LogicalMultiJoin`.
 /// The `LogicalMultiJoin` is short-lived and will be immediately

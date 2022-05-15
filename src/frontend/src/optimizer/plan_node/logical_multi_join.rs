@@ -12,24 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::fmt;
 
-
-
-
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{
-    ColPrunable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream,
-};
-
-
-use crate::optimizer::plan_node::{
-    PlanTreeNode,
-};
-
+use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
