@@ -26,13 +26,13 @@ use crate::executor2::{
     GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2,
 };
 
-pub struct GenerateSeriesExecutor2Wraper {
+pub struct GenerateSeriesExecutor2Wrapper {
     input: BoxedExecutor2,
     schema: Schema,
     identity: String,
 }
 
-impl BoxedExecutor2Builder for GenerateSeriesExecutor2Wraper {
+impl BoxedExecutor2Builder for GenerateSeriesExecutor2Wrapper {
     fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -101,7 +101,7 @@ impl BoxedExecutor2Builder for GenerateSeriesExecutor2Wraper {
     }
 }
 
-impl Executor2 for GenerateSeriesExecutor2Wraper {
+impl Executor2 for GenerateSeriesExecutor2Wrapper {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -115,7 +115,7 @@ impl Executor2 for GenerateSeriesExecutor2Wraper {
     }
 }
 
-impl GenerateSeriesExecutor2Wraper {
+impl GenerateSeriesExecutor2Wrapper {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let input = self.input.execute();
