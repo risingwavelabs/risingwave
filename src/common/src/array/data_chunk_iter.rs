@@ -38,6 +38,7 @@ impl DataChunk {
 
 struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
+    /// `None` means finished
     idx: Option<usize>,
 }
 
@@ -52,7 +53,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
                 match self.idx {
                     None => None,
                     Some(idx) => {
-                        self.idx = Some(self.idx.unwrap() + 1);
+                        self.idx = Some(idx + 1);
                         Some(RowRef {
                             chunk: self.chunk,
                             idx,
