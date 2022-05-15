@@ -20,29 +20,9 @@ use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::rule::BoxedRule;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// Pushes predicates above and within a join node into the join node and/or its children nodes.
-///
-/// # Which predicates can be pushed
-///
-/// For inner join, we can do all kinds of pushdown.
-///
-/// For left/right semi join, we can push filter to left/right and on-clause,
-/// and push on-clause to left/right.
-///
-/// For left/right anti join, we can push filter to left/right, but on-clause can not be pushed
-///
-/// ## Outer Join
-///
-/// Preserved Row table
-/// : The table in an Outer Join that must return all rows.
-///
-/// Null Supplying table
-/// : This is the table that has nulls filled in for its columns in unmatched rows.
-///
-/// |                          | Preserved Row table | Null Supplying table |
-/// |--------------------------|---------------------|----------------------|
-/// | Join predicate (on)      | Not Pushed          | Pushed               |
-/// | Where predicate (filter) | Pushed              | Not Pushed           |
+/// Merges adjacent inner joins into a single LogicalMultiJoin.
+/// The LogicalMultiJoin is short-lived and will be immediately
+/// rewritten into a join tree of binary joins.
 pub struct MultiJoinJoinRule {}
 
 impl Rule for MultiJoinJoinRule {
