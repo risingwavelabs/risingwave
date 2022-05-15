@@ -1,0 +1,27 @@
+statement ok
+create table t (v int);
+
+statement ok
+insert into t values (114), (514);
+
+statement ok
+create materialized view mv as select * from t;
+
+statement ok
+flush;
+
+query I
+select count(*) from t;
+----
+2
+
+query I
+select count(v) from mv;
+----
+2
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
