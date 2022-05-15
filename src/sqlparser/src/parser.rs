@@ -2044,7 +2044,6 @@ impl Parser {
                         Ok(DataType::Text)
                     }
                 }
-                // Make empty struct now, will fill after `parse_struct_columns`.
                 Keyword::STRUCT => Ok(DataType::Struct(self.parse_struct_data_type()?)),
                 Keyword::BYTEA => Ok(DataType::Bytea),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
