@@ -145,7 +145,7 @@ impl Condition {
                 };
                 let e = pairwise_conditions
                     .entry(key)
-                    .or_insert(Condition::true_cond());
+                    .or_insert_with(Condition::true_cond);
                 e.conjunctions.push(expr);
             }
         }
@@ -192,12 +192,10 @@ impl Condition {
             let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
+            } else if let Some(columns) = Self::as_eq_cond(&expr) {
+                eq_keys.push(columns);
             } else {
-                if let Some(columns) = Self::as_eq_cond(&expr) {
-                    eq_keys.push(columns);
-                } else {
-                    others.push(expr)
-                }
+                others.push(expr)
             }
         });
 

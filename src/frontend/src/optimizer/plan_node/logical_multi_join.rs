@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::collections::{HashMap,HashSet};
 
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
@@ -153,7 +153,7 @@ impl VertexLabeller {
             let edges = self
                 .labels_to_edges
                 .entry(new_label)
-                .or_insert(HashSet::new());
+                .or_insert_with(HashSet::new);
 
             let new_edge = if v1 < v2 { (v1, v2) } else { (v2, v1) };
             edges.insert(new_edge);
@@ -176,14 +176,14 @@ impl VertexLabeller {
             let edges = self
                 .labels_to_edges
                 .entry(new_label)
-                .or_insert(HashSet::new());
+                .or_insert_with(HashSet::new);
             edges.extend(old_edges);
         }
     }
 
-    fn into_connected_components(self) -> HashMap<usize, HashSet<usize>> {
-        self.labels_to_vertices
-    }
+    // fn into_connected_components(self) -> HashMap<usize, HashSet<usize>> {
+    //     self.labels_to_vertices
+    // }
 }
 // #[derive(Default, PartialEq, Eq, PartialOrd, Ord)]
 // struct ConditionSelectivity {
@@ -266,14 +266,14 @@ impl LogicalMultiJoin {
         println!("OTHER CONDITIONS: {:?}", non_eq_cond);
 
         // Iterate over all join conditions, whose keys represent edges on the join graph
-        for (k, _) in &join_conditions {
+        for k in join_conditions.keys() {
             labels.add_edge(k.0, k.1);
         }
 
         let mut connected_components: Vec<_> = labels.labels_to_edges.into_values().collect();
 
         // Sort in decreasing order
-        connected_components.sort_by(|a, b| b.len().cmp(&a.len()));
+        connected_components.sort_by_key(|a| std::cmp::Reverse(a.len()));
 
         println!("CONNECTED COMPONENTS: {:?}", connected_components);
 
@@ -374,8 +374,8 @@ impl LogicalMultiJoin {
         assert_eq!(
             join_conditions.len(),
             0,
-            "{}",
-            format!("JOIN CONDITIONS {:?}", join_conditions)
+            "JOIN CONDITIONS {:?}",
+            join_conditions
         );
         let mut left_deep_joins_iter = left_deep_joins.iter();
         let base_join = left_deep_joins_iter
@@ -404,9 +404,10 @@ impl LogicalMultiJoin {
         }
 
         if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
-            Ok(
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering)),
-            )
+            Ok(LogicalProject::with_mapping(
+                output,
+                self.mapping_from_ordering(&join_ordering),
+            ))
         } else {
             Ok(output)
         }

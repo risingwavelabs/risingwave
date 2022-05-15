@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use super::super::plan_node::*;
 use super::Rule;
-
 use crate::optimizer::rule::BoxedRule;
-
 
 /// Pushes predicates above and within a join node into the join node and/or its children nodes.
 ///
@@ -62,15 +58,16 @@ impl ReorderMultiJoinRule {
 
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
+    use itertools::Itertools;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::plan_common::JoinType;
 
     use super::*;
-    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-    use crate::optimizer::heuristic::{ApplyOrder, HeuristicOptimizer};
+    use crate::expr::{ExprImpl, FunctionCall, InputRef};
     use crate::session::OptimizerContext;
+    use crate::utils::Condition;
 
     #[tokio::test]
     async fn test_heuristic_join_reorder_from_multijoin() {
@@ -140,7 +137,7 @@ mod tests {
             multi_join
                 .inputs()
                 .iter()
-                .zip(vec![mid.schema(), left.schema(), right.schema()])
+                .zip_eq(vec![mid.schema(), left.schema(), right.schema()])
         {
             assert_eq!(input.schema(), schema);
         }
@@ -150,5 +147,7 @@ mod tests {
             "{:?}",
             multi_join.to_left_deep_join_with_heuristic_ordering()
         );
+
+        // TODO: continue this test
     }
 }
