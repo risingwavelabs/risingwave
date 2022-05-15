@@ -67,11 +67,8 @@ impl LogicalMultiJoin {
         if let Some(multi_join) = right.as_logical_multi_join() {
             inputs.extend(multi_join.inputs());
             let right_on = multi_join.on().clone();
-            let mut mapping = ColIndexMapping::with_shift_offset(
-                left_col_num + right_col_num,
-                -(left_col_num as isize),
-            )
-            .inverse();
+            let mut mapping =
+                ColIndexMapping::with_shift_offset(right_col_num, left_col_num as isize);
             let new_on = right_on.rewrite_expr(&mut mapping);
             conjunctions.extend(new_on.conjunctions);
         } else {
