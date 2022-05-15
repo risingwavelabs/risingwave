@@ -71,11 +71,8 @@ impl LogicalMultiJoin {
         if let Some(multi_join) = right.as_logical_multi_join() {
             inputs.extend(multi_join.inputs());
             let right_on = multi_join.on().clone();
-            let mut mapping = ColIndexMapping::with_shift_offset(
-                left_col_num + right_col_num,
-                -(left_col_num as isize),
-            )
-            .inverse();
+            let mut mapping =
+                ColIndexMapping::with_shift_offset(right_col_num, left_col_num as isize);
             let new_on = right_on.rewrite_expr(&mut mapping);
             conjunctions.extend(new_on.conjunctions);
         } else {
@@ -111,7 +108,10 @@ impl PlanTreeNode for LogicalMultiJoin {
         &self,
         _inputs: &[crate::optimizer::PlanRef],
     ) -> crate::optimizer::PlanRef {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
 
@@ -444,22 +444,34 @@ impl LogicalMultiJoin {
 
 impl ToStream for LogicalMultiJoin {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 
     fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
 
 impl ToBatch for LogicalMultiJoin {
     fn to_batch(&self) -> Result<PlanRef> {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
 
 impl ColPrunable for LogicalMultiJoin {
     fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
-        todo!()
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
     }
 }
