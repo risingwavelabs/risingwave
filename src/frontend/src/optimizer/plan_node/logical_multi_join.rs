@@ -397,20 +397,18 @@ impl LogicalMultiJoin {
             })
             .into();
 
+        if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
+            output =
+                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering));
+        }
+
         // We will later push down the `non_eq_cond` back to the individual joins via the
         // `FilterJoinRule`.
         if !non_eq_cond.always_true() {
             output = LogicalFilter::create(output, non_eq_cond);
         }
 
-        if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
-            Ok(LogicalProject::with_mapping(
-                output,
-                self.mapping_from_ordering(&join_ordering),
-            ))
-        } else {
-            Ok(output)
-        }
+        Ok(output)
     }
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {

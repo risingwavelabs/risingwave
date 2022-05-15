@@ -156,8 +156,8 @@ impl PlanRoot {
         plan = {
             let rules = vec![
                 ReorderMultiJoinRule::create(),
-                FilterJoinRule::create(),
                 FilterProjectRule::create(),
+                FilterJoinRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
