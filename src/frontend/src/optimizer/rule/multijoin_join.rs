@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan_common::JoinType;
-
 use super::super::plan_node::*;
 use super::Rule;
-use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::rule::BoxedRule;
-use crate::utils::{ColIndexMapping, Condition};
 
-/// Merges adjacent inner joins into a single LogicalMultiJoin.
-/// The LogicalMultiJoin is short-lived and will be immediately
+/// Merges adjacent inner joins into a single `LogicalMultiJoin`.
+/// The `LogicalMultiJoin` is short-lived and will be immediately
 /// rewritten into a join tree of binary joins.
 pub struct MultiJoinJoinRule {}
 
@@ -33,21 +29,24 @@ impl Rule for MultiJoinJoinRule {
 }
 
 impl MultiJoinJoinRule {
+    // TODO: remove #[allow(unused)] once used
+    #[allow(unused)]
     pub fn create() -> BoxedRule {
         Box::new(MultiJoinJoinRule {})
     }
 }
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
+    use itertools::Itertools;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::plan_common::JoinType;
 
     use super::*;
-    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-    use crate::optimizer::heuristic::{ApplyOrder, HeuristicOptimizer};
+    use crate::expr::{ExprImpl, FunctionCall, InputRef};
     use crate::session::OptimizerContext;
+    use crate::utils::Condition;
 
     #[tokio::test]
     async fn test_joins_get_merged_into_multijoin() {
@@ -117,10 +116,9 @@ mod tests {
             multi_join
                 .inputs()
                 .iter()
-                .zip(vec![mid.schema(), left.schema(), right.schema()])
+                .zip_eq(vec![mid.schema(), left.schema(), right.schema()])
         {
             assert_eq!(input.schema(), schema);
         }
-        println!("{:?}", multi_join);
     }
 }

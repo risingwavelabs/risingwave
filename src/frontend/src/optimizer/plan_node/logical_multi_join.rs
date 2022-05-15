@@ -12,26 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    StreamHashJoin, ToBatch, ToStream,
-};
-use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
-use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin, PlanTreeNode,
-    StreamFilter,
-};
-use crate::optimizer::property::{Distribution, Order};
+use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
@@ -86,7 +73,7 @@ impl LogicalMultiJoin {
             )
             .inverse();
             let new_on = right_on.rewrite_expr(&mut mapping);
-            conjunctions.extend(new_on.conjunctions.clone());
+            conjunctions.extend(new_on.conjunctions);
         } else {
             inputs.push(right.clone());
         }
@@ -116,13 +103,8 @@ impl PlanTreeNode for LogicalMultiJoin {
         vec
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
-        Self::new(
-            self.base.clone(),
-            inputs.iter().map(|i| i.clone()).collect(),
-            self.on.clone(),
-        )
-        .into()
+    fn clone_with_inputs(&self, _inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
+        todo!()
     }
 }
 
@@ -467,7 +449,7 @@ impl ToBatch for LogicalMultiJoin {
 }
 
 impl ColPrunable for LogicalMultiJoin {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
         todo!()
     }
 }
