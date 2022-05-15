@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use super::create_source::make_prost_source;
-use crate::binder::expr::{bind_column_desc, bind_data_type};
+use crate::binder::expr::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
@@ -46,7 +46,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
             let fields = {
                 if let AstDataType::Struct(defs) = &column.data_type {
                     defs.iter()
-                        .map(bind_column_desc)
+                        .map(bind_struct_field)
                         .collect::<Result<Vec<_>>>()?
                 } else {
                     vec![]

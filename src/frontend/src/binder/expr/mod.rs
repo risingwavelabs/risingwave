@@ -309,9 +309,9 @@ impl Binder {
     }
 }
 
-/// Bind `column_def` to `column_desc`, now we not use the `column_id` in `field_descs`,
-/// so use the same `column_id` with outer `column_desc`.
-pub fn bind_column_desc(column_def: &StructField) -> Result<ColumnDesc> {
+/// Bind `struct_field` to `column_desc`, now we not use the `column_id` in `field_descs`,
+/// so use the default `column_id`.
+pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     let field_descs = {
         if let AstDataType::Struct(defs) = &column_def.data_type {
             defs.iter()

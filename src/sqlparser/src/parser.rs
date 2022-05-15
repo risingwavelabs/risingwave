@@ -1951,7 +1951,7 @@ impl Parser {
         Ok(data_type)
     }
 
-    /// Parse struct columns e.g.`<v1 int, v2 int, v3 struct<...>>`.
+    /// Parse struct `data_type` e.g.`<v1 int, v2 int, v3 struct<...>>`.
     pub fn parse_struct_data_type(&mut self) -> Result<Vec<StructField>, ParserError> {
         let mut columns = vec![];
         if !self.consume_token(&Token::Lt) {
