@@ -121,6 +121,5 @@ mod tests {
         {
             assert_eq!(input.schema(), schema);
         }
-        println!("{:?}", multi_join);
     }
 }
