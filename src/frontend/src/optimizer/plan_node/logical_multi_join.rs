@@ -238,22 +238,25 @@ impl LogicalMultiJoin {
     // Our heuristic join reordering algorithm will try to perform a left-deep join.
     // It will try to do the following:
     //
-    // 1. First, split the join conditions, as join graph edges, into their connected components.
-    //    Continue with the largest connected components down to the smallest.
-    // 2. From the connected components add joins to the chain, preferring those with conditions
-    //    involving:
-    //        a. more primary keys
-    //        b. more equijoin conditions
-    //        c. more non-equijoin conditions
-    //    (in that order). This forms our selectivity heuristic.
-    // 3. Finally, if there is a join which does not have an equijoin condition, it will emit an
-    //    inner join without a condition (which is equivalent to a cross-join).
-    //
-    // At the end of the algorithm, we will emit a left-deep join tree of each of the connected
-    // components, themselves joined into a left-deep join tree, along with a projection which
-    // reorders the output to agree with the original ordering of the joins.
-
+    // 1. First, split the join graph, with eq join conditions as graph edges, into their connected
+    //    components. Repeat the procedure in 2. with the largest connected components down to
+    //    the smallest.
+    // 2. For each connected component, add joins to the chain, prioritizing adding those
+    //    joins to the bottom of the chain if their join conditions have:
+    //       a. eq joins between primary keys on both sides
+    //       b. eq joins with primary keys on one side
+    //       c. more equijoin conditions
+    //    in that order. This forms our selectivity heuristic.
+    // 3. Thirdly, we will emit a left-deep cross-join of each of the left-deep joins of the
+    //    connected components. Depending on the type of plan, this may result in a planner failure
+    //    (e.g. for streaming). No cross-join will be emitted for a single connected component.
+    // 4. Finally, we will emit, above the left-deep join tree:
+    //        a. a filter with the non eq conditions
+    //        b. a projection which reorders the output column ordering to agree with the
+    //           original ordering of the joins.
+    //    The filter will then be pushed down by another filter pushdown pass.
     pub(crate) fn to_left_deep_join_with_heuristic_ordering(&self) -> Result<PlanRef> {
+        let now = std::time::Instant::now();
         let mut labels = VertexLabeller::new(self.inputs.len());
 
         let (mut join_conditions, non_eq_cond) = self
@@ -407,6 +410,8 @@ impl LogicalMultiJoin {
         if !non_eq_cond.always_true() {
             output = LogicalFilter::create(output, non_eq_cond);
         }
+
+        println!("TIME ELAPSED: {:?}", now.elapsed().as_micros());
 
         Ok(output)
     }
