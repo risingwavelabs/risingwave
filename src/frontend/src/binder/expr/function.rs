@@ -67,6 +67,7 @@ impl Binder {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
                 }
+                "abs" => ExprType::Abs,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),

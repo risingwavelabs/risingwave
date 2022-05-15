@@ -75,7 +75,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 
     match prost.get_expr_type()? {
         Cast | Upper | Lower | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse
-        | IsNull | IsNotNull | Neg | Ascii => build_unary_expr_prost(prost),
+        | IsNull | IsNotNull | Neg | Ascii | Abs => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position => build_binary_expr_prost(prost),
