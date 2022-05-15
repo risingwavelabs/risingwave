@@ -29,21 +29,23 @@ impl Rule for MultiJoinJoinRule {
 }
 
 impl MultiJoinJoinRule {
+    // TODO: remove #[allow(unused)] once used
+    #[allow(unused)]
     pub fn create() -> BoxedRule {
         Box::new(MultiJoinJoinRule {})
     }
 }
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::plan_common::JoinType;
 
     use super::*;
-    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-    use crate::optimizer::heuristic::{ApplyOrder, HeuristicOptimizer};
+    use crate::expr::{ExprImpl, FunctionCall, InputRef};
     use crate::session::OptimizerContext;
+    use crate::utils::Condition;
 
     #[tokio::test]
     async fn test_joins_get_merged_into_multijoin() {

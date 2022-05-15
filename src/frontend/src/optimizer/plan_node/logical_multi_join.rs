@@ -103,7 +103,7 @@ impl PlanTreeNode for LogicalMultiJoin {
         vec
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
+    fn clone_with_inputs(&self, _inputs: &[crate::optimizer::PlanRef]) -> crate::optimizer::PlanRef {
         todo!()
     }
 }
