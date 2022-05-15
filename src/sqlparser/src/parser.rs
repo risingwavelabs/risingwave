@@ -24,7 +24,6 @@ use core::fmt;
 
 use log::debug;
 
-use crate::ast::ddl::StructColumnDef;
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -1953,7 +1952,7 @@ impl Parser {
     }
 
     /// Parse struct columns e.g.`<v1 int, v2 int, v3 struct<...>>`.
-    pub fn parse_struct_data_type(&mut self) -> Result<Vec<StructColumnDef>, ParserError> {
+    pub fn parse_struct_data_type(&mut self) -> Result<Vec<StructField>, ParserError> {
         let mut columns = vec![];
         if !self.consume_token(&Token::Lt) {
             return self.expected("'<' after struct", self.peek_token());
@@ -1964,7 +1963,7 @@ impl Parser {
             if let Token::Word(_) = self.peek_token() {
                 let name = self.parse_identifier()?;
                 let data_type = self.parse_data_type()?;
-                columns.push(StructColumnDef { name, data_type })
+                columns.push(StructField { name, data_type })
             } else {
                 return self.expected("struct field name", self.peek_token());
             }

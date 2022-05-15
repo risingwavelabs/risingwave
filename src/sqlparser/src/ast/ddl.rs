@@ -246,13 +246,6 @@ pub struct ColumnDef {
     pub options: Vec<ColumnOptionDef>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct StructColumnDef {
-    pub name: Ident,
-    pub data_type: DataType,
-}
-
 impl ColumnDef {
     pub fn new(
         name: Ident,
@@ -278,13 +271,6 @@ impl fmt::Display for ColumnDef {
         for option in &self.options {
             write!(f, " {}", option)?;
         }
-        Ok(())
-    }
-}
-
-impl fmt::Display for StructColumnDef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.name, self.data_type)?;
         Ok(())
     }
 }

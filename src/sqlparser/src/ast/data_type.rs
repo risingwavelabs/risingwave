@@ -17,8 +17,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::ddl::StructColumnDef;
-use crate::ast::{display_comma_separated, ObjectName};
+use crate::ast::{display_comma_separated, Ident, ObjectName};
 
 /// SQL data types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -76,7 +75,7 @@ pub enum DataType {
     Custom(ObjectName),
     /// Arrays
     Array(Box<DataType>),
-    Struct(Vec<StructColumnDef>),
+    Struct(Vec<StructField>),
 }
 
 impl fmt::Display for DataType {
@@ -138,4 +137,18 @@ fn format_type_with_optional_length(
         write!(f, "({})", len)?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct StructField {
+    pub name: Ident,
+    pub data_type: DataType,
+}
+
+impl fmt::Display for StructField {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}", self.name, self.data_type)?;
+        Ok(())
+    }
 }
