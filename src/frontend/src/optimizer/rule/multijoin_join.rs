@@ -100,7 +100,7 @@ mod tests {
                 Type::Equal,
                 vec![
                     ExprImpl::InputRef(Box::new(InputRef::new(2, ty.clone()))),
-                    ExprImpl::InputRef(Box::new(InputRef::new(8, ty))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(8, ty.clone()))),
                 ],
             )
             .unwrap(),
@@ -109,7 +109,7 @@ mod tests {
             mid.clone().into(),
             LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
             join_type,
-            Condition::with_expr(on_1),
+            Condition::with_expr(on_1.clone()),
         );
         let multi_join = LogicalMultiJoin::from_join(&join_1.into()).unwrap();
         for (input, schema) in
@@ -120,5 +120,21 @@ mod tests {
         {
             assert_eq!(input.schema(), schema);
         }
+
+        assert_eq!(multi_join.on().conjunctions.len(), 2);
+        assert!(multi_join.on().conjunctions.contains(&on_1));
+
+        let on_0_shifted: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(4, ty.clone()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(6, ty))),
+                ],
+            )
+            .unwrap(),
+        ));
+
+        assert!(multi_join.on().conjunctions.contains(&on_0_shifted));
     }
 }
