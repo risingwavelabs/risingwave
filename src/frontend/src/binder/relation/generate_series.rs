@@ -42,7 +42,6 @@ impl Binder {
             .into());
         }
 
-        // Todo(d2lark) check 2 or 3 args are same type
         let columns = [(
             false,
             Field {
