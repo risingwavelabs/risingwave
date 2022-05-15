@@ -125,3 +125,25 @@ impl PlanTreeNode for LogicalMultiJoin {
         .into()
     }
 }
+
+impl ToStream for LogicalMultiJoin {
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        todo!()
+    }
+
+    fn to_stream(&self) -> Result<PlanRef> {
+        todo!()
+    }
+}
+
+impl ToBatch for LogicalMultiJoin {
+    fn to_batch(&self) -> Result<PlanRef> {
+        todo!()
+    }
+}
+
+impl ColPrunable for LogicalMultiJoin {
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        todo!()
+    }
+}
