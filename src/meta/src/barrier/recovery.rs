@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::iter::Map;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
@@ -27,6 +28,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
     UpdateActorsRequest,
 };
+use tokio::sync::RwLock;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use uuid::Uuid;
 
@@ -59,7 +61,7 @@ where
     pub(crate) async fn recovery(
         &self,
         prev_epoch: Epoch,
-        prev_command: Option<Command>,
+        prev_command: Option<Arc<RwLock<Vec<Command>>>>,
     ) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
@@ -107,7 +109,7 @@ where
                 Command::checkpoint(),
             );
 
-            match self.inject_barrier(&command_ctx).await {
+            match GlobalBarrierManager::inject_barrier(self.env.clone(), &command_ctx).await {
                 Ok(response) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
@@ -139,14 +141,16 @@ where
     /// for `CreateMaterializedView`. For `DropMaterializedView`, since we already response fail to
     /// frontend and the actors will be rebuild by follow recovery process, it's okay to retain
     /// it.
-    async fn clean_up(&self, prev_command: Command) {
-        if let Some(table_id) = prev_command.creating_table_id() {
-            let retry_strategy = Self::get_retry_strategy();
-            tokio_retry::Retry::spawn(retry_strategy, || async {
-                self.fragment_manager.drop_table_fragments(&table_id).await
-            })
-            .await
-            .expect("Retry clean up until success");
+    async fn clean_up(&self, prev_command: Arc<RwLock<Vec<Command>>>) {
+        while let Some(command) = prev_command.write().await.pop() {
+            if let Some(table_id) = command.creating_table_id() {
+                let retry_strategy = Self::get_retry_strategy();
+                tokio_retry::Retry::spawn(retry_strategy, || async {
+                    self.fragment_manager.drop_table_fragments(&table_id).await
+                })
+                .await
+                .expect("Retry clean up until success");
+            }
         }
     }
 

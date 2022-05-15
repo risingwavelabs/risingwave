@@ -168,6 +168,9 @@ impl LocalVersionManager {
             return false;
         }
 
+        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
+        }
         guard.set_pinned_version(newly_pinned_version);
 
         self.worker_context
@@ -592,6 +595,7 @@ mod tests {
                 inf: false,
             }),
             file_size: batches.len() as u64,
+            vnode_bitmap: vec![],
         }
     }
 

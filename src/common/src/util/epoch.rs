@@ -36,7 +36,7 @@ impl Epoch {
         UNIX_SINGULARITY_DATE_EPOCH
             .elapsed()
             .expect("system clock set earlier than singularity date!")
-            .as_millis() as u64
+            .as_nanos() as u64
     }
 
     /// Returns the epoch in real system time.
