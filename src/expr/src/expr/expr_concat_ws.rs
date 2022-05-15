@@ -164,7 +164,8 @@ mod tests {
             , a b c
             . a b c
             , . b c
-            , . . .",
+            , . . .
+            . . . .",
         );
 
         let actual = concat_ws_expr.eval(&chunk).unwrap();
@@ -173,7 +174,7 @@ mod tests {
             .map(|r| r.map(|s| s.into_utf8()))
             .collect_vec();
 
-        let expected = vec![Some("a,b,c"), None, Some("b,c"), Some("")];
+        let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
 
         assert_eq!(actual, expected);
     }
