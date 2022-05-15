@@ -47,34 +47,41 @@ impl Expression for ConcatWsExpression {
             .iter()
             .map(|c| c.eval(input))
             .collect::<Result<Vec<_>>>()?;
+        let string_columns_ref = string_columns
+            .iter()
+            .map(|c| c.as_utf8())
+            .collect::<Vec<_>>();
 
-        let mut builder = Utf8ArrayBuilder::new(input.cardinality())?;
-        let row_len = string_columns[0].len();
+        let row_len = input.cardinality();
+        let mut builder = Utf8ArrayBuilder::new(row_len)?;
 
         for row_idx in 0..row_len {
-            let sep = sep_column.value_at(row_idx);
-            if sep.is_none() {
-                builder.append(None)?;
-                continue;
-            }
-            let sep = sep.unwrap();
+            let sep = match sep_column.value_at(row_idx) {
+                Some(sep) => sep,
+                None => {
+                    builder.append(None)?;
+                    continue;
+                }
+            };
 
-            let mut res = String::from("");
-            let mut found_first = false;
+            let mut writer = builder.writer().begin();
 
-            for string_column in &string_columns {
-                let string_column = string_column.as_utf8();
+            let mut string_columns = string_columns_ref.iter();
+            for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    if !found_first {
-                        found_first = true;
-                        res.push_str(string);
-                    } else {
-                        res.push_str(sep);
-                        res.push_str(string);
-                    }
+                    writer.write_ref(string)?;
+                    break;
                 }
             }
-            builder.append(Some(&res))?;
+
+            for string_column in string_columns {
+                if let Some(string) = string_column.value_at(row_idx) {
+                    writer.write_ref(sep)?;
+                    writer.write_ref(string)?;
+                }
+            }
+
+            builder = writer.finish()?.into_inner();
         }
         Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
     }
@@ -116,11 +123,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{DataChunk, Utf8Array};
-    use risingwave_common::types::ScalarImpl;
+    use itertools::Itertools;
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -147,31 +151,31 @@ mod tests {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
+        let input_node4 = make_input_ref(3, TypeName::Varchar);
 
-        let array = Utf8Array::from_slice(&[Some(","), None, Some(","), Some(",")])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col1 = Column::new(array);
-        let array = Utf8Array::from_slice(&[Some("a"), Some("a"), None, None])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col2 = Column::new(array);
-        let array = Utf8Array::from_slice(&[Some("b"), Some("b"), Some("a"), None])
-            .map(|x| Arc::new(x.into()))
-            .unwrap();
-        let col3 = Column::new(array);
+        let chunk = DataChunk::from_pretty(
+            "
+            T T T T
+            , a b c
+            . a b c
+            , . b c
+            , . . .",
+        );
 
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2, col3]).build();
-
-        let nullif_expr = ConcatWsExpression::try_from(&make_concat_ws_function(
-            vec![input_node1, input_node2, input_node3],
+        let concat_ws_expr = ConcatWsExpression::try_from(&make_concat_ws_function(
+            vec![input_node1, input_node2, input_node3, input_node4],
             TypeName::Varchar,
         ))
         .unwrap();
-        let res = nullif_expr.eval(&data_chunk).unwrap();
-        assert_eq!(res.datum_at(0), Some(ScalarImpl::Utf8("a,b".to_string())));
-        assert_eq!(res.datum_at(1), None);
-        assert_eq!(res.datum_at(2), Some(ScalarImpl::Utf8("a".to_string())));
-        assert_eq!(res.datum_at(3), Some(ScalarImpl::Utf8("".to_string())));
+
+        let actual = concat_ws_expr.eval(&chunk).unwrap();
+        let actual = actual
+            .iter()
+            .map(|r| r.map(|s| s.into_utf8()))
+            .collect_vec();
+
+        let expected = vec![Some("a,b,c"), None, Some("b,c"), Some("")];
+
+        assert_eq!(actual, expected);
     }
 }
