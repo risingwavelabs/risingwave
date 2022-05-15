@@ -152,6 +152,11 @@ mod tests {
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
         let input_node4 = make_input_ref(3, TypeName::Varchar);
+        let concat_ws_expr = ConcatWsExpression::try_from(&make_concat_ws_function(
+            vec![input_node1, input_node2, input_node3, input_node4],
+            TypeName::Varchar,
+        ))
+        .unwrap();
 
         let chunk = DataChunk::from_pretty(
             "
@@ -161,12 +166,6 @@ mod tests {
             , . b c
             , . . .",
         );
-
-        let concat_ws_expr = ConcatWsExpression::try_from(&make_concat_ws_function(
-            vec![input_node1, input_node2, input_node3, input_node4],
-            TypeName::Varchar,
-        ))
-        .unwrap();
 
         let actual = concat_ws_expr.eval(&chunk).unwrap();
         let actual = actual
