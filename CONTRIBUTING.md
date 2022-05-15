@@ -38,7 +38,6 @@ If you have questions, please [create a Github issue](https://github.com/singula
 
 ## Code Structure
 
-- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
 - The `src` folder contains all of the kernal components, refer to [src/README.md](src/README.md) for more details.
 - The `docker` folder contains Dockerfiles to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
@@ -138,7 +137,7 @@ After that, you can modify `risedev.yml` to compose the cluster. For example, we
 
 Now we can run `./risedev d`. The new dev cluster will contain components from RisingWave, as well as MinIO to persist storage data, and Grafana to monitor the cluster. RiseDev will automatically configure the components to use the available storage service and monitor target.
 
-You may also add multiple compute nodes in the cluster. The `ci-3node` config is an example.
+You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
 ### Start Playground with RiseDev
 
@@ -230,14 +229,11 @@ some unexpected decode error, try `./risedev clean-data` first.
 
 ### End-to-End Testing on CI
 
-As we are in the process of deprecating the legacy Java frontend, CI runs e2e tests with the legacy Java frontend.
-We also have some special settings with environment variable to workaround some problems.
-
 Basically, CI is using the following two configuration to run the full e2e test suite:
 
 ```shell
-./risedev dev ci-3node
-./risedev dev ci-1node
+./risedev dev ci-3cn-1fe
+./risedev dev ci-1cn-1fe
 ```
 
 We may adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
@@ -282,8 +278,6 @@ service in `risedev.yml`.
 You may use RisingWave Dashboard to see actors in the system. It will be started along with meta node.
 
 ### Logging
-
-The Java frontend uses `logback.xml` to configure its logging config.
 
 The Rust components use `tokio-tracing` to handle both logging and tracing. The default log level is set as:
 
