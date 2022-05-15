@@ -430,6 +430,7 @@ impl LocalVersionManager {
     ) {
         let min_execute_interval = Duration::from_millis(100);
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
+        min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             min_execute_interval_tick.tick().await;
             let local_version_manager = match local_version_manager_weak.upgrade() {
@@ -487,6 +488,7 @@ impl LocalVersionManager {
         };
         let mut retry_backoff = get_backoff_strategy();
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
+        min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut versions_to_unpin = vec![];
         // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {
