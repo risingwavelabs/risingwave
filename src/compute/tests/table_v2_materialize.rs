@@ -84,8 +84,8 @@ impl BatchExecutor for SingleChunkExecutor {
 
 /// This test checks whether batch task and streaming task work together for `TableV2` creation,
 /// insertion, deletion, and materialization.
-// #[tokio::test]
-#[allow(dead_code)]
+#[ignore]
+#[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
     let memory_state_store = MemoryStateStore::new();
     let _state_store_impl = StateStoreImpl::MemoryStateStore(
@@ -115,19 +115,6 @@ async fn test_table_v2_materialize() -> Result<()> {
             ..Default::default()
         },
     ];
-
-    // Create table v2 using `CreateTableExecutor`
-    // let mut create_table = CreateTableExecutor::new(
-    //     source_table_id,
-    //     source_manager.clone(),
-    //     table_columns,
-    //     "CreateTableExecutor".to_string(),
-    //     Info::TableSource(Default::default()),
-    // );
-    // // Execute
-    // create_table.open().await?;
-    // create_table.next().await?;
-    // create_table.close().await?;
 
     // Ensure the source exists
     let source_desc = source_manager.get_source(&source_table_id)?;
