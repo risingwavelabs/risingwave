@@ -43,6 +43,7 @@ pub mod optimizer;
 pub mod planner;
 mod scheduler;
 pub mod session;
+pub mod stream_fragmenter;
 pub mod utils;
 extern crate log;
 mod meta_client;

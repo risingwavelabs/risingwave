@@ -14,36 +14,20 @@
 
 mod graph;
 use graph::*;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ops::Range;
-use std::sync::Arc;
+use std::collections::HashSet;
 
 use derivative::Derivative;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
-use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
-
-use super::{CreateMaterializedViewContext, FragmentManagerRef};
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
-use crate::model::{FragmentId, LocalActorId, LocalFragmentId};
-use crate::storage::MetaStore;
-
-/// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
-pub struct StreamFragmenter {
-    /// degree of parallelism
-    parallel_degree: u32,
-    // TODO: remove this when we deprecate Java frontend.
-    is_legacy_frontend: bool,
-}
 
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
@@ -69,7 +53,7 @@ struct BuildFragmentGraphState {
 impl BuildFragmentGraphState {
     /// Create a new stream fragment with given node with generating a fragment id.
     fn new_stream_fragment(&mut self) -> StreamFragment {
-        let fragment = StreamFragment::new(LocalFragmentId::Local(self.next_local_fragment_id));
+        let fragment = StreamFragment::new(self.next_local_fragment_id);
         self.next_local_fragment_id += 1;
         fragment
     }
@@ -88,155 +72,9 @@ impl BuildFragmentGraphState {
     }
 }
 
-/// The mutable state when building actor graph.
-#[derive(Default)]
-struct BuildActorGraphState {
-    /// stream graph builder, to build streaming DAG.
-    stream_graph_builder: StreamGraphBuilder,
-    /// when converting fragment graph to actor graph, we need to know which actors belong to a
-    /// fragment.
-    fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
-    /// local actor id
-    next_local_actor_id: u32,
-}
-
-impl BuildActorGraphState {
-    fn gen_actor_ids(&mut self, parallel_degree: u32) -> Range<u32> {
-        let start_actor_id = self.next_local_actor_id;
-        self.next_local_actor_id += parallel_degree;
-        start_actor_id..start_actor_id + parallel_degree
-    }
-}
+pub struct StreamFragmenter {}
 
 impl StreamFragmenter {
-    pub async fn generate_graph<S>(
-        id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        parallel_degree: u32,
-        is_legacy_frontend: bool,
-        stream_node: &StreamNode,
-        ctx: &mut CreateMaterializedViewContext,
-    ) -> Result<BTreeMap<FragmentId, Fragment>>
-    where
-        S: MetaStore,
-    {
-        Self {
-            parallel_degree,
-            is_legacy_frontend,
-        }
-        .generate_graph_inner(id_gen_manager, fragment_manager, stream_node, ctx)
-        .await
-    }
-
-    /// Build a stream graph in two steps:
-    ///
-    /// 1. Break the streaming plan into fragments with their dependency.
-    /// 2. Duplicate each fragment as parallel actors.
-    async fn generate_graph_inner<S>(
-        self,
-        id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        stream_node: &StreamNode,
-        ctx: &mut CreateMaterializedViewContext,
-    ) -> Result<BTreeMap<FragmentId, Fragment>>
-    where
-        S: MetaStore,
-    {
-        // The stream node might be rewritten in `generate_fragment_graph`.
-        // So we `clone` and move it to prevent it from being used later.
-        let stream_node = stream_node.clone();
-        let fragment_graph = {
-            let BuildFragmentGraphState {
-                mut fragment_graph,
-                next_local_fragment_id,
-                next_operator_id: _,
-                dependent_table_ids,
-                next_table_id: next_local_table_id,
-            } = {
-                let mut state = BuildFragmentGraphState::default();
-                self.generate_fragment_graph(&mut state, stream_node)?;
-                state
-            };
-
-            // save dependent table ids in ctx
-            ctx.dependent_table_ids = dependent_table_ids;
-
-            let fragment_len = fragment_graph.fragment_len() as u32;
-            assert_eq!(fragment_len, next_local_fragment_id);
-            let offset = id_gen_manager
-                .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
-                .await? as _;
-
-            // Compute how many table ids should be allocated for all actors.
-            // Allocate all needed table ids for current MV.
-            let table_ids_cnt = next_local_table_id;
-            let start_table_id = id_gen_manager
-                .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
-                .await? as _;
-            ctx.table_id_offset = start_table_id;
-
-            fragment_graph.seal(offset);
-            fragment_graph
-        };
-
-        let stream_graph = {
-            let BuildActorGraphState {
-                stream_graph_builder,
-                fragment_actors: _,
-                next_local_actor_id,
-            } = {
-                let mut state = BuildActorGraphState::default();
-                // resolve upstream table infos first
-                // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
-                // stream manager and remove dependency on fragment manager.
-                let info = fragment_manager
-                    .get_build_graph_info(&ctx.dependent_table_ids)
-                    .await?;
-                state.stream_graph_builder.fill_info(info);
-
-                // Generate actors of the streaming plan
-                self.build_actor_graph(&mut state, &fragment_graph)?;
-                state
-            };
-
-            // generates global ids
-            let (actor_len, start_actor_id) = {
-                let actor_len = stream_graph_builder.actor_len() as u32;
-                assert_eq!(actor_len, next_local_actor_id);
-                let start_actor_id = id_gen_manager
-                    .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
-                    .await? as _;
-
-                (actor_len, start_actor_id)
-            };
-
-            stream_graph_builder.build(ctx, start_actor_id, actor_len)?
-        };
-
-        // Serialize the graph
-        let stream_graph = stream_graph
-            .into_iter()
-            .map(|(fragment_id, actors)| {
-                let fragment = fragment_graph.get_fragment(fragment_id).unwrap();
-                let fragment_id = fragment_id.as_global_id();
-                (
-                    fragment_id,
-                    Fragment {
-                        fragment_id,
-                        fragment_type: fragment.fragment_type as i32,
-                        distribution_type: if fragment.is_singleton {
-                            FragmentDistributionType::Single
-                        } else {
-                            FragmentDistributionType::Hash
-                        } as i32,
-                        actors,
-                    },
-                )
-            })
-            .collect();
-        Ok(stream_graph)
-    }
-
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
     /// fragments.
     fn rewrite_stream_node(
@@ -322,7 +160,10 @@ impl StreamFragmenter {
     ) -> Result<StreamFragment> {
         let mut fragment = state.new_stream_fragment();
         let node = self.build_fragment(state, &mut fragment, stream_node)?;
-        fragment.seal_node(node);
+
+        assert!(fragment.node.is_none());
+        fragment.node = Some(Box::new(node));
+
         state.fragment_graph.add_fragment(fragment.clone());
         Ok(fragment)
     }
@@ -348,7 +189,8 @@ impl StreamFragmenter {
 
             NodeBody::Chain(ref node) => {
                 // TODO: Remove this when we deprecate Java frontend.
-                current_fragment.is_singleton = self.is_legacy_frontend;
+                // current_fragment.is_singleton = self.is_legacy_frontend;
+                current_fragment.is_singleton = false;
 
                 // memorize table id for later use
                 state
@@ -454,117 +296,29 @@ impl StreamFragmenter {
         Ok(stream_node)
     }
 
-    fn build_actor_graph_fragment(
-        &self,
-        fragment_id: LocalFragmentId,
-        state: &mut BuildActorGraphState,
-        fragment_graph: &StreamFragmentGraph,
-    ) -> Result<()> {
-        let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
+    pub fn build_graph(stream_node: StreamNode) -> StreamFragmentGraphProto {
+        let fragmenter = Self {};
 
-        let parallel_degree = if current_fragment.is_singleton {
-            1
-        } else {
-            self.parallel_degree
+        let BuildFragmentGraphState {
+            fragment_graph,
+            next_local_fragment_id: _,
+            next_operator_id: _,
+            dependent_table_ids,
+            next_table_id,
+        } = {
+            let mut state = BuildFragmentGraphState::default();
+            fragmenter
+                .generate_fragment_graph(&mut state, stream_node)
+                .unwrap();
+            state
         };
 
-        let node = Arc::new(current_fragment.get_node().clone());
-        let actor_ids = state
-            .gen_actor_ids(parallel_degree)
+        let mut fragment_graph = fragment_graph.to_protobuf();
+        fragment_graph.dependent_table_ids = dependent_table_ids
             .into_iter()
-            .map(LocalActorId::Local)
-            .collect_vec();
-
-        for id in &actor_ids {
-            state
-                .stream_graph_builder
-                .add_actor(*id, fragment_id, node.clone());
-        }
-
-        for (downstream_fragment_id, dispatch_edge) in fragment_graph.get_downstreams(fragment_id) {
-            let downstream_actors = state
-                .fragment_actors
-                .get(downstream_fragment_id)
-                .expect("downstream fragment not processed yet");
-
-            match dispatch_edge.dispatch_strategy.get_type()? {
-                ty @ (DispatcherType::Hash
-                | DispatcherType::Simple
-                | DispatcherType::Broadcast
-                | DispatcherType::NoShuffle) => {
-                    state.stream_graph_builder.add_link(
-                        &actor_ids,
-                        downstream_actors,
-                        dispatch_edge.link_id,
-                        Dispatcher {
-                            r#type: ty.into(),
-                            column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
-                            hash_mapping: None,
-                            dispatcher_id: dispatch_edge.link_id,
-                            downstream_actor_id: vec![],
-                        },
-                        dispatch_edge.same_worker_node,
-                    );
-                }
-                DispatcherType::Invalid => unreachable!(),
-            }
-        }
-
-        let ret = state.fragment_actors.insert(fragment_id, actor_ids);
-        assert!(
-            ret.is_none(),
-            "fragment {:?} already processed",
-            fragment_id
-        );
-
-        Ok(())
-    }
-
-    /// Build actor graph from fragment graph using topological sort. Setup dispatcher in actor and
-    /// generate actors by their parallelism.
-    fn build_actor_graph(
-        &self,
-        state: &mut BuildActorGraphState,
-        fragment_graph: &StreamFragmentGraph,
-    ) -> Result<()> {
-        // Use topological sort to build the graph from downstream to upstream. (The first fragment
-        // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
-        let mut actionable_fragment_id = VecDeque::new();
-        let mut downstream_cnts = HashMap::new();
-
-        // Iterate all fragments
-        for (fragment_id, _) in fragment_graph.fragments().iter() {
-            // Count how many downstreams we have for a given fragment
-            let downstream_cnt = fragment_graph.get_downstreams(*fragment_id).len();
-            if downstream_cnt == 0 {
-                actionable_fragment_id.push_back(*fragment_id);
-            } else {
-                downstream_cnts.insert(*fragment_id, downstream_cnt);
-            }
-        }
-
-        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
-            // Build the actors corresponding to the fragment
-            self.build_actor_graph_fragment(fragment_id, state, fragment_graph)?;
-
-            // Find if we can process more fragments
-            for upstream_id in fragment_graph.get_upstreams(fragment_id).keys() {
-                let downstream_cnt = downstream_cnts
-                    .get_mut(upstream_id)
-                    .expect("the upstream should exist");
-                *downstream_cnt -= 1;
-                if *downstream_cnt == 0 {
-                    downstream_cnts.remove(upstream_id);
-                    actionable_fragment_id.push_back(*upstream_id);
-                }
-            }
-        }
-
-        if !downstream_cnts.is_empty() {
-            // There are fragments that are not processed yet.
-            return Err(ErrorCode::InternalError("graph is not a DAG".into()).into());
-        }
-
-        Ok(())
+            .map(|id| id.table_id)
+            .collect();
+        fragment_graph.table_ids_cnt = next_table_id;
+        fragment_graph
     }
 }
