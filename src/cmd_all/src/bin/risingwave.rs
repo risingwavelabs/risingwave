@@ -78,8 +78,6 @@ async fn main() {
         "frontend",
         "frontend-node",
         "frontend_node",
-        "frontend-v2",
-        "frontend",
     ] {
         fns.insert(
             fn_name,
