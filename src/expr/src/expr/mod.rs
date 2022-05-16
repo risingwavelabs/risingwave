@@ -28,7 +28,6 @@ mod expr_is_null;
 mod expr_literal;
 mod expr_ternary_bytes;
 pub mod expr_unary;
-mod pg_sleep;
 mod template;
 
 use std::convert::TryFrom;
@@ -76,8 +75,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type()? {
-        Cast | Upper | Lower | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse
-        | IsNull | IsNotNull | Neg | Ascii => build_unary_expr_prost(prost),
+        Cast | Upper | Lower | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
+        | IsNotNull | Neg | Ascii => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position => build_binary_expr_prost(prost),

@@ -21,7 +21,6 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::general_neg;
@@ -250,8 +249,6 @@ pub fn new_unary_expr(
         (ProstType::Neg, _, _) => {
             gen_neg! { child_expr, return_type }
         }
-        (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
-
         (expr, ret, child) => {
             return Err(ErrorCode::NotImplemented(format!(
                 "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
