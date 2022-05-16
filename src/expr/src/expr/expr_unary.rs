@@ -262,7 +262,7 @@ pub fn new_unary_expr(
         (ProstType::Neg, _, _) => {
             gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,
                 {
-                { decimal, decimal, general_neg },
+                    { decimal, decimal, general_neg },
                 }
             }
         }
