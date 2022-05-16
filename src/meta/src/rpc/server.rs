@@ -21,7 +21,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
-use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -39,9 +38,8 @@ use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::hummock::CompactionScheduler;
-use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, StoredCatalogManager};
+use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -142,11 +140,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         tokio::spawn(dashboard_service.serve(ui_path));
     }
 
-    let catalog_manager = Arc::new(
-        StoredCatalogManager::new(meta_store, env.notification_manager_ref())
-            .await
-            .unwrap(),
-    );
     let catalog_manager_v2 = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
@@ -198,7 +191,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     ));
 
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
-    let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager);
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager_v2.clone(),
@@ -251,7 +243,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
-            .add_service(CatalogServiceServer::new(catalog_srv))
             .add_service(ClusterServiceServer::new(cluster_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
