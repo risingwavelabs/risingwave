@@ -76,6 +76,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -95,4 +96,8 @@ harness = false
 
 [[bench]]
 name = "bench_merge_iter"
+harness = false
+
+[[bench]]
+name = "bench_fs_operation"
 harness = false
