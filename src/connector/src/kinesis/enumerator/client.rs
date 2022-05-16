@@ -89,9 +89,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_kinesis_split_enumerator() -> Result<()> {
-        let stream_name = "kinesis_test_stream".to_string();
+        let stream_name = "kinesis_debug".to_string();
         let config = aws_config::from_env()
-            .region(Region::new("cn-north-1"))
+            .region(Region::new("cn-northwest-1"))
             .load()
             .await;
         let client = aws_sdk_kinesis::Client::new(&config);
@@ -100,7 +100,7 @@ mod tests {
             client,
         };
         let list_splits_resp = enumerator.list_splits().await?;
-        // println!("{:#?}", list_splits_resp);
+        println!("{:#?}", list_splits_resp);
         assert_eq!(list_splits_resp.len(), 4);
         Ok(())
     }
