@@ -27,6 +27,7 @@ use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn gen_create_index_plan(
     session: &SessionImpl,
@@ -148,7 +149,7 @@ pub async fn handle_create_index(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (plan, table) = {
+    let (graph, table) = {
         let (plan, table) = gen_create_index_plan(
             &session,
             context.into(),
@@ -157,18 +158,21 @@ pub async fn handle_create_index(
             columns,
         )?;
         let plan = plan.to_stream_prost();
+        let graph = StreamFragmenter::build_graph(plan);
 
-        (plan, table)
+        (graph, table)
     };
 
     log::trace!(
-        "name={}, plan=\n{}",
+        "name={}, graph=\n{}",
         table_name,
-        serde_json::to_string_pretty(&plan).unwrap()
+        serde_json::to_string_pretty(&graph).unwrap()
     );
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_materialized_view(table, plan).await?;
+    catalog_writer
+        .create_materialized_view(table, graph)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
