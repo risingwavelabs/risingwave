@@ -37,19 +37,6 @@ message Schema {
   uint64 version = 3;
 }
 
-// Below for epoch service.
-
-message GetEpochRequest {}
-
-message GetEpochResponse {
-  common.Status status = 1;
-  uint64 epoch = 2;
-}
-
-service EpochService {
-  rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
-}
-
 // Below for catalog service.
 // will be deprecated and replaced by DdlService
 message CreateRequest {
@@ -193,10 +180,6 @@ message FlushResponse {
 }
 
 service StreamManagerService {
-  // will be deprecated and replaced by catalog.CreateMaterializedSource and catalog.CreateMaterializedView
-  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
-  // will be deprecated and replaced by catalog.DropMaterializedSource and catalog.DropMaterializedView
-  rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
@@ -274,17 +257,11 @@ message SubscribeResponse {
   uint64 version = 3;
   oneof info {
     common.WorkerNode node = 4;
-    // will be deprecated and replaced by database_v2
-    Database database = 5;
-    // will be deprecated and replaced by schema_v2
-    Schema schema = 6;
-    // will be deprecated and replaced by table_v2
-    Table table = 7;
     catalog.Database database_v2 = 8;
     catalog.Schema schema_v2 = 9;
     catalog.Table table_v2 = 10;
     catalog.Source source = 11;
-    MetaSnapshot fe_snapshot = 12;
+    MetaSnapshot snapshot = 12;
     hummock.HummockSnapshot hummock_snapshot = 13;
   }
 }

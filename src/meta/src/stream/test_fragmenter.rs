@@ -104,19 +104,6 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 /// create table t (v1 int, v2 int);
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
-///
-/// plan:
-///
-/// ```ignore
-///     RwStreamMaterializedView(name=[t_distributed])
-///           RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])
-///             RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])
-///               RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-///                 RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])
-///                   RwStreamFilter(condition=[>($0, $1)])
-///                     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED,keys=[0]}], collation=[[]])
-///                       RwStreamTableSource(table=[[test_schema,t]], columns=[`v1,v2,_row_id`])
-/// ```
 fn make_stream_node() -> StreamNode {
     let table_ref_id = make_table_ref_id(1);
     // table source node
