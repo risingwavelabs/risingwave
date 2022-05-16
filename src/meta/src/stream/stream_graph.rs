@@ -13,21 +13,95 @@
 // limitations under the License.
 
 use std::collections::hash_map::HashMap;
-use std::collections::{BTreeMap, HashSet};
-use std::ops::Deref;
+use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
+use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, MergeNode, StreamActor,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+};
 
+use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
 use crate::cluster::WorkerId;
-use crate::model::{ActorId, LocalActorId, LocalFragmentId};
-use crate::stream::{BuildGraphInfo, CreateMaterializedViewContext};
+use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::model::{ActorId, FragmentId};
+use crate::storage::MetaStore;
+
+/// Id of an Actor, maybe local or global
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+enum LocalActorId {
+    /// The global allocated id of a fragment.
+    Global(u32),
+    /// The local id of a fragment, need to be converted to global id if being used in the meta
+    /// service.
+    Local(u32),
+}
+
+/// Id of a fragment, maybe local or global
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+struct GlobalFragmentId(u32);
+
+impl LocalActorId {
+    pub fn as_global_id(&self) -> u32 {
+        match self {
+            Self::Global(id) => *id,
+            _ => panic!("actor id is not global id"),
+        }
+    }
+
+    pub fn as_local_id(&self) -> u32 {
+        match self {
+            Self::Local(id) => *id,
+            _ => panic!("actor id is not local id"),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_global(&self) -> bool {
+        matches!(self, Self::Global(_))
+    }
+
+    #[allow(dead_code)]
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    /// Convert local id to global id. Panics if the actor id is not local, or actor id >=
+    /// len.
+    pub fn to_global_id(self, offset: u32, len: u32) -> Self {
+        let id = self.as_local_id();
+        assert!(id < len, "actor id {} is out of range (len: {})", id, len);
+        Self::Global(id + offset)
+    }
+}
+
+impl GlobalFragmentId {
+    pub fn as_global_id(&self) -> u32 {
+        self.0
+    }
+
+    /// Convert local id to global id. Panics if the fragment id is not local, or fragment id >=
+    /// len.
+    pub fn from_local_id(id: u32, offset: u32, len: u32) -> Self {
+        assert!(
+            id < len,
+            "fragment id {} is out of range (len: {})",
+            id,
+            len
+        );
+        Self(id + offset)
+    }
+}
 
 /// A list of actors with order.
 #[derive(Debug, Clone)]
@@ -78,7 +152,7 @@ struct StreamActorBuilder {
     actor_id: LocalActorId,
 
     /// associated fragment id
-    fragment_id: LocalFragmentId,
+    fragment_id: GlobalFragmentId,
 
     /// associated stream node
     nodes: Arc<StreamNode>,
@@ -109,7 +183,7 @@ impl StreamActorBuilder {
 
     pub fn new(
         actor_id: LocalActorId,
-        fragment_id: LocalFragmentId,
+        fragment_id: GlobalFragmentId,
         node: Arc<StreamNode>,
     ) -> Self {
         Self {
@@ -123,7 +197,7 @@ impl StreamActorBuilder {
         }
     }
 
-    pub fn get_fragment_id(&self) -> LocalFragmentId {
+    pub fn get_fragment_id(&self) -> GlobalFragmentId {
         self.fragment_id
     }
 
@@ -268,7 +342,7 @@ impl StreamActorBuilder {
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 #[derive(Default)]
-pub struct StreamGraphBuilder {
+struct StreamGraphBuilder {
     actor_builders: BTreeMap<LocalActorId, StreamActorBuilder>,
 
     table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
@@ -287,7 +361,7 @@ impl StreamGraphBuilder {
     pub fn add_actor(
         &mut self,
         actor_id: LocalActorId,
-        fragment_id: LocalFragmentId,
+        fragment_id: GlobalFragmentId,
         node: Arc<StreamNode>,
     ) {
         self.actor_builders.insert(
@@ -409,7 +483,7 @@ impl StreamGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,
-    ) -> Result<HashMap<LocalFragmentId, Vec<StreamActor>>> {
+    ) -> Result<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
 
         for builder in self.actor_builders.values_mut() {
@@ -619,5 +693,346 @@ impl StreamGraphBuilder {
             fields: chain_node.upstream_fields.clone(),
             append_only: stream_node.append_only,
         })
+    }
+}
+
+/// The mutable state when building actor graph.
+#[derive(Default)]
+struct BuildActorGraphState {
+    /// stream graph builder, to build streaming DAG.
+    stream_graph_builder: StreamGraphBuilder,
+    /// when converting fragment graph to actor graph, we need to know which actors belong to a
+    /// fragment.
+    fragment_actors: HashMap<GlobalFragmentId, Vec<LocalActorId>>,
+    /// local actor id
+    next_local_actor_id: u32,
+}
+
+impl BuildActorGraphState {
+    fn gen_actor_ids(&mut self, parallel_degree: u32) -> Range<u32> {
+        let start_actor_id = self.next_local_actor_id;
+        self.next_local_actor_id += parallel_degree;
+        start_actor_id..start_actor_id + parallel_degree
+    }
+}
+
+/// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
+pub struct ActorGraphBuilder {
+    /// degree of parallelism
+    parallel_degree: u32,
+}
+
+impl ActorGraphBuilder {
+    pub async fn generate_graph<S>(
+        id_gen_manager: IdGeneratorManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+        parallel_degree: u32,
+        fragment_graph: &StreamFragmentGraphProto,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<BTreeMap<FragmentId, Fragment>>
+    where
+        S: MetaStore,
+    {
+        Self { parallel_degree }
+            .generate_graph_inner(id_gen_manager, fragment_manager, fragment_graph, ctx)
+            .await
+    }
+
+    /// Build a stream graph by duplicating each fragment as parallel actors.
+    async fn generate_graph_inner<S>(
+        self,
+        id_gen_manager: IdGeneratorManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+        fragment_graph: &StreamFragmentGraphProto,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<BTreeMap<FragmentId, Fragment>>
+    where
+        S: MetaStore,
+    {
+        let fragment_graph = {
+            // save dependent table ids in ctx
+            ctx.dependent_table_ids = fragment_graph
+                .dependent_table_ids
+                .iter()
+                .map(|table_id| TableId::new(*table_id))
+                .collect();
+
+            let fragment_len = fragment_graph.fragments.len() as u32;
+            let offset = id_gen_manager
+                .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
+                .await? as _;
+
+            // Compute how many table ids should be allocated for all actors.
+            // Allocate all needed table ids for current MV.
+            let table_ids_cnt = fragment_graph.table_ids_cnt;
+            let start_table_id = id_gen_manager
+                .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+                .await? as _;
+            ctx.table_id_offset = start_table_id;
+
+            StreamFragmentGraph::from_protobuf(fragment_graph.clone(), offset)
+        };
+
+        let stream_graph = {
+            let BuildActorGraphState {
+                stream_graph_builder,
+                fragment_actors: _,
+                next_local_actor_id,
+            } = {
+                let mut state = BuildActorGraphState::default();
+                // resolve upstream table infos first
+                // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
+                // stream manager and remove dependency on fragment manager.
+                let info = fragment_manager
+                    .get_build_graph_info(&ctx.dependent_table_ids)
+                    .await?;
+                state.stream_graph_builder.fill_info(info);
+
+                // Generate actors of the streaming plan
+                self.build_actor_graph(&mut state, &fragment_graph)?;
+                state
+            };
+
+            // generates global ids
+            let (actor_len, start_actor_id) = {
+                let actor_len = stream_graph_builder.actor_len() as u32;
+                assert_eq!(actor_len, next_local_actor_id);
+                let start_actor_id = id_gen_manager
+                    .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
+                    .await? as _;
+
+                (actor_len, start_actor_id)
+            };
+
+            stream_graph_builder.build(ctx, start_actor_id, actor_len)?
+        };
+
+        // Serialize the graph
+        let stream_graph = stream_graph
+            .into_iter()
+            .map(|(fragment_id, actors)| {
+                let fragment = fragment_graph.get_fragment(fragment_id).unwrap();
+                let fragment_id = fragment_id.as_global_id();
+                (
+                    fragment_id,
+                    Fragment {
+                        fragment_id,
+                        fragment_type: fragment.fragment_type as i32,
+                        distribution_type: if fragment.is_singleton {
+                            FragmentDistributionType::Single
+                        } else {
+                            FragmentDistributionType::Hash
+                        } as i32,
+                        actors,
+                    },
+                )
+            })
+            .collect();
+        Ok(stream_graph)
+    }
+
+    /// Build actor graph from fragment graph using topological sort. Setup dispatcher in actor and
+    /// generate actors by their parallelism.
+    fn build_actor_graph(
+        &self,
+        state: &mut BuildActorGraphState,
+        fragment_graph: &StreamFragmentGraph,
+    ) -> Result<()> {
+        // Use topological sort to build the graph from downstream to upstream. (The first fragment
+        // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
+        let mut actionable_fragment_id = VecDeque::new();
+        let mut downstream_cnts = HashMap::new();
+
+        // Iterate all fragments
+        for (fragment_id, _) in fragment_graph.fragments().iter() {
+            // Count how many downstreams we have for a given fragment
+            let downstream_cnt = fragment_graph.get_downstreams(*fragment_id).len();
+            if downstream_cnt == 0 {
+                actionable_fragment_id.push_back(*fragment_id);
+            } else {
+                downstream_cnts.insert(*fragment_id, downstream_cnt);
+            }
+        }
+
+        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
+            // Build the actors corresponding to the fragment
+            self.build_actor_graph_fragment(fragment_id, state, fragment_graph)?;
+
+            // Find if we can process more fragments
+            for upstream_id in fragment_graph.get_upstreams(fragment_id).keys() {
+                let downstream_cnt = downstream_cnts
+                    .get_mut(upstream_id)
+                    .expect("the upstream should exist");
+                *downstream_cnt -= 1;
+                if *downstream_cnt == 0 {
+                    downstream_cnts.remove(upstream_id);
+                    actionable_fragment_id.push_back(*upstream_id);
+                }
+            }
+        }
+
+        if !downstream_cnts.is_empty() {
+            // There are fragments that are not processed yet.
+            return Err(ErrorCode::InternalError("graph is not a DAG".into()).into());
+        }
+
+        Ok(())
+    }
+
+    fn build_actor_graph_fragment(
+        &self,
+        fragment_id: GlobalFragmentId,
+        state: &mut BuildActorGraphState,
+        fragment_graph: &StreamFragmentGraph,
+    ) -> Result<()> {
+        let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
+
+        let parallel_degree = if current_fragment.is_singleton {
+            1
+        } else {
+            self.parallel_degree
+        };
+
+        let node = Arc::new(current_fragment.node.unwrap());
+        let actor_ids = state
+            .gen_actor_ids(parallel_degree)
+            .into_iter()
+            .map(LocalActorId::Local)
+            .collect_vec();
+
+        for id in &actor_ids {
+            state
+                .stream_graph_builder
+                .add_actor(*id, fragment_id, node.clone());
+        }
+
+        for (downstream_fragment_id, dispatch_edge) in fragment_graph.get_downstreams(fragment_id) {
+            let downstream_actors = state
+                .fragment_actors
+                .get(downstream_fragment_id)
+                .expect("downstream fragment not processed yet");
+
+            let dispatch_strategy = dispatch_edge.dispatch_strategy.as_ref().unwrap();
+            match dispatch_strategy.get_type()? {
+                ty @ (DispatcherType::Hash
+                | DispatcherType::Simple
+                | DispatcherType::Broadcast
+                | DispatcherType::NoShuffle) => {
+                    state.stream_graph_builder.add_link(
+                        &actor_ids,
+                        downstream_actors,
+                        dispatch_edge.link_id,
+                        Dispatcher {
+                            r#type: ty.into(),
+                            column_indices: dispatch_strategy.column_indices.clone(),
+                            hash_mapping: None,
+                            dispatcher_id: dispatch_edge.link_id,
+                            downstream_actor_id: vec![],
+                        },
+                        dispatch_edge.same_worker_node,
+                    );
+                }
+                DispatcherType::Invalid => unreachable!(),
+            }
+        }
+
+        let ret = state
+            .fragment_actors
+            .insert(fragment_id, actor_ids.to_vec());
+        assert!(
+            ret.is_none(),
+            "fragment {:?} already processed",
+            fragment_id
+        );
+
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct StreamFragmentGraph {
+    /// stores all the fragments in the graph.
+    fragments: HashMap<GlobalFragmentId, StreamFragment>,
+
+    /// stores edges between fragments: upstream => downstream.
+    downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+
+    /// stores edges between fragments: downstream -> upstream.
+    upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+}
+
+impl StreamFragmentGraph {
+    /// Will convert all local ids to global ids by `local_id + offset`
+    pub fn from_protobuf(mut proto: StreamFragmentGraphProto, offset: u32) -> Self {
+        let mut graph = Self::default();
+
+        let len = proto.fragments.len() as u32;
+
+        graph.fragments = std::mem::take(&mut proto.fragments)
+            .into_iter()
+            .map(|(id, fragment)| {
+                let id = GlobalFragmentId::from_local_id(id, offset, len);
+                (
+                    id,
+                    StreamFragment {
+                        fragment_id: id.as_global_id(),
+                        ..fragment
+                    },
+                )
+            })
+            .collect();
+
+        for edge in proto.edges {
+            let upstream_id = GlobalFragmentId::from_local_id(edge.upstream_id, offset, len);
+            let downstream_id = GlobalFragmentId::from_local_id(edge.downstream_id, offset, len);
+            let res = graph.upstreams.entry(downstream_id).or_default().insert(
+                upstream_id,
+                StreamFragmentEdge {
+                    upstream_id: upstream_id.as_global_id(),
+                    downstream_id: downstream_id.as_global_id(),
+                    ..edge.clone()
+                },
+            );
+            assert!(res.is_none());
+            let res = graph.downstreams.entry(upstream_id).or_default().insert(
+                downstream_id,
+                StreamFragmentEdge {
+                    upstream_id: upstream_id.as_global_id(),
+                    downstream_id: downstream_id.as_global_id(),
+                    ..edge
+                },
+            );
+            assert!(res.is_none());
+        }
+
+        graph
+    }
+
+    pub fn fragments(&self) -> &HashMap<GlobalFragmentId, StreamFragment> {
+        &self.fragments
+    }
+
+    pub fn get_fragment(&self, fragment_id: GlobalFragmentId) -> Option<&StreamFragment> {
+        self.fragments.get(&fragment_id)
+    }
+
+    pub fn get_downstreams(
+        &self,
+        fragment_id: GlobalFragmentId,
+    ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
+        lazy_static::lazy_static! {
+            static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
+        }
+        self.downstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
+    }
+
+    pub fn get_upstreams(
+        &self,
+        fragment_id: GlobalFragmentId,
+    ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
+        lazy_static::lazy_static! {
+            static ref EMPTY_HASHMAP: HashMap<GlobalFragmentId, StreamFragmentEdge> = HashMap::new();
+        }
+        self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 }

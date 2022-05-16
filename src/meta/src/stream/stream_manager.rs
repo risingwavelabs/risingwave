@@ -659,7 +659,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
+    use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::*;
