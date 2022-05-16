@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use futures::stream::{self, StreamExt};
-use futures::Future;
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{is_remote_sst_id, VersionedComparator};
 use risingwave_pb::hummock::{
     CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
 };
@@ -36,11 +36,10 @@ use super::iterator::{
 };
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use super::sstable_store::SstableStoreRef;
-use super::{
-    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
-};
+use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::vacuum::Vacuum;
+use crate::hummock::{HummockError, SSTableBuilderOptions};
 use crate::monitor::StateStoreMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
@@ -90,6 +89,7 @@ impl Compactor {
         context: Arc<CompactorContext>,
         buffers: &[SharedBufferBatch],
         stats: Arc<StateStoreMetrics>,
+        is_local: bool,
     ) -> HummockResult<Vec<(Sstable, Vec<VNodeBitmap>)>> {
         let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();
         start_user_keys.sort();
@@ -147,7 +147,35 @@ impl Compactor {
                 MergeIterator::new(iters, stats.clone())
             };
             compaction_futures.push(tokio::spawn(async move {
-                compactor.compact_key_range(split_index, iter).await
+                // TODO: use `GroupedSstableBuilder` with correct `KeyValueGroupingImpl`
+                let builder = CapacitySplitTableBuilder::new({
+                    let sstable_store = compactor.context.sstable_store.clone();
+                    let meta_client = compactor.context.hummock_meta_client.clone();
+                    let options = compactor.context.options.clone();
+                    move || {
+                        let sstable_store = sstable_store.clone();
+                        let meta_client = meta_client.clone();
+                        let options = options.clone();
+                        async move {
+                            let table_id = if is_local {
+                                sstable_store.get_next_local_sst_id()
+                            } else {
+                                meta_client
+                                    .get_new_table_id()
+                                    .await
+                                    .map_err(HummockError::meta_error)?
+                            };
+                            debug_assert_eq!(is_local, !is_remote_sst_id(table_id));
+                            let builder = SSTableBuilder::new(
+                                SSTableBuilderOptions::from_storage_config(&options),
+                            );
+                            Ok((table_id, builder))
+                        }
+                    }
+                });
+                compactor
+                    .compact_key_range(split_index, iter, builder)
+                    .await
             }));
         }
 
@@ -202,7 +230,30 @@ impl Compactor {
             let compactor = compactor.clone();
             compaction_futures.push(tokio::spawn(async move {
                 let merge_iter = compactor.build_sst_iter().await?;
-                compactor.compact_key_range(split_index, merge_iter).await
+                // TODO: use `GroupedSstableBuilder` with correct `KeyValueGroupingImpl`
+                let builder = CapacitySplitTableBuilder::new({
+                    let meta_client = compactor.context.hummock_meta_client.clone();
+                    let options = compactor.context.options.clone();
+                    move || {
+                        let meta_client = meta_client.clone();
+                        let options = options.clone();
+                        async move {
+                            let table_id = meta_client
+                                .get_new_table_id()
+                                .await
+                                .map_err(HummockError::meta_error)?;
+                            debug_assert!(is_remote_sst_id(table_id));
+                            let builder = SSTableBuilder::new(
+                                SSTableBuilderOptions::from_storage_config(&options),
+                            );
+                            Ok((table_id, builder))
+                        }
+                        .boxed()
+                    }
+                });
+                compactor
+                    .compact_key_range(split_index, merge_iter, builder)
+                    .await
             }));
         }
 
@@ -286,30 +337,23 @@ impl Compactor {
     }
 
     /// Compact the given key range and merge iterator.
-    async fn compact_key_range(
+    /// Upon a successful return, the built SSTs are already uploaded to object store.
+    async fn compact_key_range<B, F>(
         &self,
         split_index: usize,
         iter: MergeIterator,
-    ) -> HummockResult<CompactOutput> {
+        mut builder: CapacitySplitTableBuilder<B>,
+    ) -> HummockResult<CompactOutput>
+    where
+        B: Clone + Fn() -> F,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    {
         let split = self.compact_task.splits[split_index].clone();
         let kr = KeyRange {
             left: Bytes::copy_from_slice(split.get_left()),
             right: Bytes::copy_from_slice(split.get_right()),
             inf: split.get_inf(),
         };
-
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        // TODO: use `GroupedSstableBuilder` with correct `KeyValueGroupingImpl`
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = self
-                .context
-                .hummock_meta_client
-                .get_new_table_id()
-                .await
-                .map_err(HummockError::meta_error)?;
-            let builder = HummockStorage::get_builder(&self.context.options);
-            Ok((table_id, builder))
-        });
 
         // Monitor time cost building shared buffer to SSTs.
         let build_l0_sst_timer = if self.context.is_share_buffer_compact {
@@ -399,14 +443,14 @@ impl Compactor {
         Ok(MergeIterator::new(table_iters, self.context.stats.clone()))
     }
 
-    pub async fn try_vacuum(
+    pub async fn try_vacuum_remote(
         vacuum_task: Option<VacuumTask>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         if let Some(vacuum_task) = vacuum_task {
             tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
-            match Vacuum::vacuum(
+            match Vacuum::vacuum_remote(
                 sstable_store.clone(),
                 vacuum_task,
                 hummock_meta_client.clone(),
@@ -507,7 +551,7 @@ impl Compactor {
                                 }
                             }
 
-                            Compactor::try_vacuum(
+                            Compactor::try_vacuum_remote(
                                 vacuum_task,
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),

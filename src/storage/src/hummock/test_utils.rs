@@ -48,6 +48,7 @@ pub fn default_config_for_test() -> StorageConfig {
         write_conflict_detection_enabled: true,
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 64 << 20,
+        local_object_store_root: "memory".to_string(),
     }
 }
 

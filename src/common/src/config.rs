@@ -136,6 +136,10 @@ pub struct StorageConfig {
     /// Capacity of sstable meta cache.
     #[serde(default = "default::meta_cache_capacity")]
     pub meta_cache_capacity: usize,
+
+    /// Local object store root. We should call `get_local_object_store` to get the object store.
+    #[serde(default = "default::local_object_store_root")]
+    pub local_object_store_root: String,
 }
 
 impl Default for StorageConfig {
@@ -231,6 +235,10 @@ mod default {
     pub fn meta_cache_capacity() -> usize {
         // 64 MB
         67108864
+    }
+
+    pub fn local_object_store_root() -> String {
+        "tempdisk".to_string()
     }
 }
 

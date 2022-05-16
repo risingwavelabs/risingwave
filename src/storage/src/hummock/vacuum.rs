@@ -23,12 +23,12 @@ use crate::hummock::SstableStoreRef;
 pub struct Vacuum;
 
 impl Vacuum {
-    pub async fn vacuum(
+    pub async fn vacuum_remote(
         sstable_store: SstableStoreRef,
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<()> {
-        let store = sstable_store.store();
+        let store = sstable_store.remote_store();
         let sst_ids = vacuum_task.sstable_ids;
         for sst_id in &sst_ids {
             // Meta
@@ -102,7 +102,7 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        Vacuum::vacuum(sstable_store, vacuum_task, mock_hummock_meta_client)
+        Vacuum::vacuum_remote(sstable_store, vacuum_task, mock_hummock_meta_client)
             .await
             .unwrap();
     }

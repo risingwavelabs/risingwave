@@ -50,6 +50,7 @@ risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
+tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [

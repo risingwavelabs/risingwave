@@ -165,6 +165,7 @@ impl SharedBufferUploader {
             Arc::new(mem_compactor_ctx),
             batches,
             self.stats.clone(),
+            false,
         )
         .await?;
 

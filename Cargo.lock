@@ -4087,6 +4087,7 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.3",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-retry",
