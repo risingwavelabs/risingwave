@@ -437,7 +437,7 @@ mod tests {
             expr_type: Type::Cast as i32,
             return_type: Some(return_type),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_input_ref(0, TypeName::Char)],
+                children: vec![make_input_ref(0, TypeName::Varchar)],
             })),
         };
         let vec_executor = build_from_prost(&expr).unwrap();
