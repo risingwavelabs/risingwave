@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, FrontendConfig,
-    FrontendService, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService,
-    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
+    FrontendService, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService, PrometheusConfig,
+    PrometheusGen, PrometheusService, RedPandaConfig,
 };
 
 #[serde_with::skip_serializing_none]

@@ -74,11 +74,7 @@ async fn main() {
     }
 
     // frontend node configuration
-    for fn_name in [
-        "frontend",
-        "frontend-node",
-        "frontend_node",
-    ] {
+    for fn_name in ["frontend", "frontend-node", "frontend_node"] {
         fns.insert(
             fn_name,
             Box::new(|args: Vec<String>| {
