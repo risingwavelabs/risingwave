@@ -94,9 +94,10 @@
     select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 > t2.v1 and t1.v2 < 10;
   batch_plan: |
     BatchProject { exprs: [$1, $3] }
-      BatchNestedLoopJoin { type: Inner, predicate: ($0 > $2) AND ($1 < 10:Int32) }
+      BatchNestedLoopJoin { type: Inner, predicate: ($0 > $2) }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t1, columns: [v1, v2] }
+          BatchFilter { predicate: ($1 < 10:Int32) }
+            BatchScan { table: t1, columns: [v1, v2] }
         BatchExchange { order: [], dist: Single }
           BatchScan { table: t2, columns: [v1, v2] }
 - sql: |
