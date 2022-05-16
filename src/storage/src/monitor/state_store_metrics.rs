@@ -48,8 +48,6 @@ macro_rules! for_all_metrics {
             iter_merge_seek_duration: Histogram,
 
             sst_store_block_request_counts: GenericCounter<AtomicU64>,
-            sst_store_get_remote_duration: Histogram,
-            sst_store_put_remote_duration: Histogram,
 
             shared_buffer_to_l0_duration: Histogram,
             shared_buffer_to_sstable_size: Histogram,
@@ -234,22 +232,6 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let opts = histogram_opts!(
-            "state_store_sst_store_get_remote_duration",
-            "Time spent fetching blocks from remote object store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
-        );
-        let sst_store_get_remote_duration =
-            register_histogram_with_registry!(opts, registry).unwrap();
-
-        let opts = histogram_opts!(
-            "state_store_sst_store_put_remote_duration",
-            "Time spent putting blocks to remote object store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
-        );
-        let sst_store_put_remote_duration =
-            register_histogram_with_registry!(opts, registry).unwrap();
-
         // --
         let compaction_upload_sst_counts = register_int_counter_with_registry!(
             "state_store_compaction_upload_sst_counts",
@@ -309,8 +291,6 @@ impl StateStoreMetrics {
             iter_merge_seek_duration,
 
             sst_store_block_request_counts,
-            sst_store_get_remote_duration,
-            sst_store_put_remote_duration,
 
             shared_buffer_to_l0_duration,
             shared_buffer_to_sstable_size,

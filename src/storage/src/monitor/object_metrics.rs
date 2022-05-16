@@ -1,3 +1,18 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
@@ -18,11 +33,8 @@ macro_rules! for_all_metrics {
 
 macro_rules! define_state_store_metrics {
     ($( $name:ident: $type:ty ),* ,) => {
-        /// [`StateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
-        /// `RocksDBStateStore` and `TikvStateStore`.
-        /// In practice, keep in mind that this represents the whole Hummock utilization of
-        /// a `RisingWave` instance. More granular utilization of per `materialization view`
-        /// job or an executor should be collected by views like `StateStats` and `JobStats`.
+        /// [`ObjectStoreMetrics`] stores the performance and IO metrics of `ObjectStore` such as
+        /// `S3` and `MinIO`.
         #[derive(Debug)]
         pub struct ObjectStoreMetrics {
             $( pub $name: $type, )*
@@ -57,7 +69,7 @@ impl ObjectStoreMetrics {
         let latency_opts = histogram_opts!(
             "object_store_operation_latency",
             "Total latency of operation on object store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap(), // max 52s
+            exponential_buckets(0.0001, 2.0, 21).unwrap(), // max 104s
         );
         let operation_latency =
             register_histogram_vec_with_registry!(latency_opts, &["type"], registry).unwrap();
