@@ -87,8 +87,8 @@ impl<S: StateStore> SourceStateHandler<S> {
         }
     }
 
-    /// Initializes the state of the specified ``state_identifier`` and returns an empty vec
-    /// if it does not exist (e.g., the first accessible source).
+    /// Retrieves the state of the specified ``state_identifier``
+    /// Returns None if it does not exist (e.g., the first accessible source).
     ///
     /// The function returns the serialized state.
     pub async fn restore_states(
