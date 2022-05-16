@@ -14,10 +14,7 @@
 
 //! For expression that only accept two nullable arguments as input.
 
-use risingwave_common::array::{
-    BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array,
-};
-use risingwave_common::error::Result;
+use risingwave_common::array::BoolArray;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 
