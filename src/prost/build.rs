@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Build protobuf structs.
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap_or("./src".to_string()));
+    let out_dir = PathBuf::from("./src");
     let file_descriptor_set_path: PathBuf = out_dir.join("file_descriptor_set.bin");
     tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
