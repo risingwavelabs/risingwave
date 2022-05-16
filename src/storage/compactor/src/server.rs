@@ -66,7 +66,15 @@ pub async fn compactor_serve(
     ));
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let object_store = Arc::new(parse_object_store(&opts.state_store).await);
+    let object_store = Arc::new(
+        parse_object_store(
+            opts.state_store
+                .strip_prefix("hummock+")
+                .expect("object store must be hummock for compactor server"),
+            true,
+        )
+        .await,
+    );
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
         storage_config.data_directory.to_string(),

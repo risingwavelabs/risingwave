@@ -30,7 +30,7 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     preflight_check, AwsS3Config, CompactorService, ComputeNodeService, ConfigExpander,
-    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendServiceV2, GrafanaService,
+    ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
     JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig,
     Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
@@ -204,7 +204,7 @@ fn task_main(
             ServiceConfig::FrontendV2(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = FrontendServiceV2::new(c.clone())?;
+                let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;

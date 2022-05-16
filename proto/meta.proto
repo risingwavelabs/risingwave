@@ -129,17 +129,12 @@ message TableFragments {
     ActorState state = 2;
   }
   message Fragment {
-    enum FragmentType {
-      SOURCE = 0;
-      SINK = 1;
-      OTHERS = 2;
-    }
     enum FragmentDistributionType {
       SINGLE = 0;
       HASH = 1;
     }
     uint32 fragment_id = 1;
-    FragmentType fragment_type = 2;
+    stream_plan.FragmentType fragment_type = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
   }
@@ -159,7 +154,7 @@ message CreateMaterializedViewRequest {
   uint32 node_id = 1;
   // TODO: remove this, do catalog init in Meta and return in response.
   plan_common.TableRefId table_ref_id = 2;
-  stream_plan.StreamNode stream_node = 3;
+  stream_plan.StreamFragmentGraph fragment_graph = 3;
 }
 
 // will be deprecated and replaced by DdlService
@@ -262,12 +257,12 @@ message SubscribeResponse {
   uint64 version = 3;
   oneof info {
     common.WorkerNode node = 4;
-    catalog.Database database_v2 = 8;
-    catalog.Schema schema_v2 = 9;
-    catalog.Table table_v2 = 10;
-    catalog.Source source = 11;
-    MetaSnapshot snapshot = 12;
-    hummock.HummockSnapshot hummock_snapshot = 13;
+    catalog.Database database = 5;
+    catalog.Schema schema = 6;
+    catalog.Table table = 7;
+    catalog.Source source = 8;
+    MetaSnapshot snapshot = 9;
+    hummock.HummockSnapshot hummock_snapshot = 10;
   }
 }
 

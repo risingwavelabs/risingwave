@@ -118,11 +118,11 @@ script = '''
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
-rm -f "${PREFIX_BIN}/frontend-v2"
+rm -f "${PREFIX_BIN}/frontend"
 rm -f "${PREFIX_BIN}/compactor"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend" "${PREFIX_BIN}/frontend"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${PREFIX_BIN}/compactor"
 '''
 

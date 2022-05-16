@@ -117,7 +117,7 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::DatabaseV2(database.to_owned()))
+                .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
 
             Ok(version)
@@ -138,7 +138,7 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Delete, Info::DatabaseV2(database))
+                .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
             Ok(version)
@@ -158,7 +158,7 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::SchemaV2(schema.to_owned()))
+                .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
                 .await;
 
             Ok(version)
@@ -179,7 +179,7 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Delete, Info::SchemaV2(schema))
+                .notify_frontend(Operation::Delete, Info::Schema(schema))
                 .await;
 
             Ok(version)
@@ -217,7 +217,7 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::TableV2(table.to_owned()))
+                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             Ok(version)
@@ -256,7 +256,7 @@ where
             let version = self
                 .env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::TableV2(table.to_owned()))
+                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             Ok(version)
@@ -291,7 +291,7 @@ where
                     let version = self
                         .env
                         .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::TableV2(table))
+                        .notify_frontend(Operation::Delete, Info::Table(table))
                         .await;
 
                     Ok(version)
@@ -455,7 +455,7 @@ where
 
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::TableV2(mview.to_owned()))
+                .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
             // Currently frontend uses source's version
             let version = self
@@ -555,7 +555,7 @@ where
 
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Delete, Info::TableV2(mview))
+                    .notify_frontend(Operation::Delete, Info::Table(mview))
                     .await;
                 let version = self
                     .env

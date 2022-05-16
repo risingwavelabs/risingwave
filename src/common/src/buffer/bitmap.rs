@@ -250,7 +250,10 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     type Output = Result<Bitmap>;
 
     fn bitand(self, rhs: &'b Bitmap) -> Result<Bitmap> {
-        Ok(Bitmap::from((&self.bits & &rhs.bits)?))
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let mut bitmap = Bitmap::from((&self.bits & &rhs.bits)?);
+        bitmap.num_bits = self.num_bits;
+        Ok(bitmap)
     }
 }
 
@@ -258,7 +261,10 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     type Output = Result<Bitmap>;
 
     fn bitor(self, rhs: &'b Bitmap) -> Result<Bitmap> {
-        Ok(Bitmap::from((&self.bits | &rhs.bits)?))
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let mut bitmap = Bitmap::from((&self.bits | &rhs.bits)?);
+        bitmap.num_bits = self.num_bits;
+        Ok(bitmap)
     }
 }
 
@@ -302,7 +308,8 @@ impl TryFrom<&ProstBuffer> for Bitmap {
 
     fn try_from(buf: &ProstBuffer) -> Result<Bitmap> {
         let mut builder = BitmapBuilder::default();
-        buf.get_body().as_slice().iter().for_each(|e| {
+        let body = buf.get_body().as_slice();
+        body.iter().for_each(|e| {
             builder.append(*e == 1_u8);
         });
 

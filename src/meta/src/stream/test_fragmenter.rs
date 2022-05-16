@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_frontend::stream_fragmenter::StreamFragmenter;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -35,7 +36,7 @@ use risingwave_pb::stream_plan::{
 
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
-use crate::stream::fragmenter::StreamFragmenter;
+use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
 
 fn make_table_ref_id(id: i32) -> TableRefId {
@@ -260,11 +261,12 @@ async fn test_fragmenter() -> Result<()> {
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
-    let graph = StreamFragmenter::generate_graph(
+    let graph = StreamFragmenter::build_graph(stream_node);
+    let graph = ActorGraphBuilder::generate_graph(
         env.id_gen_manager_ref(),
         fragment_manager,
         parallel_degree,
-        &stream_node,
+        &graph,
         &mut ctx,
     )
     .await?;

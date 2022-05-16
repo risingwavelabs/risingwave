@@ -101,24 +101,24 @@ impl ObserverManager {
         Ok(())
     }
 
-    fn handle_catalog_v2_notification(&mut self, resp: SubscribeResponse) {
+    fn handle_catalog_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
 
         let mut catalog_guard = self.catalog.write();
         match info {
-            Info::DatabaseV2(database) => match resp.operation() {
+            Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database.clone()),
                 Operation::Delete => catalog_guard.drop_database(database.id),
                 _ => panic!("receive an unsupported notify {:?}", resp.clone()),
             },
-            Info::SchemaV2(schema) => match resp.operation() {
+            Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema.clone()),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
-            Info::TableV2(table) => match resp.operation() {
+            Info::Table(table) => match resp.operation() {
                 Operation::Add => catalog_guard.create_table(table),
                 Operation::Delete => {
                     catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
@@ -150,8 +150,8 @@ impl ObserverManager {
         };
 
         match info {
-            Info::DatabaseV2(_) | Info::SchemaV2(_) | Info::TableV2(_) | Info::Source(_) => {
-                self.handle_catalog_v2_notification(resp);
+            Info::Database(_) | Info::Schema(_) | Info::Table(_) | Info::Source(_) => {
+                self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
                 self.update_worker_node_manager(resp.operation(), node.clone());
