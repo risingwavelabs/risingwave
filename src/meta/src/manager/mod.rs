@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog_v2;
+mod catalog;
 mod env;
 mod hash_mapping;
 mod id;
 mod notification;
 mod stream_clients;
 
-pub use catalog_v2::*;
+pub use catalog::*;
 pub use env::*;
 pub use hash_mapping::*;
 pub use id::*;
