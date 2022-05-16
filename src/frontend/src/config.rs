@@ -17,19 +17,19 @@
 use risingwave_common::error::ErrorCode::InvalidConfigValue;
 use risingwave_common::error::RwError;
 
-use crate::config::QueryMode::{DISTRIBUTED, LOCAL};
+use crate::config::QueryMode::{Distributed, Local};
 
 pub static QUERY_MODE: &str = "query_mode";
 
 #[derive(Debug, Clone)]
 pub enum QueryMode {
-    LOCAL,
-    DISTRIBUTED,
+    Local,
+    Distributed,
 }
 
 impl Default for QueryMode {
     fn default() -> Self {
-        DISTRIBUTED
+        Distributed
     }
 }
 
@@ -39,9 +39,9 @@ impl<'a> TryFrom<&'a str> for QueryMode {
 
     fn try_from(s: &'a str) -> Result<Self, RwError> {
         if s.eq_ignore_ascii_case("local") {
-            Ok(LOCAL)
+            Ok(Local)
         } else if s.eq_ignore_ascii_case("distributed") {
-            Ok(DISTRIBUTED)
+            Ok(Distributed)
         } else {
             Err(InvalidConfigValue {
                 config_entry: QUERY_MODE.to_string(),
@@ -59,10 +59,10 @@ mod tests {
 
     #[test]
     fn parse_query_mode() {
-        assert_matches!("local".try_into().unwrap(), QueryMode::LOCAL);
-        assert_matches!("Local".try_into().unwrap(), QueryMode::LOCAL);
-        assert_matches!("distributed".try_into().unwrap(), QueryMode::DISTRIBUTED);
-        assert_matches!("diStributed".try_into().unwrap(), QueryMode::DISTRIBUTED);
+        assert_matches!("local".try_into().unwrap(), QueryMode::Local);
+        assert_matches!("Local".try_into().unwrap(), QueryMode::Local);
+        assert_matches!("distributed".try_into().unwrap(), QueryMode::Distributed);
+        assert_matches!("diStributed".try_into().unwrap(), QueryMode::Distributed);
         assert!(QueryMode::try_from("ab").is_err());
     }
 }
