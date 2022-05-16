@@ -23,7 +23,6 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
-use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
@@ -43,7 +42,6 @@ use crate::manager::{CatalogManager, MetaOpts, MetaSrvEnv, StoredCatalogManager}
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
-use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
@@ -255,7 +253,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(ClusterServiceServer::new(cluster_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
-            .add_service(EpochServiceServer::new(EpochServiceImpl::default()))
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .serve_with_incoming_shutdown(
