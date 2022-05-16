@@ -48,7 +48,7 @@ impl FeQueryMessage {
         // Why there is a \0..
         match CStr::from_bytes_with_nul(&self.sql_bytes) {
             Ok(cstr) => match cstr.to_str() {
-                Ok(v) => Ok(v.trim_end_matches('\0')),
+                Ok(v) => Ok(v),
                 Err(e) => Err(Error::new(
                     ErrorKind::InvalidInput,
                     format!("Cannot transform cstr to str: {}", e),
