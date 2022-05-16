@@ -32,6 +32,7 @@
 #![feature(trait_alias)]
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
+#![feature(assert_matches)]
 #[macro_use]
 pub mod catalog;
 pub mod binder;
@@ -48,6 +49,7 @@ mod meta_client;
 pub mod test_utils;
 extern crate core;
 extern crate risingwave_common;
+mod config;
 
 use std::ffi::OsString;
 use std::iter;
