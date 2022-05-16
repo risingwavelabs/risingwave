@@ -46,13 +46,12 @@ pub struct FeQueryMessage {
 impl FeQueryMessage {
     pub fn get_sql(&self) -> Result<&str> {
         match CStr::from_bytes_with_nul(&self.sql_bytes) {
-            Ok(cstr) => match cstr.to_str() {
-                Ok(v) => Ok(v),
-                Err(e) => Err(Error::new(
+            Ok(cstr) => cstr.to_str().map_err(|err| {
+                Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Cannot transform cstr to str: {}", e),
-                )),
-            },
+                    format!("Cannot transform cstr to str: {}", err),
+                )
+            }),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
                 format!("Invalid UTF-8 sequence: {}", err),
