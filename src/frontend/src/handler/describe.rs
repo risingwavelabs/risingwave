@@ -166,9 +166,15 @@ mod tests {
     #[tokio::test]
     async fn test_describe_handler_table() {
         let frontend = LocalFrontend::new(Default::default()).await;
-        frontend.run_sql("create table t (v1 int, v2 int);").await.unwrap();
+        frontend
+            .run_sql("create table t (v1 int, v2 int);")
+            .await
+            .unwrap();
 
-        frontend.run_sql("create index idx1 on t (v1,v2);").await.unwrap();
+        frontend
+            .run_sql("create index idx1 on t (v1,v2);")
+            .await
+            .unwrap();
 
         let sql = "describe t";
         let pg_response = frontend.run_sql(sql).await.unwrap();
@@ -190,6 +196,5 @@ mod tests {
         };
 
         assert_eq!(columns, expected_columns);
-
     }
 }
