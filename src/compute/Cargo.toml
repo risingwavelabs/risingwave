@@ -60,3 +60,5 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 [dev-dependencies]
 rand = "0.8"
 tempfile = "3"
+futures-async-stream = "0.2"
+

@@ -3617,6 +3617,7 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "futures-async-stream",
  "hyper",
  "itertools",
  "lazy_static",
