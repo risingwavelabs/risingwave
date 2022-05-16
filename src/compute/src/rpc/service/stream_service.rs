@@ -141,7 +141,12 @@ impl StreamService for StreamServiceImpl {
 
         let collect_result = self
             .mgr
-            .send_and_collect_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
+            .send_and_collect_barrier(
+                &barrier,
+                req.actor_ids_to_send,
+                req.actor_ids_to_collect,
+                true,
+            )
             .await
             .map_err(|e| e.to_grpc_status())?;
 
