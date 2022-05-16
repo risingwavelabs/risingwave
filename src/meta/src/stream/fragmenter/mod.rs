@@ -41,8 +41,6 @@ use crate::storage::MetaStore;
 pub struct StreamFragmenter {
     /// degree of parallelism
     parallel_degree: u32,
-    // TODO: remove this when we deprecate Java frontend.
-    is_legacy_frontend: bool,
 }
 
 /// The mutable state when building fragment graph.
@@ -113,19 +111,15 @@ impl StreamFragmenter {
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         parallel_degree: u32,
-        is_legacy_frontend: bool,
         stream_node: &StreamNode,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
-        Self {
-            parallel_degree,
-            is_legacy_frontend,
-        }
-        .generate_graph_inner(id_gen_manager, fragment_manager, stream_node, ctx)
-        .await
+        Self { parallel_degree }
+            .generate_graph_inner(id_gen_manager, fragment_manager, stream_node, ctx)
+            .await
     }
 
     /// Build a stream graph in two steps:
@@ -347,9 +341,6 @@ impl StreamFragmenter {
             NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
             NodeBody::Chain(ref node) => {
-                // TODO: Remove this when we deprecate Java frontend.
-                current_fragment.is_singleton = self.is_legacy_frontend;
-
                 // memorize table id for later use
                 state
                     .dependent_table_ids

@@ -60,8 +60,6 @@ pub struct CreateMaterializedViewContext {
     pub hash_mapping: Vec<ParallelUnitId>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
-    /// TODO: remove this when we deprecate Java frontend.
-    pub is_legacy_frontend: bool,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -289,7 +287,6 @@ where
             affiliated_source,
             hash_mapping,
             table_id_offset: _,
-            is_legacy_frontend,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
@@ -319,18 +316,15 @@ where
         // resolve chain node infos, including:
         // 1. insert upstream actor id in merge node
         // 2. insert parallel unit id in batch query node
-        // note: this only works for Rust frontend.
-        if !is_legacy_frontend {
-            self.resolve_chain_node(
-                &mut table_fragments,
-                &dependent_table_ids,
-                &hash_mapping,
-                &mut dispatches,
-                &mut upstream_node_actors,
-                &locations,
-            )
-            .await?;
-        }
+        self.resolve_chain_node(
+            &mut table_fragments,
+            &dependent_table_ids,
+            &hash_mapping,
+            &mut dispatches,
+            &mut upstream_node_actors,
+            &locations,
+        )
+        .await?;
 
         // Verify whether all same_as_upstream constraints are satisfied.
         //

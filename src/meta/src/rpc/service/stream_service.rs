@@ -84,7 +84,6 @@ where
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))
             .await;
         let mut ctx = CreateMaterializedViewContext {
-            is_legacy_frontend: true,
             hash_mapping,
             ..Default::default()
         };
@@ -93,7 +92,6 @@ where
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
-            true,
             req.get_stream_node().map_err(tonic_err)?,
             &mut ctx,
         )

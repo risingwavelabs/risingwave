@@ -423,7 +423,6 @@ where
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
-            false,
             &stream_node,
             &mut ctx,
         )
