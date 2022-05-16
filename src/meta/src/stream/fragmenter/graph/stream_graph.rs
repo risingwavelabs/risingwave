@@ -538,6 +538,7 @@ impl StreamGraphBuilder {
         }
     }
 
+    /// Resolve the chain node, only rewrite the schema of input MergeNode.
     fn resolve_chain_node(&self, stream_node: &StreamNode) -> Result<StreamNode> {
         let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap() else {
             unreachable!()
