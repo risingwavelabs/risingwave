@@ -21,10 +21,8 @@ use bytes::Bytes;
 use fail::fail_point;
 use risingwave_hummock_sdk::{get_local_sst_id, is_remote_sst_id, HummockSSTableId};
 
-use crate::hummock::{
-    Block, BlockCache, BlockHolder, CachableEntry, HummockError, HummockResult, LookupResult,
-    LruCache, Sstable, SstableMeta,
-};
+use super::{Block, BlockCache, Sstable, SstableMeta};
+use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
@@ -208,32 +206,22 @@ impl SstableStore {
     }
 
     pub async fn sstable(&self, sst_id: HummockSSTableId) -> HummockResult<TableHolder> {
-        match self.meta_cache.lookup_for_request(sst_id, sst_id) {
-            LookupResult::Cached(entry) => Ok(entry),
-            LookupResult::WaitPendingRequest(recv) => recv.await.map_err(HummockError::other),
-            LookupResult::Miss => {
+        let entry = self
+            .meta_cache
+            .lookup_with_request_dedup(sst_id, sst_id, || async {
                 let path = self.get_sst_meta_path(sst_id);
-                match self
+                let buf = self
                     .get_store_of_table(sst_id)
                     .read(&path, None)
                     .await
-                    .map_err(HummockError::object_io_error)
-                {
-                    Ok(buf) => {
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
-                        let sst = Box::new(Sstable { id: sst_id, meta });
-                        let handle =
-                            self.meta_cache
-                                .insert(sst_id, sst_id, sst.encoded_size(), sst);
-                        Ok(handle)
-                    }
-                    Err(e) => {
-                        self.meta_cache.clear_pending_request(&sst_id, sst_id);
-                        Err(e)
-                    }
-                }
-            }
-        }
+                    .map_err(HummockError::object_io_error)?;
+                let meta = SstableMeta::decode(&mut &buf[..])?;
+                let sst = Box::new(Sstable { id: sst_id, meta });
+                let size = sst.encoded_size();
+                Ok((sst, size))
+            })
+            .await?;
+        Ok(entry)
     }
 
     pub fn get_sst_meta_path(&self, sst_id: HummockSSTableId) -> String {

@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use clap::StructOpt;
 use risedev::{
-    CompactorService, ComputeNodeService, ConfigExpander, FrontendServiceV2, MetaNodeService,
+    CompactorService, ComputeNodeService, ConfigExpander, FrontendService, MetaNodeService,
     ServiceConfig,
 };
 use tokio::fs::File;
@@ -78,7 +78,7 @@ pub async fn playground() -> Result<()> {
                 }
                 ServiceConfig::FrontendV2(c) => {
                     let mut command = Command::new("frontend-node");
-                    FrontendServiceV2::apply_command_args(&mut command, c)?;
+                    FrontendService::apply_command_args(&mut command, c)?;
                     rw_services.push(RisingWaveService::Frontend(
                         command.get_args().map(ToOwned::to_owned).collect(),
                     ));

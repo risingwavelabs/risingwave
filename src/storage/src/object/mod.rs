@@ -22,9 +22,7 @@ pub use mem::*;
 pub mod s3;
 pub use s3::*;
 
-pub mod disk;
-pub use disk::*;
-
+mod disk;
 pub mod error;
 pub use error::*;
 
@@ -63,7 +61,7 @@ pub trait ObjectStore: Send + Sync {
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>>;
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
 
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
@@ -101,7 +99,7 @@ impl ObjectStoreImpl {
     pub async fn readv(
         &self,
         path: &str,
-        block_locs: Vec<BlockLocation>,
+        block_locs: &[BlockLocation],
     ) -> ObjectResult<Vec<Bytes>> {
         match self {
             ObjectStoreImpl::Mem(mem) => mem.readv(path, block_locs).await,
