@@ -309,8 +309,8 @@ impl Binder {
         left: Expr,
         right: Expr,
     ) -> Result<FunctionCall> {
-        let bound_left = self.bind_expr(left)?;
-        let bound_right = self.bind_expr(right)?;
+        let left = self.bind_expr(left)?;
+        let right = self.bind_expr(right)?;
 
         if negated {
             // x IS NOT DISTINCT FROM y is equivalent to (x IS NULL AND y IS NULL) OR x = y
@@ -320,13 +320,13 @@ impl Binder {
                     FunctionCall::new_unchecked(
                         ExprType::And,
                         vec![
-                            FunctionCall::new(ExprType::IsNull, vec![bound_left.clone()])?.into(),
-                            FunctionCall::new(ExprType::IsNull, vec![bound_right.clone()])?.into(),
+                            FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
+                            FunctionCall::new(ExprType::IsNull, vec![right.clone()])?.into(),
                         ],
                         DataType::Boolean,
                     )
                     .into(),
-                    FunctionCall::new(ExprType::Equal, vec![bound_left, bound_right])?.into(),
+                    FunctionCall::new(ExprType::Equal, vec![left, right])?.into(),
                 ],
             )
         } else {
@@ -341,12 +341,9 @@ impl Binder {
                             FunctionCall::new_unchecked(
                                 ExprType::And,
                                 vec![
-                                    FunctionCall::new(
-                                        ExprType::IsNotNull,
-                                        vec![bound_left.clone()],
-                                    )?
-                                    .into(),
-                                    FunctionCall::new(ExprType::IsNull, vec![bound_right.clone()])?
+                                    FunctionCall::new(ExprType::IsNotNull, vec![left.clone()])?
+                                        .into(),
+                                    FunctionCall::new(ExprType::IsNull, vec![right.clone()])?
                                         .into(),
                                 ],
                                 DataType::Boolean,
@@ -355,13 +352,9 @@ impl Binder {
                             FunctionCall::new_unchecked(
                                 ExprType::And,
                                 vec![
-                                    FunctionCall::new(ExprType::IsNull, vec![bound_left.clone()])?
+                                    FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
+                                    FunctionCall::new(ExprType::IsNotNull, vec![right.clone()])?
                                         .into(),
-                                    FunctionCall::new(
-                                        ExprType::IsNotNull,
-                                        vec![bound_right.clone()],
-                                    )?
-                                    .into(),
                                 ],
                                 DataType::Boolean,
                             )
@@ -369,7 +362,7 @@ impl Binder {
                         ],
                     )?
                     .into(),
-                    FunctionCall::new(ExprType::NotEqual, vec![bound_left, bound_right])?.into(),
+                    FunctionCall::new(ExprType::NotEqual, vec![left, right])?.into(),
                 ],
             )
         }
