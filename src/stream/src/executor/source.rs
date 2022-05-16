@@ -59,7 +59,7 @@ pub struct SourceExecutor<S: StateStore> {
     source_identify: String,
 
     split_state_store: SourceStateHandler<S>,
-    
+
     // store latest split to offset mapping.
     // None if there is no update on source state since the previsouly seen barrier.
     state_cache: Option<Vec<ConnectorState>>,

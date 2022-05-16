@@ -48,8 +48,6 @@ impl<S: StateStore> Debug for SourceStateHandler<S> {
     }
 }
 
-
-
 impl<S: StateStore> SourceStateHandler<S> {
     pub fn new(keyspace: Keyspace<S>) -> Self {
         Self { keyspace }
@@ -98,8 +96,10 @@ impl<S: StateStore> SourceStateHandler<S> {
         state_identifier: String,
         epoch: u64,
     ) -> Result<Option<Bytes>> {
-        self.keyspace.get(state_identifier, epoch).await.map_err(|e| anyhow!(e))
-
+        self.keyspace
+            .get(state_identifier, epoch)
+            .await
+            .map_err(|e| anyhow!(e))
     }
 
     pub async fn try_recover_from_state_store(
