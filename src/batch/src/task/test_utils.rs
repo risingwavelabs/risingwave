@@ -237,7 +237,6 @@ impl<'a> TableBuilder<'a> {
         let insert = InsertNode {
             table_source_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
-            frontend_v2: false,
         };
 
         let tuples = self

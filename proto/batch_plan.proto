@@ -37,7 +37,6 @@ message FilterScanNode {
 message InsertNode {
   plan_common.TableRefId table_source_ref_id = 1;
   repeated int32 column_ids = 2;
-  bool frontend_v2 = 3;
 }
 
 message DeleteNode {
