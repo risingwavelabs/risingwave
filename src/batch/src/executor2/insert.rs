@@ -19,7 +19,7 @@ use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
+    ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -89,9 +89,7 @@ impl InsertExecutor2 {
                 builder.append(Some(source_desc.next_row_id())).unwrap();
             }
 
-            let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
-                builder.finish().unwrap(),
-            ))));
+            let rowid_column = once(Column::from(builder.finish().unwrap()));
             let child_columns = data_chunk.into_parts().0.into_iter();
 
             // Materialize plan is assembled manually with Rust frontend, so we put the row
@@ -159,7 +157,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::{Array, I32Array, I64Array, StructArray};
+    use risingwave_common::array::{Array, ArrayImpl, I32Array, I64Array, StructArray};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;

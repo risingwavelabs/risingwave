@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use risingwave_batch::executor::{Executor as BatchExecutor};
+use risingwave_batch::executor::Executor as BatchExecutor;
 use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
 use risingwave_batch::executor2::monitor::BatchMetrics;
 use risingwave_batch::executor2::{
@@ -28,7 +28,6 @@ use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
@@ -98,7 +97,8 @@ async fn test_table_v2_materialize() -> Result<()> {
             }),
             column_id: 0,
             ..Default::default()
-        }.into(),
+        }
+        .into(),
         // data
         ProstColumnDesc {
             column_type: Some(DataType {
@@ -107,7 +107,8 @@ async fn test_table_v2_materialize() -> Result<()> {
             }),
             column_id: 1,
             ..Default::default()
-        }.into(),
+        }
+        .into(),
     ];
     source_manager.create_table_source(&source_table_id, table_columns)?;
 
