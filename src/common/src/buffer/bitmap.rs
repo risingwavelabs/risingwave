@@ -215,11 +215,10 @@ impl Bitmap {
     }
 
     pub fn to_protobuf(&self) -> ProstBuffer {
-        let mut buf = ProstBuffer::default();
-        for b in self.iter() {
-            buf.body.push(b as u8);
+        ProstBuffer {
+            body: self.bits.as_slice().to_vec(),
+            ..Default::default()
         }
-        buf
     }
 
     pub fn iter(&self) -> BitmapIter<'_> {
@@ -307,13 +306,7 @@ impl TryFrom<&ProstBuffer> for Bitmap {
     type Error = RwError;
 
     fn try_from(buf: &ProstBuffer) -> Result<Bitmap> {
-        let mut builder = BitmapBuilder::default();
-        let body = buf.get_body().as_slice();
-        body.iter().for_each(|e| {
-            builder.append(*e == 1_u8);
-        });
-
-        Ok(builder.finish())
+        Buffer::from_slice(&buf.body).map(Into::into)
     }
 }
 
