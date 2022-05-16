@@ -97,7 +97,7 @@ impl StateStoreImpl {
                 );
                 let local_object_store =
                     Arc::new(parse_object_store(config.local_object_store.as_str(), false).await);
-                let remote_sstable_store = Arc::new(SstableStore::new(
+                let sstable_store = Arc::new(SstableStore::new(
                     remote_object_store.clone(),
                     local_object_store,
                     config.data_directory.to_string(),
@@ -107,7 +107,7 @@ impl StateStoreImpl {
                 ));
                 let inner = HummockStorage::new(
                     config.clone(),
-                    remote_sstable_store.clone(),
+                    sstable_store.clone(),
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
                 )
@@ -120,7 +120,7 @@ impl StateStoreImpl {
                     let (_, shutdown_sender) = Compactor::start_compactor(
                         config.clone(),
                         hummock_meta_client,
-                        remote_sstable_store,
+                        sstable_store,
                         state_store_stats.clone(),
                     );
                     in_mem_object_store.set_compactor_shutdown_sender(shutdown_sender);
@@ -131,7 +131,7 @@ impl StateStoreImpl {
                     let (_, shutdown_sender) = Compactor::start_compactor(
                         config.clone(),
                         hummock_meta_client,
-                        remote_sstable_store,
+                        sstable_store,
                         state_store_stats.clone(),
                     );
                     disk_object_store.set_compactor_shutdown_sender(shutdown_sender);
