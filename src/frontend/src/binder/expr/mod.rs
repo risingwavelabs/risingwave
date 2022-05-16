@@ -331,9 +331,9 @@ impl Binder {
         } else {
             // x IS DISTINCT FROM y is equivalent to
             // (x IS NULL AND y IS NOT NULL) OR (x IS NOT NULL AND y IS NULL) OR x <> y
-           FunctionCall::new (
-               ExprType::Or,
-               vec![
+            FunctionCall::new (
+                ExprType::Or,
+                vec![
                     FunctionCall::new(
                         ExprType::Or,
                         vec![
