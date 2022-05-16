@@ -25,6 +25,8 @@ pub use s3::*;
 pub mod error;
 pub use error::*;
 
+use crate::monitor::ObjectStoreMetrics;
+
 #[derive(Debug, Copy, Clone)]
 pub struct BlockLocation {
     pub offset: usize,
@@ -69,25 +71,40 @@ pub trait ObjectStore: Send + Sync {
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 
-pub enum ObjectStoreImpl {
-    Mem(InMemObjectStore),
-    S3(S3ObjectStore),
+pub struct ObjectStoreImpl {
+    inner: Box<dyn ObjectStore>,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
 }
 
 /// Manually dispatch trait methods.
 impl ObjectStoreImpl {
-    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.upload(path, obj).await,
-            ObjectStoreImpl::S3(s3) => s3.upload(path, obj).await,
+    pub fn new(store: Box<dyn ObjectStore>, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self {
+            inner: store,
+            object_store_metrics,
         }
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.read(path, block_loc).await,
-            ObjectStoreImpl::S3(s3) => s3.read(path, block_loc).await,
+    /// only for test
+    pub fn new_mem() -> Self {
+        Self {
+            inner: Box::new(InMemObjectStore::new()),
+            object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         }
+    }
+
+    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        let timer = self.object_store_metrics.write_latency.start_timer();
+        self.inner.upload(path, obj).await?;
+        timer.observe_duration();
+        Ok(())
+    }
+
+    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        let timer = self.object_store_metrics.read_latency.start_timer();
+        let ret = self.inner.read(path, block_loc).await?;
+        timer.observe_duration();
+        Ok(ret)
     }
 
     pub async fn readv(
@@ -95,38 +112,32 @@ impl ObjectStoreImpl {
         path: &str,
         block_locs: Vec<BlockLocation>,
     ) -> ObjectResult<Vec<Bytes>> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.readv(path, block_locs).await,
-            ObjectStoreImpl::S3(s3) => s3.readv(path, block_locs).await,
-        }
+        self.inner.readv(path, block_locs).await
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.metadata(path).await,
-            ObjectStoreImpl::S3(s3) => s3.metadata(path).await,
-        }
+        self.inner.metadata(path).await
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.delete(path).await,
-            ObjectStoreImpl::S3(s3) => s3.delete(path).await,
-        }
+        self.inner.delete(path).await
     }
 }
 
-pub async fn parse_object_store(hummock: &str) -> ObjectStoreImpl {
-    match hummock {
-        s3 if s3.starts_with("hummock+s3://") => ObjectStoreImpl::S3(
+pub async fn parse_object_store(
+    hummock: &str,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+) -> ObjectStoreImpl {
+    let store: Box<dyn ObjectStore> = match hummock {
+        s3 if s3.starts_with("hummock+s3://") => Box::new(
             S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
         ),
-        minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio.strip_prefix("hummock+").unwrap()).await,
-        ),
+        minio if minio.starts_with("hummock+minio://") => {
+            Box::new(S3ObjectStore::with_minio(minio.strip_prefix("hummock+").unwrap()).await)
+        }
         memory if memory.starts_with("hummock+memory") => {
             tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
-            ObjectStoreImpl::Mem(InMemObjectStore::new())
+            Box::new(InMemObjectStore::new())
         }
         other => {
             unimplemented!(
@@ -134,5 +145,6 @@ pub async fn parse_object_store(hummock: &str) -> ObjectStoreImpl {
                 other
             )
         }
-    }
+    };
+    ObjectStoreImpl::new(store, object_store_metrics)
 }

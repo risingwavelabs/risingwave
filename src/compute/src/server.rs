@@ -30,7 +30,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
@@ -96,6 +96,7 @@ pub async fn compute_node_serve(
     // Initialize state store.
     let storage_config = Arc::new(config.storage.clone());
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -105,6 +106,7 @@ pub async fn compute_node_serve(
             hummock_metrics.clone(),
         )),
         state_store_metrics.clone(),
+        object_store_metrics,
     )
     .await
     .unwrap();

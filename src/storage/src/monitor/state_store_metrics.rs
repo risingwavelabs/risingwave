@@ -18,7 +18,7 @@ use prometheus::{
     register_int_counter_with_registry, Histogram, Registry,
 };
 
-use super::monitor_process;
+use super::{monitor_process, Print};
 
 /// Define all metrics.
 #[macro_export]
@@ -42,6 +42,7 @@ macro_rules! for_all_metrics {
             write_batch_duration: Histogram,
             write_batch_size: Histogram,
             write_build_l0_sst_duration: Histogram,
+            write_build_l0_bytes: GenericCounter<AtomicU64>,
 
             iter_merge_sstable_counts: Histogram,
             iter_merge_seek_duration: Histogram,
@@ -54,6 +55,10 @@ macro_rules! for_all_metrics {
             shared_buffer_to_sstable_size: Histogram,
 
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
+            compaction_read_bytes: GenericCounter<AtomicU64>,
+            compaction_write_bytes: GenericCounter<AtomicU64>,
+            compact_sst_duration: Histogram,
+            compact_task_duration: Histogram,
         }
     };
 }
@@ -69,9 +74,16 @@ macro_rules! define_state_store_metrics {
         pub struct StateStoreMetrics {
             $( pub $name: $type, )*
         }
+
+        impl Print for StateStoreMetrics {
+           fn print(&self) {
+                $( self.$name.print(); )*
+           }
+        }
     }
 
 }
+
 for_all_metrics! { define_state_store_metrics }
 
 impl StateStoreMetrics {
@@ -178,7 +190,11 @@ impl StateStoreMetrics {
         );
         let write_build_l0_sst_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
-
+        let write_build_l0_bytes = register_int_counter_with_registry!(
+            "state_store_write_build_l0_bytes",
+            "Total size of compaction files size that have been written to object store from shared buffer",
+            registry
+        ).unwrap();
         let opts = histogram_opts!(
             "state_store_shared_buffer_to_l0_duration",
             "Histogram of time spent from compacting shared buffer to remote storage",
@@ -241,6 +257,31 @@ impl StateStoreMetrics {
             registry
         )
         .unwrap();
+        let compaction_read_bytes = register_int_counter_with_registry!(
+            "state_store_compaction_read_bytes",
+            "Total size of file size that read from object store in compaction job",
+            registry
+        )
+        .unwrap();
+        let compaction_write_bytes = register_int_counter_with_registry!(
+            "state_store_compaction_write_bytes",
+            "Total size of compaction files size that have been written to object store",
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_compact_sst_duration",
+            "Total time of compact_key_range that have been issued to state store",
+            exponential_buckets(0.001, 2.0, 16).unwrap() // max 32s
+        );
+        let compact_sst_duration = register_histogram_with_registry!(opts, registry).unwrap();
+        let opts = histogram_opts!(
+            "state_store_compact_task_duration",
+            "Total time of compact that have been issued to state store",
+            exponential_buckets(0.001, 2.0, 16).unwrap() // max 32s
+        );
+        let compact_task_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         monitor_process(&registry).unwrap();
 
@@ -259,6 +300,7 @@ impl StateStoreMetrics {
             range_backward_scan_duration,
 
             write_batch_tuple_counts,
+            write_build_l0_bytes,
             write_batch_duration,
             write_batch_size,
             write_build_l0_sst_duration,
@@ -274,6 +316,10 @@ impl StateStoreMetrics {
             shared_buffer_to_sstable_size,
 
             compaction_upload_sst_counts,
+            compaction_read_bytes,
+            compaction_write_bytes,
+            compact_task_duration,
+            compact_sst_duration,
         }
     }
 
