@@ -68,7 +68,6 @@ message ExprNode {
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
-    STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;

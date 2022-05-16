@@ -37,19 +37,6 @@ message Schema {
   uint64 version = 3;
 }
 
-// Below for epoch service.
-
-message GetEpochRequest {}
-
-message GetEpochResponse {
-  common.Status status = 1;
-  uint64 epoch = 2;
-}
-
-service EpochService {
-  rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
-}
-
 // Below for catalog service.
 // will be deprecated and replaced by DdlService
 message CreateRequest {
