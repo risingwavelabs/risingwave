@@ -11,12 +11,16 @@ v1 Int32
 v2 Int32
 v3 Int32
 
+statement ok
+create index idx1 on t3 (v1,v2);;
+
 query TT
-show columns from t3;
+describe t3;
 ----
 v1 Int32
 v2 Int32
 v3 Int32
+idx1 index(v1,v2)
 
 query T
 show databases;
@@ -42,11 +46,13 @@ query T
 show materialized views from dev;
 ----
 mv3
+idx1
 
 query T
 show materialized views;
 ----
 mv3
+idx1
 
 query T
 show materialized sources;
@@ -58,6 +64,9 @@ show sources;
 
 statement ok
 drop materialized view mv3;
+
+statement ok
+drop materialized view idx1;
 
 statement ok
 drop table t3;

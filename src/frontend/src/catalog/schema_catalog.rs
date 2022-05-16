@@ -31,7 +31,7 @@ pub struct SchemaCatalog {
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
-    index_id_by_table_id: HashMap<TableId, Vec<TableId>>,
+    index_by_table_id: HashMap<TableId, Vec<TableCatalog>>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
 }
@@ -43,19 +43,19 @@ impl SchemaCatalog {
         let table: TableCatalog = prost.into();
 
         if let Some(table_id) = &table.is_index_on {
-            self.create_index(id, *table_id);
+            self.create_index(table.clone(), *table_id);
         }
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
     }
 
-    pub fn create_index(&mut self, index_id: TableId, table_id: TableId) {
-        match self.index_id_by_table_id.get_mut(&table_id) {
+    pub fn create_index(&mut self, index: TableCatalog, table_id: TableId) {
+        match self.index_by_table_id.get_mut(&table_id) {
             None => {
-                self.index_id_by_table_id.insert(table_id, vec![index_id]);
+                self.index_by_table_id.insert(table_id, vec![index]);
             }
             Some(ids) => {
-                ids.push(index_id);
+                ids.push(index);
             }
         }
     }
@@ -122,6 +122,10 @@ impl SchemaCatalog {
         self.table_by_name.get(table_name)
     }
 
+    pub fn get_index_by_id(&self, table_id: &TableId) -> Option<&Vec<TableCatalog>> {
+        self.index_by_table_id.get(table_id)
+    }
+
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&SourceCatalog> {
         self.source_by_name.get(source_name)
     }
@@ -138,7 +142,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             name: schema.name.clone(),
             table_by_name: HashMap::new(),
             table_name_by_id: HashMap::new(),
-            index_id_by_table_id: HashMap::new(),
+            index_by_table_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
         }
