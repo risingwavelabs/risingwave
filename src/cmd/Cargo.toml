@@ -26,7 +26,7 @@ tracing = { version = "0.1", features = ["release_max_level_info"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [[bin]]
-name = "frontend-v2"
+name = "frontend"
 path = "src/bin/frontend_node.rs"
 
 [[bin]]
