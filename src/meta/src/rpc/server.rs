@@ -198,12 +198,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
     );
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<S>::new(
-        env.clone(),
-        stream_manager,
-        fragment_manager.clone(),
-        cluster_manager.clone(),
-    );
+    let stream_srv = StreamServiceImpl::<S>::new(stream_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
