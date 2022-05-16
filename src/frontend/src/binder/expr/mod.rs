@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use itertools::zip_eq;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
-    UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, StructField,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -308,6 +309,33 @@ impl Binder {
     }
 }
 
+/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
+pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
+    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
+        defs.iter()
+            .map(|f| {
+                Ok(ColumnDesc {
+                    data_type: bind_data_type(&f.data_type)?,
+                    // Literals don't have `column_id`.
+                    column_id: ColumnId::new(0),
+                    name: f.name.value.clone(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        vec![]
+    };
+    Ok(ColumnDesc {
+        data_type: bind_data_type(&column_def.data_type)?,
+        column_id: ColumnId::new(0),
+        name: column_def.name.value.clone(),
+        field_descs,
+        type_name: "".to_string(),
+    })
+}
+
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
@@ -333,6 +361,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             )
             .into())
         }
+        AstDataType::Struct(types) => DataType::Struct {
+            fields: types
+                .iter()
+                .map(|f| bind_data_type(&f.data_type))
+                .collect::<Result<Vec<_>>>()?
+                .into(),
+        },
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),
