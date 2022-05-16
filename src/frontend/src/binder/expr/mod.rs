@@ -309,25 +309,23 @@ impl Binder {
     }
 }
 
-/// Bind `struct_field` to `column_desc`, now we not use the `column_id` in `field_descs`,
-/// so use the default `column_id`.
+/// Given a type `STRUCT<v1 int>`, this functions binds the field `v1 int`.
 pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
-    let field_descs = {
-        if let AstDataType::Struct(defs) = &column_def.data_type {
-            defs.iter()
-                .map(|f| {
-                    Ok(ColumnDesc {
-                        data_type: bind_data_type(&f.data_type)?,
-                        column_id: ColumnId::new(0),
-                        name: f.name.value.clone(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                    })
+    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
+        defs.iter()
+            .map(|f| {
+                Ok(ColumnDesc {
+                    data_type: bind_data_type(&f.data_type)?,
+                    // Literals don't have `column_id`.
+                    column_id: ColumnId::new(0),
+                    name: f.name.value.clone(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
                 })
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            vec![]
-        }
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        vec![]
     };
     Ok(ColumnDesc {
         data_type: bind_data_type(&column_def.data_type)?,

@@ -75,6 +75,7 @@ pub enum DataType {
     Custom(ObjectName),
     /// Arrays
     Array(Box<DataType>),
+    /// Structs
     Struct(Vec<StructField>),
 }
 
@@ -120,8 +121,7 @@ impl fmt::Display for DataType {
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {
-                write!(f, "STRUCT")?;
-                write!(f, "<{}>", display_comma_separated(defs))
+                write!(f, "STRUCT<{}>", display_comma_separated(defs))
             }
         }
     }
@@ -148,7 +148,6 @@ pub struct StructField {
 
 impl fmt::Display for StructField {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.name, self.data_type)?;
-        Ok(())
+        write!(f, "{} {}", self.name, self.data_type)
     }
 }
