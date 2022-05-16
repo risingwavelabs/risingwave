@@ -57,3 +57,23 @@ query T
 values(true::boolean::integer);
 ----
 1
+
+query T
+values(1.23::float::varchar);
+----
+1.23
+
+query T
+values(1.233333333333333321123123123::decimal::varchar);
+----
+1.233333333333333321123123123
+
+query T
+values(213213::int::varchar);
+----
+213213
+
+query T
+values(2132::smallint::varchar);
+----
+2132

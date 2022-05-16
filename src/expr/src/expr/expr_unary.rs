@@ -101,7 +101,14 @@ macro_rules! gen_cast {
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
 
-            { boolean, varchar, bool_to_str },
+            { boolean, varchar, general_to_string },
+            { int16, varchar, general_to_string },
+            { int32, varchar, general_to_string },
+            { int64, varchar, general_to_string },
+            { float32, varchar, general_to_string },
+            { float64, varchar, general_to_string },
+            { decimal, varchar, general_to_string },
+
             { boolean, int32, general_cast },
             { int32, boolean, int32_to_bool },
 
