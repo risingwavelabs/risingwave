@@ -251,11 +251,7 @@ where
                     .await
                     .workers
                     .values()
-                    // TODO: Java frontend doesn't send heartbeat. Remove this line after using Rust
-                    // frontend.
-                    .filter(|worker| {
-                        worker.worker_type() != WorkerType::Frontend && worker.expire_at() < now
-                    })
+                    .filter(|worker| worker.expire_at() < now)
                     .cloned()
                     .collect_vec();
                 // 1. Initialize new workers' expire_at.

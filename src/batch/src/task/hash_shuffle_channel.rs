@@ -101,6 +101,7 @@ impl ChanSender for HashShuffleSender {
 
 impl HashShuffleSender {
     async fn send_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+        let chunk = chunk.compact()?;
         let hash_values = generate_hash_values(&chunk, &self.hash_info)?;
         let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values)?;
 
