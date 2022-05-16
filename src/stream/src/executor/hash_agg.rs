@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -20,6 +19,7 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
+use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -32,7 +32,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{pk_input_arrays, Executor, PkDataTypes, PkIndicesRef, StreamExecutorResult};
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall, AggState,
+    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -245,7 +245,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     match states {
                         Some(s) => s.unwrap(),
                         None => Box::new(
-                            generate_agg_state(
+                            generate_managed_agg_state(
                                 Some(
                                     &key.clone()
                                         .deserialize(key_data_types.iter())
@@ -498,19 +498,24 @@ mod tests {
 
     // --- Test HashAgg with in-memory KeyedState ---
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_local_hash_aggregation_count_in_memory() {
         test_local_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_global_hash_aggregation_count_in_memory() {
         test_global_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
-    #[tokio::test]
-    async fn test_local_hash_aggregation_max_in_memory() {
-        test_local_hash_aggregation_max(create_in_memory_keyspace_agg(2)).await
+    #[madsim::test]
+    async fn test_local_hash_aggregation_min_in_memory() {
+        test_local_hash_aggregation_min(create_in_memory_keyspace_agg(2)).await
+    }
+
+    #[madsim::test]
+    async fn test_local_hash_aggregation_min_append_only_in_memory() {
+        test_local_hash_aggregation_min_append_only(create_in_memory_keyspace_agg(2)).await
     }
 
     async fn test_local_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {
@@ -536,21 +541,25 @@ mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
+        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
         ];
 
@@ -619,22 +628,26 @@ mod tests {
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
+        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only,
             },
             // This is local hash aggregation, so we add another sum state
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
+                append_only,
             },
         ];
 
@@ -681,7 +694,7 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_max(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_local_hash_aggregation_min(keyspace: Vec<Keyspace<impl StateStore>>) {
         let schema = Schema {
             fields: vec![
                 // group key column
@@ -716,11 +729,13 @@ mod tests {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only: false,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only: false,
             },
         ];
 
@@ -755,6 +770,95 @@ mod tests {
                 -  2 1  2333
                 U- 1 2   233
                 U+ 1 1 23333"
+            )
+            .sorted_rows(),
+        );
+    }
+
+    async fn test_local_hash_aggregation_min_append_only(keyspace: Vec<Keyspace<impl StateStore>>) {
+        let schema = Schema {
+            fields: vec![
+                // group key column
+                Field::unnamed(DataType::Int64),
+                // data column to get minimum
+                Field::unnamed(DataType::Int64),
+                // primary key column
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I  I  I
+            + 2 5  1000
+            + 1 15 1001
+            + 1 8  1002
+            + 2 5  1003
+            + 2 10 1004
+            ",
+        ));
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I  I  I
+            + 1 20 1005
+            + 1 1  1006
+            + 2 10 1007
+            + 2 20 1008
+            ",
+        ));
+        tx.push_barrier(3, false);
+
+        // This is local hash aggregation, so we add another row count state
+        let keys = vec![0];
+        let append_only = true;
+        let agg_calls = vec![
+            AggCall {
+                kind: AggKind::RowCount,
+                args: AggArgs::None,
+                return_type: DataType::Int64,
+                append_only,
+            },
+            AggCall {
+                kind: AggKind::Min,
+                args: AggArgs::Unary(DataType::Int64, 1),
+                return_type: DataType::Int64,
+                append_only,
+            },
+        ];
+
+        let hash_agg =
+            new_boxed_hash_agg_executor(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+        let mut hash_agg = hash_agg.execute();
+
+        // Consume the init barrier
+        hash_agg.next().await.unwrap().unwrap();
+        // Consume stream chunk
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap().sorted_rows(),
+            StreamChunk::from_pretty(
+                " I I    I
+                + 1 2 8
+                + 2 3 5"
+            )
+            .sorted_rows(),
+        );
+
+        assert_matches!(
+            hash_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap().sorted_rows(),
+            StreamChunk::from_pretty(
+                "  I I  I
+                U- 1 2 8
+                U+ 1 4 1
+                U- 2 3 5 
+                U+ 2 5 5
+                "
             )
             .sorted_rows(),
         );

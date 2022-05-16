@@ -36,7 +36,7 @@ use crate::task::SharedContext;
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
 /// and do this again and again.
-#[tokio::test]
+#[madsim::test]
 async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
@@ -44,6 +44,7 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
+        let append_only = false;
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             input.boxed(),
@@ -52,11 +53,13 @@ async fn test_merger_sum_aggr() {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
                     return_type: DataType::Int64,
+                    append_only,
                 },
                 AggCall {
                     kind: AggKind::Sum,
                     args: AggArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
+                    append_only,
                 },
             ],
             vec![],
@@ -87,7 +90,7 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel(16);
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
-        handles.push(tokio::spawn(actor.run()));
+        handles.push(madsim::task::spawn(actor.run()));
         inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
@@ -107,12 +110,13 @@ async fn test_merger_sum_aggr() {
     );
     let context = SharedContext::for_test().into();
     let actor = Actor::new(dispatcher, 0, context);
-    handles.push(tokio::spawn(actor.run()));
+    handles.push(madsim::task::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
     let merger = MergeExecutor::new(schema, vec![], 0, outputs);
 
     // for global aggregator, we need to sum data and sum row count
+    let append_only = false;
     let aggregator = SimpleAggExecutor::new(
         merger.boxed(),
         vec![
@@ -120,11 +124,13 @@ async fn test_merger_sum_aggr() {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only,
             },
         ],
         create_in_memory_keyspace_agg(2),
@@ -151,7 +157,7 @@ async fn test_merger_sum_aggr() {
     };
     let context = SharedContext::for_test().into();
     let actor = Actor::new(consumer, 0, context);
-    handles.push(tokio::spawn(actor.run()));
+    handles.push(madsim::task::spawn(actor.run()));
 
     let mut epoch = 1;
     input
@@ -181,14 +187,15 @@ async fn test_merger_sum_aggr() {
     }
     input
         .send(Message::Barrier(
-            Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(HashSet::from([0]))),
+            Barrier::new_test_barrier(epoch)
+                .with_mutation(Mutation::Stop([0].into_iter().collect())),
         ))
         .await
         .unwrap();
 
     // wait for all actors
     for handle in handles {
-        handle.await.unwrap().unwrap();
+        handle.await.unwrap();
     }
 
     let data = items.lock().unwrap();

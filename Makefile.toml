@@ -1,21 +1,19 @@
 extend = [
-  {path = "src/risedevtool/grafana.toml"},
-  {path = "src/risedevtool/prometheus.toml"},
-  {path = "src/risedevtool/minio.toml"},
-  {path = "src/risedevtool/etcd.toml"},
-  {path = "src/risedevtool/jaeger.toml"},
-  {path = "src/risedevtool/kafka.toml"},
-  {path = "src/risedevtool/risedev-components.toml"},
-  {path = "src/frontend/test_runner/planner_test.toml"},
+  { path = "src/risedevtool/grafana.toml" },
+  { path = "src/risedevtool/prometheus.toml" },
+  { path = "src/risedevtool/minio.toml" },
+  { path = "src/risedevtool/etcd.toml" },
+  { path = "src/risedevtool/jaeger.toml" },
+  { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/risedev-components.toml" },
+  { path = "src/frontend/test_runner/planner_test.toml" },
 ]
 
-env_files = [
-  "./risedev-components.user.env"
-]
+env_files = ["./risedev-components.user.env"]
 
 
 env_scripts = [
-'''
+  '''
 #!@duckscript
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
@@ -36,7 +34,7 @@ if ${is_all_in_one_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
 end
-'''
+''',
 ]
 
 [config]
@@ -114,7 +112,7 @@ fi
 [tasks.link-standalone-binaries]
 category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
-condition = { env_not_set = [ "ENABLE_ALL_IN_ONE" ] }
+condition = { env_not_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
 #!@shell
 set -e
@@ -131,7 +129,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${
 [tasks.link-all-in-one-binaries]
 category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
-condition = { env_set = [ "ENABLE_ALL_IN_ONE" ] }
+condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
 #!@shell
 set -e
@@ -149,7 +147,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 [tasks.link-user-bin]
 category = "RiseDev - Build"
 description = "Link all binaries to .bin"
-condition = { env_set = [ "ENABLE_ALL_IN_ONE" ] }
+condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
 #!@shell
 set -e
@@ -166,8 +164,12 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 [tasks.post-build-risingwave]
 category = "RiseDev - Build"
 description = "Copy RisngWave binaries to bin"
-condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
-dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-user-bin"]
+condition = { env_set = ["ENABLE_BUILD_RUST"] }
+dependencies = [
+  "link-standalone-binaries",
+  "link-all-in-one-binaries",
+  "link-user-bin",
+]
 
 [tasks.b]
 alias = "build-risingwave"
@@ -178,7 +180,7 @@ alias = "build-risingwave"
 [tasks.extract-dashboard-artifact]
 category = "RiseDev - Build"
 description = "Extract dashboard artifact"
-condition = { env_not_set = [ "ENABLE_BUILD_DASHBOARD_V2" ] }
+condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
 script = '''
 #!@shell
 
@@ -194,7 +196,7 @@ git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 [tasks.export-dashboard-v2]
 category = "RiseDev - Build"
 description = "Build dashboard v2"
-condition = { env_set = [ "ENABLE_BUILD_DASHBOARD_V2" ] }
+condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
 script = """
 #!@shell
 set -e
@@ -207,7 +209,7 @@ cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 [tasks.build-risingwave]
 category = "RiseDev - Build"
 description = "Build Rust components"
-condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!@shell
 
@@ -225,7 +227,7 @@ cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
 [tasks.clean]
 category = "RiseDev - Build"
 description = "Clean Rust targets"
-condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!@shell
 set -e
@@ -235,36 +237,13 @@ cargo clean
 [tasks.build-docs]
 category = "RiseDev - Build"
 description = "Build Rust docs"
-condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!@shell
 
 set -e
 
 cargo doc --workspace --no-deps --document-private-items
-'''
-
-[tasks.build-frontend]
-category = "RiseDev - Build"
-description = "Build RisingWave SQL frontend"
-condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
-script = '''
-#!@shell
-
-set -e
-cd legacy && ./gradlew build -x test
-'''
-
-[tasks.post-build-frontend]
-category = "RiseDev - Build"
-description = "Post build RisingWave SQL frontend"
-condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
-script = '''
-#!@shell
-
-set -e
-rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
-ln -s "$(pwd)/legacy/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
 '''
 
 [tasks.prepare-config]
@@ -275,7 +254,6 @@ script = '''
 
 set -e
 
-cp "legacy/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
 cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
@@ -296,11 +274,9 @@ dependencies = [
   "download-kafka",
   "build-risingwave",
   "post-build-risingwave",
-  "build-frontend",
-  "post-build-frontend",
   "extract-dashboard-artifact",
   "export-dashboard-v2",
-  "prepare-config"
+  "prepare-config",
 ]
 
 [tasks.p]
@@ -326,12 +302,16 @@ alias = "dev"
 
 [tasks.dev]
 category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
+dependencies = ["pre-start-playground"]
 command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Start a full RisingWave dev cluster using risedev-playground"
+
+[tasks.kafka]
+category = "RiseDev - Start"
+description = "Start a RisingWave dev cluster alongside with a Kafka instance"
+command = "./risedev"
+args = ["dev", "ci-kafka"]
 
 [tasks.kill-risedev]
 category = "RiseDev - Stop"
@@ -349,6 +329,11 @@ alias = "kill-risedev"
 
 [tasks.k]
 alias = "kill-risedev"
+
+[tasks.down]
+category = "RiseDev - Stop"
+description = "Kill RisingWave dev cluster and clean the data"
+dependencies = ["k", "clean-data"]
 
 [tasks.fill-kafka]
 command = "scripts/source/prepare_source.sh"
@@ -385,10 +370,6 @@ echo
 
 echo "check: $(tput setaf 4)cmake$(tput sgr0)"
 cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
-echo
-
-echo "check: $(tput setaf 4)java == 11$(tput sgr0)"
-java --version || echo "$(tput setaf 3)java$(tput sgr0) not found."
 echo
 """
 description = "Install required tools to do pre-CI check and run e2e tests"
@@ -471,7 +452,13 @@ echo "If cargo clippy check failed or generates warning, you may run $(tput seta
 
 [tasks.check]
 category = "RiseDev - Check"
-dependencies = ["warn-on-missing-tools", "check-hakari", "check-dep-sort", "check-fmt", "check-clippy"]
+dependencies = [
+  "warn-on-missing-tools",
+  "check-hakari",
+  "check-dep-sort",
+  "check-fmt",
+  "check-clippy",
+]
 script = """
 #!@shell
 
@@ -520,21 +507,14 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 
 [tasks.ci-start]
 category = "RiseDev - CI"
-dependencies = [
-  "clean-data",
-  "pre-start-playground"
-]
+dependencies = ["clean-data", "pre-start-playground"]
 command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = [
-  "k",
-  "l",
-  "check-logs",
-]
+dependencies = ["k", "l", "check-logs"]
 description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]

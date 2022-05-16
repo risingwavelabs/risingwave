@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -32,6 +31,7 @@ use crate::filesystem::file_common::{
     Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
 };
 use crate::filesystem::s3::s3_notification_event::{NotificationEvent, NotifyEventType};
+use crate::S3Properties;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AwsCredential {
@@ -147,7 +147,7 @@ pub async fn new_share_config(
     Ok(shared_config_loader.load().await)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct S3SourceBasicConfig {
     pub(crate) bucket: String,
     pub(crate) sqs_queue_name: String,
@@ -155,19 +155,6 @@ pub struct S3SourceBasicConfig {
     pub(crate) secret: String,
     pub(crate) region: String,
     pub(crate) match_pattern: Option<String>,
-}
-
-impl S3SourceBasicConfig {
-    pub(crate) fn empty() -> Self {
-        Self {
-            bucket: "_BUCKET_NONE".to_string(),
-            sqs_queue_name: "_SQS_QUEUE_NONE".to_string(),
-            access: "".to_string(),
-            secret: "".to_string(),
-            region: "".to_string(),
-            match_pattern: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -178,34 +165,16 @@ pub struct S3SourceConfig {
     pub(crate) sqs_config: SqsReceiveMsgConfig,
 }
 
-impl From<HashMap<String, String>> for S3SourceBasicConfig {
-    fn from(map: HashMap<String, String>) -> Self {
-        let mut empty_config = S3SourceBasicConfig::empty();
-        // May be, use macro instead of this method.
-        for (k, v) in map {
-            match k.as_str() {
-                "s3.region_name" => {
-                    empty_config.region = v;
-                }
-                "s3.bucket_name" => {
-                    empty_config.bucket = v;
-                }
-                "sqs_queue_name" => {
-                    empty_config.sqs_queue_name = v;
-                }
-                "match_pattern" => {
-                    empty_config.match_pattern = Some(v);
-                }
-                "s3.credentials.access" => {
-                    empty_config.access = v;
-                }
-                "s3.credentials.secret" => {
-                    empty_config.secret = v;
-                }
-                _ => {}
-            }
+impl From<S3Properties> for S3SourceBasicConfig {
+    fn from(props: S3Properties) -> Self {
+        S3SourceBasicConfig {
+            bucket: props.bucket_name,
+            sqs_queue_name: props.sqs_queue_name,
+            access: props.access,
+            secret: props.secret,
+            region: props.region_name,
+            match_pattern: props.match_pattern,
         }
-        empty_config
     }
 }
 
@@ -551,10 +520,12 @@ pub(crate) mod test {
     }
 
     pub fn new_s3_source_config(shared_config: aws_types::SdkConfig) -> S3SourceConfig {
-        let mut basic_config = S3SourceBasicConfig::empty();
-        basic_config.sqs_queue_name = "s3-dd-storage-notify-queue".to_string();
-        basic_config.bucket = BUCKET_NAME.to_string();
-        basic_config.region = TEST_REGION_NAME.to_string();
+        let basic_config = S3SourceBasicConfig {
+            sqs_queue_name: "s3-dd-storage-notify-queue".to_string(),
+            bucket: BUCKET_NAME.to_string(),
+            region: TEST_REGION_NAME.to_string(),
+            ..Default::default()
+        };
         S3SourceConfig {
             basic_config,
             shared_config,

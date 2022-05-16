@@ -16,6 +16,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
@@ -159,11 +160,11 @@ lazy_static::lazy_static! {
 }
 
 impl Order {
-    pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> PlanRef {
+    pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> Result<PlanRef> {
         if !plan.order().satisfies(self) {
-            self.enforce(plan)
+            Ok(self.enforce(plan))
         } else {
-            plan
+            Ok(plan)
         }
     }
 

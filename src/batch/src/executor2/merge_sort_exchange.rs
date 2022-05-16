@@ -119,7 +119,7 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
                     self.task_id.clone(),
                 )
                 .await?;
-                let _ = self.sources.push(new_source);
+                self.sources.push(new_source);
                 self.get_source_chunk(source_idx).await?;
                 if let Some(chunk) = &self.source_inputs[source_idx] {
                     // We assume that we would always get a non-empty chunk from the upstream of

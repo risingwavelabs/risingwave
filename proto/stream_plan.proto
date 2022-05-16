@@ -6,8 +6,6 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
-option java_multiple_files = true;
-option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
@@ -73,12 +71,14 @@ message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   repeated int32 distribution_keys = 2;
   repeated uint32 table_ids = 3;
+  bool append_only = 4;
 }
 
 message HashAggNode {
   repeated int32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated uint32 table_ids = 3;
+  bool append_only = 4;
 }
 
 message TopNNode {

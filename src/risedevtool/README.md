@@ -26,8 +26,8 @@ In root directory, simply run:
 The default scene contains a MinIO, compute-node, meta-node and a frontend. RiseDev will automatically download and configure those services for you.
 
 RiseDev also provides several other modes:
-- ci-3node: 3 compute node + meta node + frontend + MinIO
-- ci-1node: 1 compute node + meta node + frontend + MinIO
+- ci-3cn-1fe: 3 compute node + meta node + frontend + MinIO
+- ci-1cn-1fe: 1 compute node + meta node + frontend + MinIO
 - dev-compute-node: 1 compute-node (user managed) + MinIO + prometheus + meta + frontend
 
 #### Debug compute node
@@ -51,11 +51,11 @@ Then, you need simply start compute-node by yourself -- either in command line b
 
 ### Configuration File
 
-`risedev.yml` defines all available scenes. Let's take a look at the ci-3node config:
+`risedev.yml` defines all available scenes. Let's take a look at the ci-3cn-1fe config:
 
 ```yaml
 risedev:
-  ci-3node:
+  ci-3cn-1fe:
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -74,7 +74,7 @@ If you don't want one service, or want them to start in different order, simply 
 
 ```yaml
 risedev:
-  ci-3node:
+  ci-3cn-1fe:
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -106,7 +106,6 @@ The configurator will write an env file to risedev-components.user.env.
 RISEDEV_CONFIGURED=true
 ENABLE_MINIO=true
 ENABLE_BUILD_RUST=true
-ENABLE_BUILD_FRONTEND=true
 ```
 
 This environment file will then be read by cargo-make, which decides whether or not to run a step.
@@ -143,7 +142,7 @@ template:
     user-managed: false
 
 risedev:
-  ci-3node:
+  ci-3cn-1fe:
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -163,7 +162,7 @@ template:
     user-managed: false
 
 risedev:
-  ci-3node:
+  ci-3cn-1fe:
     - use: compute-node
       address: "127.0.0.1"
       exporter-address: "127.0.0.1"
@@ -178,10 +177,10 @@ The config in template (namely port and exporter port) will be overwritten by us
 
 #### Variable Expanding
 
-In ci-3node config,
+In ci-3cn-1fe config,
 
 ```yaml
-ci-3node:
+ci-3cn-1fe:
   - use: compute-node
     address: "127.0.0.1"
     exporter-address: "127.0.0.1"
@@ -194,7 +193,7 @@ ci-3node:
 `${port}` will be expanded to `5687`, the field of the same name in the current yaml map.
 
 ```yaml
-ci-3node:
+ci-3cn-1fe:
   - use: compute-node
     address: "127.0.0.1"
     exporter-address: "127.0.0.1"
@@ -219,7 +218,7 @@ The `*` will be expanded by id. For example, in this frontend config, risedev wi
     user-managed: false
 ```
 
-For ci-3node, there are three compute nodes, so this will be expanded into:
+For ci-3cn-1fe, there are three compute nodes, so this will be expanded into:
 
 ```yaml
  -  use: frontend

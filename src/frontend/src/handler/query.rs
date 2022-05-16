@@ -32,6 +32,8 @@ use crate::session::{OptimizerContext, SessionImpl};
 /// TODO: Use session config to set this.
 pub static IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
 
+pub static QUERY_MODE: &str = "query_mode";
+
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
@@ -105,21 +107,21 @@ async fn distribute_execute(
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
-        let plan = Planner::new(context.into())
-            .plan(stmt)?
-            .gen_batch_query_plan();
+        let root = Planner::new(context.into()).plan(stmt)?;
 
-        info!(
-            "Generated distributed plan: {:?}",
-            plan.explain_to_string()?
-        );
-
-        let pg_descs = plan
+        let pg_descs = root
             .schema()
             .fields()
             .iter()
             .map(to_pg_field)
             .collect::<Vec<PgFieldDescriptor>>();
+
+        let plan = root.gen_batch_query_plan()?;
+
+        info!(
+            "Generated distributed plan: {:?}",
+            plan.explain_to_string()?
+        );
 
         let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
         let query = plan_fragmenter.split(plan)?;

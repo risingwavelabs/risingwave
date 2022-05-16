@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
+use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
@@ -115,7 +114,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         // storage.
         assert!(!self.is_dirty());
         // Read all.
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
         for (raw_key, mut raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
             let value = deserialize_cell(&mut raw_value, &DataType::Varchar)?.unwrap();
@@ -305,7 +304,7 @@ mod tests {
         managed_state
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_string_agg_state() {
         let keyspace = create_in_memory_keyspace();
         let store = keyspace.state_store();

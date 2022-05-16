@@ -16,12 +16,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
@@ -190,11 +189,10 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let required_col_idx = required_cols
-            .ones()
-            .map(|i| self.required_col_idx[i])
+            .iter()
+            .map(|i| self.required_col_idx[*i])
             .collect();
 
         Self::new(
@@ -209,17 +207,17 @@ impl ColPrunable for LogicalScan {
 }
 
 impl ToBatch for LogicalScan {
-    fn to_batch(&self) -> PlanRef {
-        BatchSeqScan::new(self.clone()).into()
+    fn to_batch(&self) -> Result<PlanRef> {
+        Ok(BatchSeqScan::new(self.clone()).into())
     }
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> PlanRef {
-        StreamTableScan::new(self.clone()).into()
+    fn to_stream(&self) -> Result<PlanRef> {
+        Ok(StreamTableScan::new(self.clone()).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         match self.base.pk_indices.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
@@ -242,7 +240,7 @@ impl ToStream for LogicalScan {
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);
                 let new_len = required_col_idx.len();
-                (
+                Ok((
                     Self::new(
                         self.table_name.clone(),
                         required_col_idx,
@@ -252,12 +250,12 @@ impl ToStream for LogicalScan {
                     )
                     .into(),
                     ColIndexMapping::identity_or_none(self.schema().len(), new_len),
-                )
+                ))
             }
-            false => (
+            false => Ok((
                 self.clone().into(),
                 ColIndexMapping::identity(self.schema().len()),
-            ),
+            )),
         }
     }
 }

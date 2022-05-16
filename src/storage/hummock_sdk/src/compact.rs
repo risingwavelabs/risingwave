@@ -14,35 +14,29 @@
 
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
+use crate::HummockSSTableId;
+
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
+    use std::fmt::Write;
+
     let mut s = String::new();
-    s.push_str(&format!(
-        "Compaction task id: {:?}, target level: {:?}\n",
+    writeln!(
+        s,
+        "Compaction task id: {:?}, target level: {:?}",
         compact_task.task_id, compact_task.target_level
-    ));
-    s.push_str(&format!(
-        "Compaction watermark: {:?} \n",
-        compact_task.watermark
-    ));
-    s.push_str(&format!(
-        "Compaction # splits: {:?} \n",
-        compact_task.splits.len()
-    ));
-    s.push_str(&format!(
-        "Compaction task status: {:?} \n",
-        compact_task.task_status
-    ));
+    )
+    .unwrap();
+    writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
+    writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
+    writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
-        let tables: Vec<u64> = level_entry
+        let tables: Vec<HummockSSTableId> = level_entry
             .table_infos
             .iter()
             .map(|table| table.id)
             .collect();
-        s.push_str(&format!(
-            "Level {:?}: {:?} \n",
-            level_entry.level_idx, tables
-        ));
+        writeln!(s, "Level {:?}: {:?} ", level_entry.level_idx, tables).unwrap();
     }
     s.push_str("Compaction task output: \n");
     for sst in &compact_task.sorted_output_ssts {
@@ -52,6 +46,8 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
 }
 
 pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo) {
+    use std::fmt::Write;
+
     let key_range = sstable_info.key_range.as_ref().unwrap();
     let key_range_str = if key_range.inf {
         "(-inf, +inf)".to_owned()
@@ -62,8 +58,10 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
             hex::encode(key_range.right.as_slice())
         )
     };
-    s.push_str(&format!(
-        "SstableInfo: id={:?}, KeyRange={:?}, size={:?}\n",
+    writeln!(
+        s,
+        "SstableInfo: id={:?}, KeyRange={:?}, size={:?}",
         sstable_info.id, key_range_str, sstable_info.file_size
-    ));
+    )
+    .unwrap();
 }

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -23,8 +24,8 @@ use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
-    StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHashAgg,
+    StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
@@ -363,8 +364,7 @@ impl LogicalAgg {
             .transpose()?;
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
-        let expr_alias = vec![None; expr_handler.project.len()];
-        let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
+        let logical_project = LogicalProject::create(input, expr_handler.project);
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
         let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
@@ -438,93 +438,134 @@ impl fmt::Display for LogicalAgg {
 }
 
 impl ColPrunable for LogicalAgg {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let upstream_required_cols = {
+            let mapping = self.o2i_col_mapping();
 
-        let mut child_required_cols =
-            FixedBitSet::with_capacity(self.input.schema().fields().len());
-        child_required_cols.extend(self.group_keys.iter().cloned());
+            FixedBitSet::from_iter(
+                required_cols
+                    .iter()
+                    .filter_map(|&output_idx| mapping.try_map(output_idx)),
+            )
+        };
+        let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
-        // Do not prune the group keys.
-        let mut group_keys = self.group_keys.clone();
-        let mut agg_calls: Vec<_> = required_cols
-            .ones()
-            .filter(|&index| index >= self.group_keys.len())
-            .map(|index| {
-                let index = index - self.group_keys.len();
-                let agg_call = self.agg_calls[index].clone();
-                child_required_cols.extend(agg_call.inputs.iter().map(|x| x.index()));
-                agg_call
-            })
-            .collect();
+        let (agg_call_required_cols, agg_calls) = {
+            let mut tmp = FixedBitSet::with_capacity(self.input().schema().fields().len());
+            let new_agg_calls = required_cols
+                .iter()
+                .filter(|&&index| index >= self.group_keys.len())
+                .map(|&index| {
+                    let index = index - self.group_keys.len();
+                    let agg_call = self.agg_calls[index].clone();
+                    tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
+                    agg_call
+                })
+                .collect_vec();
+            (tmp, new_agg_calls)
+        };
 
-        let mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
-        agg_calls.iter_mut().for_each(|agg_call| {
-            agg_call
-                .inputs
-                .iter_mut()
-                .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
-        });
-        group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
-
-        let agg = LogicalAgg::new(
-            agg_calls,
-            group_keys,
-            self.input.prune_col(&child_required_cols),
+        let input_required_cols = {
+            let mut tmp: FixedBitSet = upstream_required_cols.clone();
+            tmp.union_with(&group_key_required_cols);
+            tmp.union_with(&agg_call_required_cols);
+            tmp.ones().collect_vec()
+        };
+        let mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
         );
+        let agg = {
+            let agg_calls = agg_calls
+                .iter()
+                .cloned()
+                .map(|mut agg_call| {
+                    agg_call
+                        .inputs
+                        .iter_mut()
+                        .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
+                    agg_call
+                })
+                .collect();
+            let group_keys = self
+                .group_keys
+                .iter()
+                .cloned()
+                .map(|key| mapping.map(key))
+                .collect();
+            LogicalAgg::new(
+                agg_calls,
+                group_keys,
+                self.input.prune_col(&input_required_cols),
+            )
+        };
 
-        if FixedBitSet::from_iter(0..self.group_keys.len()).is_subset(required_cols) {
+        if group_key_required_cols.is_subset(&upstream_required_cols) {
             agg.into()
         } else {
             // Some group key columns are not needed
-            let mut required_cols_new = FixedBitSet::with_capacity(agg.schema().fields().len());
-            required_cols
-                .ones()
-                .filter(|&i| i < agg.group_keys.len())
-                .for_each(|i| required_cols_new.insert(i));
-            required_cols_new.extend(agg.group_keys.len()..agg.schema().fields().len());
+            let new_output_cols = {
+                let mapping = self.i2o_col_mapping();
+                let mut tmp = input_required_cols
+                    .iter()
+                    .filter_map(|&idx| mapping.try_map(idx))
+                    .collect_vec();
+                tmp.extend(
+                    required_cols
+                        .iter()
+                        .filter(|&&index| index >= self.group_keys.len()),
+                );
+                tmp
+            };
+            let mapping =
+                &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = agg.schema().len();
             LogicalProject::with_mapping(
                 agg.into(),
-                ColIndexMapping::with_remaining_columns(&required_cols_new),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
         }
     }
 }
 
 impl ToBatch for LogicalAgg {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_keys().is_empty() {
-            BatchSimpleAgg::new(new_logical).into()
+            Ok(BatchSimpleAgg::new(new_logical).into())
         } else {
-            BatchHashAgg::new(new_logical).into()
+            Ok(BatchHashAgg::new(new_logical).into())
         }
     }
 }
 
 impl ToStream for LogicalAgg {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef> {
         if self.group_keys().is_empty() {
-            StreamSimpleAgg::new(
+            Ok(StreamSimpleAgg::new(
                 self.clone_with_input(
                     self.input()
-                        .to_stream_with_dist_required(&Distribution::Single),
+                        .to_stream_with_dist_required(&Distribution::Single)?,
                 ),
             )
-            .into()
+            .into())
         } else {
-            StreamHashAgg::new(
+            Ok(StreamHashAgg::new(
                 self.clone_with_input(self.input().to_stream_with_dist_required(
                     &Distribution::HashShard(self.group_keys().to_vec()),
-                )),
+                )?),
             )
-            .into()
+            .into())
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
 
         // To rewrite StreamAgg, there are two things to do:
@@ -544,10 +585,10 @@ impl ToStream for LogicalAgg {
             }
         });
 
-        (
+        Ok((
             LogicalAgg::new(agg_calls, group_keys, input).into(),
             ColIndexMapping::new(map),
-        )
+        ))
     }
 }
 
@@ -689,7 +730,7 @@ mod tests {
     /// ```
     /// with required columns [0,1] (all columns) will result in
     /// ```text
-    /// Agg(max(input_ref(1))) group by (input_ref(0))
+    /// Agg(min(input_ref(1))) group by (input_ref(0))
     ///  TableScan(v2, v3)
     async fn test_prune_all() {
         let ty = DataType::Int32;
@@ -715,8 +756,7 @@ mod tests {
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(2);
-        required_cols.extend(vec![0, 1]);
+        let required_cols = vec![0, 1];
         let plan = agg.prune_col(&required_cols);
 
         // Check the result
@@ -743,7 +783,7 @@ mod tests {
     /// with required columns [1] (group key removed) will result in
     /// ```text
     /// Project(input_ref(1))
-    ///   Agg(max(input_ref(1))) group by (input_ref(0))
+    ///   Agg(min(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
     async fn test_prune_group_key() {
         let ctx = OptimizerContext::mock().await;
@@ -769,8 +809,7 @@ mod tests {
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(2);
-        required_cols.extend(vec![1]);
+        let required_cols = vec![1];
         let plan = agg.prune_col(&required_cols);
 
         // Check the result
@@ -839,10 +878,8 @@ mod tests {
         let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(4);
-        required_cols.extend(vec![0, 3]);
+        let required_cols = vec![0, 3];
         let plan = agg.prune_col(&required_cols);
-
         // Check the result
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);

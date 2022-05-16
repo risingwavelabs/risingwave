@@ -22,12 +22,16 @@ include ../../batch/tpch/q7.slt.part
 include ../../batch/tpch/q8.join_reorder.workaround.slt.part
 include ../../batch/tpch/q9.join_reorder.workaround.slt.part
 include ../../batch/tpch/q10.slt.part
-# include ../../batch/tpch/q11.slt.part 
+include ../../batch/tpch/q11.slt.part
 include ../../batch/tpch/q12.slt.part
 include ../../batch/tpch/q13.slt.part
 include ../../batch/tpch/q14.slt.part
+# include ../../batch/tpch/q15.slt.part
+include ../../batch/tpch/q16.slt.part
 include ../../batch/tpch/q17.slt.part
 include ../../batch/tpch/q18.slt.part
 include ../../batch/tpch/q19.slt.part
+include ../../batch/tpch/q20.slt.part
+# include ../../batch/tpch/q21.slt.part
 
 include ../../tpch/drop_tables.slt.part

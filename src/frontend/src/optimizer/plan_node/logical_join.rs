@@ -15,18 +15,21 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
-    ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    StreamHashJoin, ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
+use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -83,16 +86,12 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
-    // FIXME: please note that the modification here is just a temporary fix for bug of LogicalJoin.
-    // Related issue is #1849.
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
-            JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::FullOuter
-            | JoinType::LeftSemi => left_len + right_len,
-            JoinType::LeftAnti => left_len,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                left_len + right_len
+            }
+            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
         }
     }
@@ -104,14 +103,11 @@ impl LogicalJoin {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::LeftSemi
-            | JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::FullOuter => {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::identity_or_none(left_len + right_len, left_len)
             }
-            JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
         }
     }
@@ -123,14 +119,10 @@ impl LogicalJoin {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::LeftSemi
-            | JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::FullOuter => {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
         }
     }
@@ -237,6 +229,14 @@ impl LogicalJoin {
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
         Self::new(self.left.clone(), self.right.clone(), self.join_type, cond)
     }
+
+    pub fn is_left_join(&self) -> bool {
+        matches!(self.join_type(), JoinType::LeftSemi | JoinType::LeftAnti)
+    }
+
+    pub fn is_right_join(&self) -> bool {
+        matches!(self.join_type(), JoinType::RightSemi | JoinType::RightAnti)
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -263,8 +263,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
         let new_on = {
             let (mut left_map, _) = left_col_change.clone().into_parts();
             let (mut right_map, _) = right_col_change.clone().into_parts();
-            for i in &mut right_map {
-                *i = Some(i.unwrap() + left.schema().len());
+            for i in right_map.iter_mut().flatten() {
+                *i += left.schema().len();
             }
             left_map.append(&mut right_map);
             self.on()
@@ -288,27 +288,37 @@ impl PlanTreeNodeBinary for LogicalJoin {
 impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let left_len = self.left.schema().fields.len();
 
-        let mut visitor = CollectInputRef::new(required_cols.clone());
+        let total_len = self.left().schema().len() + self.right().schema().len();
+        let mut resized_required_cols = FixedBitSet::with_capacity(total_len);
+
+        required_cols.iter().for_each(|&i| {
+            if self.is_right_join() {
+                resized_required_cols.insert(left_len + i);
+            } else {
+                resized_required_cols.insert(i);
+            }
+        });
+
+        let mut visitor = CollectInputRef::new(resized_required_cols);
         self.on.visit_expr(&mut visitor);
-        let left_right_required_cols = visitor.collect();
+        let left_right_required_cols = FixedBitSet::from(visitor).ones().collect_vec();
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
+        let mut mapping =
+            ColIndexMapping::with_remaining_columns(&left_right_required_cols, total_len);
         on = on.rewrite_expr(&mut mapping);
 
-        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
-        let mut right_required_cols =
-            FixedBitSet::with_capacity(self.right.schema().fields().len());
-        left_right_required_cols.ones().for_each(|i| {
+        let mut left_required_cols = Vec::new();
+        let mut right_required_cols = Vec::new();
+        FixedBitSet::with_capacity(self.right.schema().fields().len());
+        left_right_required_cols.iter().for_each(|&i| {
             if i < left_len {
-                left_required_cols.insert(i);
+                left_required_cols.push(i);
             } else {
-                right_required_cols.insert(i - left_len);
+                right_required_cols.push(i - left_len);
             }
         });
 
@@ -319,29 +329,39 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &left_right_required_cols {
+        let required_inputs_in_output = if self.is_left_join() {
+            left_required_cols
+        } else if self.is_right_join() {
+            right_required_cols
+        } else {
+            left_right_required_cols
+        };
+        if required_cols == required_inputs_in_output {
             join.into()
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            let mapping = ColIndexMapping::with_remaining_columns(
+                &required_inputs_in_output,
+                self.schema().len(),
+            );
+            let remaining_columns = required_cols.iter().map(|&i| mapping.map(i)).collect_vec();
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(&remaining_columns, self.schema().len()),
             )
         }
     }
 }
 
 impl ToBatch for LogicalJoin {
-    fn to_batch(&self) -> PlanRef {
+    fn to_batch(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
             self.on.clone(),
         );
 
-        let left = self.left().to_batch();
-        let right = self.right().to_batch();
+        let left = self.left().to_batch()?;
+        let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
@@ -357,30 +377,39 @@ impl ToBatch for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                BatchFilter::new(logical_filter).into()
+                Ok(BatchFilter::new(logical_filter).into())
             } else {
-                BatchHashJoin::new(logical_join, predicate).into()
+                Ok(BatchHashJoin::new(logical_join, predicate).into())
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            todo!("nested loop join")
+            Ok(BatchNestedLoopJoin::new(logical_join).into())
         }
     }
 }
 
 impl ToStream for LogicalJoin {
-    fn to_stream(&self) -> PlanRef {
+    fn to_stream(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
             self.on.clone(),
         );
-        let left = self
-            .left()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.left_eq_indexes()));
         let right = self
             .right()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()));
+            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()))?;
+
+        let r2l =
+            predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+
+        let left_dist = r2l
+            .rewrite_required_distribution(right.distribution())
+            .unwrap();
+
+        let mut left = self.left().to_stream_with_dist_required(&left_dist)?;
+        if left.distribution() != &left_dist {
+            left = left_dist.enforce(left, Order::any());
+        }
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
@@ -396,22 +425,24 @@ impl ToStream for LogicalJoin {
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                StreamFilter::new(logical_filter).into()
+                Ok(StreamFilter::new(logical_filter).into())
             } else {
-                StreamHashJoin::new(logical_join, predicate).into()
+                Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            // Convert to Nested-loop Join for non-equal joins
-            todo!("nested loop join")
+            Err(RwError::from(ErrorCode::NotImplemented(
+                "stream nested-loop join".to_string(),
+                None.into(),
+            )))
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (left, left_col_change) = self.left.logical_rewrite_for_stream();
-        let (right, right_col_change) = self.right.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (left, left_col_change) = self.left.logical_rewrite_for_stream()?;
+        let (right, right_col_change) = self.right.logical_rewrite_for_stream()?;
         let (join, out_col_change) =
             self.rewrite_with_left_right(left, left_col_change, right, right_col_change);
-        (join.into(), out_col_change)
+        Ok((join.into(), out_col_change))
     }
 }
 
@@ -480,8 +511,7 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(6);
-        required_cols.extend(vec![2, 3]);
+        let required_cols = vec![2, 3];
         let plan = join.prune_col(&required_cols);
 
         // Check the result
@@ -506,6 +536,77 @@ mod tests {
         let right = join.right();
         let right = right.as_logical_values().unwrap();
         assert_eq!(right.schema().fields(), &fields[3..4]);
+    }
+
+    /// Semi join panicked previously at `prune_col`. Add test to prevent regression.
+    #[tokio::test]
+    async fn test_prune_semi_join() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = (1..7)
+            .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
+            .collect();
+        let left = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields[0..3].to_vec(),
+            },
+            ctx.clone(),
+        );
+        let right = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields[3..6].to_vec(),
+            },
+            ctx,
+        );
+        let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(4, ty))),
+                ],
+            )
+            .unwrap(),
+        ));
+        for join_type in [
+            JoinType::LeftSemi,
+            JoinType::RightSemi,
+            JoinType::LeftAnti,
+            JoinType::RightAnti,
+        ] {
+            let join = LogicalJoin::new(
+                left.clone().into(),
+                right.clone().into(),
+                join_type,
+                Condition::with_expr(on.clone()),
+            );
+
+            let offset = if join.is_right_join() { 3 } else { 0 };
+
+            // Perform the prune
+            let required_cols = vec![0];
+            // key 0 is never used in the join (always key 1)
+            let plan = join.prune_col(&required_cols);
+            // Check that the join has been wrapped in a projection
+            let as_plan = plan.as_logical_project().unwrap();
+            // Check the result
+            assert_eq!(as_plan.schema().fields().len(), 1);
+            assert_eq!(as_plan.schema().fields()[0], fields[offset]);
+
+            // Perform the prune
+            let required_cols = vec![0, 1, 2];
+            // should not panic here
+            let plan = join.prune_col(&required_cols);
+            // Check that the join has not been wrapped in a projection
+            let as_plan = plan.as_logical_join().unwrap();
+            // Check the result
+            assert_eq!(as_plan.schema().fields().len(), 3);
+            assert_eq!(as_plan.schema().fields()[0], fields[offset]);
+            assert_eq!(as_plan.schema().fields()[1], fields[offset + 1]);
+            assert_eq!(as_plan.schema().fields()[2], fields[offset + 2]);
+        }
     }
 
     /// Pruning
@@ -560,8 +661,7 @@ mod tests {
         );
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(6);
-        required_cols.extend(vec![1, 3]);
+        let required_cols = vec![1, 3];
         let plan = join.prune_col(&required_cols);
 
         // Check the result
@@ -654,7 +754,7 @@ mod tests {
         );
 
         // Perform `to_batch`
-        let result = logical_join.to_batch();
+        let result = logical_join.to_batch().unwrap();
 
         // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
         let batch_filter = result.as_batch_filter().unwrap();

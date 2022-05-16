@@ -67,7 +67,7 @@
     create table t(a Boolean);
     select * from t where (NULL IS NULL) IS TRUE AND FALSE IS FALSE AND a;
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [a] }
+    LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: $1 }
         LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
@@ -75,7 +75,7 @@
     create table t(a Boolean);
     select * from t where (NULL IS NOT TRUE) IS NOT FALSE AND a IS NOT TRUE;
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [a] }
+    LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: IsNotTrue($1) }
         LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
@@ -83,7 +83,7 @@
     create table t(a double precision);
     select * from t where (a IS NOT NULL AND 3.14 IS NOT NULL) OR (NULL IS NOT NULL);
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [a] }
+    LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: IsNotNull($1) }
         LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
@@ -97,15 +97,14 @@
       StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: select 1
   batch_plan: |
-    BatchProject { exprs: [1:Int32], expr_alias: [ ] }
+    BatchProject { exprs: [1:Int32] }
       BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select a from t as t2(a);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0], expr_alias: [a] }
-        BatchScan { table: t, columns: [v1] }
+      BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;
@@ -119,42 +118,3 @@
     BatchDelete { table: t }
       BatchFilter { predicate: ($1 = 1:Int32) }
         BatchScan { table: t, columns: [_row_id#0, v1, v2] }
-- sql: |
-    create table t (v1 int);
-    select nullif(v1, 1) from t;
-  batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0)], expr_alias: [ ] }
-        BatchScan { table: t, columns: [v1] }
-  stream_plan: |
-    StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0), $1], expr_alias: [ ,  ] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
-- sql: |
-    create table t (v1 int);
-    select nullif(v1, 1, 2) from t;
-  binder_error: 'Bind error: Nullif function must contain 2 arguments'
-- sql: |
-    create table t (v1 int);
-    select nullif(v1, 'a') from t;
-  binder_error: 'Feature is not yet implemented: Equal[Int32, Varchar], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
-- sql: |
-    create table t (v1 int);
-    select coalesce(v1, 1) from t;
-  batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Coalesce($0, 1:Int32)], expr_alias: [ ] }
-        BatchScan { table: t, columns: [v1] }
-  stream_plan: |
-    StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamProject { exprs: [Coalesce($0, 1:Int32), $1], expr_alias: [ ,  ] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
-- sql: |
-    create table t (v1 int);
-    select coalesce() from t;
-  binder_error: 'Bind error: Coalesce function must contain at least 1 argument'
-- sql: |
-    create table t (v1 int);
-    select coalesce(1,'a') from t;
-  binder_error: 'Bind error: Coalesce function cannot match types Int32 and Varchar'
-

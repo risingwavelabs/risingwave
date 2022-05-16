@@ -26,7 +26,6 @@ sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g;s/\$\[<target>\]/release/g
 # Generate workflow for main branch
 
 jobs_main=(
-   "jobs/frontend-check.yml"
    "jobs/e2e-risedev-dev.gen.yml"
    "jobs/e2e-risedev-release.gen.yml"
    "jobs/e2e-source.yml"
@@ -46,7 +45,6 @@ echo "$HEADER" >> ../workflows/main.yml
 # TODO add connector specific jobs below
 
 jobs_main_cron=(
-   "jobs/frontend-check.yml"
    "jobs/e2e-risedev-dev.gen.yml"
    "jobs/e2e-source.yml"
    "jobs/compute-node-build-dev.gen.yml"
@@ -62,7 +60,6 @@ echo "$HEADER" >> ../workflows/main-cron.yml
 # Generate workflow for pull requests
 
 jobs_pr=(
-   "jobs/frontend-check.yml"
    "jobs/e2e-risedev-dev.gen.yml"
    "jobs/e2e-source.yml"
    "jobs/compute-node-build-dev.gen.yml"

@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 
@@ -21,6 +22,7 @@ use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
+use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
@@ -111,17 +113,24 @@ impl PlanTreeNodeBinary for BatchHashJoin {
 impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl ToDistributedBatch for BatchHashJoin {
-    fn to_distributed(&self) -> PlanRef {
-        let left = self.left().to_distributed_with_required(
-            Order::any(),
-            &Distribution::HashShard(self.eq_join_predicate().left_eq_indexes()),
-        );
+    fn to_distributed(&self) -> Result<PlanRef> {
         let right = self.right().to_distributed_with_required(
             Order::any(),
             &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
-        );
-
-        self.clone_with_left_right(left, right).into()
+        )?;
+        let r2l = self
+            .eq_join_predicate()
+            .r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+        let left_dist = r2l
+            .rewrite_required_distribution(right.distribution())
+            .unwrap();
+        let mut left = self
+            .left()
+            .to_distributed_with_required(Order::any(), &left_dist)?;
+        if left.distribution() != &left_dist {
+            left = left_dist.enforce(left, Order::any());
+        }
+        Ok(self.clone_with_left_right(left, right).into())
     }
 }
 
@@ -141,16 +150,20 @@ impl ToBatchProst for BatchHashJoin {
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
-            condition: None,
+            condition: self
+                .eq_join_predicate
+                .other_cond()
+                .as_expr_unless_true()
+                .map(|x| x.to_expr_proto()),
         })
     }
 }
 
 impl ToLocalBatch for BatchHashJoin {
-    fn to_local(&self) -> PlanRef {
-        let left = self.left().to_local();
-        let right = self.right().to_local();
+    fn to_local(&self) -> Result<PlanRef> {
+        let left = self.left().to_local()?;
+        let right = self.right().to_local()?;
 
-        self.clone_with_left_right(left, right).into()
+        Ok(self.clone_with_left_right(left, right).into())
     }
 }

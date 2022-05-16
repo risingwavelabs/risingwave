@@ -106,6 +106,7 @@ impl ToStreamProst for StreamHashAgg {
                 .map(PlanAggCall::to_protobuf)
                 .collect_vec(),
             table_ids: vec![],
+            append_only: self.append_only(),
         })
     }
 }

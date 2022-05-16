@@ -21,7 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -213,12 +213,12 @@ where
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = Epoch::now();
+            let new_epoch = state.prev_epoch.next();
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
             let (new_epoch, actors_to_finish, finished_create_mviews) =
-                self.recovery(state.prev_epoch, None).await;
+                self.recovery(state.prev_epoch).await;
             unfinished.add(new_epoch.0, actors_to_finish, vec![]);
             for finished in finished_create_mviews {
                 unfinished.finish_actors(finished.epoch, once(finished.actor_id));
@@ -254,7 +254,7 @@ where
                 notifiers.iter_mut().for_each(Notifier::notify_collected);
                 continue;
             }
-            let new_epoch = Epoch::now();
+            let new_epoch = state.prev_epoch.next();
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
@@ -262,7 +262,7 @@ where
                 &info,
                 &state.prev_epoch,
                 &new_epoch,
-                command.clone(),
+                command,
             );
 
             let mut notifiers = notifiers;
@@ -288,7 +288,7 @@ where
                     if self.enable_recovery {
                         // If failed, enter recovery mode.
                         let (new_epoch, actors_to_finish, finished_create_mviews) =
-                            self.recovery(state.prev_epoch, Some(command)).await;
+                            self.recovery(state.prev_epoch).await;
                         unfinished = UnfinishedNotifiers::default();
                         unfinished.add(new_epoch.0, actors_to_finish, vec![]);
                         for finished in finished_create_mviews {

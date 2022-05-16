@@ -7,9 +7,6 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
-option java_multiple_files = true;
-// TODO: java_package will be removed later, so we don't rename it to batch_plan here.
-option java_package = "com.risingwave.proto.plan";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
@@ -139,6 +136,12 @@ message GenerateInt32SeriesNode {
   int32 step = 3;
 }
 
+message GenerateTimeSeriesNode {
+  string start = 1;
+  string stop = 2;
+  data.IntervalUnit step = 3;
+}
+
 // Task is a running instance of Stage.
 message TaskId {
   string query_id = 1;
@@ -196,6 +199,7 @@ message PlanNode {
     SortMergeJoinNode sort_merge_join = 22;
     GenerateInt32SeriesNode generate_int32_series = 23;
     HopWindowNode hop_window = 25;
+    GenerateTimeSeriesNode generate_time_series = 26;
   }
   string identity = 24;
 }

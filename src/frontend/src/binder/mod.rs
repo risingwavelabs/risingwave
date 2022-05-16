@@ -32,8 +32,8 @@ pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundTableSource, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundTableSource,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
@@ -112,6 +112,6 @@ pub mod test_utils {
 }
 
 /// The column name stored in [`BindContext`] for a column without an alias.
-const UNNAMED_COLUMN: &str = "?column?";
+pub const UNNAMED_COLUMN: &str = "?column?";
 /// The table name stored in [`BindContext`] for a subquery without an alias.
 const UNNAMED_SUBQUERY: &str = "?subquery?";

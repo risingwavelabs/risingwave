@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use paste::paste;
 
 use super::*;
@@ -32,7 +31,7 @@ pub trait ColPrunable {
     /// When implementing this method for a node, it may require its children to produce additional
     /// columns besides `required_cols`. In this case, it may need to insert a
     /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef;
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef;
 }
 
 /// Implements [`ColPrunable`] for batch and streaming node.
@@ -40,7 +39,7 @@ macro_rules! impl_prune_col {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ColPrunable for [<$convention $name>] {
-                fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
+                fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
                     panic!("column pruning is only allowed on logical plan")
                 }
             })*

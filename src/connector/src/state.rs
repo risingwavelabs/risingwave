@@ -145,7 +145,7 @@ impl<S: StateStore> SourceStateHandler<S> {
     pub async fn restore_states(&self, state_identifier: String) -> Result<Vec<(u64, Bytes)>> {
         // TODO: do we need snapshot read here?
         let epoch = u64::MAX;
-        let scan_rs = self.keyspace.scan_strip_prefix(Option::None, epoch).await;
+        let scan_rs = self.keyspace.scan(Option::None, epoch).await;
         let mut restore_values = Vec::new();
         match scan_rs {
             Ok(scan_list) => {

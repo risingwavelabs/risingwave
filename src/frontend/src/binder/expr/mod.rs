@@ -32,76 +32,66 @@ mod value;
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
-            Expr::IsNull(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNull, *expr)?,
-            ))),
-            Expr::IsNotNull(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotNull, *expr)?,
-            ))),
-            Expr::IsTrue(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsTrue, *expr)?,
-            ))),
-            Expr::IsNotTrue(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotTrue, *expr)?,
-            ))),
-            Expr::IsFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsFalse, *expr)?,
-            ))),
-            Expr::IsNotFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotFalse, *expr)?,
-            ))),
-            Expr::Case {
-                operand,
-                conditions,
-                results,
-                else_result,
-            } => Ok(ExprImpl::FunctionCall(Box::new(self.bind_case(
-                operand,
-                conditions,
-                results,
-                else_result,
-            )?))),
-            Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_trim(*expr, trim_where)?,
-            ))),
+            // literal
+            Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
+            Expr::TypedString { data_type, value } => {
+                let s: ExprImpl = self.bind_string(value)?.into();
+                s.cast_explicit(bind_data_type(&data_type)?)
+            }
+            Expr::Row(exprs) => Ok(ExprImpl::Literal(Box::new(self.bind_row(&exprs)?))),
+            // input ref
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
-                Ok(self.bind_single_field_column(*field_expr, &idents)?)
+                self.bind_single_field_column(*field_expr, &idents)
             }
-            Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
-            Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_binary_op(*left, op, *right)?,
-            ))),
-            Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
+            // operators & functions
+            Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
+            Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
-            Expr::Function(f) => Ok(self.bind_function(f)?),
-            Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
-            Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::Function(f) => self.bind_function(f),
+            // subquery
+            Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
+            Expr::Exists(q) => self.bind_subquery_expr(*q, SubqueryKind::Existential),
             Expr::InSubquery {
                 expr,
                 subquery,
                 negated,
             } => self.bind_in_subquery(*expr, *subquery, negated),
-            Expr::TypedString { data_type, value } => {
-                let s: ExprImpl = self.bind_string(value)?.into();
-                s.cast_explicit(bind_data_type(&data_type)?)
-            }
+            // special syntax (except date/time or string)
+            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
+            Expr::IsNull(expr) => self.bind_is_operator(ExprType::IsNull, *expr),
+            Expr::IsNotNull(expr) => self.bind_is_operator(ExprType::IsNotNull, *expr),
+            Expr::IsTrue(expr) => self.bind_is_operator(ExprType::IsTrue, *expr),
+            Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
+            Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
+            Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
+            Expr::Case {
+                operand,
+                conditions,
+                results,
+                else_result,
+            } => self.bind_case(operand, conditions, results, else_result),
             Expr::Between {
                 expr,
                 negated,
                 low,
                 high,
-            } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_between(*expr, negated, *low, *high)?,
-            ))),
-            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            } => self.bind_between(*expr, negated, *low, *high),
             Expr::InList {
                 expr,
                 list,
                 negated,
             } => self.bind_in_list(*expr, list, negated),
+            // special syntax for date/time
+            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            // special syntaxt for string
+            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
+            Expr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+            } => self.bind_substring(*expr, substring_from, substring_for),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -202,7 +192,7 @@ impl Binder {
         expr: Expr,
         // ([BOTH | LEADING | TRAILING], <expr>)
         trim_where: Option<(TrimWhereField, Box<Expr>)>,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let mut inputs = vec![self.bind_expr(expr)?];
         let func_type = match trim_where {
             Some(t) => {
@@ -215,7 +205,26 @@ impl Binder {
             }
             None => ExprType::Trim,
         };
-        FunctionCall::new(func_type, inputs)
+        Ok(FunctionCall::new(func_type, inputs)?.into())
+    }
+
+    fn bind_substring(
+        &mut self,
+        expr: Expr,
+        substring_from: Option<Box<Expr>>,
+        substring_for: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![
+            self.bind_expr(expr)?,
+            match substring_from {
+                Some(expr) => self.bind_expr(*expr)?,
+                None => ExprImpl::literal_int(1),
+            },
+        ];
+        if let Some(expr) = substring_for {
+            args.push(self.bind_expr(*expr)?);
+        }
+        FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
     }
 
     /// Bind `expr (not) between low and high`
@@ -225,7 +234,7 @@ impl Binder {
         negated: bool,
         low: Expr,
         high: Expr,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
         let low = self.bind_expr(low)?;
         let high = self.bind_expr(high)?;
@@ -253,7 +262,7 @@ impl Binder {
             )
         };
 
-        Ok(func_call)
+        Ok(func_call.into())
     }
 
     pub(super) fn bind_case(
@@ -262,7 +271,7 @@ impl Binder {
         conditions: Vec<Expr>,
         results: Vec<Expr>,
         else_result: Option<Box<Expr>>,
-    ) -> Result<FunctionCall> {
+    ) -> Result<ExprImpl> {
         let mut inputs = Vec::new();
         let results_expr: Vec<ExprImpl> = results
             .into_iter()
@@ -285,16 +294,12 @@ impl Binder {
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
-        FunctionCall::new(ExprType::Case, inputs)
+        Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
-    pub(super) fn bind_is_operator(
-        &mut self,
-        func_type: ExprType,
-        expr: Expr,
-    ) -> Result<FunctionCall> {
+    pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
-        FunctionCall::new(func_type, vec![expr])
+        Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
