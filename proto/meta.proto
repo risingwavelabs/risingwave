@@ -262,9 +262,9 @@ message SubscribeResponse {
   uint64 version = 3;
   oneof info {
     common.WorkerNode node = 4;
-    catalog.Database database_v2 = 8;
-    catalog.Schema schema_v2 = 9;
-    catalog.Table table_v2 = 10;
+    catalog.Database database = 8;
+    catalog.Schema schema = 9;
+    catalog.Table table = 10;
     catalog.Source source = 11;
     MetaSnapshot snapshot = 12;
     hummock.HummockSnapshot hummock_snapshot = 13;
