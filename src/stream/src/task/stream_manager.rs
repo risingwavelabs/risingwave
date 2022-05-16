@@ -167,6 +167,7 @@ impl LocalStreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
+        need_sync: bool,
     ) -> Result<CollectResult> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
@@ -174,17 +175,19 @@ impl LocalStreamManager {
         let collect_result = rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
-        dispatch_state_store!(self.state_store(), store, {
-            match store.sync(Some(barrier.epoch.prev)).await {
-                Ok(_) => {}
-                // TODO: Handle sync failure by propagating it
-                // back to global barrier manager
-                Err(e) => panic!(
-                    "Failed to sync state store after receiving barrier {:?} due to {}",
-                    barrier, e
-                ),
-            }
-        });
+        if need_sync {
+            dispatch_state_store!(self.state_store(), store, {
+                match store.sync(Some(barrier.epoch.prev)).await {
+                    Ok(_) => {}
+                    // TODO: Handle sync failure by propagating it
+                    // back to global barrier manager
+                    Err(e) => panic!(
+                        "Failed to sync state store after receiving barrier {:?} due to {}",
+                        barrier, e
+                    ),
+                }
+            });
+        }
 
         Ok(collect_result)
     }
@@ -228,7 +231,7 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect)
+        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, false)
             .await?;
         self.core.lock().drop_all_actors();
 

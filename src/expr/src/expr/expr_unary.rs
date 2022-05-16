@@ -21,7 +21,6 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
@@ -273,8 +272,6 @@ pub fn new_unary_expr(
                 }
             }
         }
-        (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
-
         (expr, ret, child) => {
             return Err(ErrorCode::NotImplemented(format!(
                 "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
@@ -460,7 +457,7 @@ mod tests {
             expr_type: Type::Cast as i32,
             return_type: Some(return_type),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_input_ref(0, TypeName::Char)],
+                children: vec![make_input_ref(0, TypeName::Varchar)],
             })),
         };
         let vec_executor = build_from_prost(&expr).unwrap();

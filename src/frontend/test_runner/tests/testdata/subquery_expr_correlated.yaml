@@ -184,8 +184,9 @@
             LogicalScan { table: t2, columns: [_row_id#0, x, y] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0] }
-      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND (($0 + $3) = 100:Int32) AND ($1 = 1000:Int32) }
-        LogicalScan { table: t1, columns: [x, y] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $2) AND (($0 + $3) = 100:Int32) }
+        LogicalFilter { predicate: ($1 = 1000:Int32) }
+          LogicalScan { table: t1, columns: [x, y] }
         LogicalProject { exprs: [$1, $0] }
           LogicalScan { table: t2, columns: [x, y] }
 - sql: |

@@ -19,9 +19,8 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::RwError;
 
-use crate::executor::Executor;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, Executor2};
 
 /// Mock the input of executor.
@@ -50,33 +49,6 @@ impl MockExecutor {
 
     pub fn add(&mut self, chunk: DataChunk) {
         self.chunks.push_back(chunk);
-    }
-}
-
-#[async_trait::async_trait]
-impl Executor for MockExecutor {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.chunks.is_empty() {
-            return Ok(None);
-        }
-        let chunk = self.chunks.pop_front().unwrap();
-        Ok(Some(chunk))
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
     }
 }
 

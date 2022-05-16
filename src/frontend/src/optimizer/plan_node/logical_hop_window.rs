@@ -204,6 +204,7 @@ impl ColPrunable for LogicalHopWindow {
             new_hop.into(),
             ColIndexMapping::with_remaining_columns(&required_output_cols, self.schema().len()),
         )
+        .into()
     }
 }
 

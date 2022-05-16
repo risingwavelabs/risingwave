@@ -23,8 +23,11 @@ use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
 
 use super::SearchResult;
 use crate::hummock::compaction::compaction_picker::CompactionPicker;
-use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::overlap_strategy::{
+    HashStrategy, OverlapStrategy, RangeOverlapStrategy,
+};
 use crate::hummock::compaction::CompactionConfig;
+use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -36,11 +39,16 @@ pub struct TierCompactionPicker {
 
 impl Default for TierCompactionPicker {
     fn default() -> Self {
+        let config = Arc::new(CompactionConfig::default());
+        let overlap_strategy = match &config.compaction_mode {
+            RangeMode => Arc::new(RangeOverlapStrategy::default()) as Arc<dyn OverlapStrategy>,
+            ConsistentHashMode => Arc::new(HashStrategy::default()),
+        };
         Self {
             compact_task_id: 0,
             target_level: 1,
-            overlap_strategy: Arc::new(RangeOverlapStrategy {}),
-            config: Arc::new(CompactionConfig::default()),
+            overlap_strategy,
+            config,
         }
     }
 }
