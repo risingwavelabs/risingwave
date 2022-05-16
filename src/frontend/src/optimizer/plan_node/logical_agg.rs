@@ -528,6 +528,7 @@ impl ColPrunable for LogicalAgg {
                 agg.into(),
                 ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
+            .into()
         }
     }
 }
