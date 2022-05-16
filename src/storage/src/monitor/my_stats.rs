@@ -20,25 +20,6 @@ use prometheus::proto::Histogram;
 
 use crate::monitor::StateStoreMetrics;
 
-#[derive(Clone, Default)]
-pub struct MyStateStoreStats {
-    pub write_batch_duration: MyHistogram,
-    pub write_batch_size: MyHistogram,
-}
-
-impl MyStateStoreStats {
-    pub fn from_prom_stats(stats: &StateStoreMetrics) -> Self {
-        Self {
-            write_batch_duration: MyHistogram::from_prom_hist(
-                stats.write_batch_duration.metric().get_histogram(),
-            ),
-            write_batch_size: MyHistogram::from_prom_hist(
-                stats.write_batch_size.metric().get_histogram(),
-            ),
-        }
-    }
-}
-
 #[derive(Clone, Default, Debug)]
 pub struct MyHistogram {
     pub upper_bound_list: Vec<f64>,

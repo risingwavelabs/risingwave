@@ -94,16 +94,28 @@ impl ObjectStoreImpl {
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let timer = self.object_store_metrics.write_latency.start_timer();
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(obj.len() as u64);
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["upload"])
+            .start_timer();
         self.inner.upload(path, obj).await?;
-        timer.observe_duration();
         Ok(())
     }
 
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        let timer = self.object_store_metrics.read_latency.start_timer();
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["read"])
+            .start_timer();
         let ret = self.inner.read(path, block_loc).await?;
-        timer.observe_duration();
+        self.object_store_metrics
+            .read_bytes
+            .inc_by(ret.len() as u64);
         Ok(ret)
     }
 
@@ -112,14 +124,29 @@ impl ObjectStoreImpl {
         path: &str,
         block_locs: Vec<BlockLocation>,
     ) -> ObjectResult<Vec<Bytes>> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["readv"])
+            .start_timer();
         self.inner.readv(path, block_locs).await
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["metadata"])
+            .start_timer();
         self.inner.metadata(path).await
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["delete"])
+            .start_timer();
         self.inner.delete(path).await
     }
 }

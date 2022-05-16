@@ -1,7 +1,8 @@
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, Histogram, Registry,
+    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
+    register_histogram_with_registry, register_int_counter_with_registry, Histogram, HistogramVec,
+    Registry,
 };
 
 use super::Print;
@@ -11,8 +12,7 @@ macro_rules! for_all_metrics {
         $macro! {
             write_bytes: GenericCounter<AtomicU64>,
             read_bytes: GenericCounter<AtomicU64>,
-            read_latency: Histogram,
-            write_latency: Histogram,
+            operation_latency: HistogramVec,
         }
     };
 }
@@ -55,26 +55,18 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
-        let read_latency_opts = histogram_opts!(
-            "object_store_read_latency",
-            "Total latency of read-request to object store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+        let latency_opts = histogram_opts!(
+            "object_store_operation_latency",
+            "Total latency of operation on object store",
+            exponential_buckets(0.0001, 2.0, 20).unwrap(), // max 52s
         );
-        let read_latency = register_histogram_with_registry!(read_latency_opts, registry).unwrap();
-
-        let write_latency_opts = histogram_opts!(
-            "object_store_write_latency",
-            "Total latency of write-request to object store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let write_latency =
-            register_histogram_with_registry!(write_latency_opts, registry).unwrap();
+        let operation_latency =
+            register_histogram_vec_with_registry!(latency_opts, &["type"], registry).unwrap();
 
         Self {
             write_bytes,
             read_bytes,
-            read_latency,
-            write_latency,
+            operation_latency,
         }
     }
 
