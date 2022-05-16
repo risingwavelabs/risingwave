@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -20,6 +19,7 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
+use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -498,22 +498,22 @@ mod tests {
 
     // --- Test HashAgg with in-memory KeyedState ---
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_local_hash_aggregation_count_in_memory() {
         test_local_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_global_hash_aggregation_count_in_memory() {
         test_global_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_local_hash_aggregation_min_in_memory() {
         test_local_hash_aggregation_min(create_in_memory_keyspace_agg(2)).await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_local_hash_aggregation_min_append_only_in_memory() {
         test_local_hash_aggregation_min_append_only(create_in_memory_keyspace_agg(2)).await
     }

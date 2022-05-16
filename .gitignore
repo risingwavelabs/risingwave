@@ -21,12 +21,6 @@ build/
 # Golang
 go/bin/
 
-# Java
-**/.idea
-**/.gradle
-legacy/**/build
-legacy/**/bin
-
 # Rust
 src/**/target
 src/**/target_tarpaulin

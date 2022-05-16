@@ -143,7 +143,7 @@ mod tests {
     use super::super::*;
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_projection() {
         let chunk1 = StreamChunk::from_pretty(
             " I I

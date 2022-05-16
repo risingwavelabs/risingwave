@@ -122,6 +122,16 @@ pub enum ErrorCode {
     ValueEncodingError(ValueEncodingError),
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
+    #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
+    InvalidConfigValue {
+        config_entry: String,
+        config_value: String,
+    },
+
+    /// This error occurs when the meta node receives heartbeat from a previous removed worker
+    /// node. Currently we don't support re-register, and the worker node need a full restart.
+    #[error("Unknown worker")]
+    UnknownWorker,
 
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
@@ -285,10 +295,12 @@ impl ErrorCode {
             ErrorCode::InvalidInputSyntax(_) => 14,
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::ValueEncodingError(_) => 16,
+            ErrorCode::InvalidConfigValue { .. } => 17,
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,
             ErrorCode::BindError(_) => 23,
+            ErrorCode::UnknownWorker => 24,
             ErrorCode::UnknownError(_) => 101,
         }
     }

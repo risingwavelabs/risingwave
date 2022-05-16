@@ -21,7 +21,7 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchProject { exprs: [$0, ($0 + 1:Int32)], expr_alias: [v1,  ] }
+        BatchProject { exprs: [$0, ($0 + 1:Int32)] }
           BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -36,20 +36,19 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchProject { exprs: [$0], expr_alias: [a1] }
-          BatchScan { table: t, columns: [v1] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by 1+1;
   batch_plan: |
-    BatchProject { exprs: [$0, $1], expr_alias: [v1, v2] }
+    BatchProject { exprs: [$0, $1] }
       BatchExchange { order: [$2 ASC], dist: Single }
         BatchSort { order: [$2 ASC] }
-          BatchProject { exprs: [$0, $1, (1:Int32 + 1:Int32)], expr_alias: [v1, v2,  ] }
+          BatchProject { exprs: [$0, $1, (1:Int32 + 1:Int32)] }
             BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, expr#2(hidden), _row_id#0(hidden)], pk_columns: [_row_id#0], order_descs: [expr#2, _row_id#0] }
-      StreamProject { exprs: [$0, $1, (1:Int32 + 1:Int32), $2], expr_alias: [v1, v2,  ,  ] }
+      StreamProject { exprs: [$0, $1, (1:Int32 + 1:Int32), $2] }
         StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -84,17 +83,17 @@
     create table t (x int, y int, z int);
     select x, y from t order by x + y, z;
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $1, ($0 + $1), $2], expr_alias: [x, y,  ,  ] }
+    LogicalProject { exprs: [$0, $1, ($0 + $1), $2] }
       LogicalScan { table: t, columns: [x, y, z] }
   batch_plan: |
-    BatchProject { exprs: [$0, $1], expr_alias: [x, y] }
+    BatchProject { exprs: [$0, $1] }
       BatchExchange { order: [$2 ASC, $3 ASC], dist: Single }
         BatchSort { order: [$2 ASC, $3 ASC] }
-          BatchProject { exprs: [$0, $1, ($0 + $1), $2], expr_alias: [x, y,  ,  ] }
+          BatchProject { exprs: [$0, $1, ($0 + $1), $2] }
             BatchScan { table: t, columns: [x, y, z] }
   stream_plan: |
     StreamMaterialize { columns: [x, y, expr#2(hidden), z(hidden), _row_id#0(hidden)], pk_columns: [_row_id#0], order_descs: [expr#2, z, _row_id#0] }
-      StreamProject { exprs: [$0, $1, ($0 + $1), $2, $3], expr_alias: [x, y,  ,  ,  ] }
+      StreamProject { exprs: [$0, $1, ($0 + $1), $2, $3] }
         StreamTableScan { table: t, columns: [x, y, z, _row_id#0], pk_indices: [3] }
 - sql: |
     /* order by the number of an output column */

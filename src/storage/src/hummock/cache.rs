@@ -20,6 +20,7 @@
 //! `LruCache` implementation port from github.com/facebook/rocksdb. The class `LruCache` is
 //! thread-safe, because every operation on cache will be protected by a spin lock.
 use std::collections::HashMap;
+use std::future::Future;
 use std::hash::Hash;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,6 +28,8 @@ use std::sync::Arc;
 
 use futures::channel::oneshot::{channel, Receiver, Sender};
 use spin::Mutex;
+
+use crate::hummock::{HummockError, HummockResult};
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
@@ -677,6 +680,37 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 }
 
+impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
+    pub async fn lookup_with_request_dedup<F, VC>(
+        self: &Arc<Self>,
+        hash: u64,
+        key: K,
+        fetch_value: F,
+    ) -> HummockResult<CachableEntry<K, T>>
+    where
+        F: FnOnce() -> VC,
+        VC: Future<Output = HummockResult<(T, usize)>>,
+    {
+        match self.lookup_for_request(hash, key.clone()) {
+            LookupResult::Cached(entry) => Ok(entry),
+            LookupResult::WaitPendingRequest(recv) => {
+                let entry = recv.await.map_err(HummockError::other)?;
+                Ok(entry)
+            }
+            LookupResult::Miss => match fetch_value().await {
+                Ok((value, charge)) => {
+                    let entry = self.insert(key, hash, charge, value);
+                    Ok(entry)
+                }
+                Err(e) => {
+                    self.clear_pending_request(&key, hash);
+                    Err(e)
+                }
+            },
+        }
+    }
+}
+
 pub struct CachableEntry<K: LruKey, T: LruValue> {
     cache: Arc<LruCache<K, T>>,
     handle: *mut LruHandle<K, T>,
@@ -924,6 +958,7 @@ mod tests {
 
             cache.release(new_entry);
             assert!((*new_entry).is_in_cache());
+            #[cfg(debug_assertions)]
             assert!((*new_entry).is_in_lru());
 
             // assert old value unchanged.
@@ -933,9 +968,12 @@ mod tests {
 
             cache.release(old_entry);
             assert!(!(*old_entry).is_in_cache());
-            assert!(!(*old_entry).is_in_lru());
             assert!((*new_entry).is_in_cache());
-            assert!((*new_entry).is_in_lru());
+            #[cfg(debug_assertions)]
+            {
+                assert!(!(*old_entry).is_in_lru());
+                assert!((*new_entry).is_in_lru());
+            }
         }
     }
 

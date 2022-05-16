@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::fmt;
+use std::cmp::Ordering;
 use std::time::{Duration, SystemTime};
 
 lazy_static::lazy_static! {
@@ -26,13 +27,39 @@ pub struct Epoch(pub u64);
 /// `INVALID_EPOCH` defines the invalid epoch value.
 pub const INVALID_EPOCH: u64 = 0;
 
+const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
+
 impl Epoch {
     pub fn now() -> Self {
-        Self(Self::physical_now())
+        Self(Self::physical_now() << EPOCH_PHYSICAL_SHIFT_BITS)
     }
 
-    // TODO: use a monotonic library to replace SystemTime.
-    pub fn physical_now() -> u64 {
+    #[must_use]
+    pub fn next(self) -> Self {
+        let physical_now = Epoch::physical_now();
+        let prev_physical_time = self.physical_time();
+        match physical_now.cmp(&prev_physical_time) {
+            Ordering::Greater => Epoch(physical_now << EPOCH_PHYSICAL_SHIFT_BITS),
+            Ordering::Equal => {
+                tracing::warn!("New generate epoch is too close to the previous one.");
+                Epoch(self.0 + 1)
+            }
+            Ordering::Less => {
+                tracing::warn!(
+                    "Clock goes backwards when calling Epoch::next(): prev={}, curr={}",
+                    prev_physical_time,
+                    physical_now
+                );
+                Epoch(self.0 + 1)
+            }
+        }
+    }
+
+    pub fn physical_time(&self) -> u64 {
+        self.0 >> EPOCH_PHYSICAL_SHIFT_BITS
+    }
+
+    fn physical_now() -> u64 {
         UNIX_SINGULARITY_DATE_EPOCH
             .elapsed()
             .expect("system clock set earlier than singularity date!")
@@ -41,7 +68,7 @@ impl Epoch {
 
     /// Returns the epoch in real system time.
     pub fn as_system_time(&self) -> SystemTime {
-        *UNIX_SINGULARITY_DATE_EPOCH + Duration::from_millis(self.0)
+        *UNIX_SINGULARITY_DATE_EPOCH + Duration::from_millis(self.physical_time())
     }
 }
 
@@ -69,5 +96,15 @@ mod tests {
         let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
         let singularity_st = SystemTime::from(singularity_dt);
         assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);
+    }
+
+    #[test]
+    fn test_epoch_generate() {
+        let mut prev_epoch = Epoch::now();
+        for _ in 0..1000 {
+            let epoch = prev_epoch.next();
+            assert!(epoch > prev_epoch);
+            prev_epoch = epoch;
+        }
     }
 }

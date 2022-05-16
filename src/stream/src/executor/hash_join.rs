@@ -689,7 +689,7 @@ mod tests {
         (tx_l, tx_r, Box::new(executor).execute())
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_inner_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -764,7 +764,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_left_semi_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -874,7 +874,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_right_semi_join() {
         let chunk_r1 = StreamChunk::from_pretty(
             "  I I
@@ -984,7 +984,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_left_anti_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1112,7 +1112,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_right_anti_join() {
         let chunk_r1 = StreamChunk::from_pretty(
             "  I I
@@ -1240,7 +1240,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_inner_join_with_barrier() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1336,7 +1336,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_left_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1417,7 +1417,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_right_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1491,7 +1491,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_full_outer_join() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1574,7 +1574,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I
@@ -1666,7 +1666,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_streaming_hash_inner_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::from_pretty(
             "  I I

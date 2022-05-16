@@ -64,7 +64,7 @@ where
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let info = self.resolve_actor_info(None).await;
-            let mut new_epoch = Epoch::now();
+            let mut new_epoch = prev_epoch.next();
 
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
@@ -87,7 +87,7 @@ where
             }
 
             let prev_epoch = new_epoch;
-            new_epoch = Epoch::now();
+            new_epoch = prev_epoch.next();
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
@@ -129,7 +129,6 @@ where
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
     /// already.
     async fn sync_sources(&self, info: &BarrierActorInfo) -> Result<()> {
-        // Attention, using catalog v2 here, it's not compatible with Java frontend.
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let sources = catalog_guard.list_sources().await?;
 

@@ -1,0 +1,29 @@
+- sql: |
+    create table t(a int, b int);
+    select
+      max(num) as max_num, a
+    from (
+      select
+        count(*) as num, a, b
+      from t
+      group by a, b
+    )
+    group by a;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$1, $0] }
+        BatchHashAgg { group_keys: [$0], aggs: [max($1)] }
+          BatchProject { exprs: [$0, $2] }
+            BatchExchange { order: [], dist: HashShard([0]) }
+              BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
+                BatchExchange { order: [], dist: HashShard([0, 1]) }
+                  BatchScan { table: t, columns: [a, b] }
+  stream_plan: |
+    StreamMaterialize { columns: [max_num, a], pk_columns: [a] }
+      StreamProject { exprs: [$2, $0] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
+          StreamProject { exprs: [$0, $3, $1] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
+                StreamExchange { dist: HashShard([0, 1]) }
+                  StreamTableScan { table: t, columns: [a, b, _row_id#0], pk_indices: [2] }
