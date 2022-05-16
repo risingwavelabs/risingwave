@@ -44,15 +44,13 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
             check_valid_column_name(&column.name.value)?;
-            let field_descs = {
-                if let AstDataType::Struct(fields) = &column.data_type {
-                    fields
-                        .iter()
-                        .map(bind_struct_field)
-                        .collect::<Result<Vec<_>>>()?
-                } else {
-                    vec![]
-                }
+            let field_descs = if let AstDataType::Struct(fields) = &column.data_type {
+                fields
+                    .iter()
+                    .map(bind_struct_field)
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                vec![]
             };
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,

@@ -309,7 +309,7 @@ impl Binder {
     }
 }
 
-/// Given a type `STRUCT<v1 int>`, this functions binds the field `v1 int`.
+/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
 pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
         defs.iter()
