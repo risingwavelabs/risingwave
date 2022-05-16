@@ -50,6 +50,12 @@ impl Binder {
             Expr::IsNotFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_is_operator(ExprType::IsNotFalse, *expr)?,
             ))),
+            Expr::IsDistinctFrom(left, right) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_distinct_from(false, *left, *right)?
+            ))),
+            Expr::IsNotDistinctFrom(left, right) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_distinct_from(true, *left, *right)?
+            ))),
             Expr::Case {
                 operand,
                 conditions,
@@ -295,6 +301,61 @@ impl Binder {
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
         FunctionCall::new(func_type, vec![expr])
+    }
+
+    pub(super) fn bind_distinct_from(
+        &mut self,
+        negated: bool,
+        left: Expr,
+        right: Expr
+    ) -> Result<FunctionCall> {
+        let bound_left = self.bind_expr(left)?;
+        let bound_right = self.bind_expr(right)?;
+
+       if negated {
+            FunctionCall::new(
+                ExprType::Or,
+                vec![
+                    FunctionCall::new_unchecked(
+                        ExprType::And,
+                        vec![
+                            FunctionCall::new(ExprType::IsNull, vec![bound_left.clone()])?.into(),
+                            FunctionCall::new(ExprType::IsNull, vec![bound_right.clone()])?.into()
+                        ],
+                        DataType::Boolean
+                    ).into(),
+                    FunctionCall::new(ExprType::Equal, vec![bound_left, bound_right])?.into()
+                ]
+            )
+        } else {
+           FunctionCall::new (
+               ExprType::Or,
+               vec![
+                    FunctionCall::new(
+                        ExprType::Or,
+                        vec![
+                            FunctionCall::new_unchecked(
+                                ExprType::And,
+                                vec![
+                                    FunctionCall::new(ExprType::IsNotNull, vec![bound_left.clone()])?.into(),
+                                    FunctionCall::new(ExprType::IsNull, vec![bound_right.clone()])?.into()
+                                ],
+                                DataType::Boolean
+                            ).into(),
+                            FunctionCall::new_unchecked(
+                                ExprType::And,
+                                vec![
+                                    FunctionCall::new(ExprType::IsNull, vec![bound_left.clone()])?.into(),
+                                    FunctionCall::new(ExprType::IsNotNull, vec![bound_right.clone()])?.into()
+                                ],
+                                DataType::Boolean
+                            ).into(),
+                        ]
+                    )?.into(),
+                    FunctionCall::new(ExprType::NotEqual, vec![bound_left, bound_right])?.into(),
+               ]
+           )
+        }
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
