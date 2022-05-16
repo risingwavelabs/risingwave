@@ -24,7 +24,7 @@ Reading this document requires prior knowledge of LSM-Tree-based KV storage engi
 
 ![Overview of Architecture](images/state-store-overview/state-store-overview-01.svg)
 
-Hummock consists of manager service on meta node, clients on compute nodes, and a shared storage to store files (SSTs). Every time a new write batch is produced, Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
+Hummock consists of manager service on meta node, clients on worker nodes (including compute nodes, frontend nodes, and compactor nodes), and a shared storage to store files (SSTs). Every time a new write batch is produced, Hummock client will upload those files to shared storage, and notify the Hummock manager of the new data. With compaction going on, new files will be added and unused files will be vacuumed. The Hummock manager will take care of the lifecycle of a file — is a file is being used? can we delete a file? etc.
 
 Streaming state store has distinguished workload characteristics.
 
