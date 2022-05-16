@@ -76,7 +76,7 @@ pub async fn compactor_serve(
         .await,
     );
     let local_object_store =
-        Arc::new(parse_object_store(&storage_config.local_object_store_root, false).await);
+        Arc::new(parse_object_store(&storage_config.local_object_store, false).await);
     let sstable_store = Arc::new(SstableStore::new(
         remote_object_store,
         local_object_store,

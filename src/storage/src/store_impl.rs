@@ -95,9 +95,8 @@ impl StateStoreImpl {
                 let remote_object_store = Arc::new(
                     parse_object_store(hummock.strip_prefix("hummock+").unwrap(), true).await,
                 );
-                let local_object_store = Arc::new(
-                    parse_object_store(config.local_object_store_root.as_str(), false).await,
-                );
+                let local_object_store =
+                    Arc::new(parse_object_store(config.local_object_store.as_str(), false).await);
                 let remote_sstable_store = Arc::new(SstableStore::new(
                     remote_object_store.clone(),
                     local_object_store,

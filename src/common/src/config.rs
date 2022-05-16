@@ -138,8 +138,8 @@ pub struct StorageConfig {
     pub meta_cache_capacity: usize,
 
     /// Local object store root. We should call `get_local_object_store` to get the object store.
-    #[serde(default = "default::local_object_store_root")]
-    pub local_object_store_root: String,
+    #[serde(default = "default::local_object_store")]
+    pub local_object_store: String,
 }
 
 impl Default for StorageConfig {
@@ -237,7 +237,7 @@ mod default {
         67108864
     }
 
-    pub fn local_object_store_root() -> String {
+    pub fn local_object_store() -> String {
         "tempdisk".to_string()
     }
 }

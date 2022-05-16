@@ -157,7 +157,7 @@ async fn main() {
         write_conflict_detection_enabled: opts.write_conflict_detection_enabled,
         block_cache_capacity: opts.block_cache_capacity_mb as usize * (1 << 20),
         meta_cache_capacity: opts.meta_cache_capacity_mb as usize * (1 << 20),
-        local_object_store_root: "memory".to_string(),
+        local_object_store: "memory".to_string(),
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
