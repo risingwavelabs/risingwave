@@ -62,9 +62,7 @@ risedev:
   full:
     - use: minio
     - use: etcd
-    # - use: jaeger
     - use: meta-node
-      # enable-dashboard-v2: true
     - use: compute-node
     - use: frontend
     - use: compactor

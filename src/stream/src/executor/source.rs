@@ -59,10 +59,10 @@ pub struct SourceExecutor<S: StateStore> {
     source_identify: String,
 
     split_state_store: SourceStateHandler<S>,
-    // store latest split to offset mapping
+    
+    // store latest split to offset mapping.
+    // None if there is no update on source state since the previsouly seen barrier.
     state_cache: Option<Vec<ConnectorState>>,
-    // whether there is any data flowing between two barriers
-    idle_between_barriers: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -94,7 +94,6 @@ impl<S: StateStore> SourceExecutor<S> {
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             split_state_store: SourceStateHandler::new(keyspace),
             state_cache: None,
-            idle_between_barriers: true,
         })
     }
 
@@ -225,7 +224,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     match barrier.map_err(StreamExecutorError::source_error)? {
                         Message::Barrier(barrier) => {
                             let epoch = barrier.epoch.prev;
-                            if self.state_cache.is_some() && !self.idle_between_barriers {
+                            if self.state_cache.is_some() {
                                 self.split_state_store
                                     .take_snapshot(self.state_cache.clone().unwrap(), epoch)
                                     .await
@@ -234,15 +233,14 @@ impl<S: StateStore> SourceExecutor<S> {
                                             InternalError(e.to_string()),
                                         ))
                                     })?;
+                                self.state_cache = None;
                             }
-                            self.idle_between_barriers = true;
                             yield Message::Barrier(barrier)
                         }
                         _ => unreachable!(),
                     }
                 }
                 Either::Right(chunk_with_state) => {
-                    self.idle_between_barriers = false;
                     let chunk_with_state =
                         chunk_with_state.map_err(StreamExecutorError::source_error)?;
                     if chunk_with_state.split_offset_mapping.is_some() {
