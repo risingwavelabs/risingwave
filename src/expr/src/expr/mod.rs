@@ -20,6 +20,7 @@ pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
+mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;
@@ -45,6 +46,7 @@ use risingwave_pb::expr::ExprNode;
 
 use crate::expr::build_expr_from_prost::*;
 use crate::expr::expr_coalesce::CoalesceExpression;
+use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
 
 pub type ExpressionRef = Arc<dyn Expression>;
@@ -88,6 +90,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        ConcatWs => ConcatWsExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
