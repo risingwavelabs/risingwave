@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
@@ -45,11 +46,17 @@ pub struct FeQueryMessage {
 impl FeQueryMessage {
     pub fn get_sql(&self) -> Result<&str> {
         // Why there is a \0..
-        match std::str::from_utf8(&self.sql_bytes[..]) {
-            Ok(v) => Ok(v.trim_end_matches('\0')),
-            Err(e) => Err(Error::new(
+        match CStr::from_bytes_with_nul(&self.sql_bytes) {
+            Ok(cstr) => match cstr.to_str() {
+                Ok(v) => Ok(v.trim_end_matches('\0')),
+                Err(e) => Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Cannot transform cstr to str: {}", e),
+                )),
+            },
+            Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Invalid UTF-8 sequence: {}", e),
+                format!("Invalid UTF-8 sequence: {}", err),
             )),
         }
     }
