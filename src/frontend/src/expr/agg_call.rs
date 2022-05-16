@@ -78,7 +78,7 @@ impl AggCall {
                 }
                 DataType::Float32 | DataType::Float64 => DataType::Float64,
                 DataType::Interval => DataType::Interval,
-                _ => return unsupported(),
+                _ => return invalid(),
             },
             (AggKind::Avg, _) => return invalid(),
 
@@ -91,7 +91,7 @@ impl AggCall {
                 DataType::Float32 => DataType::Float32,
                 DataType::Float64 => DataType::Float64,
                 DataType::Interval => DataType::Interval,
-                _ => return unsupported(),
+                _ => return invalid(),
             },
             (AggKind::Sum, _) => return invalid(),
 
