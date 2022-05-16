@@ -312,7 +312,8 @@ impl Binder {
         let bound_left = self.bind_expr(left)?;
         let bound_right = self.bind_expr(right)?;
 
-       if negated {
+        if negated {
+            // x IS NOT DISTINCT FROM y is equivalent to (x IS NULL AND y IS NULL) OR x = y
             FunctionCall::new(
                 ExprType::Or,
                 vec![
@@ -328,6 +329,8 @@ impl Binder {
                 ]
             )
         } else {
+            // x IS DISTINCT FROM y is equivalent to
+            // (x IS NULL AND y IS NOT NULL) OR (x IS NOT NULL AND y IS NULL) OR x <> y
            FunctionCall::new (
                ExprType::Or,
                vec![
