@@ -56,10 +56,10 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
         let futures = block_locs
-            .into_iter()
-            .map(|block_loc| self.read(path, Some(block_loc)))
+            .iter()
+            .map(|block_loc| self.read(path, Some(*block_loc)))
             .collect_vec();
         try_join_all(futures).await
     }

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::future::join_all;
+use futures::future::try_join_all;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -181,7 +181,7 @@ impl ObjectStore for LocalDiskObjectStore {
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
         match block_loc {
-            Some(block_loc) => Ok(self.readv(path, vec![block_loc]).await?.pop().unwrap()),
+            Some(block_loc) => Ok(self.readv(path, &[block_loc]).await?.pop().unwrap()),
             None => {
                 let file_holder = self.get_read_file(path).await?;
                 let metadata = utils::get_metadata(file_holder.clone()).await?;
@@ -204,10 +204,10 @@ impl ObjectStore for LocalDiskObjectStore {
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
         let file_holder = self.get_read_file(path).await?;
         let metadata = utils::get_metadata(file_holder.clone()).await?;
-        for block_loc in &block_locs {
+        for block_loc in block_locs {
             if block_loc.offset + block_loc.size > metadata.len() as usize {
                 return Err(ObjectError::disk(
                     "".to_string(),
@@ -223,10 +223,10 @@ impl ObjectStore for LocalDiskObjectStore {
             }
         }
         let mut ret = Vec::with_capacity(block_locs.len());
-        // TODO: may want to sort and reorder the location to improve serial read.
-        for block_loc in block_locs {
+        for block_loc_ref in block_locs {
             let file_holder = file_holder.clone();
             let path_owned = path.to_owned();
+            let block_loc = *block_loc_ref;
             let future = utils::asyncify(move || {
                 let mut buf = vec![0; block_loc.size as usize];
                 file_holder
@@ -245,10 +245,8 @@ impl ObjectStore for LocalDiskObjectStore {
             });
             ret.push(future)
         }
-        Ok(join_all(ret)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?)
+
+        Ok(try_join_all(ret).await?)
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -389,7 +387,7 @@ mod tests {
         let read_data = store
             .readv(
                 "test.obj",
-                test_loc
+                &test_loc
                     .iter()
                     .map(|(offset, size)| BlockLocation {
                         offset: *offset,
@@ -465,7 +463,7 @@ mod tests {
         assert!(store
             .readv(
                 "test.obj",
-                vec![
+                &[
                     BlockLocation {
                         offset: 499999,
                         size: 2,
