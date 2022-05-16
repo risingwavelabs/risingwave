@@ -17,10 +17,10 @@ use async_trait::async_trait;
 use aws_sdk_kinesis::model::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
 
-use crate::KinesisProperties;
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::kinesis::*;
+use crate::KinesisProperties;
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,

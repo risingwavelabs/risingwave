@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::dummy_connector::DummySplitReader;
 use crate::kafka::source::KafkaSplitReader;
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::kinesis::source::reader::KinesisSplitReader;
+use crate::kinesis::source::reader::{KinesisMultiSplitReader, KinesisSplitReader};
 use crate::kinesis::split::KinesisOffset;
 use crate::nexmark::source::reader::NexmarkSplitReader;
 
@@ -157,7 +157,7 @@ pub trait SplitReader {
 
 pub enum SplitReaderImpl {
     Kafka(KafkaSplitReader),
-    Kinesis(KinesisSplitReader),
+    Kinesis(KinesisMultiSplitReader),
     Dummy(DummySplitReader),
     Nexmark(NexmarkSplitReader),
     Pulsar(PulsarSplitReader),
@@ -186,7 +186,7 @@ impl SplitReaderImpl {
                 Self::Kafka(KafkaSplitReader::new(props, state).await?)
             }
             ConnectorProperties::Kinesis(props) => {
-                Self::Kinesis(KinesisSplitReader::new(props, state).await?)
+                Self::Kinesis(KinesisMultiSplitReader::new(props, state).await?)
             }
             ConnectorProperties::Nexmark(props) => {
                 Self::Nexmark(NexmarkSplitReader::new(*props, state).await?)
@@ -301,10 +301,10 @@ impl SplitEnumeratorImpl {
             }
             ConnectorProperties::Kinesis(props) => {
                 KinesisSplitEnumerator::new(props).await.map(Self::Kinesis)
-            },
+            }
             ConnectorProperties::Nexmark(props) => {
                 NexmarkSplitEnumerator::new(props.as_ref()).map(Self::Nexmark)
-            },
+            }
             ConnectorProperties::S3(_) => todo!(),
         }
     }
