@@ -17,7 +17,7 @@ use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
 /// Format scalars according to postgres convention.
@@ -56,6 +56,25 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
             )
         })
         .collect_vec()
+}
+
+/// Convert column descs to rows which conclude name and type
+pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
+    let mut rows = vec![];
+    for col in columns {
+        rows.extend(col.flatten().into_iter().map(|c| {
+            let type_name = {
+                // If datatype is struct, use type name as struct name
+                if let DataType::Struct { fields: _f } = c.data_type {
+                    c.type_name.clone()
+                } else {
+                    format!("{:?}", &c.data_type)
+                }
+            };
+            Row::new(vec![Some(c.name), Some(type_name)])
+        }));
+    }
+    rows
 }
 
 /// Convert from [`Field`] to [`PgFieldDescriptor`].
