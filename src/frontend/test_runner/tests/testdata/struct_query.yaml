@@ -258,7 +258,7 @@
 - sql: |
     create materialized view t as select * from s;
     select avg(country) from t;
-  binder_error: 'Feature is not yet implemented: Unsupported aggregation: avg(Struct { fields: [Varchar, Varchar] }), Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Invalid input syntax: Invalid aggregation: avg(Struct { fields: [Varchar, Varchar] })'
   create_source:
     row_format: protobuf
     name: s
