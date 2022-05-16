@@ -188,10 +188,6 @@ impl StreamFragmenter {
             NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
             NodeBody::Chain(ref node) => {
-                // TODO: Remove this when we deprecate Java frontend.
-                // current_fragment.is_singleton = self.is_legacy_frontend;
-                current_fragment.is_singleton = false;
-
                 // memorize table id for later use
                 state
                     .dependent_table_ids
