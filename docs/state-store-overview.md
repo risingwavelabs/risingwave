@@ -130,7 +130,7 @@ Hummock implements the following iterators:
 
 Currently, Hummock is using a compaction strategy similar to leveled-compaction in RocksDB. It will compact data using consistent hash (docs and implementation TBD), so that data on shared storage distribute in the same way as how stream executors use them.
 
-Compaction is done on a special worker node called compactor node. The standalone compactor listens for compaction jobs from meta node, compacts one or more SSTs into new ones, and report completion to the meta node. (In Hummock in-memory mode, compactor will be running as a thread inside compute node.)
+Compaction is done on a special worker node called compactor node. The standalone compactor listens for compaction jobs from meta node, compacts one or more SSTs into new ones, and reports completion to the meta node. (In Hummock in-memory mode, compactor will be running as a thread inside compute node.)
 
 To support MVCC read without affecting compaction, we track the epoch low watermark in Hummock snapshots. A user key-value pair will be retained if (1) it is the latest, or (2) it belongs to an epoch above the low watermark.
 
