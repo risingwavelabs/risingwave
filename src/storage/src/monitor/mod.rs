@@ -15,7 +15,7 @@
 mod state_store_metrics;
 
 use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
-use prometheus::Histogram;
+use prometheus::{Histogram, HistogramVec};
 pub use state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
@@ -56,5 +56,12 @@ impl Print for Histogram {
         let sample_count = self.get_sample_count();
         let sample_sum = self.get_sample_sum();
         println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
+    }
+}
+
+impl Print for HistogramVec {
+    fn print(&self) {
+        let desc = &self.desc()[0].fq_name;
+        println!("{desc} {:?}", self);
     }
 }

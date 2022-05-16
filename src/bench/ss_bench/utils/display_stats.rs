@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::Metric;
 use risingwave_storage::monitor::{MyHistogram, StateStoreMetrics};
 
 use super::my_stats::MyStateStoreStats;

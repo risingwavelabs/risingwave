@@ -1,8 +1,7 @@
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_with_registry, Histogram, HistogramVec,
-    Registry,
+    register_int_counter_with_registry, HistogramVec, Registry,
 };
 
 use super::Print;

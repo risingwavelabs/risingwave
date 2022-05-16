@@ -111,7 +111,8 @@ impl StateStoreImpl {
                 .await?;
                 if hummock.starts_with("hummock+memory") || config.disable_remote_compactor {
                     tracing::info!("start a compactor for in-memory object store");
-                    let (_, shutdown_sender) = Compactor::start_compactor(
+                    // todo: set shutdown_sender in HummockStorage.
+                    let (_, _shutdown_sender) = Compactor::start_compactor(
                         config.clone(),
                         hummock_meta_client,
                         sstable_store,

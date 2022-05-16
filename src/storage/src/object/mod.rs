@@ -129,7 +129,11 @@ impl ObjectStoreImpl {
             .operation_latency
             .with_label_values(&["readv"])
             .start_timer();
-        self.inner.readv(path, block_locs).await
+        let ret = self.inner.readv(path, block_locs).await?;
+        self.object_store_metrics
+            .read_bytes
+            .inc_by(ret.iter().map(|block| block.len()).sum::<usize>() as u64);
+        Ok(ret)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {

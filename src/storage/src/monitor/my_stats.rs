@@ -15,10 +15,7 @@
 use std::fmt::{Display, Formatter};
 
 use itertools::Itertools;
-use prometheus::core::Metric;
 use prometheus::proto::Histogram;
-
-use crate::monitor::StateStoreMetrics;
 
 #[derive(Clone, Default, Debug)]
 pub struct MyHistogram {
