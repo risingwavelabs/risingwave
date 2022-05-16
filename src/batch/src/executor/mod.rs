@@ -34,7 +34,6 @@ use crate::task::{BatchEnvironment, TaskId};
 
 pub mod executor2_wrapper;
 mod fuse;
-mod join;
 #[cfg(test)]
 pub mod test_utils;
 mod trace;
