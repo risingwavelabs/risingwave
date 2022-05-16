@@ -45,7 +45,6 @@ pub struct FeQueryMessage {
 
 impl FeQueryMessage {
     pub fn get_sql(&self) -> Result<&str> {
-        // Why there is a \0..
         match CStr::from_bytes_with_nul(&self.sql_bytes) {
             Ok(cstr) => match cstr.to_str() {
                 Ok(v) => Ok(v),
