@@ -19,8 +19,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 
-use self::fuse::FusedExecutor;
-use crate::executor::trace::TraceExecutor;
 use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
@@ -33,10 +31,8 @@ use crate::executor2::{
 use crate::task::{BatchEnvironment, TaskId};
 
 pub mod executor2_wrapper;
-mod fuse;
 #[cfg(test)]
 pub mod test_utils;
-mod trace;
 
 /// `Executor` is an operator in the query execution.
 #[async_trait::async_trait]
@@ -57,14 +53,6 @@ pub trait Executor: Send {
 
     /// Identity string of the executor
     fn identity(&self) -> &str;
-
-    /// Turn an executor into a fused executor
-    fn fuse(self) -> FusedExecutor<Self>
-    where
-        Self: Executor + std::marker::Sized,
-    {
-        FusedExecutor::new(self)
-    }
 }
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -164,7 +152,7 @@ impl<'a> ExecutorBuilder<'a> {
     }
 
     fn try_build(&self) -> Result<BoxedExecutor> {
-        let real_executor = build_executor! { self,
+        build_executor! { self,
             NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
@@ -185,9 +173,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
             NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
             NodeBody::HopWindow => HopWindowExecutor2,
-        }?;
-        let input_desc = real_executor.identity().to_string();
-        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
+        }
     }
 
     fn try_build2(&self) -> Result<BoxedExecutor2> {
