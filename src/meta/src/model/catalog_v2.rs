@@ -55,3 +55,48 @@ impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);
+
+#[cfg(test)]
+mod tests {
+    use futures::future;
+
+    use super::*;
+    use crate::manager::MetaSrvEnv;
+
+    fn database_for_id(id: u32) -> Database {
+        Database {
+            id,
+            name: format!("database_{}", id),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_database() -> Result<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let store = env.meta_store();
+        let databases = Database::list(store).await?;
+        assert!(databases.is_empty());
+        assert!(Database::select(store, &0).await.unwrap().is_none());
+
+        future::join_all((0..100).map(|i| async move { database_for_id(i).insert(store).await }))
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
+
+        for i in 0..100 {
+            let database = Database::select(store, &i).await?.unwrap();
+            assert_eq!(database, database_for_id(i));
+        }
+
+        let databases = Database::list(store).await?;
+        assert_eq!(databases.len(), 100);
+
+        for i in 0..100 {
+            assert!(Database::delete(store, &i).await.is_ok());
+        }
+        let databases = Database::list(store).await?;
+        assert!(databases.is_empty());
+
+        Ok(())
+    }
+}
