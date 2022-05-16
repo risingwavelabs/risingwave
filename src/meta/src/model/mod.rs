@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod barrier;
-mod catalog;
 mod catalog_v2;
 mod cluster;
 mod hash_mapping;
@@ -24,7 +23,6 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use barrier::*;
-pub use catalog::*;
 pub use catalog_v2::*;
 pub use cluster::*;
 pub use hash_mapping::*;
