@@ -17,11 +17,12 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_connector::{ConnectorProperties, ConnectorStateV2, SplitReaderImpl};
+use risingwave_connector::{Column, ConnectorProperties, ConnectorStateV2, SplitReaderImpl};
 
 use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
@@ -73,11 +74,24 @@ impl ConnectorSource {
             splits
         );
 
-        let reader = SplitReaderImpl::create(self.config.clone(), splits)
-            .await
-            .to_rw_result()?;
+        let columns: Vec<SourceColumnDesc> = self.get_target_columns(column_ids)?;
 
-        let columns = self.get_target_columns(column_ids)?;
+        let reader = SplitReaderImpl::create(
+            self.config.clone(),
+            splits,
+            Some(
+                columns
+                    .iter()
+                    .cloned()
+                    .map(|col| Column {
+                        name: col.name,
+                        data_type: col.data_type,
+                    })
+                    .collect_vec(),
+            ),
+        )
+        .await
+        .to_rw_result()?;
 
         Ok(ConnectorStreamReader {
             reader,
