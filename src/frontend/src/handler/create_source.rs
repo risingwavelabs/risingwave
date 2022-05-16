@@ -30,6 +30,7 @@ use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::{OptimizerContext, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
@@ -111,13 +112,16 @@ pub async fn handle_create_source(
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
-        let (plan, table) = {
+        let (graph, table) = {
             let (plan, table) = gen_materialized_source_plan(context.into(), source.clone())?;
             let plan = plan.to_stream_prost();
-            (plan, table)
+            let graph = StreamFragmenter::build_graph(plan);
+
+            (graph, table)
         };
+
         catalog_writer
-            .create_materialized_source(source, table, plan)
+            .create_materialized_source(source, table, graph)
             .await?;
     } else {
         catalog_writer.create_source(source).await?;

@@ -201,13 +201,6 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                     )?)
                     .into(),
                 ),
-                TypeName::Char | TypeName::Symbol => ScalarImpl::Utf8(
-                    std::str::from_utf8(prost_value.get_body())
-                        .map_err(|e| {
-                            InternalError(format!("Failed to deserialize char, reason: {:?}", e))
-                        })?
-                        .to_string(),
-                ),
                 TypeName::Varchar => ScalarImpl::Utf8(
                     std::str::from_utf8(prost_value.get_body())
                         .map_err(|e| {

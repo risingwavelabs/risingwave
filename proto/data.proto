@@ -45,7 +45,6 @@ message DataType {
     FLOAT = 3;
     DOUBLE = 4;
     BOOLEAN = 5;
-    CHAR = 6;
     VARCHAR = 7;
     DECIMAL = 8;
     TIME = 9;
@@ -54,7 +53,6 @@ message DataType {
     DATE = 12;
     // Timestamp type with timezone
     TIMESTAMPZ = 13;
-    SYMBOL = 14;
     STRUCT = 15;
     LIST = 16;
   }
