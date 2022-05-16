@@ -22,6 +22,7 @@ use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 /// Generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
@@ -72,15 +73,17 @@ pub async fn handle_create_mv(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (table, stream_plan) = {
+    let (table, graph) = {
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let stream_plan = plan.to_stream_prost();
-        (table, stream_plan)
+        let graph = StreamFragmenter::build_graph(stream_plan);
+
+        (table, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_materialized_view(table, stream_plan)
+        .create_materialized_view(table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(

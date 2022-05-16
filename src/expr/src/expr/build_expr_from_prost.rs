@@ -230,7 +230,7 @@ mod tests {
         let input_ref_expr_node = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(ProstDataType {
-                type_name: TypeName::Char as i32,
+                type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
             rex_node: Some(RexNode::InputRef(input_ref)),
@@ -239,7 +239,7 @@ mod tests {
             ExprNode {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
-                    type_name: TypeName::Char as i32,
+                    type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
@@ -249,7 +249,7 @@ mod tests {
             ExprNode {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
-                    type_name: TypeName::Char as i32,
+                    type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
@@ -311,7 +311,7 @@ mod tests {
         let left = ExprNode {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(ProstDataType {
-                type_name: TypeName::Symbol as i32,
+                type_name: TypeName::Varchar as i32,
                 precision: 11,
                 ..Default::default()
             }),

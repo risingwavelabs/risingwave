@@ -56,10 +56,10 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
         let futures = block_locs
-            .into_iter()
-            .map(|block_loc| self.read(path, Some(block_loc)))
+            .iter()
+            .map(|block_loc| self.read(path, Some(*block_loc)))
             .collect_vec();
         try_join_all(futures).await
     }
@@ -100,6 +100,14 @@ impl InMemObjectStore {
 
     pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
         *self.compactor_shutdown_sender.lock() = Some(shutdown_sender);
+    }
+}
+
+impl Drop for InMemObjectStore {
+    fn drop(&mut self) {
+        if let Some(sender) = self.compactor_shutdown_sender.lock().take() {
+            let _ = sender.send(());
+        }
     }
 }
 

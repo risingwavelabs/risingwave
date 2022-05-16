@@ -63,7 +63,6 @@ pub enum Components {
     Kafka,
     Tracing,
     RustComponents,
-    LegacyFrontend,
     Dashboard,
     Release,
     AllInOne,
@@ -78,7 +77,6 @@ impl Components {
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
             Self::RustComponents => "[Build] Rust components",
-            Self::LegacyFrontend => "[Build] Legacy Java frontend",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
             Self::Release => "[Build] Enable release mode",
@@ -113,11 +111,6 @@ Required if you want to create source from Kafka.
 Required if you want to build compute-node and meta-node.
 Otherwise you will need to manually download and copy it
 to RiseDev directory."
-            }
-            Self::LegacyFrontend => {
-                "
-Required if you want to build frontend. Otherwise you will
-need to manually download and copy it to RiseDev directory."
             }
             Self::Dashboard => {
                 "
@@ -159,7 +152,6 @@ a dev cluster.
             "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
-            "ENABLE_BUILD_FRONTEND" => Some(Self::LegacyFrontend),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
@@ -175,7 +167,6 @@ a dev cluster.
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
             Self::RustComponents => "ENABLE_BUILD_RUST",
-            Self::LegacyFrontend => "ENABLE_BUILD_FRONTEND",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",

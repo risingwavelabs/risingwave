@@ -31,6 +31,7 @@ use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
@@ -121,23 +122,24 @@ pub async fn handle_create_table(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (plan, source, table) = {
+    let (graph, source, table) = {
         let (plan, source, table) =
             gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
         let plan = plan.to_stream_prost();
+        let graph = StreamFragmenter::build_graph(plan);
 
-        (plan, source, table)
+        (graph, source, table)
     };
 
     log::trace!(
-        "name={}, plan=\n{}",
+        "name={}, graph=\n{}",
         table_name,
-        serde_json::to_string_pretty(&plan).unwrap()
+        serde_json::to_string_pretty(&graph).unwrap()
     );
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_materialized_source(source, table, plan)
+        .create_materialized_source(source, table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
