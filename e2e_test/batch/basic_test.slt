@@ -435,3 +435,7 @@ f
 f
 t
 f
+
+
+statement ok
+drop table t;
