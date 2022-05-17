@@ -46,7 +46,7 @@ pub enum StatementType {
     SET_OPTION,
     SHOW_PARAMETERS,
     SHOW_COMMAND,
-    START_TRANSITION,
+    START_TRANSACTION,
     ABORT,
     FLUSH,
     OTHER,
