@@ -29,6 +29,7 @@ pub mod create_table;
 mod describe;
 pub mod dml;
 mod drop_database;
+mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
 pub mod drop_source;
@@ -41,7 +42,6 @@ mod set;
 mod show;
 mod show_column;
 pub mod util;
-mod drop_index;
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone());

@@ -54,7 +54,7 @@ pub async fn handle_drop_index(
         if table.is_index_on.is_none() {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-            )))
+            )));
         }
         table.id()
     };
