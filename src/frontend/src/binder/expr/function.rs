@@ -110,6 +110,9 @@ impl Binder {
         if inputs.len() < 2 {
             Err(ErrorCode::BindError("ConcatWs function must contain at least 2 arguments".to_string()).into())
         } else {
+            // concat_ws is a special case which casts arguments from
+            // any type (int, timestamps, etc...) to varchar.
+            // cast_explicit is used because it permits all of these casts, cast_implicit does not.
             let inputs = inputs
                 .into_iter()
                 .map(|input| input.cast_explicit(DataType::Varchar))
