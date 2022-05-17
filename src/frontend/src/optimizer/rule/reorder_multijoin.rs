@@ -16,38 +16,16 @@ use super::super::plan_node::*;
 use super::Rule;
 use crate::optimizer::rule::BoxedRule;
 
-/// Pushes predicates above and within a join node into the join node and/or its children nodes.
-///
-/// # Which predicates can be pushed
-///
-/// For inner join, we can do all kinds of pushdown.
-///
-/// For relation_a/relation_c semi join, we can push filter to relation_a/relation_c and on-clause,
-/// and push on-clause to relation_a/relation_c.
-///
-/// For relation_a/relation_c anti join, we can push filter to relation_a/relation_c, but on-clause
-/// can not be pushed
-///
-/// ## Outer Join
-///
-/// Preserved Row table
-/// : The table in an Outer Join that must return all rows.
-///
-/// Null Supplying table
-/// : This is the table that has nulls filled in for its columns in unmatched rows.
-///
-/// |                          | Preserved Row table | Null Supplying table |
-/// |--------------------------|---------------------|----------------------|
-/// | Join predicate (on)      | Not Pushed          | Pushed               |
-/// | Where predicate (filter) | Pushed              | Not Pushed           |
+/// Reorders a multi join into a left deep join via the heuristic ordering
 pub struct ReorderMultiJoinRule {}
 
 impl Rule for ReorderMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
-        let relation_a_deep_join = join.heuristic_ordering().ok()?;
-        Some(relation_a_deep_join)
+        let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
+        let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
+        Some(left_deep_join)
     }
 }
 
@@ -137,23 +115,20 @@ mod tests {
             .unwrap(),
         ));
         let join_1 = LogicalJoin::new(
-            relation_b.clone().into(),
             LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
+            relation_b.clone().into(),
             join_type,
             Condition::with_expr(on_1),
         );
         let multi_join = LogicalMultiJoin::from_join(&join_1.into()).unwrap();
         for (input, schema) in multi_join.inputs().iter().zip_eq(vec![
             relation_a.schema(),
-            relation_b.schema(),
             relation_c.schema(),
+            relation_b.schema(),
         ]) {
             assert_eq!(input.schema(), schema);
         }
-        println!("{:?}", multi_join);
 
-        println!("{:?}", multi_join.heuristic_ordering());
-
-        // TODO: continue this test
+        assert_eq!(multi_join.heuristic_ordering().unwrap(), vec![0, 2, 1]);
     }
 }

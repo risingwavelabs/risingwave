@@ -221,7 +221,7 @@ fn test_connected_component_labeller() {
 }
 
 impl LogicalMultiJoin {
-    pub fn as_reordered_left_deep_join(&self, join_ordering: &[usize]) -> Result<PlanRef> {
+    pub fn as_reordered_left_deep_join(&self, join_ordering: &[usize]) -> PlanRef {
         assert_eq!(join_ordering.len(), self.inputs.len());
         assert!(!join_ordering.is_empty());
 
@@ -250,7 +250,7 @@ impl LogicalMultiJoin {
         // `FilterJoinRule`.
         output = LogicalFilter::create(output, self.on.clone());
 
-        Ok(output)
+        output
     }
 
     // Our heuristic join reordering algorithm will try to perform a left-deep join.
@@ -273,7 +273,7 @@ impl LogicalMultiJoin {
     //        b. a projection which reorders the output column ordering to agree with the
     //           original ordering of the joins.
     //    The filter will then be pushed down by another filter pushdown pass.
-    pub(crate) fn heuristic_ordering(&self) -> Result<PlanRef> {
+    pub(crate) fn heuristic_ordering(&self) -> Result<Vec<usize>> {
         let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
         let (eq_join_conditions, _) = self
@@ -349,7 +349,7 @@ impl LogicalMultiJoin {
                 join_ordering.push(i);
             }
         }
-        self.as_reordered_left_deep_join(&join_ordering)
+        Ok(join_ordering)
     }
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
