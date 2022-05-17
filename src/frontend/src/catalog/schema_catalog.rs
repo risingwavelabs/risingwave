@@ -99,6 +99,13 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_some())
+            .map(|(_, v)| v)
+    }
+
     /// Iterate all sources, including the materialized sources.
     pub fn iter_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
