@@ -157,10 +157,10 @@ pub trait SplitReader {
 }
 
 pub enum SplitReaderImpl {
-    Kafka(KafkaSplitReader),
     Kinesis(Box<KinesisMultiSplitReader>),
+    Kafka(Box<KafkaSplitReader>),
     Dummy(DummySplitReader),
-    Nexmark(NexmarkSplitReader),
+    Nexmark(Box<NexmarkSplitReader>),
     Pulsar(PulsarSplitReader),
 }
 
@@ -188,13 +188,13 @@ impl SplitReaderImpl {
 
         let connector = match config {
             ConnectorProperties::Kafka(props) => {
-                Self::Kafka(KafkaSplitReader::new(props, state).await?)
+                Self::Kafka(Box::new(KafkaSplitReader::new(props, state).await?))
             }
             ConnectorProperties::Kinesis(props) => {
                 Self::Kinesis(Box::new(KinesisMultiSplitReader::new(props, state).await?))
             }
             ConnectorProperties::Nexmark(props) => {
-                Self::Nexmark(NexmarkSplitReader::new(*props, state).await?)
+                Self::Nexmark(Box::new(NexmarkSplitReader::new(*props, state).await?))
             }
             ConnectorProperties::Pulsar(props) => {
                 Self::Pulsar(PulsarSplitReader::new(props, state).await?)
