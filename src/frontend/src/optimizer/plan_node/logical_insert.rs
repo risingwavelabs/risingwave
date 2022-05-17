@@ -103,6 +103,6 @@ impl ToStream for LogicalInsert {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
-        unreachable!("delete should always be converted to batch plan");
+        unreachable!("insert should always be converted to batch plan");
     }
 }
