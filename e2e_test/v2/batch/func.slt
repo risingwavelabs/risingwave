@@ -91,9 +91,9 @@ select concat_ws(NULL, NULL, 'b');
 NULL
 
 query T
-select concat_ws(true, 1, 1.01, 'A', NULL);
+select concat_ws(',', 1, 1.01, 'A', true, NULL);
 ----
-1true1.01trueA
+1,1.01,A,true
 
 statement ok
 create table t (v1 varchar, v2 smallint, v3 int, v4 decimal, v5 real, v6 double, v7 bool, v8 varchar);
