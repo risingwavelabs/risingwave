@@ -266,7 +266,6 @@ impl StateStoreMetrics {
         let compact_task_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         monitor_process(&registry).unwrap();
-
         Self {
             get_duration,
             get_key_size,
@@ -280,26 +279,22 @@ impl StateStoreMetrics {
             range_scan_duration,
             range_backward_scan_size,
             range_backward_scan_duration,
-
             write_batch_tuple_counts,
-            write_build_l0_bytes,
             write_batch_duration,
             write_batch_size,
             write_build_l0_sst_duration,
-
+            write_build_l0_bytes,
             iter_merge_sstable_counts,
             iter_merge_seek_duration,
-
             sst_store_block_request_counts,
-
             shared_buffer_to_l0_duration,
             shared_buffer_to_sstable_size,
 
             compaction_upload_sst_counts,
             compaction_read_bytes,
             compaction_write_bytes,
-            compact_task_duration,
             compact_sst_duration,
+            compact_task_duration,
         }
     }
 

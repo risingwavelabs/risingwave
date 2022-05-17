@@ -157,26 +157,18 @@ impl ObjectStoreImpl {
     }
 }
 
-
-pub async fn parse_object_store(url: &str, is_remote: bool, object_store_metrics: Arc<ObjectStoreMetrics>) -> ObjectStoreImpl {
-    match url {
+pub async fn parse_object_store(
+    url: &str,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+) -> ObjectStoreImpl {
+    let store: Box<dyn ObjectStore> = match url {
         s3 if s3.starts_with("s3://") => {
-            assert!(
-                is_remote,
-                "S3 object store is only supported for remote stores"
-            );
-            ObjectStoreImpl::S3(
-                S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await,
-            )
+            Box::new(S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await)
         }
         minio if minio.starts_with("minio://") => {
-            assert!(
-                is_remote,
-                "S3 object store is only supported for remote stores"
-            );
-            ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await)
+            Box::new(S3ObjectStore::new(minio.strip_prefix("minio://").unwrap().to_string()).await)
         }
-        disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(LocalDiskObjectStore::new(
+        disk if disk.starts_with("disk://") => Box::new(LocalDiskObjectStore::new(
             disk.strip_prefix("disk://").unwrap(),
         )),
         memory if memory.starts_with("memory") => {

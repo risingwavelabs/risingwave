@@ -70,7 +70,6 @@ impl SstableStore {
         data: Bytes,
         policy: CachePolicy,
     ) -> HummockResult<usize> {
-
         let meta = Bytes::from(sst.meta.encode_to_bytes());
         let len = data.len();
 
