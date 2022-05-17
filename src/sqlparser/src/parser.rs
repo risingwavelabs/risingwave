@@ -2591,9 +2591,9 @@ impl Parser {
                 }
                 Keyword::COLUMNS => {
                     if self.parse_keyword(Keyword::FROM) {
-                        return Ok(Statement::ShowColumn {
-                            name: self.parse_object_name()?,
-                        });
+                        return Ok(Statement::ShowObjects(ShowObject::Columns {
+                            table: self.parse_object_name()?,
+                        }));
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }

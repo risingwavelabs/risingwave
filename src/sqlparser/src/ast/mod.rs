@@ -633,6 +633,7 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
+    Columns { table: ObjectName },
 }
 
 impl fmt::Display for ShowObject {
@@ -658,6 +659,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Columns { table } => write!(f, "COLUMNS FROM {:?}", table),
         }
     }
 }
@@ -769,11 +771,6 @@ pub enum Statement {
     },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
-        /// Table or Source name
-        name: ObjectName,
-    },
-    /// SHOW COLUMN FROM TABLE OR SOURCE
-    ShowColumn {
         /// Table or Source name
         name: ObjectName,
     },
@@ -915,10 +912,6 @@ impl fmt::Display for Statement {
             }
             Statement::Describe { name } => {
                 write!(f, "DESCRIBE {}", name)?;
-                Ok(())
-            }
-            Statement::ShowColumn { name } => {
-                write!(f, "SHOW COLUMNS FROM {}", name)?;
                 Ok(())
             }
             Statement::ShowObjects(show_object) => {
