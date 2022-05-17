@@ -112,7 +112,7 @@ impl SstableStore {
         Ok(len)
     }
 
-    pub async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
+    async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
         let meta_path = self.get_sst_meta_path(sst.id);
         let meta = Bytes::from(sst.meta.encode_to_bytes());
         self.get_store_of_table(sst.id)
@@ -121,7 +121,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn put_sst_data(&self, sst_id: HummockSSTableId, data: Bytes) -> HummockResult<()> {
+    async fn put_sst_data(&self, sst_id: HummockSSTableId, data: Bytes) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
         self.get_store_of_table(sst_id)
             .upload(&data_path, data)
@@ -129,7 +129,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn delete_sst_data(&self, sst_id: HummockSSTableId) -> HummockResult<()> {
+    async fn delete_sst_data(&self, sst_id: HummockSSTableId) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
         self.get_store_of_table(sst_id)
             .delete(&data_path)
