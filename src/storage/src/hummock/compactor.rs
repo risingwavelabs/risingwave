@@ -534,17 +534,13 @@ impl Compactor {
                             compact_task,
                             vacuum_task,
                         })) => {
-                            if let Err(err) = tokio::spawn(process_task(
+                            tokio::spawn(process_task(
                                 compact_task,
                                 vacuum_task,
                                 compactor_context.clone(),
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),
-                            ))
-                            .await
-                            {
-                                tracing::warn!("Failed to process task: {:#?}", err);
-                            }
+                            ));
                         }
                         Err(e) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());
