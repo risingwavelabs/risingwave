@@ -133,8 +133,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             create_index::handle_create_index(context, name, table_name, columns).await
         }
         // Ignore `StartTransaction` And `Abort` temporarily.Its not final implementation.
-        // 1.Fully support transaction is too hard and gives few benefits to us.
-        // 2.Some client e.g.psycopg2 will use this statement.
+        // 1. Fully support transaction is too hard and gives few benefits to us.
+        // 2. Some client e.g.psycopg2 will use this statement.
         // TODO: Track issues #2595 #2541
         Statement::StartTransaction { .. } => Ok(PgResponse::empty_result(START_TRANSACTION)),
         Statement::Abort { .. } => Ok(PgResponse::empty_result(ABORT)),
