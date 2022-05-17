@@ -56,4 +56,4 @@ SHOW COLUMNS FROM schema.t
 ---
 SHOW COLUMNS FROM schema.t
 =>
-ShowColumn { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }
+ShowObjects(Columns { table: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) })

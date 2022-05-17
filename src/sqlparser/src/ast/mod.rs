@@ -659,7 +659,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
-            ShowObject::Columns { table } => write!(f, "COLUMNS FROM {:?}", table),
+            ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
 }
