@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use core::result::Result::Ok;
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::{thread, time};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -24,19 +22,16 @@ use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
-use aws_smithy_types::DateTime;
 use futures::future::join_all;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use futures_async_stream::{for_await, try_stream};
 use futures_concurrency::prelude::*;
-use risingwave_common::error::RwError;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::kinesis::build_client;
 use crate::kinesis::source::message::KinesisMessage;
-use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::{ConnectorStateV2, KinesisProperties, SplitImpl};
 
@@ -184,7 +179,7 @@ async fn split_reader_into_stream(mut reader: KinesisSplitReader) {
 impl SplitReader for KinesisMultiSplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         if self.consumer_handler.is_none() {
-            let mut split_readers = join_all(
+            let split_readers = join_all(
                 self.splits
                     .iter()
                     .map(|split| async {
@@ -261,14 +256,11 @@ impl KinesisMultiSplitReader {
 }
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
+
     use std::iter::Iterator;
 
-    use async_stream::stream;
-    use futures::Stream;
-    use futures_async_stream::{for_await, try_stream};
+    use futures_async_stream::for_await;
     use futures_concurrency::prelude::*;
-    use rand::Rng;
 
     use super::*;
 

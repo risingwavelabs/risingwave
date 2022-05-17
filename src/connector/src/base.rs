@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::dummy_connector::DummySplitReader;
 use crate::kafka::source::KafkaSplitReader;
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::kinesis::source::reader::{KinesisMultiSplitReader, KinesisSplitReader};
+use crate::kinesis::source::reader::KinesisMultiSplitReader;
 use crate::kinesis::split::KinesisOffset;
 use crate::nexmark::source::reader::NexmarkSplitReader;
 
