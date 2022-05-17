@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::StatementType::{ABORT, START_TRANSITION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
@@ -131,6 +132,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             }
             create_index::handle_create_index(context, name, table_name, columns).await
         }
+        Statement::StartTransaction { .. } => Ok(PgResponse::empty_result(START_TRANSITION)),
+        Statement::Abort { .. } => Ok(PgResponse::empty_result(ABORT)),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }
