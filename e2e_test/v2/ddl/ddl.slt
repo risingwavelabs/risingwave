@@ -130,3 +130,10 @@ drop schema ddl_schema;
 # Drop it again with if exists.
 statement ok
 drop schema if exists ddl_schema;
+
+# Create table concludes struct column.
+statement ok
+create table st (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
+
+statement ok
+drop table st

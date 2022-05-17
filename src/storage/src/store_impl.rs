@@ -92,9 +92,10 @@ impl StateStoreImpl {
         object_store_metrics: Arc<ObjectStoreMetrics>,
     ) -> StorageResult<Self> {
         let store = match s {
-            hummock if hummock.starts_with("hummock") => {
-                let object_store =
-                    Arc::new(parse_object_store(hummock, object_store_metrics).await);
+            hummock if hummock.starts_with("hummock+") => {
+                let object_store = Arc::new(
+                    parse_object_store(hummock.strip_prefix("hummock+").unwrap(), true).await,
+                );
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store.clone(),
                     config.data_directory.to_string(),
@@ -109,6 +110,8 @@ impl StateStoreImpl {
                     state_store_stats.clone(),
                 )
                 .await?;
+                // in-mem and disk object store are local object store. Therefore, if we use them as
+                // remote object store, we should start a compactor locally.              
                 if hummock.starts_with("hummock+memory") || config.disable_remote_compactor {
                     tracing::info!("start a compactor for in-memory object store");
                     // todo: set shutdown_sender in HummockStorage.
