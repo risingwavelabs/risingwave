@@ -213,20 +213,18 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     }
 }
 
-#[inline(always)]
-pub fn bool_to_str(input: bool) -> Result<String> {
-    match input {
-        true => Ok("true".into()),
-        false => Ok("false".into()),
-    }
-}
-
 pub fn int32_to_bool(input: i32) -> Result<bool> {
     Ok(input != 0)
 }
 
+pub fn general_to_string<T: std::fmt::Display>(elem: T) -> Result<String> {
+    Ok(elem.to_string())
+}
+
 #[cfg(test)]
 mod tests {
+    use num_traits::FromPrimitive;
+
     #[test]
     fn parse_str() {
         use super::*;
@@ -258,5 +256,37 @@ mod tests {
         assert!(int32_to_bool(32).unwrap());
         assert!(int32_to_bool(-32).unwrap());
         assert!(!int32_to_bool(0).unwrap());
+    }
+
+    #[test]
+    fn number_to_string() {
+        use super::*;
+
+        assert_eq!(general_to_string(true).unwrap(), "true");
+        assert_eq!(general_to_string(false).unwrap(), "false");
+
+        assert_eq!(general_to_string(32).unwrap(), "32");
+        assert_eq!(general_to_string(-32).unwrap(), "-32");
+        assert_eq!(general_to_string(i32::MIN).unwrap(), "-2147483648");
+        assert_eq!(general_to_string(i32::MAX).unwrap(), "2147483647");
+
+        assert_eq!(general_to_string(i16::MIN).unwrap(), "-32768");
+        assert_eq!(general_to_string(i16::MAX).unwrap(), "32767");
+
+        assert_eq!(general_to_string(i64::MIN).unwrap(), "-9223372036854775808");
+        assert_eq!(general_to_string(i64::MAX).unwrap(), "9223372036854775807");
+
+        assert_eq!(general_to_string(32.12).unwrap(), "32.12");
+        assert_eq!(general_to_string(-32.14).unwrap(), "-32.14");
+
+        assert_eq!(general_to_string(32.12_f32).unwrap(), "32.12");
+        assert_eq!(general_to_string(-32.14_f32).unwrap(), "-32.14");
+
+        assert_eq!(
+            general_to_string(Decimal::from_f64(1.222).unwrap()).unwrap(),
+            "1.222"
+        );
+
+        assert_eq!(general_to_string(Decimal::NaN).unwrap(), "NaN");
     }
 }
