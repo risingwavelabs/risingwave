@@ -5,7 +5,6 @@ package meta;
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
-import "plan_common.proto";
 import "stream_plan.proto";
 
 option optimize_for = SPEED;
