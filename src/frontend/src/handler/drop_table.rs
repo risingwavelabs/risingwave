@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -22,7 +23,12 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub fn check_source(catalog_reader: &CatalogReader, session: Arc<SessionImpl>,schema_name: &str,table_name:&str) -> Result<()>{
+pub fn check_source(
+    catalog_reader: &CatalogReader,
+    session: Arc<SessionImpl>,
+    schema_name: &str,
+    table_name: &str,
+) -> Result<()> {
     let reader = catalog_reader.read_guard();
     if let Ok(s) = reader.get_source_by_name(session.database(), schema_name, table_name) {
         if s.source_type == SourceType::Source {
@@ -43,7 +49,7 @@ pub async fn handle_drop_table(
 
     let catalog_reader = session.env().catalog_reader();
 
-    check_source(catalog_reader,session.clone(),&schema_name,&table_name)?;
+    check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
     let (source_id, table_id) = {
         let reader = catalog_reader.read_guard();

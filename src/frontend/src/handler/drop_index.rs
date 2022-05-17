@@ -29,7 +29,7 @@ pub async fn handle_drop_index(
 
     let catalog_reader = session.env().catalog_reader();
 
-    check_source(catalog_reader,session.clone(),&schema_name,&table_name)?;
+    check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
     let table_id = {
         let reader = catalog_reader.read_guard();
@@ -53,9 +53,7 @@ pub async fn handle_drop_index(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_materialized_view(table_id).await?;
 
-    Ok(PgResponse::empty_result(
-        StatementType::DROP_INDEX,
-    ))
+    Ok(PgResponse::empty_result(StatementType::DROP_INDEX))
 }
 
 #[cfg(test)]
