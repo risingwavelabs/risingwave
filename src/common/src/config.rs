@@ -136,6 +136,9 @@ pub struct StorageConfig {
     /// Capacity of sstable meta cache.
     #[serde(default = "default::meta_cache_capacity")]
     pub meta_cache_capacity: usize,
+
+    #[serde(default = "default::disable_remote_compactor")]
+    pub disable_remote_compactor: bool,
 }
 
 impl Default for StorageConfig {
@@ -231,6 +234,10 @@ mod default {
     pub fn meta_cache_capacity() -> usize {
         // 64 MB
         67108864
+    }
+
+    pub fn disable_remote_compactor() -> bool {
+        false
     }
 }
 

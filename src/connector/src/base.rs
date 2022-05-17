@@ -24,7 +24,8 @@ use crate::dummy_connector::DummySplitReader;
 use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::source::KafkaSplitReader;
 use crate::kafka::KafkaSplit;
-use crate::kinesis::source::reader::KinesisSplitReader;
+use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
+use crate::kinesis::source::reader::KinesisMultiSplitReader;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::nexmark::source::reader::NexmarkSplitReader;
 use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
@@ -156,10 +157,10 @@ pub trait SplitReader {
 }
 
 pub enum SplitReaderImpl {
-    Kafka(KafkaSplitReader),
-    Kinesis(KinesisSplitReader),
+    Kinesis(Box<KinesisMultiSplitReader>),
+    Kafka(Box<KafkaSplitReader>),
     Dummy(DummySplitReader),
-    Nexmark(NexmarkSplitReader),
+    Nexmark(Box<NexmarkSplitReader>),
     Pulsar(PulsarSplitReader),
 }
 
@@ -187,13 +188,13 @@ impl SplitReaderImpl {
 
         let connector = match config {
             ConnectorProperties::Kafka(props) => {
-                Self::Kafka(KafkaSplitReader::new(props, state).await?)
+                Self::Kafka(Box::new(KafkaSplitReader::new(props, state).await?))
             }
             ConnectorProperties::Kinesis(props) => {
-                Self::Kinesis(KinesisSplitReader::new(props, state).await?)
+                Self::Kinesis(Box::new(KinesisMultiSplitReader::new(props, state).await?))
             }
             ConnectorProperties::Nexmark(props) => {
-                Self::Nexmark(NexmarkSplitReader::new(*props, state).await?)
+                Self::Nexmark(Box::new(NexmarkSplitReader::new(*props, state).await?))
             }
             ConnectorProperties::Pulsar(props) => {
                 Self::Pulsar(PulsarSplitReader::new(props, state).await?)
@@ -297,17 +298,19 @@ impl SplitEnumeratorImpl {
         }
     }
 
-    pub fn create(properties: ConnectorProperties) -> Result<Self> {
+    pub async fn create(properties: ConnectorProperties) -> Result<Self> {
         match properties {
             ConnectorProperties::Kafka(props) => KafkaSplitEnumerator::new(props).map(Self::Kafka),
             ConnectorProperties::Pulsar(props) => {
                 PulsarSplitEnumerator::new(props).map(Self::Pulsar)
             }
-            ConnectorProperties::Kinesis(_) => todo!(),
-            ConnectorProperties::S3(_) => todo!(),
-            ConnectorProperties::Nexmark(props) => {
-                NexmarkSplitEnumerator::new(&props).map(Self::Nexmark)
+            ConnectorProperties::Kinesis(props) => {
+                KinesisSplitEnumerator::new(props).await.map(Self::Kinesis)
             }
+            ConnectorProperties::Nexmark(props) => {
+                NexmarkSplitEnumerator::new(props.as_ref()).map(Self::Nexmark)
+            }
+            ConnectorProperties::S3(_) => todo!(),
         }
     }
 }

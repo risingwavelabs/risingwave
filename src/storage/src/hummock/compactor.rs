@@ -182,6 +182,13 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
+                for (table, _) in &sst {
+                    compactor
+                        .context
+                        .stats
+                        .write_build_l0_bytes
+                        .inc_by(table.meta.estimated_size as u64);
+                }
                 level0.extend(sst);
             }
 
@@ -199,6 +206,12 @@ impl Compactor {
             compact_task_to_string(&compact_task)
         );
         let start_time = Instant::now();
+        for level in &compact_task.input_ssts {
+            for f in &level.table_infos {
+                context.stats.compaction_read_bytes.inc_by(f.file_size);
+            }
+        }
+        let timer = context.stats.compact_task_duration.start_timer();
 
         if !compact_task.vnode_mappings.is_empty() {
             compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
@@ -266,6 +279,7 @@ impl Compactor {
             compact_task.task_id,
             start_time.elapsed()
         );
+        timer.observe_duration();
         compact_success
     }
 
@@ -276,23 +290,9 @@ impl Compactor {
             .sorted_output_ssts
             .reserve(self.compact_task.splits.len());
 
-        for (_, sst) in output_ssts {
-            // for table in &sub_output {
-            //     add_table(
-            //         compact_task
-            //             .metrics
-            //             .as_mut()
-            //             .unwrap()
-            //             .write
-            //             .as_mut()
-            //             .unwrap(),
-            //         table,
-            //     );
-            // }
-
-            self.compact_task
-                .sorted_output_ssts
-                .extend(sst.into_iter().map(|(sst, vnode_bitmaps)| SstableInfo {
+        for (_, ssts) in output_ssts {
+            for (sst, vnode_bitmaps) in ssts {
+                let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
@@ -301,7 +301,13 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
-                }));
+                };
+                self.context
+                    .stats
+                    .compaction_write_bytes
+                    .inc_by(sst_info.file_size);
+                self.compact_task.sorted_output_ssts.push(sst_info);
+            }
         }
 
         if let Err(e) = self
@@ -348,10 +354,10 @@ impl Compactor {
         );
 
         // Monitor time cost building shared buffer to SSTs.
-        let build_l0_sst_timer = if self.context.is_share_buffer_compact {
-            Some(self.context.stats.write_build_l0_sst_duration.start_timer())
+        let timer = if self.context.is_share_buffer_compact {
+            self.context.stats.write_build_l0_sst_duration.start_timer()
         } else {
-            None
+            self.context.stats.compact_sst_duration.start_timer()
         };
         Compactor::compact_and_build_sst(
             &mut builder,
@@ -361,9 +367,7 @@ impl Compactor {
             self.compact_task.watermark,
         )
         .await?;
-        if let Some(timer) = build_l0_sst_timer {
-            timer.observe_duration();
-        }
+        timer.observe_duration();
 
         // Seal.
         builder.seal_current();
