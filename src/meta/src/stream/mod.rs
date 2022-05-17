@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod fragmenter;
 mod meta;
 mod scheduler;
 mod source_manager;
+mod stream_graph;
 mod stream_manager;
 
 #[cfg(test)]
 mod test_fragmenter;
 
-pub use fragmenter::*;
 pub use meta::*;
 pub use scheduler::*;
 pub use source_manager::*;
+pub use stream_graph::*;
 pub use stream_manager::*;

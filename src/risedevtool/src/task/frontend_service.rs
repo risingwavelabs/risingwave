@@ -21,22 +21,22 @@ use anyhow::{anyhow, Result};
 use super::{ExecuteContext, Task};
 use crate::FrontendConfig;
 
-pub struct FrontendServiceV2 {
+pub struct FrontendService {
     config: FrontendConfig,
 }
 
-impl FrontendServiceV2 {
+impl FrontendService {
     pub fn new(config: FrontendConfig) -> Result<Self> {
         Ok(Self { config })
     }
 
-    fn frontend_v2(&self) -> Result<Command> {
+    fn frontend(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
             Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("frontend-node")))
         } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("frontend-v2")))
+            Ok(Command::new(Path::new(&prefix_bin).join("frontend")))
         }
     }
 
@@ -69,12 +69,12 @@ impl FrontendServiceV2 {
     }
 }
 
-impl Task for FrontendServiceV2 {
+impl Task for FrontendService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = self.frontend_v2()?;
+        let mut cmd = self.frontend()?;
 
         cmd.env("RUST_BACKTRACE", "1");
         Self::apply_command_args(&mut cmd, &self.config)?;

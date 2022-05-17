@@ -25,8 +25,7 @@ use risingwave_pb::stream_plan::{
     ExchangeNode, LookupNode, LookupUnionNode, StreamNode,
 };
 
-use crate::stream::fragmenter::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
-use crate::stream::StreamFragmenter;
+use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge, StreamFragmenter};
 
 impl StreamFragmenter {
     /// All exchanges inside delta join is one-to-one exchange.

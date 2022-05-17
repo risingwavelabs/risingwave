@@ -12,6 +12,7 @@ async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
+derivative = "2"
 downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 enum-as-inner = "0.4"
@@ -53,4 +54,5 @@ uuid = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
+assert_matches = "1"
 tempfile = "3"
