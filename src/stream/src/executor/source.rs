@@ -24,6 +24,7 @@ use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamC
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
@@ -207,6 +208,13 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(recover_state, self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::Connector),
+            SourceImpl::ParallelConnector(c) => {
+                let splits = try_match_expand!(recover_state, ConnectorStateV2::Splits)
+                    .expect("Parallel Connector Source only support Vec<Split> as state");
+                c.stream_reader(splits, self.column_ids.clone())
+                    .await
+                    .map(SourceStreamReaderImpl::ParallelConnector)
+            }
         }
         .map_err(StreamExecutorError::source_error)?;
 
