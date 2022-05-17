@@ -315,6 +315,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_multi_splits() -> Result<()> {
         let properties = KinesisProperties {
             assume_role_arn: None,
