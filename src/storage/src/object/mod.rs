@@ -165,9 +165,7 @@ pub async fn parse_object_store(
         s3 if s3.starts_with("s3://") => {
             Box::new(S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await)
         }
-        minio if minio.starts_with("minio://") => {
-            Box::new(S3ObjectStore::new(minio.strip_prefix("minio://").unwrap().to_string()).await)
-        }
+        minio if minio.starts_with("minio://") => Box::new(S3ObjectStore::with_minio(minio).await),
         disk if disk.starts_with("disk://") => Box::new(LocalDiskObjectStore::new(
             disk.strip_prefix("disk://").unwrap(),
         )),
