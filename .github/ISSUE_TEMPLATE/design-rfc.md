@@ -1,5 +1,13 @@
-# RFC Template
+---
+name: Design RFC
+about: Propose a design
+title: ''
+labels: 'type/feature'
+assignees: ''
 
+---
+
+# RFC Template
 
 This doc will first explain why we need ..... Then we will go through the technical design of this feature.
 
