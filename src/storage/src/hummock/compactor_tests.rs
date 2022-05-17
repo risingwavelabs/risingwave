@@ -23,7 +23,7 @@ mod tests {
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use crate::hummock::compactor::{Compactor, CompactorContext};
+    use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::HummockStorage;
     use crate::monitor::StateStoreMetrics;
@@ -76,6 +76,7 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
         };
 
         // 1. add sstables

@@ -71,12 +71,10 @@ pub async fn compactor_serve(
             opts.state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
-            true,
         )
         .await,
     );
-    let local_object_store =
-        Arc::new(parse_object_store(&storage_config.local_object_store, false).await);
+    let local_object_store = Arc::new(parse_object_store(&storage_config.local_object_store).await);
     let sstable_store = Arc::new(SstableStore::new(
         remote_object_store,
         local_object_store,

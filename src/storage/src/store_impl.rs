@@ -92,11 +92,10 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let remote_object_store = Arc::new(
-                    parse_object_store(hummock.strip_prefix("hummock+").unwrap(), true).await,
-                );
+                let remote_object_store =
+                    Arc::new(parse_object_store(hummock.strip_prefix("hummock+").unwrap()).await);
                 let local_object_store =
-                    Arc::new(parse_object_store(config.local_object_store.as_str(), false).await);
+                    Arc::new(parse_object_store(config.local_object_store.as_str()).await);
                 let sstable_store = Arc::new(SstableStore::new(
                     remote_object_store.clone(),
                     local_object_store,

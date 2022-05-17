@@ -13,13 +13,11 @@
 // limitations under the License.
 
 use std::clone::Clone;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use risingwave_hummock_sdk::{get_local_sst_id, is_remote_sst_id, HummockSSTableId};
+use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
@@ -49,7 +47,6 @@ pub struct SstableStore {
     meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
-    next_local_sst_id: AtomicU64,
 }
 
 impl SstableStore {
@@ -73,7 +70,6 @@ impl SstableStore {
             block_cache: BlockCache::new(block_cache_capacity),
             meta_cache,
             stats,
-            next_local_sst_id: AtomicU64::new(0),
         }
     }
 
@@ -238,10 +234,6 @@ impl SstableStore {
 
     pub fn local_store(&self) -> ObjectStoreRef {
         self.local_store.clone()
-    }
-
-    pub fn get_next_local_sst_id(&self) -> HummockSSTableId {
-        get_local_sst_id(self.next_local_sst_id.fetch_add(1, Relaxed))
     }
 
     fn get_store_of_table(&self, sst_id: HummockSSTableId) -> &ObjectStoreRef {

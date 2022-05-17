@@ -125,32 +125,18 @@ impl ObjectStoreImpl {
     }
 }
 
-pub async fn parse_object_store(url: &str, is_remote: bool) -> ObjectStoreImpl {
+pub async fn parse_object_store(url: &str) -> ObjectStoreImpl {
     match url {
-        s3 if s3.starts_with("s3://") => {
-            assert!(
-                is_remote,
-                "S3 object store is only supported for remote stores"
-            );
-            ObjectStoreImpl::S3(
-                S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await,
-            )
-        }
+        s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
+            S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await,
+        ),
         minio if minio.starts_with("minio://") => {
-            assert!(
-                is_remote,
-                "S3 object store is only supported for remote stores"
-            );
             ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await)
         }
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(LocalDiskObjectStore::new(
             disk.strip_prefix("disk://").unwrap(),
         )),
         temp_disk if temp_disk.starts_with("tempdisk") => {
-            assert!(
-                !is_remote,
-                "temp disk can only be used as local object store"
-            );
             let path = tempfile::TempDir::new()
                 .expect("should be able to create temp dir")
                 .into_path()
@@ -165,7 +151,7 @@ pub async fn parse_object_store(url: &str, is_remote: bool) -> ObjectStoreImpl {
         }
         other => {
             unimplemented!(
-                "{} Hummock only supports s3, minio and memory for now.",
+                "{} Hummock only supports s3, minio, disk, and  memory for now.",
                 other
             )
         }
