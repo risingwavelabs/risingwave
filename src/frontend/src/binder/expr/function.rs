@@ -108,7 +108,10 @@ impl Binder {
     /// ConcatWs(expr1,expr2) -> ConcatWs(expr1 AS varchar, expr2 as varchar)
     fn rewrite_concat_ws_args_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.len() < 2 {
-            Err(ErrorCode::BindError("ConcatWs function must contain at least 2 arguments".to_string()).into())
+            Err(ErrorCode::BindError(
+                "ConcatWs function must contain at least 2 arguments".to_string(),
+            )
+            .into())
         } else {
             // concat_ws is a special case which casts arguments from
             // any type (int, timestamps, etc...) to varchar.

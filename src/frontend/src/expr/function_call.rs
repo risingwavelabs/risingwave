@@ -116,13 +116,14 @@ impl FunctionCall {
                 align_types(inputs.iter_mut())
             }
             ExprType::ConcatWs => {
-                 if inputs.len() < 2 {
+                if inputs.len() < 2 {
                     return Err(ErrorCode::BindError(
                         "ConcatWs function must contain more than 2 arguments".into(),
                     )
                     .into());
                 }
-                // NOTE: inputs can be any type, they will be casted into varchars with explicit_cast.
+                // NOTE: inputs can be any type, they will be casted into varchars with
+                // explicit_cast.
                 Ok(DataType::Varchar)
             }
             _ => infer_type(
