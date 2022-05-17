@@ -26,6 +26,7 @@ mod select;
 mod set_expr;
 mod statement;
 mod values;
+mod update;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
