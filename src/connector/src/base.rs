@@ -21,24 +21,25 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::dummy_connector::DummySplitReader;
+use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::source::KafkaSplitReader;
+use crate::kafka::KafkaSplit;
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::kinesis::source::reader::KinesisMultiSplitReader;
-use crate::kinesis::split::KinesisOffset;
+use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::nexmark::source::reader::NexmarkSplitReader;
-
-pub enum SourceOffset {
-    Number(i64),
-    String(String),
-}
-
-use crate::kafka::enumerator::KafkaSplitEnumerator;
-use crate::kafka::KafkaSplit;
-use crate::kinesis::split::KinesisSplit;
 use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
 use crate::pulsar::source::reader::PulsarSplitReader;
 use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
 use crate::{kafka, kinesis, nexmark, pulsar, ConnectorProperties};
+
+pub type DataType = risingwave_common::types::DataType;
+
+#[derive(Clone, Debug)]
+pub struct Column {
+    pub name: String,
+    pub data_type: DataType,
+}
 
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
@@ -174,7 +175,11 @@ impl SplitReaderImpl {
         }
     }
 
-    pub async fn create(config: ConnectorProperties, state: ConnectorStateV2) -> Result<Self> {
+    pub async fn create(
+        config: ConnectorProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self> {
         if let ConnectorStateV2::Splits(s) = &state {
             if s.is_empty() {
                 return Ok(Self::Dummy(DummySplitReader {}));

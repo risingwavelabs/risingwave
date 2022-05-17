@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use itertools::zip_eq;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, TrimWhereField,
-    UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, StructField,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -125,18 +126,32 @@ impl Binder {
         list: Vec<Expr>,
         negated: bool,
     ) -> Result<ExprImpl> {
-        let mut bound_expr_list = vec![self.bind_expr(expr)?];
+        let left = self.bind_expr(expr)?;
+        let mut bound_expr_list = vec![left.clone()];
+        let mut non_const_exprs = vec![];
         for elem in list {
-            bound_expr_list.push(self.bind_expr(elem)?);
+            let expr = self.bind_expr(elem)?;
+            match expr.is_const() {
+                true => bound_expr_list.push(expr),
+                false => non_const_exprs.push(expr),
+            }
         }
-        let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
+        let mut ret = FunctionCall::new(ExprType::In, bound_expr_list)?.into();
+        // Non-const exprs are not part of IN-expr in backend and rewritten into OR-Equal-exprs.
+        for expr in non_const_exprs {
+            ret = FunctionCall::new(
+                ExprType::Or,
+                vec![
+                    ret,
+                    FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
+                ],
+            )?
+            .into();
+        }
         if negated {
-            Ok(
-                FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
-                    .into(),
-            )
+            Ok(FunctionCall::new_unchecked(ExprType::Not, vec![ret], DataType::Boolean).into())
         } else {
-            Ok(in_expr.into())
+            Ok(ret)
         }
     }
 
@@ -308,6 +323,33 @@ impl Binder {
     }
 }
 
+/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
+pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
+    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
+        defs.iter()
+            .map(|f| {
+                Ok(ColumnDesc {
+                    data_type: bind_data_type(&f.data_type)?,
+                    // Literals don't have `column_id`.
+                    column_id: ColumnId::new(0),
+                    name: f.name.value.clone(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        vec![]
+    };
+    Ok(ColumnDesc {
+        data_type: bind_data_type(&column_def.data_type)?,
+        column_id: ColumnId::new(0),
+        name: column_def.name.value.clone(),
+        field_descs,
+        type_name: "".to_string(),
+    })
+}
+
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
@@ -333,6 +375,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             )
             .into())
         }
+        AstDataType::Struct(types) => DataType::Struct {
+            fields: types
+                .iter()
+                .map(|f| bind_data_type(&f.data_type))
+                .collect::<Result<Vec<_>>>()?
+                .into(),
+        },
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),
