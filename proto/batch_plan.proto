@@ -101,16 +101,10 @@ message HopWindowNode {
   data.IntervalUnit window_size = 3;
 }
 
-message GenerateInt32SeriesNode {
-  int32 start = 1;
-  int32 stop = 2;
-  int32 step = 3;
-}
-
-message GenerateTimeSeriesNode {
-  string start = 1;
-  string stop = 2;
-  data.IntervalUnit step = 3;
+message GenerateSeriesNode {
+  expr.ExprNode start = 1;
+  expr.ExprNode stop = 2;
+  expr.ExprNode step = 3;
 }
 
 // Task is a running instance of Stage.
@@ -155,7 +149,6 @@ message PlanNode {
     ExchangeNode exchange = 9;
     OrderByNode order_by = 10;
     NestedLoopJoinNode nested_loop_join = 11;
-    SourceScanNode source_scan = 13;
     TopNNode top_n = 14;
     SortAggNode sort_agg = 15;
     RowSeqScanNode row_seq_scan = 16;
@@ -164,9 +157,8 @@ message PlanNode {
     HashJoinNode hash_join = 19;
     MergeSortExchangeNode merge_sort_exchange = 21;
     SortMergeJoinNode sort_merge_join = 22;
-    GenerateInt32SeriesNode generate_int32_series = 23;
     HopWindowNode hop_window = 25;
-    GenerateTimeSeriesNode generate_time_series = 26;
+    GenerateSeriesNode generate_series = 26;
   }
   string identity = 24;
 }
