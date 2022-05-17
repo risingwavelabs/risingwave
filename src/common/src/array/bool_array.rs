@@ -162,8 +162,6 @@ impl ArrayBuilder for BoolArrayBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::identity;
-
     use itertools::Itertools;
 
     use super::*;
@@ -212,7 +210,7 @@ mod tests {
                 .collect_vec();
 
             let array = helper_test_builder(v.clone());
-            let cardinality = array.iter().filter_map(identity).count();
+            let cardinality = array.iter().flatten().count();
 
             let encoded = array.to_protobuf();
             let decoded = read_bool_array(&encoded, cardinality).unwrap().into_bool();
