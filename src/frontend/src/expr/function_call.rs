@@ -115,6 +115,26 @@ impl FunctionCall {
                 }
                 align_types(inputs.iter_mut())
             }
+            ExprType::ConcatWs => {
+                if inputs.len() < 2 {
+                    return Err(ErrorCode::BindError(
+                        "ConcatWs function must contain at least 2 arguments".into(),
+                    )
+                    .into());
+                }
+
+                inputs = inputs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, input)| match i {
+                        // 0-th arg must be string
+                        0 => input.cast_implicit(DataType::Varchar),
+                        // subsequent can be any type
+                        _ => input.cast_explicit(DataType::Varchar),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(DataType::Varchar)
+            }
             _ => infer_type(
                 func_type,
                 inputs.iter().map(|expr| expr.return_type()).collect(),
