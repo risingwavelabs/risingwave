@@ -162,9 +162,12 @@ impl ArrayBuilder for BoolArrayBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::identity;
+
     use itertools::Itertools;
 
     use super::*;
+    use crate::array::read_bool_array;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len()).unwrap();
@@ -190,6 +193,33 @@ mod tests {
         let array = helper_test_builder(v.clone());
         let res = v.iter().zip_eq(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
+    }
+
+    #[test]
+    fn test_bool_array_serde() {
+        for rem in 0..8 {
+            let num_bits = 128 + rem;
+            let v = (0..num_bits)
+                .map(|x| {
+                    if x % 2 == 0 {
+                        None
+                    } else if x % 3 == 0 {
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
+                })
+                .collect_vec();
+
+            let array = helper_test_builder(v.clone());
+            let cardinality = array.iter().filter_map(identity).count();
+
+            let encoded = array.to_protobuf();
+            let decoded = read_bool_array(&encoded, cardinality).unwrap().into_bool();
+
+            let equal = array.iter().zip_eq(decoded.iter()).all(|(a, b)| a == b);
+            assert!(equal);
+        }
     }
 
     #[test]
