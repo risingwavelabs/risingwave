@@ -76,9 +76,19 @@ select concat_ws(',', 'a', 'b');
 a,b
 
 query T
+select concat_ws(NULL, 'a', 'b');
+----
+NULL
+
+query T
 select concat_ws(',', NULL, 'b');
 ----
 b
+
+query T
+select concat_ws(NULL, NULL, 'b');
+----
+NULL
 
 query T
 select concat_ws(',', 1, 1.01, 'A', true, NULL);

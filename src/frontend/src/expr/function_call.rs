@@ -134,9 +134,14 @@ impl FunctionCall {
                 // explicit_cast.
                 inputs = inputs
                     .into_iter()
-                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .enumerate()
+                    .map(|(i, input)| match i {
+                        // 0-th arg must be string
+                        0 => input.cast_implicit(DataType::Varchar),
+                        // subsequent can be any type
+                        _ => input.cast_explicit(DataType::Varchar),
+                    })
                     .collect::<Result<Vec<_>>>()?;
-
                 Ok(DataType::Varchar)
             }
             _ => infer_type(
