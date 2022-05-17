@@ -124,7 +124,7 @@ impl FunctionCall {
                 }
 
                 if inputs[0].return_type() != DataType::Varchar {
-                     return Err(ErrorCode::BindError(
+                    return Err(ErrorCode::BindError(
                         "ConcatWs function must have text as first argument".into(),
                     )
                     .into());
