@@ -85,7 +85,7 @@ impl BoxedExecutor2Builder for GenerateSeriesExecutor2Wrapper {
                 let step = step.as_int32().value_at(0);
 
                 if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                    let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
 
                     let input = Box::new(GenerateSeriesI32Executor2::new(
                         start,
