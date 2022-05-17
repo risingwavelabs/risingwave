@@ -375,3 +375,20 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_u8(0);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::pg_message::FeQueryMessage;
+
+    #[tokio::test]
+    async fn test_get_sql() {
+        let bytes: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(bytes),
+        };
+        let sql = fe.get_sql();
+        assert!(sql.is_err(), "{}", true);
+    }
+}
