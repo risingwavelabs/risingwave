@@ -1,5 +1,5 @@
 query I
-select * from generate_series('2008-03-01 00:00:00'::TIMESTAMP,'2008-03-04 12:00:00'::TIMESTAMP, interval '12' hour)
+select generate_series from generate_series('2008-03-01 00:00:00'::TIMESTAMP,'2008-03-04 12:00:00'::TIMESTAMP, interval '12' hour)
 ----
 2008-03-01 00:00:00
 2008-03-01 12:00:00
@@ -21,6 +21,14 @@ SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
 
 query III
 SELECT * FROM generate_series('2'::INT + '2'::INT,'10'::INT,'2'::INT);
+----
+4
+6
+8
+10
+
+query IIII
+SELECT generate_series FROM generate_series('2'::INT + '2'::INT,'10'::INT,'2'::INT);
 ----
 4
 6

@@ -24,6 +24,7 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Debug)]
 pub struct BoundGenerateSeriesFunction {
     pub(crate) args: Vec<ExprImpl>,
+    pub(crate) data_type: DataType,
 }
 
 impl Binder {
@@ -42,10 +43,17 @@ impl Binder {
             .into());
         }
 
+        let exprs: Vec<_> = args
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
+
+        let data_type = type_check(&exprs)?;
+
         let columns = [(
             false,
             Field {
-                data_type: DataType::Timestamp,
+                data_type: data_type.clone(),
                 name: "generate_series".to_string(),
                 sub_fields: vec![],
                 type_name: "".to_string(),
@@ -55,25 +63,21 @@ impl Binder {
 
         self.bind_context(columns, "generate_series".to_string(), None)?;
 
-        let exprs: Vec<_> = args
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
-
-        type_check(&exprs)?;
-
-        Ok(BoundGenerateSeriesFunction { args: exprs })
+        Ok(BoundGenerateSeriesFunction {
+            args: exprs,
+            data_type,
+        })
     }
 }
 
-fn type_check(exprs: &Vec<ExprImpl>) -> Result<()> {
+fn type_check(exprs: &[ExprImpl]) -> Result<DataType> {
     let mut exprs = exprs.iter();
     let Some((start, stop,step)) = exprs.next_tuple() else {
         return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into())
     };
     match (start.return_type(), stop.return_type(), step.return_type()) {
-        (DataType::Int32, DataType::Int32, DataType::Int32)
-        | (DataType::Timestamp, DataType::Timestamp, DataType::Interval) => Ok(()),
+        (DataType::Int32, DataType::Int32, DataType::Int32) => Ok(DataType::Int32),
+        (DataType::Timestamp, DataType::Timestamp, DataType::Interval) => Ok(DataType::Timestamp),
         _ => Err(ErrorCode::BindError(
             "Invalid arguments for Generate series function".to_string(),
         )

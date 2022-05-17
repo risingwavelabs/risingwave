@@ -17,7 +17,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
     BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
@@ -92,7 +92,7 @@ impl Planner {
         table_function: BoundGenerateSeriesFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(
-            DataType::Timestamp,
+            table_function.data_type,
             "generate_series",
         )]);
 
