@@ -123,15 +123,6 @@ impl FunctionCall {
                     .into());
                 }
 
-                if inputs[0].return_type() != DataType::Varchar {
-                    return Err(ErrorCode::BindError(
-                        "ConcatWs function must have text as first argument".into(),
-                    )
-                    .into());
-                }
-
-                // subsequent inputs can be any type, they are cast into varchars with
-                // explicit_cast.
                 inputs = inputs
                     .into_iter()
                     .enumerate()
