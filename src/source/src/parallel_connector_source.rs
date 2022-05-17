@@ -18,11 +18,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::try_join_all;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{internal_error, Result, ToRwResult};
 use risingwave_connector::{
-    ConnectorProperties, ConnectorStateV2, SourceMessage, SplitImpl, SplitReaderImpl,
+    Column, ConnectorProperties, ConnectorStateV2, SourceMessage, SplitImpl, SplitReaderImpl,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -56,7 +57,11 @@ pub struct ParallelConnectorSourceReader {
 }
 
 impl InnerConnectorSourceReader {
-    async fn new(prop: ConnectorProperties, split: SplitImpl) -> Result<Self> {
+    async fn new(
+        prop: ConnectorProperties,
+        split: SplitImpl,
+        columns: Vec<SourceColumnDesc>,
+    ) -> Result<Self> {
         log::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
             prop,
@@ -64,9 +69,22 @@ impl InnerConnectorSourceReader {
         );
 
         // Here is a workaround, we now provide the vec with only one element
-        let reader = SplitReaderImpl::create(prop, ConnectorStateV2::Splits(vec![split]))
-            .await
-            .to_rw_result()?;
+        let reader = SplitReaderImpl::create(
+            prop,
+            ConnectorStateV2::Splits(vec![split]),
+            Some(
+                columns
+                    .iter()
+                    .cloned()
+                    .map(|col| Column {
+                        name: col.name,
+                        data_type: col.data_type,
+                    })
+                    .collect_vec(),
+            ),
+        )
+        .await
+        .to_rw_result()?;
 
         Ok(InnerConnectorSourceReader { reader })
     }
@@ -186,10 +204,13 @@ impl ParallelConnectorSource {
 
         let props = self.config.clone();
 
+        let columns = self.get_target_columns(column_ids)?;
+
         let readers = try_join_all(splits.into_iter().map(|split| {
             log::debug!("spawning pulsar split reader for split {:?}", split);
             let props = props.clone();
-            async move { InnerConnectorSourceReader::new(props, split).await }
+            let columns = columns.clone();
+            async move { InnerConnectorSourceReader::new(props, split, columns).await }
         }))
         .await?;
 
@@ -200,8 +221,6 @@ impl ParallelConnectorSource {
             stop_chs.push(stop_tx);
             futures.push(handler);
         }
-
-        let columns = self.get_target_columns(column_ids)?;
 
         Ok(ParallelConnectorSourceReader {
             config: self.config.clone(),
