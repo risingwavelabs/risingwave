@@ -243,7 +243,7 @@ impl LogicalMultiJoin {
 
         if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
             output =
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering));
+                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering)).into();
         }
 
         // We will later push down the `non_eq_cond` back to the individual joins via the
