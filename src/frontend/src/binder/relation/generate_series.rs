@@ -68,7 +68,7 @@ impl Binder {
 
 fn type_check(exprs: &Vec<ExprImpl>) -> Result<()> {
     let mut exprs = exprs.iter();
-    let Some((ExprImpl::Literal(start), ExprImpl::Literal(stop),ExprImpl::Literal(step))) = exprs.next_tuple() else {
+    let Some((start, stop,step)) = exprs.next_tuple() else {
         return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into())
     };
     match (start.return_type(), stop.return_type(), step.return_type()) {
