@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
-pub async fn handle_drop_mv(
+pub async fn handle_drop_index(
     context: OptimizerContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
@@ -51,10 +51,10 @@ pub async fn handle_drop_mv(
             )));
         }
 
-        if table.is_index_on.is_some() {
+        if table.is_index_on.is_none() {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+            )))
         }
         table.id()
     };

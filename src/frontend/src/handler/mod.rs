@@ -41,6 +41,7 @@ mod set;
 mod show;
 mod show_column;
 pub mod util;
+mod drop_index;
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone());
@@ -76,7 +77,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         }) => match object_type {
             ObjectType::Table => drop_table::handle_drop_table(context, object_name).await,
             ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
-            ObjectType::Index => drop_mv::handle_drop_mv(context, object_name).await,
+            ObjectType::Index => drop_index::handle_drop_index(context, object_name).await,
             ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
             ObjectType::Database => {
                 drop_database::handle_drop_database(
