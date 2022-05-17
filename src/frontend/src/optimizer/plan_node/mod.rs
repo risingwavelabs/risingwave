@@ -227,6 +227,7 @@ mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
 mod logical_limit;
+mod logical_multi_join;
 mod logical_project;
 mod logical_scan;
 mod logical_source;
@@ -271,6 +272,7 @@ pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_multi_join::LogicalMultiJoin;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
@@ -323,6 +325,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, TopN }
             , { Logical, HopWindow }
             , { Logical, GenerateSeries }
+            , { Logical, MultiJoin }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -377,6 +380,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, TopN }
             , { Logical, HopWindow }
             , { Logical, GenerateSeries }
+            , { Logical, MultiJoin }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }

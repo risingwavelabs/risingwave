@@ -126,18 +126,32 @@ impl Binder {
         list: Vec<Expr>,
         negated: bool,
     ) -> Result<ExprImpl> {
-        let mut bound_expr_list = vec![self.bind_expr(expr)?];
+        let left = self.bind_expr(expr)?;
+        let mut bound_expr_list = vec![left.clone()];
+        let mut non_const_exprs = vec![];
         for elem in list {
-            bound_expr_list.push(self.bind_expr(elem)?);
+            let expr = self.bind_expr(elem)?;
+            match expr.is_const() {
+                true => bound_expr_list.push(expr),
+                false => non_const_exprs.push(expr),
+            }
         }
-        let in_expr = FunctionCall::new(ExprType::In, bound_expr_list)?;
+        let mut ret = FunctionCall::new(ExprType::In, bound_expr_list)?.into();
+        // Non-const exprs are not part of IN-expr in backend and rewritten into OR-Equal-exprs.
+        for expr in non_const_exprs {
+            ret = FunctionCall::new(
+                ExprType::Or,
+                vec![
+                    ret,
+                    FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
+                ],
+            )?
+            .into();
+        }
         if negated {
-            Ok(
-                FunctionCall::new_unchecked(ExprType::Not, vec![in_expr.into()], DataType::Boolean)
-                    .into(),
-            )
+            Ok(FunctionCall::new_unchecked(ExprType::Not, vec![ret], DataType::Boolean).into())
         } else {
-            Ok(in_expr.into())
+            Ok(ret)
         }
     }
 
