@@ -312,65 +312,41 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let left = self.bind_expr(left)?;
         let right = self.bind_expr(right)?;
+        let both_not_null = FunctionCall::new(
+            ExprType::And,
+            vec![
+                FunctionCall::new(ExprType::IsNotNull, vec![left.clone()])?.into(),
+                FunctionCall::new(ExprType::IsNotNull, vec![right.clone()])?.into(),
+            ],
+        );
 
-        let func_call = if negated {
-            // x IS NOT DISTINCT FROM y is equivalent to (x IS NULL AND y IS NULL) OR x = y
-            FunctionCall::new_unchecked(
-                ExprType::Or,
-                vec![
-                    FunctionCall::new_unchecked(
-                        ExprType::And,
-                        vec![
-                            FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
-                            FunctionCall::new(ExprType::IsNull, vec![right.clone()])?.into(),
-                        ],
-                        DataType::Boolean,
-                    )
-                    .into(),
-                    FunctionCall::new(ExprType::Equal, vec![left, right])?.into(),
-                ],
-                DataType::Boolean,
-            )
+        let func_call = FunctionCall::new(
+            ExprType::Or,
+            vec![
+                FunctionCall::new(
+                    ExprType::And,
+                    vec![
+                        FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
+                        FunctionCall::new(ExprType::IsNull, vec![right.clone()])?.into(),
+                    ],
+                )?
+                .into(),
+                FunctionCall::new(
+                    ExprType::And,
+                    vec![
+                        both_not_null?.into(),
+                        FunctionCall::new(ExprType::Equal, vec![left, right])?.into(),
+                    ],
+                )?
+                .into(),
+            ],
+        );
+
+        if negated {
+            Ok(func_call?.into())
         } else {
-            // x IS DISTINCT FROM y is equivalent to
-            // (x IS NULL AND y IS NOT NULL) OR (x IS NOT NULL AND y IS NULL) OR x <> y
-            FunctionCall::new_unchecked(
-                ExprType::Or,
-                vec![
-                    FunctionCall::new(
-                        ExprType::Or,
-                        vec![
-                            FunctionCall::new_unchecked(
-                                ExprType::And,
-                                vec![
-                                    FunctionCall::new(ExprType::IsNotNull, vec![left.clone()])?
-                                        .into(),
-                                    FunctionCall::new(ExprType::IsNull, vec![right.clone()])?
-                                        .into(),
-                                ],
-                                DataType::Boolean,
-                            )
-                            .into(),
-                            FunctionCall::new_unchecked(
-                                ExprType::And,
-                                vec![
-                                    FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
-                                    FunctionCall::new(ExprType::IsNotNull, vec![right.clone()])?
-                                        .into(),
-                                ],
-                                DataType::Boolean,
-                            )
-                            .into(),
-                        ],
-                    )?
-                    .into(),
-                    FunctionCall::new(ExprType::NotEqual, vec![left, right])?.into(),
-                ],
-                DataType::Boolean,
-            )
-        };
-
-        Ok(func_call.into())
+            Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
+        }
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
