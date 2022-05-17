@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use std::hash::{Hash, Hasher};
-use std::mem::size_of;
 
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
@@ -30,6 +28,11 @@ pub struct BoolArray {
 }
 
 impl BoolArray {
+    pub fn new(bitmap: Bitmap, data: Bitmap) -> Self {
+        assert_eq!(bitmap.len(), data.len());
+        Self { bitmap, data }
+    }
+
     pub fn from_slice(data: &[Option<bool>]) -> Result<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
@@ -71,21 +74,12 @@ impl Array for BoolArray {
     }
 
     fn to_protobuf(&self) -> ProstArray {
-        let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
-
-        for v in self.iter().flatten() {
-            let bool_numeric = if v { 1 } else { 0 } as u8;
-            output_buffer.push(bool_numeric);
-        }
-
-        let values = Buffer {
-            compression: CompressionType::None as i32,
-            body: output_buffer,
-        };
+        let value = self.data.to_protobuf();
         let null_bitmap = self.null_bitmap().to_protobuf();
+
         ProstArray {
             null_bitmap: Some(null_bitmap),
-            values: vec![values],
+            values: vec![value],
             array_type: ArrayType::Bool as i32,
             struct_array_data: None,
             list_array_data: None,

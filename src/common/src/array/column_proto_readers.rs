@@ -20,8 +20,8 @@ use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, IntervalArrayBuilder,
-    NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArray, IntervalArrayBuilder, NaiveDateArrayBuilder,
+    NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
@@ -64,11 +64,18 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     Ok(arr.into())
 }
 
-fn read_bool(cursor: &mut Cursor<&[u8]>) -> Result<bool> {
-    let v = cursor
-        .read_u8()
-        .map_err(|e| InternalError(format!("Failed to read u8 from bool buffer: {}", e)))?;
-    Ok(v != 0)
+pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+    ensure!(
+        array.get_values().len() == 1,
+        "Must have only 1 buffer in a bool array"
+    );
+
+    let data = (&array.get_values()[0]).try_into()?;
+    let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+    assert_eq!(bitmap.num_high_bits(), cardinality);
+
+    let arr = BoolArray::new(bitmap, data);
+    Ok(arr.into())
 }
 
 fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
@@ -149,7 +156,6 @@ macro_rules! read_one_value_array {
 
 read_one_value_array! {
     { IntervalUnit, IntervalArrayBuilder },
-    { bool, BoolArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },
     { NaiveDateTime, NaiveDateTimeArrayBuilder }

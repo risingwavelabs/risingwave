@@ -138,7 +138,9 @@ impl Bitmap {
         })
     }
 
-    pub fn from_buffer_unchecked(buf: Buffer, num_bits: usize) -> Self {
+    pub fn from_buffer_with_num_bits(buf: Buffer, num_bits: usize) -> Self {
+        assert!(num_bits <= buf.len() << 3);
+
         let num_high_bits = buf.as_slice().iter().map(|x| x.count_ones()).sum::<u32>() as usize;
         Self {
             num_bits,
@@ -150,7 +152,7 @@ impl Bitmap {
     #[cfg(test)]
     pub fn from_buffer(buf: Buffer) -> Self {
         let num_bits = buf.len() << 3;
-        Self::from_buffer_unchecked(buf, num_bits)
+        Self::from_buffer_with_num_bits(buf, num_bits)
     }
 
     /// Return the next set bit index on or after `bit_idx`.
@@ -260,7 +262,7 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     fn bitand(self, rhs: &'b Bitmap) -> Result<Bitmap> {
         assert_eq!(self.num_bits, rhs.num_bits);
         let bits = (&self.bits & &rhs.bits)?;
-        Ok(Bitmap::from_buffer_unchecked(bits, self.num_bits))
+        Ok(Bitmap::from_buffer_with_num_bits(bits, self.num_bits))
     }
 }
 
@@ -270,7 +272,7 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     fn bitor(self, rhs: &'b Bitmap) -> Result<Bitmap> {
         assert_eq!(self.num_bits, rhs.num_bits);
         let bits = (&self.bits | &rhs.bits)?;
-        Ok(Bitmap::from_buffer_unchecked(bits, self.num_bits))
+        Ok(Bitmap::from_buffer_with_num_bits(bits, self.num_bits))
     }
 }
 
@@ -300,9 +302,12 @@ impl TryFrom<Vec<bool>> for Bitmap {
 
 impl Bitmap {
     pub fn to_protobuf(&self) -> ProstBuffer {
-        let num_bits = self.num_bits.to_be_bytes();
+        let last_byte_num_bits = ((self.num_bits % 8) as u8).to_be_bytes();
         let bits = self.bits.as_slice();
-        let body = num_bits.iter().chain(bits.iter()).cloned().collect();
+        let body = last_byte_num_bits
+            .into_iter()
+            .chain(bits.iter().cloned())
+            .collect();
 
         ProstBuffer {
             body,
@@ -315,10 +320,11 @@ impl TryFrom<&ProstBuffer> for Bitmap {
     type Error = RwError;
 
     fn try_from(buf: &ProstBuffer) -> Result<Bitmap> {
-        let num_bits = usize::from_be_bytes(buf.body[..8].try_into().unwrap());
-        let bits = Buffer::from_slice(&buf.body[8..])?;
+        let last_byte_num_bits = u8::from_be_bytes(buf.body[..1].try_into().unwrap());
+        let bits = Buffer::from_slice(&buf.body[1..])?;
+        let num_bits = (bits.len() << 3) - ((8 - last_byte_num_bits) % 8) as usize;
 
-        Ok(Self::from_buffer_unchecked(bits, num_bits))
+        Ok(Self::from_buffer_with_num_bits(bits, num_bits))
     }
 }
 
