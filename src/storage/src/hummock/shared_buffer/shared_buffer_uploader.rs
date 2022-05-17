@@ -160,8 +160,6 @@ impl SharedBufferUploader {
             stats: self.stats.clone(),
             is_share_buffer_compact: true,
             sstable_id_generator: if is_local {
-                get_remote_sstable_id_generator(self.hummock_meta_client.clone())
-            } else {
                 let atomic = self.next_local_sstable_id.clone();
                 Arc::new(move || {
                     {
@@ -170,6 +168,8 @@ impl SharedBufferUploader {
                     }
                     .boxed()
                 })
+            } else {
+                get_remote_sstable_id_generator(self.hummock_meta_client.clone())
             },
         };
 
