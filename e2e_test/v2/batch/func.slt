@@ -35,3 +35,37 @@ select coalesce(v1,v2,v3) from t1;
 
 statement ok
 drop table t1;
+
+statement ok
+create table t (v1 int);
+
+statement ok
+create table b (b1 int, b2 int);
+
+
+statement ok
+insert into t values (2);
+
+statement ok
+insert into b values (2, 1);
+
+query T
+SELECT 1 in (3, 0.5*2, min(v1)) from t;
+----
+t
+
+query I
+SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
+----
+1
+
+query I
+SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
+----
+1
+
+statement ok
+drop table t;
+
+statement ok
+drop table b;

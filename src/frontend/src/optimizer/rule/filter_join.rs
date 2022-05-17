@@ -47,17 +47,27 @@ pub struct FilterJoinRule {}
 
 impl Rule for FilterJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter = plan.as_logical_filter()?;
-        let input = filter.input();
-        let join = input.as_logical_join()?;
+        let (filter_predicate, join) = match plan.as_logical_filter() {
+            Some(filter) => {
+                let input = filter.input();
+                let join = input.as_logical_join()?;
+                (filter.predicate().clone(), join.clone())
+            }
+            // This rule also handles the case where there's no filter above the join.
+            // We pushdown the predicates within the on-clause.
+            None => {
+                let join = plan.as_logical_join()?;
+                (Condition::true_cond(), join.clone())
+            }
+        };
 
         let join_type = join.join_type();
         let left_col_num = join.left().schema().len();
         let right_col_num = join.right().schema().len();
 
-        let mut new_filter_predicate = filter.predicate().clone();
+        let mut new_filter_predicate = filter_predicate.clone();
 
-        let join_type = self.simplify_outer(filter.predicate(), left_col_num, join_type);
+        let join_type = self.simplify_outer(&filter_predicate, left_col_num, join_type);
 
         let (left_from_filter, right_from_filter, on) = self.push_down(
             &mut new_filter_predicate,

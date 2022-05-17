@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{internal_error, ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
@@ -92,17 +92,13 @@ impl From<&ProstDataType> for DataType {
             TypeName::Float => DataType::Float32,
             TypeName::Double => DataType::Float64,
             TypeName::Boolean => DataType::Boolean,
-            // TODO(TaoWu): Java frontend still interprets CHAR as a separate type.
-            // So to run e2e, we may return VARCHAR that mismatches with what Java frontend
-            // expected. Fix this when Java frontend fully deprecated.
-            TypeName::Varchar | TypeName::Char => DataType::Varchar,
+            TypeName::Varchar => DataType::Varchar,
             TypeName::Date => DataType::Date,
             TypeName::Time => DataType::Time,
             TypeName::Timestamp => DataType::Timestamp,
             TypeName::Timestampz => DataType::Timestampz,
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
-            TypeName::Symbol => DataType::Varchar,
             TypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 DataType::Struct {
@@ -325,16 +321,6 @@ for_all_scalar_variants! { scalar_impl_enum }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
-
-pub fn get_data_type_from_datum(datum: &Datum) -> Result<DataType> {
-    match datum {
-        // TODO: Predicate data type from None Datum
-        None => Err(internal_error(
-            "cannot get data type from None Datum".to_string(),
-        )),
-        Some(scalar) => scalar.data_type(),
-    }
-}
 
 /// Convert a [`Datum`] to a [`DatumRef`].
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {

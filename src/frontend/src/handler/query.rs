@@ -32,6 +32,8 @@ use crate::session::{OptimizerContext, SessionImpl};
 /// TODO: Use session config to set this.
 pub static IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
 
+pub static QUERY_MODE: &str = "query_mode";
+
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();

@@ -82,7 +82,7 @@ impl fmt::Display for LogicalSource {
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping)
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 

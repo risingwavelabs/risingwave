@@ -17,7 +17,7 @@ use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::{expr_node, ExprNode};
+use risingwave_pb::expr::ExprNode;
 
 use crate::expr::expr_binary_bytes::new_substr_start;
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
@@ -142,22 +142,19 @@ pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(ret_type == DataType::Boolean);
-    ensure!(children[0].get_expr_type()? == expr_node::Type::InputRef);
-    let input_ref_expr = expr_build_from_prost(&children[0])?;
-    for child in &children[1..] {
-        ensure!(child.get_expr_type()? == expr_node::Type::ConstantValue);
-    }
+    let left_expr = expr_build_from_prost(&children[0])?;
     let mut data = Vec::new();
-    // Used for literal expression below to generate datum
+    // Used for const expression below to generate datum.
+    // Frontend has made sure these can all be folded to constants.
     let data_chunk = DataChunk::new_dummy(1);
     for child in &children[1..] {
-        let literal_expr = expr_build_from_prost(child)?;
-        let array = literal_expr.eval(&data_chunk)?;
+        let const_expr = expr_build_from_prost(child)?;
+        let array = const_expr.eval(&data_chunk)?;
         let datum = array.value_at(0).to_owned_datum();
         data.push(datum);
     }
     Ok(Box::new(InExpression::new(
-        input_ref_expr,
+        left_expr,
         data.into_iter(),
         ret_type,
     )))
@@ -230,7 +227,7 @@ mod tests {
         let input_ref_expr_node = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(ProstDataType {
-                type_name: TypeName::Char as i32,
+                type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
             rex_node: Some(RexNode::InputRef(input_ref)),
@@ -239,7 +236,7 @@ mod tests {
             ExprNode {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
-                    type_name: TypeName::Char as i32,
+                    type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
@@ -249,7 +246,7 @@ mod tests {
             ExprNode {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
-                    type_name: TypeName::Char as i32,
+                    type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
@@ -311,7 +308,7 @@ mod tests {
         let left = ExprNode {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(ProstDataType {
-                type_name: TypeName::Symbol as i32,
+                type_name: TypeName::Varchar as i32,
                 precision: 11,
                 ..Default::default()
             }),
