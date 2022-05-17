@@ -484,15 +484,16 @@ mod tests {
 
     #[test]
     fn test_bitmap_from_protobuf() {
-        let bitmap_bytes = vec![0u8, 1, 0, 1, 0, 0, 1, 0];
+        let bitmap_bytes = vec![3u8 /* len % 8 */, 0b0101_0010, 0b110];
         let buf = ProstBuffer {
-            body: bitmap_bytes.clone(),
-            ..Default::default()
+            body: bitmap_bytes,
+            compression: CompressionType::None as _,
         };
         let bitmap: Bitmap = (&buf).try_into().unwrap();
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
-        assert_eq!(actual_bytes, bitmap_bytes);
-        assert_eq!(bitmap.num_high_bits(), 3);
+
+        assert_eq!(actual_bytes, vec![0, 1, 0, 0, 1, 0, 1, 0, /*  */ 0, 1, 1]); // in reverse order
+        assert_eq!(bitmap.num_high_bits(), 5);
     }
 
     #[test]

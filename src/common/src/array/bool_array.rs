@@ -195,8 +195,7 @@ mod tests {
 
     #[test]
     fn test_bool_array_serde() {
-        for rem in 0..8 {
-            let num_bits = 128 + rem;
+        for num_bits in [0..8, 128..136].into_iter().flatten() {
             let v = (0..num_bits)
                 .map(|x| {
                     if x % 2 == 0 {
@@ -210,10 +209,9 @@ mod tests {
                 .collect_vec();
 
             let array = helper_test_builder(v.clone());
-            let cardinality = array.iter().flatten().count();
 
             let encoded = array.to_protobuf();
-            let decoded = read_bool_array(&encoded, cardinality).unwrap().into_bool();
+            let decoded = read_bool_array(&encoded, num_bits).unwrap().into_bool();
 
             let equal = array.iter().zip_eq(decoded.iter()).all(|(a, b)| a == b);
             assert!(equal);

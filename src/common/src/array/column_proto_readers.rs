@@ -20,8 +20,8 @@ use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArray, IntervalArrayBuilder, NaiveDateArrayBuilder,
-    NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayMeta, BoolArray, IntervalArrayBuilder,
+    NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
@@ -72,9 +72,10 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayIm
 
     let data = (&array.get_values()[0]).try_into()?;
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
-    assert_eq!(bitmap.num_high_bits(), cardinality);
 
     let arr = BoolArray::new(bitmap, data);
+    assert_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }
 
