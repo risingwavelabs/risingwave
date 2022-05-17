@@ -23,7 +23,6 @@ use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures::future::join_all;
-use futures::FutureExt;
 use futures_async_stream::{for_await, try_stream};
 use futures_concurrency::prelude::*;
 use tokio::sync::Mutex;
