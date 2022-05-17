@@ -26,13 +26,13 @@ use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::sstable::VNODE_BITMAP_LEN;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreImpl};
+use crate::object::ObjectStoreImpl;
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::store::StateStore;
 
 #[tokio::test]
 async fn test_basic() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_client = Arc::new(ObjectStoreImpl::new_mem());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -173,7 +173,7 @@ async fn test_basic() {
 
 #[tokio::test]
 async fn test_vnode_filter() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_client = Arc::new(ObjectStoreImpl::new_mem());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -250,7 +250,7 @@ async fn test_vnode_filter() {
 
 #[tokio::test]
 async fn test_state_store_sync() {
-    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_client = Arc::new(ObjectStoreImpl::new_mem());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
 
     let mut config = default_config_for_test();
@@ -344,7 +344,7 @@ async fn test_state_store_sync() {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_store = Arc::new(ObjectStoreImpl::new_mem());
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
