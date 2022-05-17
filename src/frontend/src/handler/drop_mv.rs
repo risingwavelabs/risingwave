@@ -42,6 +42,7 @@ pub async fn handle_drop_mv(
             )));
         }
 
+        // If is index on is `Some`, then it is a actually an index.
         if table.is_index_on.is_some() {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP INDEX` to drop an index.".to_owned(),
