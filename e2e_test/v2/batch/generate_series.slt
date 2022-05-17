@@ -18,3 +18,11 @@ SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
 6
 8
 10
+
+query III
+SELECT * FROM generate_series('2'::INT + '2'::INT,'10'::INT,'2'::INT);
+----
+4
+6
+8
+10
