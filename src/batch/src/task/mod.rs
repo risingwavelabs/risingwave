@@ -23,6 +23,3 @@ mod fifo_channel;
 mod hash_shuffle_channel;
 mod task_;
 mod task_manager;
-
-#[cfg(test)]
-mod test_utils;
