@@ -118,12 +118,25 @@ impl FunctionCall {
             ExprType::ConcatWs => {
                 if inputs.len() < 2 {
                     return Err(ErrorCode::BindError(
-                        "ConcatWs function must contain more than 2 arguments".into(),
+                        "ConcatWs function must contain at least 2 arguments".into(),
                     )
                     .into());
                 }
-                // NOTE: inputs can be any type, they will be casted into varchars with
+
+                if inputs[0].return_type() != DataType::Varchar {
+                     return Err(ErrorCode::BindError(
+                        "ConcatWs function must have text as first argument".into(),
+                    )
+                    .into());
+                }
+
+                // subsequent inputs can be any type, they are cast into varchars with
                 // explicit_cast.
+                inputs = inputs
+                    .into_iter()
+                    .map(|input| input.cast_explicit(DataType::Varchar))
+                    .collect::<Result<Vec<_>>>()?;
+
                 Ok(DataType::Varchar)
             }
             _ => infer_type(

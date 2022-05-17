@@ -62,10 +62,7 @@ impl Binder {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
                 }
-                "concat_ws" => {
-                    inputs = Self::rewrite_concat_ws_args_when(inputs)?;
-                    ExprType::ConcatWs
-                }
+                "concat_ws" => ExprType::ConcatWs,
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
@@ -100,26 +97,6 @@ impl Binder {
                 Literal::new(None, inputs[0].return_type()).into(),
                 inputs[0].clone(),
             ];
-            Ok(inputs)
-        }
-    }
-
-    /// Make sure inputs have at least 2 values and add explicit casts to Varchar
-    /// ConcatWs(expr1,expr2) -> ConcatWs(expr1 AS varchar, expr2 as varchar)
-    fn rewrite_concat_ws_args_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
-        if inputs.len() < 2 {
-            Err(ErrorCode::BindError(
-                "ConcatWs function must contain at least 2 arguments".to_string(),
-            )
-            .into())
-        } else {
-            // concat_ws is a special case which casts arguments from
-            // any type (int, timestamps, etc...) to varchar.
-            // cast_explicit is used because it permits all of these casts, cast_implicit does not.
-            let inputs = inputs
-                .into_iter()
-                .map(|input| input.cast_explicit(DataType::Varchar))
-                .collect::<Result<Vec<_>>>()?;
             Ok(inputs)
         }
     }
