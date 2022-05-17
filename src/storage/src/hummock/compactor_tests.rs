@@ -26,7 +26,7 @@ mod tests {
     use crate::hummock::compactor::{Compactor, CompactorContext};
     use crate::hummock::{HummockStorage, SstableStore};
     use crate::monitor::StateStoreMetrics;
-    use crate::object::{InMemObjectStore, ObjectStoreImpl};
+    use crate::object::ObjectStoreImpl;
     use crate::storage_value::StorageValue;
     use crate::StateStore;
 
@@ -43,7 +43,7 @@ mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+        let obj_client = Arc::new(ObjectStoreImpl::new_mem());
         let block_cache_capacity = 65536;
         let meta_cache_capacity = 65536;
         let sstable_store = Arc::new(SstableStore::new(
