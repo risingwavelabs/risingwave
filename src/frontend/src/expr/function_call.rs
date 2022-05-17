@@ -115,6 +115,15 @@ impl FunctionCall {
                 }
                 align_types(inputs.iter_mut())
             }
+            ExprType::ConcatWs => {
+                 if inputs.len() < 2 {
+                    return Err(ErrorCode::BindError(
+                        "Coalesce function must contain more than 2 arguments".into(),
+                    )
+                    .into());
+                }
+                align_types(inputs.iter_mut())
+            }
             _ => infer_type(
                 func_type,
                 inputs.iter().map(|expr| expr.return_type()).collect(),
