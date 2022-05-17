@@ -14,13 +14,15 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::{BoxedExecutor2, FilterExecutor2};
 use risingwave_common::error::Result;
+use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
+use crate::optimizer::plan_node::{PlanBase, ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::Order;
 use crate::utils::Condition;
 
@@ -46,6 +48,10 @@ impl BatchFilter {
 
     pub fn predicate(&self) -> &Condition {
         self.logical.predicate()
+    }
+
+    fn identity(&self) -> String {
+        format!("BatchFilter {:?}", self.base.id)
     }
 }
 
@@ -88,5 +94,15 @@ impl ToLocalBatch for BatchFilter {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local_with_order_required(Order::any())?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ToBatchExecutor for BatchFilter {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        let input = self.input().to_executor()?;
+        let expr =
+            build_from_prost(&ExprImpl::from(self.logical.predicate().clone()).to_expr_proto())?;
+
+        Ok(Box::new(FilterExecutor2::new(expr, input, self.identity())))
     }
 }

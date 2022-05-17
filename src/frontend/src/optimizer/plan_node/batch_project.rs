@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
@@ -23,7 +24,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -115,5 +116,11 @@ impl ToLocalBatch for BatchProject {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local_with_order_required(Order::any())?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ToBatchExecutor for BatchProject {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

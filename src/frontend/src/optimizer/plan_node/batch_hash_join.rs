@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
@@ -23,7 +24,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::Expr;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
 
@@ -165,5 +166,11 @@ impl ToLocalBatch for BatchHashJoin {
         let right = self.right().to_local()?;
 
         Ok(self.clone_with_left_right(left, right).into())
+    }
+}
+
+impl ToBatchExecutor for BatchHashJoin {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

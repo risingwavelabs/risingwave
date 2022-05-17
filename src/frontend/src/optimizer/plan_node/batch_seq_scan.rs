@@ -14,13 +14,14 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
+use crate::optimizer::plan_node::{LogicalScan, ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
@@ -94,6 +95,12 @@ impl ToBatchProst for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
+        todo!()
+    }
+}
+
+impl ToBatchExecutor for BatchSeqScan {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
         todo!()
     }
 }

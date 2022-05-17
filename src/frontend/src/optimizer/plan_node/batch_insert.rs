@@ -14,13 +14,14 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::TableRefId;
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
+use crate::optimizer::plan_node::{PlanBase, ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchInsert` implements [`LogicalInsert`]
@@ -86,5 +87,11 @@ impl ToLocalBatch for BatchInsert {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ToBatchExecutor for BatchInsert {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

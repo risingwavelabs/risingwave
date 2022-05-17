@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GenerateTimeSeriesNode;
@@ -21,7 +22,7 @@ use risingwave_pb::batch_plan::GenerateTimeSeriesNode;
 use super::{
     LogicalGenerateSeries, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -75,5 +76,11 @@ impl ToBatchProst for BatchGenerateSeries {
 impl ToLocalBatch for BatchGenerateSeries {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
+    }
+}
+
+impl ToBatchExecutor for BatchGenerateSeries {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

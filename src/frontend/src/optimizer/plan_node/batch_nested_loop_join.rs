@@ -14,13 +14,14 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
@@ -106,5 +107,11 @@ impl ToLocalBatch for BatchNestedLoopJoin {
         let right = self.right().to_local()?;
 
         Ok(self.clone_with_left_right(left, right).into())
+    }
+}
+
+impl ToBatchExecutor for BatchNestedLoopJoin {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

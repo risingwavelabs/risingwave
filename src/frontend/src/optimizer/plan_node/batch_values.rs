@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
@@ -21,7 +22,7 @@ use risingwave_pb::batch_plan::ValuesNode;
 
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
@@ -147,5 +148,11 @@ mod tests {
 impl ToLocalBatch for BatchValues {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
+    }
+}
+
+impl ToBatchExecutor for BatchValues {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

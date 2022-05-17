@@ -14,12 +14,13 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchExchange` imposes a particular distribution on its input
@@ -90,5 +91,11 @@ impl ToBatchProst for BatchExchange {
 impl ToLocalBatch for BatchExchange {
     fn to_local(&self) -> Result<PlanRef> {
         unreachable!()
+    }
+}
+
+impl ToBatchExecutor for BatchExchange {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

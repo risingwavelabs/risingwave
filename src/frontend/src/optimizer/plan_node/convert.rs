@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use paste::paste;
+use risingwave_batch::executor2::BoxedExecutor2;
 
 use super::*;
 use crate::optimizer::property::{Distribution, Order};
@@ -108,6 +109,13 @@ pub trait ToDistributedBatch {
     }
 }
 
+/// Converts a batch plan to batch executor.
+///
+/// This is used in local execution mode to convert a plan directly to batch executor.
+pub trait ToBatchExecutor {
+    fn to_executor(&self) -> Result<BoxedExecutor2>;
+}
+
 /// Implement [`ToBatch`] for batch and streaming node.
 macro_rules! impl_to_batch {
     ([], $( { $convention:ident, $name:ident }),*) => {
@@ -170,3 +178,18 @@ macro_rules! ban_to_local {
 }
 for_logical_plan_nodes! { ban_to_local }
 for_stream_plan_nodes! { ban_to_local }
+
+/// impl `ToBatchExecutor`  for logical and streaming node.
+macro_rules! ban_to_batch_executor {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl ToBatchExecutor for [<$convention $name>] {
+                fn to_executor(&self) -> Result<BoxedExecutor2> {
+                    panic!("converting to distributed is only allowed on batch plan")
+                }
+            })*
+        }
+    }
+}
+for_logical_plan_nodes! { ban_to_batch_executor }
+for_stream_plan_nodes! { ban_to_batch_executor }

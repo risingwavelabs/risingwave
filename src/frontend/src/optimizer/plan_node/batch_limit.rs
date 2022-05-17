@@ -14,12 +14,13 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
 use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
@@ -82,5 +83,11 @@ impl ToLocalBatch for BatchLimit {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ToBatchExecutor for BatchLimit {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }

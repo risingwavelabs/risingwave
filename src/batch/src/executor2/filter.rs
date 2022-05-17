@@ -117,6 +117,16 @@ impl BoxedExecutor2Builder for FilterExecutor2 {
     }
 }
 
+impl FilterExecutor2 {
+    pub fn new(expr: BoxedExpression, child: BoxedExecutor2, identity: String) -> Self {
+        Self {
+            expr,
+            child,
+            identity,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

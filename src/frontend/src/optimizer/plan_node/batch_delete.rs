@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_batch::executor2::BoxedExecutor2;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
@@ -22,7 +23,7 @@ use risingwave_pb::plan_common::TableRefId;
 use super::{
     LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{ToBatchExecutor, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchDelete` implements [`LogicalDelete`]
@@ -86,5 +87,11 @@ impl ToLocalBatch for BatchDelete {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ToBatchExecutor for BatchDelete {
+    fn to_executor(&self) -> Result<BoxedExecutor2> {
+        todo!()
     }
 }
