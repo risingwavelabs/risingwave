@@ -118,11 +118,12 @@ impl FunctionCall {
             ExprType::ConcatWs => {
                  if inputs.len() < 2 {
                     return Err(ErrorCode::BindError(
-                        "Coalesce function must contain more than 2 arguments".into(),
+                        "ConcatWs function must contain more than 2 arguments".into(),
                     )
                     .into());
                 }
-                align_types(inputs.iter_mut())
+                // NOTE: inputs can be any type, they will be casted into varchars with explicit_cast.
+                Ok(DataType::Varchar)
             }
             _ => infer_type(
                 func_type,
