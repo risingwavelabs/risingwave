@@ -45,7 +45,7 @@ impl Rule for ReorderMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
-        let left_deep_join = join.to_left_deep_join_with_heuristic_ordering().ok()?;
+        let left_deep_join = join.heuristic_ordering().ok()?;
         Some(left_deep_join)
     }
 }
@@ -145,7 +145,7 @@ mod tests {
 
         println!(
             "{:?}",
-            multi_join.to_left_deep_join_with_heuristic_ordering()
+            multi_join.heuristic_ordering()
         );
 
         // TODO: continue this test

@@ -181,15 +181,17 @@ impl ConnectedComponentLabeller {
         }
     }
 
-    fn get_labels(&self) -> Vec<HashSet<(usize, usize)>> {
+    fn into_edge_sets(self) -> Vec<HashSet<(usize, usize)>> {
         self.labels_to_edges.into_values().collect()
     }
 }
 
-// Graph: 0-1-2  3-4-5  6
-// => 0-1-2-3-4-5  6
 #[test]
-fn test_get_connected_components() {
+fn test_connected_component_labeller() {
+    // Graph:
+    // 0-1-2  3-4-5  6
+    // => 0-1-2-3-4-5  6
+    // => 0-1-2-3-4-5-6
     let mut labeller = ConnectedComponentLabeller::new(7);
     labeller.add_edge(0, 1);
     labeller.add_edge(1, 2);
@@ -219,9 +221,36 @@ fn test_get_connected_components() {
 }
 
 impl LogicalMultiJoin {
-    pub fn as_left_deep_join_with_ordering(&self, ordering: &[usize]) -> Result<PlanRef> {
-        assert_eq!(ordering.len(), self.input.len());
-        
+    pub fn as_reordered_left_deep_join(&self, join_ordering: &[usize]) -> Result<PlanRef> {
+        assert_eq!(join_ordering.len(), self.inputs.len());
+        assert!(join_ordering.len() > 0);
+
+        let base_plan = self.inputs[join_ordering[0]].clone();
+
+        // Express as a cross join, we will rely on filter pushdown to push all of the join
+        // conditions to convert into inner joins.
+        let mut output = join_ordering[1..]
+            .iter()
+            .fold(base_plan, |join_chain, &index| {
+                LogicalJoin::new(
+                    join_chain,
+                    self.inputs[index].clone(),
+                    JoinType::Inner,
+                    Condition::true_cond(),
+                )
+                .into()
+            });
+
+        if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
+            output =
+                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering));
+        }
+
+        // We will later push down the `non_eq_cond` back to the individual joins via the
+        // `FilterJoinRule`.
+        output = LogicalFilter::create(output, self.on.clone());
+
+        Ok(output)
     }
 
     // Our heuristic join reordering algorithm will try to perform a left-deep join.
@@ -244,73 +273,49 @@ impl LogicalMultiJoin {
     //        b. a projection which reorders the output column ordering to agree with the
     //           original ordering of the joins.
     //    The filter will then be pushed down by another filter pushdown pass.
-    pub(crate) fn to_left_deep_join_with_heuristic_ordering(&self) -> Result<PlanRef> {
-        let mut labels = ConnectedComponentLabeller::new(self.inputs.len());
+    pub(crate) fn heuristic_ordering(&self) -> Result<PlanRef> {
+        let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
-        let (mut join_conditions, non_eq_cond) = self
+        let (mut eq_join_conditions, _) = self
             .on
             .clone()
             .split_eq_by_input_col_nums(&self.input_col_nums());
 
         // Iterate over all join conditions, whose keys represent edges on the join graph
-        for k in join_conditions.keys() {
-            labels.add_edge(k.0, k.1);
+        for k in eq_join_conditions.keys() {
+            labeller.add_edge(k.0, k.1);
         }
 
-        let mut connected_components: Vec<_> = labels.get_labels();
+        let mut edge_sets: Vec<_> = labeller.into_edge_sets();
 
         // Sort in decreasing order of len
-        connected_components.sort_by_key(|a| std::cmp::Reverse(a.len()));
+        edge_sets.sort_by_key(|a| std::cmp::Reverse(a.len()));
 
-        let mut left_deep_joins = Vec::<PlanRef>::with_capacity(connected_components.len());
         let mut join_ordering = vec![];
 
-        for component in connected_components {
-            let mut conditions = vec![];
+        for component in edge_sets {
+            let mut eq_cond_edges = vec![];
             for edge in component {
                 // Technically, every edge should be in join condition
-                if let Some(condition) = join_conditions.remove(&edge) {
-                    conditions.push((edge, condition));
+                if let Some(_) = eq_join_conditions.remove(&edge) {
+                    eq_cond_edges.push(edge);
                 }
             }
 
-            let (mut join, join_ordering_start_index) = if !conditions.is_empty() {
-                let (edge, condition) = conditions.remove(0);
-                let join_ordering_start_index = join_ordering.len();
-                join_ordering.append(&mut vec![edge.0, edge.1]);
-
-                let mut mapping = self.mapping_from_ordering(&join_ordering).inverse();
-                let remapped_condition = condition.rewrite_expr(&mut mapping);
-
-                (
-                    LogicalJoin::new(
-                        self.inputs[edge.0].clone(),
-                        self.inputs[edge.1].clone(),
-                        JoinType::Inner,
-                        remapped_condition,
-                    ),
-                    join_ordering_start_index,
-                )
-            } else {
+            if eq_cond_edges.is_empty() {
                 // There is nothing to join in this connected component
                 break;
             };
 
-            while !conditions.is_empty() {
+            let edge = eq_cond_edges.remove(0);
+            join_ordering.append(&mut vec![edge.0, edge.1]);
+
+            while !eq_cond_edges.is_empty() {
                 let mut found = vec![];
-                for (idx, (edge, condition)) in conditions.iter().enumerate() {
+                for (idx, edge) in eq_cond_edges.iter().enumerate() {
                     // If the eq join condition is on the existing join, add it to the existing
                     // join's on condition (this will be pushed down further later on).
                     if join_ordering.contains(&edge.1) && join_ordering.contains(&edge.0) {
-                        let mut remapped_condition = condition.clone();
-                        let mut mapping = self
-                            .mapping_from_ordering(&join_ordering[join_ordering_start_index..])
-                            .inverse();
-                        remapped_condition = remapped_condition.rewrite_expr(&mut mapping);
-
-                        let new_on = join.on().clone().and(remapped_condition);
-
-                        join = join.clone_with_cond(new_on);
                         found.push(idx);
                     } else {
                         // Else, the eq join condition involves a new input, or is not connected to
@@ -324,22 +329,9 @@ impl LogicalMultiJoin {
                         };
                         join_ordering.push(new_input);
                         found.push(idx);
-
-                        let mut remapped_condition = condition.clone();
-                        let mut mapping = self
-                            .mapping_from_ordering(&join_ordering[join_ordering_start_index..])
-                            .inverse();
-                        remapped_condition = remapped_condition.rewrite_expr(&mut mapping);
-
-                        join = LogicalJoin::new(
-                            join.into(),
-                            self.inputs[new_input].clone(),
-                            JoinType::Inner,
-                            remapped_condition,
-                        );
                     }
                 }
-                // This ensures conditions.len() is strictly decreasing per iteration
+                // This ensures eq_cond_edges.len() is strictly decreasing per iteration
                 // Since the graph is connected, it is always possible to find at least one edge
                 // remaining that can be connected to the current join result.
                 if found.is_empty() {
@@ -348,60 +340,26 @@ impl LogicalMultiJoin {
                     )));
                 }
                 let mut idx = 0;
-                conditions.retain(|_| {
+                eq_cond_edges.retain(|_| {
                     let keep = !found.contains(&idx);
                     idx += 1;
                     keep
                 });
             }
-            left_deep_joins.push(join.into());
         }
         // Deal with singleton inputs (with no eq condition joins between them whatsoever)
         for i in 0..self.inputs.len() {
             if !join_ordering.contains(&i) {
                 join_ordering.push(i);
-                left_deep_joins.push(self.inputs[i].clone());
             }
         }
         assert_eq!(
-            join_conditions.len(),
+            eq_join_conditions.len(),
             0,
-            "REMAINING JOIN CONDITIONS {:?}",
-            join_conditions
+            "Eq join conditions should have been exhausted {:?}",
+            eq_join_conditions
         );
-        let mut left_deep_joins_iter = left_deep_joins.iter();
-        let base_join =
-            left_deep_joins_iter
-                .next()
-                .ok_or(RwError::from(ErrorCode::InternalError(
-                    "No relations found in the MultiJoin".into(),
-                )))?;
-
-        // Create a bushy join by cross-joining a series of joins with no join graph edge
-        // between them in a left-deep fashion.
-        let mut output: PlanRef =
-            left_deep_joins_iter.fold(base_join.clone(), |join: PlanRef, next_join| {
-                LogicalJoin::new(
-                    join,
-                    next_join.clone().into(),
-                    JoinType::Inner,
-                    Condition {
-                        conjunctions: vec![],
-                    },
-                )
-                .into()
-            });
-
-        if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
-            output =
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering));
-        }
-
-        // We will later push down the `non_eq_cond` back to the individual joins via the
-        // `FilterJoinRule`.
-        output = LogicalFilter::create(output, non_eq_cond);
-
-        Ok(output)
+        self.as_reordered_left_deep_join(&join_ordering)
     }
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
