@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -50,48 +50,62 @@ impl BoxedExecutor2Builder for GenerateSeriesExecutor2Wrapper {
         let stop = stop_expr.eval(&dummy_chunk)?;
         let step = step_expr.eval(&dummy_chunk)?;
 
-        match (start.datum_at(0), stop.datum_at(0), step.datum_at(0)) {
-            (
-                Some(ScalarImpl::NaiveDateTime(start)),
-                Some(ScalarImpl::NaiveDateTime(stop)),
-                Some(ScalarImpl::Interval(step)),
-            ) => {
-                let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
+        match start_expr.return_type() {
+            DataType::Timestamp => {
+                let start = start.as_naivedatetime().value_at(0);
+                let stop = stop.as_naivedatetime().value_at(0);
+                let step = step.as_interval().value_at(0);
 
-                let input = Box::new(GenerateSeriesTimestampExecutor2::new(
-                    start,
-                    stop,
-                    step,
-                    schema.clone(),
-                    identity.clone(),
-                ));
+                if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
 
-                Ok(Box::new(Self {
-                    input,
-                    schema,
-                    identity,
-                }))
+                    let input = Box::new(GenerateSeriesTimestampExecutor2::new(
+                        start,
+                        stop,
+                        step,
+                        schema.clone(),
+                        identity.clone(),
+                    ));
+
+                    Ok(Box::new(Self {
+                        input,
+                        schema,
+                        identity,
+                    }))
+                } else {
+                    Err(ErrorCode::InternalError(
+                        "the parameters of Generate Series Function are incorrect".to_string(),
+                    )
+                    .into())
+                }
             }
-            (
-                Some(ScalarImpl::Int32(start)),
-                Some(ScalarImpl::Int32(stop)),
-                Some(ScalarImpl::Int32(step)),
-            ) => {
-                let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+            DataType::Int32 => {
+                let start = start.as_int32().value_at(0);
+                let stop = stop.as_int32().value_at(0);
+                let step = step.as_int32().value_at(0);
 
-                let input = Box::new(GenerateSeriesI32Executor2::new(
-                    start,
-                    stop,
-                    step,
-                    schema.clone(),
-                    identity.clone(),
-                ));
+                if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
 
-                Ok(Box::new(Self {
-                    input,
-                    schema,
-                    identity,
-                }))
+                    let input = Box::new(GenerateSeriesI32Executor2::new(
+                        start,
+                        stop,
+                        step,
+                        schema.clone(),
+                        identity.clone(),
+                    ));
+
+                    Ok(Box::new(Self {
+                        input,
+                        schema,
+                        identity,
+                    }))
+                } else {
+                    Err(ErrorCode::InternalError(
+                        "the parameters of Generate Series Function are incorrect".to_string(),
+                    )
+                    .into())
+                }
             }
             _ => Err(ErrorCode::InternalError(
                 "the parameters of Generate Series Function are incorrect".to_string(),
