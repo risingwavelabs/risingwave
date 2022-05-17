@@ -60,11 +60,11 @@
     FROM bid;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, $1, (0.908:Decimal * $2), $3], expr_alias: [auction, bidder, price, dateTime] }
+      BatchProject { exprs: [$0, $1, (0.908:Decimal * $2), $3] }
         BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, dateTime, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamProject { exprs: [$0, $1, (0.908:Decimal * $2), $3, $4], expr_alias: [auction, bidder, price, dateTime,  ] }
+      StreamProject { exprs: [$0, $1, (0.908:Decimal * $2), $3, $4] }
         StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id#0], pk_indices: [4] }
 - id: nexmark_q2
   before:
@@ -90,9 +90,9 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$3, $4, $5, $0], expr_alias: [name, city, state, id] }
+      BatchProject { exprs: [$3, $4, $5, $0] }
         BatchHashJoin { type: Inner, predicate: $1 = $2 }
-          BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
+          BatchProject { exprs: [$0, $1] }
             BatchExchange { order: [], dist: HashShard([1]) }
               BatchFilter { predicate: ($2 = 10:Int32) }
                 BatchScan { table: auction, columns: [id, seller, category] }
@@ -102,9 +102,9 @@
   stream_plan: |
     StreamMaterialize { columns: [name, city, state, id, _row_id#0(hidden), _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
       StreamExchange { dist: HashShard([4, 5]) }
-        StreamProject { exprs: [$4, $5, $6, $0, $2, $7], expr_alias: [name, city, state, id,  ,  ] }
+        StreamProject { exprs: [$4, $5, $6, $0, $2, $7] }
           StreamHashJoin { type: Inner, predicate: $1 = $3 }
-            StreamProject { exprs: [$0, $1, $3], expr_alias: [ ,  ,  ] }
+            StreamProject { exprs: [$0, $1, $3] }
               StreamExchange { dist: HashShard([1]) }
                 StreamFilter { predicate: ($2 = 10:Int32) }
                   StreamTableScan { table: auction, columns: [id, seller, category, _row_id#0], pk_indices: [3] }
@@ -117,7 +117,7 @@
   sql: |
     SELECT
         Q.category,
-        AVG(Q.final)
+        AVG(Q.final) as avg
     FROM (
         SELECT MAX(B.price) AS final, A.category
         FROM auction A, bid B
@@ -127,34 +127,32 @@
     GROUP BY Q.category;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, ($1 / $2)], expr_alias: [category,  ] }
+      BatchProject { exprs: [$0, ($1 / $2)] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1)] }
-          BatchExchange { order: [], dist: HashShard([0]) }
-            BatchProject { exprs: [$1, $2], expr_alias: [ ,  ] }
+          BatchProject { exprs: [$1, $2] }
+            BatchExchange { order: [], dist: HashShard([1]) }
               BatchHashAgg { group_keys: [$0, $1], aggs: [max($2)] }
-                BatchProject { exprs: [$0, $3, $5], expr_alias: [ ,  ,  ] }
-                  BatchExchange { order: [], dist: HashShard([0, 3]) }
-                    BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
-                      BatchHashJoin { type: Inner, predicate: $0 = $4 }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchScan { table: auction, columns: [id, dateTime, expires, category] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchScan { table: bid, columns: [auction, price, dateTime] }
+                BatchProject { exprs: [$0, $3, $5] }
+                  BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
+                    BatchHashJoin { type: Inner, predicate: $0 = $4 }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: auction, columns: [id, dateTime, expires, category] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: bid, columns: [auction, price, dateTime] }
   stream_plan: |
-    StreamMaterialize { columns: [category, expr#1], pk_columns: [category] }
-      StreamExchange { dist: HashShard([0]) }
-        StreamProject { exprs: [$0, ($2 / $3)], expr_alias: [category,  ] }
-          StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
-            StreamProject { exprs: [$1, $3, $0], expr_alias: [ ,  ,  ] }
+    StreamMaterialize { columns: [category, avg], pk_columns: [category] }
+      StreamProject { exprs: [$0, ($2 / $3)] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
+          StreamProject { exprs: [$1, $3, $0] }
+            StreamExchange { dist: HashShard([1]) }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
-                StreamProject { exprs: [$0, $3, $6, $4, $8], expr_alias: [ ,  ,  ,  ,  ] }
-                  StreamExchange { dist: HashShard([0, 3]) }
-                    StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }
-                      StreamHashJoin { type: Inner, predicate: $0 = $5 }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamTableScan { table: auction, columns: [id, dateTime, expires, category, _row_id#0], pk_indices: [4] }
-                        StreamExchange { dist: HashShard([0]) }
-                          StreamTableScan { table: bid, columns: [auction, price, dateTime, _row_id#0], pk_indices: [3] }
+                StreamProject { exprs: [$0, $3, $6, $4, $8] }
+                  StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }
+                    StreamHashJoin { type: Inner, predicate: $0 = $5 }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamTableScan { table: auction, columns: [id, dateTime, expires, category, _row_id#0], pk_indices: [4] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamTableScan { table: bid, columns: [auction, price, dateTime, _row_id#0], pk_indices: [3] }
 - id: nexmark_q5
   before:
     - create_tables
@@ -200,13 +198,14 @@
         Q.seller,
         AVG(Q.final) OVER
             (PARTITION BY Q.seller ORDER BY Q.dateTime ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
+        as avg
     FROM (
         SELECT MAX(B.price) AS final, A.seller, B.dateTime
         FROM auction AS A, bid AS B
         WHERE A.id = B.auction and B.dateTime between A.dateTime and A.expires
         GROUP BY A.id, A.seller
     ) AS Q;
-  planner_error: "Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function"
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - id: nexmark_q7
   before:
     - create_tables

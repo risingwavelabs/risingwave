@@ -1,19 +1,19 @@
 [package]
 edition = "2021"
 name = "risingwave_connector"
-version = "0.1.6"
+version = "0.1.7"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.40"
-aws-smithy-types = "0.40"
-aws-types = { version = "0.10", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-kinesis = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.11", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.41"
+aws-smithy-types = "0.41"
+aws-types = { version = "0.11", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -23,9 +23,9 @@ farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 globset = "0.4.8"
 http = "0.2"
+http-serde = "1.1.0"
 hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
 log = "0.4"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
@@ -49,10 +49,11 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 twox-hash = "1"
 url = "2"
 urlencoding = "2"
+
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 [dev-dependencies]
 rand = "0.8"

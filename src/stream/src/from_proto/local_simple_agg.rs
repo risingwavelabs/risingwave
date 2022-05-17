@@ -34,7 +34,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(build_agg_call_from_prost)
+            .map(|agg_call| build_agg_call_from_prost(node.append_only, agg_call))
             .try_collect()?;
 
         Ok(LocalSimpleAggExecutor::new(
@@ -47,7 +47,10 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
     }
 }
 
-pub fn build_agg_call_from_prost(agg_call_proto: &risingwave_pb::expr::AggCall) -> Result<AggCall> {
+pub fn build_agg_call_from_prost(
+    append_only: bool,
+    agg_call_proto: &risingwave_pb::expr::AggCall,
+) -> Result<AggCall> {
     let args = match &agg_call_proto.get_args()[..] {
         [] => AggArgs::None,
         [arg] => AggArgs::Unary(
@@ -65,5 +68,6 @@ pub fn build_agg_call_from_prost(agg_call_proto: &risingwave_pb::expr::AggCall) 
         kind: AggKind::try_from(agg_call_proto.get_type()?)?,
         args,
         return_type: DataType::from(agg_call_proto.get_return_type()?),
+        append_only,
     })
 }

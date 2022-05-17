@@ -113,6 +113,9 @@ pub struct Parser {
     tokens: Vec<Token>,
     /// The index of the first unprocessed token in `self.tokens`
     index: usize,
+    /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
+    /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
+    angle_brackets_num: i32,
 }
 
 impl Parser {
@@ -122,7 +125,11 @@ impl Parser {
 
     /// Parse the specified tokens
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, index: 0 }
+        Parser {
+            tokens,
+            index: 0,
+            angle_brackets_num: 0,
+        }
     }
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
@@ -1386,6 +1393,8 @@ impl Parser {
             self.parse_create_index(true)
         } else if self.parse_keyword(Keyword::SCHEMA) {
             self.parse_create_schema()
+        } else if self.parse_keyword(Keyword::DATABASE) {
+            self.parse_create_database()
         } else {
             self.expected("an object type after CREATE", self.peek_token())
         }
@@ -1397,6 +1406,17 @@ impl Parser {
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
+        })
+    }
+
+    pub fn parse_create_database(&mut self) -> Result<Statement, ParserError> {
+        let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
+        let db_name = self.parse_object_name()?;
+        Ok(Statement::CreateDatabase {
+            db_name,
+            if_not_exists,
+            location: None,
+            managed_location: None,
         })
     }
 
@@ -1536,6 +1556,7 @@ impl Parser {
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
         let name = self.parse_identifier()?;
         let data_type = self.parse_data_type()?;
+
         let collation = if self.parse_keyword(Keyword::COLLATE) {
             Some(self.parse_object_name()?)
         } else {
@@ -1930,6 +1951,43 @@ impl Parser {
         Ok(data_type)
     }
 
+    /// Parse struct `data_type` e.g.`<v1 int, v2 int, v3 struct<...>>`.
+    pub fn parse_struct_data_type(&mut self) -> Result<Vec<StructField>, ParserError> {
+        let mut columns = vec![];
+        if !self.consume_token(&Token::Lt) {
+            return self.expected("'<' after struct", self.peek_token());
+        }
+        self.angle_brackets_num += 1;
+
+        loop {
+            if let Token::Word(_) = self.peek_token() {
+                let name = self.parse_identifier()?;
+                let data_type = self.parse_data_type()?;
+                columns.push(StructField { name, data_type })
+            } else {
+                return self.expected("struct field name", self.peek_token());
+            }
+            let comma = self.consume_token(&Token::Comma);
+            if self.angle_brackets_num == 0 {
+                break;
+            } else if self.consume_token(&Token::Gt) {
+                self.angle_brackets_num -= 1;
+                break;
+            } else if self.consume_token(&Token::ShiftRight) {
+                if self.angle_brackets_num >= 1 {
+                    self.angle_brackets_num -= 2;
+                    break;
+                } else {
+                    return parser_err!("too much '>'");
+                }
+            } else if !comma {
+                return self.expected("',' or '>' after column definition", self.peek_token());
+            }
+        }
+
+        Ok(columns)
+    }
+
     /// Parse a SQL datatype
     pub fn parse_data_type_inner(&mut self) -> Result<DataType, ParserError> {
         match self.next_token() {
@@ -1986,6 +2044,7 @@ impl Parser {
                         Ok(DataType::Text)
                     }
                 }
+                Keyword::STRUCT => Ok(DataType::Struct(self.parse_struct_data_type()?)),
                 Keyword::BYTEA => Ok(DataType::Bytea),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
                     let (precision, scale) = self.parse_optional_precision_scale()?;

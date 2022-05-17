@@ -13,41 +13,26 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::base::SourceSplit;
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum PulsarOffset {
-    MessageID(u64),
-    Timestamp(u64),
-    None,
-}
+use crate::base::SplitMetaData;
+use crate::pulsar::topic::Topic;
+use crate::pulsar::PulsarEnumeratorOffset;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PulsarSplit {
-    pub(crate) sub_topic: String,
-    pub(crate) start_offset: PulsarOffset,
-    pub(crate) stop_offset: PulsarOffset,
+    pub(crate) topic: Topic,
+    pub(crate) start_offset: PulsarEnumeratorOffset,
 }
 
-impl PulsarSplit {
-    pub fn new(sub_topic: String, start_offset: PulsarOffset, stop_offset: PulsarOffset) -> Self {
-        Self {
-            sub_topic,
-            start_offset,
-            stop_offset,
-        }
-    }
-}
-
-impl SourceSplit for PulsarSplit {
+impl SplitMetaData for PulsarSplit {
     fn id(&self) -> String {
-        self.sub_topic.clone()
+        self.topic.to_string()
     }
 
-    fn to_string(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    fn to_json_bytes(&self) -> Bytes {
+        Bytes::from(serde_json::to_string(self).unwrap())
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {

@@ -20,9 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
-use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::stream_plan::StreamActor;
+use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ParallelUnitId, WorkerId};
@@ -116,6 +115,23 @@ where
                 v.insert(table_fragment);
                 Ok(())
             }
+        }
+    }
+
+    /// Cancel creation of a new `TableFragments` and delete it from meta store.
+    pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> Result<()> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(*table_id) {
+            Entry::Occupied(o) => {
+                TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
+                o.remove();
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
         }
     }
 

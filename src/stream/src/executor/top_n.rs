@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use async_trait::async_trait;
+use madsim::collections::HashSet;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
@@ -557,7 +556,7 @@ mod tests {
         ))
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_top_n_executor_with_offset() {
         let order_types = create_order_pairs();
         let source = create_source();
@@ -653,7 +652,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_top_n_executor_with_limit() {
         let order_types = create_order_pairs();
         let source = create_source();
@@ -758,7 +757,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_top_n_executor_with_offset_and_limit() {
         let order_types = create_order_pairs();
         let source = create_source();

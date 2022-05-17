@@ -134,19 +134,17 @@ impl ColIndexMapping {
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
-    /// let mut remaining_cols = FixedBitSet::with_capacity(5);
-    /// remaining_cols.insert(1);
-    /// remaining_cols.insert(3);
-    /// let mapping = ColIndexMapping::with_remaining_columns(&remaining_cols);
+    /// let mut remaining_cols = vec![1, 3];
+    /// let mapping = ColIndexMapping::with_remaining_columns(&remaining_cols, 4);
     /// assert_eq!(mapping.map(1), 0);
     /// assert_eq!(mapping.map(3), 1);
     /// assert_eq!(mapping.try_map(0), None);
     /// assert_eq!(mapping.try_map(2), None);
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
-    pub fn with_remaining_columns(cols: &FixedBitSet) -> Self {
-        let mut map = vec![None; cols.len()];
-        for (tar, src) in cols.ones().enumerate() {
+    pub fn with_remaining_columns(cols: &[usize], src_size: usize) -> Self {
+        let mut map = vec![None; src_size];
+        for (tar, &src) in cols.iter().enumerate() {
             map[src] = Some(tar);
         }
         Self::new(map)
@@ -160,21 +158,20 @@ impl ColIndexMapping {
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
-    /// let mut removed_cols = FixedBitSet::with_capacity(5);
-    /// removed_cols.insert(0);
-    /// removed_cols.insert(2);
-    /// removed_cols.insert(4);
-    /// let mapping = ColIndexMapping::with_removed_columns(&removed_cols);
+    /// let mut removed_cols = vec![0, 2, 4];
+    /// let mapping = ColIndexMapping::with_removed_columns(&removed_cols, 5);
     /// assert_eq!(mapping.map(1), 0);
     /// assert_eq!(mapping.map(3), 1);
     /// assert_eq!(mapping.try_map(0), None);
     /// assert_eq!(mapping.try_map(2), None);
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
-    pub fn with_removed_columns(cols: &FixedBitSet) -> Self {
-        let mut cols = cols.clone();
-        cols.toggle_range(..);
-        Self::with_remaining_columns(&cols)
+    pub fn with_removed_columns(cols: &[usize], src_size: usize) -> Self {
+        let cols = (0..src_size)
+            .into_iter()
+            .filter(|x| !cols.contains(x))
+            .collect_vec();
+        Self::with_remaining_columns(&cols, src_size)
     }
 
     #[must_use]
@@ -360,8 +357,6 @@ impl Debug for ColIndexMapping {
 
 #[cfg(test)]
 mod tests {
-    use fixedbitset::FixedBitSet;
-
     use crate::utils::ColIndexMapping;
 
     #[test]
@@ -377,10 +372,8 @@ mod tests {
     #[test]
     fn test_composite() {
         let add_mapping = ColIndexMapping::with_shift_offset(3, 3);
-        let mut remaining_cols = FixedBitSet::with_capacity(6);
-        remaining_cols.insert(3);
-        remaining_cols.insert(5);
-        let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols);
+        let remaining_cols = vec![3, 5];
+        let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols, 6);
         let composite = add_mapping.composite(&col_prune_mapping);
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);

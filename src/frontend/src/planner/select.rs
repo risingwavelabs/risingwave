@@ -37,11 +37,20 @@ impl Planner {
             mut select_items,
             group_by,
             mut having,
-            aliases,
             distinct,
             ..
         }: BoundSelect,
+        extra_order_exprs: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
+        // Append expressions in ORDER BY.
+        if distinct && !extra_order_exprs.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "for SELECT DISTINCT, ORDER BY expressions must appear in select list".into(),
+            )
+            .into());
+        }
+        select_items.extend(extra_order_exprs);
+
         // Plan the FROM clause.
         let mut root = match from {
             None => self.create_dummy_values(),
@@ -66,7 +75,7 @@ impl Planner {
         if select_items.iter().any(|e| e.has_subquery()) {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
-        root = LogicalProject::create(root, select_items, aliases);
+        root = LogicalProject::create(root, select_items);
 
         if distinct {
             let group_keys = (0..root.schema().fields().len()).collect();
@@ -94,11 +103,7 @@ impl Planner {
             ],
         )
         .unwrap();
-        Ok(LogicalProject::create(
-            count_star.into(),
-            vec![ge.into()],
-            vec![None],
-        ))
+        Ok(LogicalProject::create(count_star.into(), vec![ge.into()]))
     }
 
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as

@@ -60,8 +60,6 @@ pub struct CreateMaterializedViewContext {
     pub hash_mapping: Vec<ParallelUnitId>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
-    /// TODO: remove this when we deprecate Java frontend.
-    pub is_legacy_frontend: bool,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -289,7 +287,6 @@ where
             affiliated_source,
             hash_mapping,
             table_id_offset: _,
-            is_legacy_frontend,
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
@@ -319,18 +316,15 @@ where
         // resolve chain node infos, including:
         // 1. insert upstream actor id in merge node
         // 2. insert parallel unit id in batch query node
-        // note: this only works for Rust frontend.
-        if !is_legacy_frontend {
-            self.resolve_chain_node(
-                &mut table_fragments,
-                &dependent_table_ids,
-                &hash_mapping,
-                &mut dispatches,
-                &mut upstream_node_actors,
-                &locations,
-            )
-            .await?;
-        }
+        self.resolve_chain_node(
+            &mut table_fragments,
+            &dependent_table_ids,
+            &hash_mapping,
+            &mut dispatches,
+            &mut upstream_node_actors,
+            &locations,
+        )
+        .await?;
 
         // Verify whether all same_as_upstream constraints are satisfied.
         //
@@ -455,7 +449,7 @@ where
                             split_type: splits.first().unwrap().get_type(),
                             stream_source_splits: splits
                                 .iter()
-                                .map(|split| split.to_string().unwrap().as_bytes().to_vec())
+                                .map(|split| split.to_json_bytes().to_vec())
                                 .collect(),
                         });
                     }
@@ -603,13 +597,21 @@ where
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
-        self.barrier_manager
+        let table_id = table_fragments.table_id();
+        if let Err(err) = self
+            .barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
                 table_sink_map,
                 dispatches,
             })
-            .await?;
+            .await
+        {
+            self.fragment_manager
+                .cancel_create_table_fragments(&table_id)
+                .await?;
+            return Err(err);
+        }
 
         Ok(())
     }
@@ -651,7 +653,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
+    use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::*;

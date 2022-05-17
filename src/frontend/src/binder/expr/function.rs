@@ -58,6 +58,11 @@ impl Binder {
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
+                "nullif" => {
+                    inputs = Self::rewrite_nullif_to_case_when(inputs)?;
+                    ExprType::Case
+                }
+                "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
@@ -80,6 +85,21 @@ impl Binder {
         }
     }
 
+    /// Make sure inputs only have 2 value and rewrite the arguments.
+    /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
+    fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
+        } else {
+            let inputs = vec![
+                FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
+                Literal::new(None, inputs[0].return_type()).into(),
+                inputs[0].clone(),
+            ];
+            Ok(inputs)
+        }
+    }
+
     /// Rewrite the arguments to be consistent with the `round` signature:
     /// - round(Decimal, Int32) -> Decimal
     /// - round(Decimal) -> Decimal
@@ -87,11 +107,13 @@ impl Binder {
         if inputs.len() == 1 {
             // Rewrite round(Decimal) to round(Decimal, 0).
             let input = inputs.pop().unwrap();
-            if input.return_type() == DataType::Decimal {
-                vec![input, Literal::new(Some(0.into()), DataType::Int32).into()]
-            } else {
-                vec![input]
-            }
+            vec![
+                input
+                    .clone()
+                    .cast_implicit(DataType::Decimal)
+                    .unwrap_or(input),
+                Literal::new(Some(0.into()), DataType::Int32).into(),
+            ]
         } else if inputs.len() == 2 {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();

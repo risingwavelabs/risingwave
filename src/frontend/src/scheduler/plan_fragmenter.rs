@@ -395,6 +395,7 @@ mod tests {
     };
     use risingwave_pb::plan_common::JoinType;
 
+    use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
         PlanNodeType,
@@ -465,7 +466,32 @@ mod tests {
                 JoinType::Inner,
                 Condition::true_cond(),
             ),
-            EqJoinPredicate::create(0, 0, Condition::true_cond()),
+            EqJoinPredicate::new(
+                Condition::true_cond(),
+                vec![
+                    (
+                        InputRef {
+                            index: 0,
+                            data_type: DataType::Int32,
+                        },
+                        InputRef {
+                            index: 2,
+                            data_type: DataType::Int32,
+                        },
+                    ),
+                    (
+                        InputRef {
+                            index: 1,
+                            data_type: DataType::Float64,
+                        },
+                        InputRef {
+                            index: 3,
+                            data_type: DataType::Float64,
+                        },
+                    ),
+                ],
+                2,
+            ),
         )
         .into();
         let batch_exchange_node3: PlanRef = BatchExchange::new(

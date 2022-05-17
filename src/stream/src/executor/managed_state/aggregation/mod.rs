@@ -113,18 +113,26 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     row_count.is_some(),
                     "should set row_count for value states other than AggKind::RowCount"
                 );
-                Ok(Self::Table(
-                    create_streaming_extreme_state(
-                        agg_call,
-                        keyspace,
-                        row_count.unwrap(),
-                        // TODO: estimate a good cache size instead of hard-coding
-                        Some(1024),
-                        pk_data_types,
-                        key_hash_code,
-                    )
-                    .await?,
-                ))
+
+                // optimization: use single-value state for append-only min/max
+                if agg_call.append_only {
+                    Ok(Self::Value(
+                        ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                    ))
+                } else {
+                    Ok(Self::Table(
+                        create_streaming_extreme_state(
+                            agg_call,
+                            keyspace,
+                            row_count.unwrap(),
+                            // TODO: estimate a good cache size instead of hard-coding
+                            Some(1024),
+                            pk_data_types,
+                            key_hash_code,
+                        )
+                        .await?,
+                    ))
+                }
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`

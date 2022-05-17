@@ -20,14 +20,14 @@ use risingwave_pb::batch_plan::exchange_info::{Distribution, DistributionMode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::{
-    exchange_info, CreateTableNode, ExchangeInfo, InsertNode, PlanFragment, PlanNode,
-    TaskId as ProstTaskId, TaskOutputId as ProstOutputId, ValuesNode,
+    exchange_info, ExchangeInfo, InsertNode, PlanFragment, PlanNode, TaskId as ProstTaskId,
+    TaskOutputId as ProstOutputId, ValuesNode,
 };
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ConstantValue;
-use risingwave_pb::plan_common::{ColumnDesc, Field as NodeField};
+use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_pb::task_service::GetDataResponse;
 
 use super::*;
@@ -192,52 +192,51 @@ impl<'a> TableBuilder<'a> {
 
     pub async fn run(self) {
         let inserted_rows = self.tuples.len();
-        let create = self.build_create_table_plan();
+        // let create = self.build_create_table_plan();
         let insert = self
             .build_insert_values_plan()
             .expect("failed to create insert plan");
-        assert_eq!(self.runner.run(create).await.unwrap()[0].len(), 0);
+        // assert_eq!(self.runner.run(create).await.unwrap()[0].len(), 0);
         TestRunner::validate_insert_result(
             &self.runner.run(insert).await.unwrap()[0],
             inserted_rows,
         );
     }
 
-    fn build_create_table_plan(&self) -> PlanFragment {
-        let create = CreateTableNode {
-            table_ref_id: None,
-            column_descs: self
-                .col_types
-                .iter()
-                .enumerate()
-                .map(|(i, typ)| ColumnDesc {
-                    column_type: Some(typ.clone()),
-                    column_id: i as i32, // use index as column_id
-                    ..CoreDefault::default()
-                })
-                .collect_vec(),
-            ..Default::default()
-        };
-
-        PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                node_body: Some(NodeBody::CreateTable(create)),
-                identity: "CreateTableExecutor".to_string(),
-            }),
-
-            exchange_info: Some(ExchangeInfo {
-                mode: 0,
-                distribution: None,
-            }),
-        }
-    }
+    // fn build_create_table_plan(&self) -> PlanFragment {
+    //     let create = CreateTableNode {
+    //         table_ref_id: None,
+    //         column_descs: self
+    //             .col_types
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(i, typ)| ColumnDesc {
+    //                 column_type: Some(typ.clone()),
+    //                 column_id: i as i32, // use index as column_id
+    //                 ..CoreDefault::default()
+    //             })
+    //             .collect_vec(),
+    //         ..Default::default()
+    //     };
+    //
+    //     PlanFragment {
+    //         root: Some(PlanNode {
+    //             children: vec![],
+    //             node_body: Some(NodeBody::CreateTable(create)),
+    //             identity: "CreateTableExecutor".to_string(),
+    //         }),
+    //
+    //         exchange_info: Some(ExchangeInfo {
+    //             mode: 0,
+    //             distribution: None,
+    //         }),
+    //     }
+    // }
 
     fn build_insert_values_plan(&self) -> Result<PlanFragment> {
         let insert = InsertNode {
             table_source_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
-            frontend_v2: false,
         };
 
         let tuples = self

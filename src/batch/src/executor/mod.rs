@@ -12,88 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use drop_stream::*;
-use drop_table::*;
-use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 
-use self::fuse::FusedExecutor;
-use crate::executor::create_source::CreateSourceExecutor;
-pub use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::trace::TraceExecutor;
-use crate::executor2::executor_wrapper::ExecutorWrapper;
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    GenerateSeriesI32Executor2, HashAggExecutor2Builder, HashJoinExecutor2Builder, InsertExecutor2,
-    LimitExecutor2, MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2,
-    ProjectExecutor2, RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2,
-    StreamScanExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
+    GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2, HashAggExecutor2Builder,
+    HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2,
+    MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2,
+    RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, StreamScanExecutor2,
+    TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
-mod create_source;
-mod create_table;
-mod drop_stream;
-mod drop_table;
-pub mod executor2_wrapper;
-mod fuse;
-mod join;
 #[cfg(test)]
 pub mod test_utils;
-mod trace;
-
-/// `Executor` is an operator in the query execution.
-#[async_trait::async_trait]
-pub trait Executor: Send {
-    /// Initializes the executor.
-    async fn open(&mut self) -> Result<()>;
-
-    /// Executes the executor to get next chunk
-    async fn next(&mut self) -> Result<Option<DataChunk>>;
-
-    /// Finalizes the executor.
-    async fn close(&mut self) -> Result<()>;
-
-    /// Returns the schema of the executor's return data.
-    ///
-    /// Schema must be available before `init`.
-    fn schema(&self) -> &Schema;
-
-    /// Identity string of the executor
-    fn identity(&self) -> &str;
-
-    /// Turn an executor into a fused executor
-    fn fuse(self) -> FusedExecutor<Self>
-    where
-        Self: Executor + std::marker::Sized,
-    {
-        FusedExecutor::new(self)
-    }
-}
-
-pub type BoxedExecutor = Box<dyn Executor>;
 
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from
 /// proto and global environment
 pub trait BoxedExecutorBuilder {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor>;
-
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
-        Ok(Box::new(ExecutorWrapper::from(Self::new_boxed_executor(
-            source,
-        )?)))
-    }
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2>;
 }
 
 #[allow(dead_code)]
 struct NotImplementedBuilder;
 
 impl BoxedExecutorBuilder for NotImplementedBuilder {
-    fn new_boxed_executor(_source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    fn new_boxed_executor2(_source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
         Err(ErrorCode::NotImplemented("Executor not implemented".to_string(), None.into()).into())
     }
 }
@@ -103,18 +50,6 @@ pub struct ExecutorBuilder<'a> {
     pub task_id: &'a TaskId,
     env: BatchEnvironment,
     epoch: u64,
-}
-
-macro_rules! build_executor {
-    ($source: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
-        match $source.plan_node().get_node_body().unwrap() {
-            $(
-                $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source)
-                },
-            )*
-        }
-    }
 }
 
 macro_rules! build_executor2 {
@@ -144,17 +79,6 @@ impl<'a> ExecutorBuilder<'a> {
         }
     }
 
-    pub fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().map_err(|e| {
-            InternalError(format!(
-                "[PlanNode: {:?}] Failed to build executor: {}",
-                self.plan_node.get_node_body(),
-                e,
-            ))
-            .into()
-        })
-    }
-
     pub fn build2(&self) -> Result<BoxedExecutor2> {
         self.try_build2().map_err(|e| {
             InternalError(format!(
@@ -171,49 +95,16 @@ impl<'a> ExecutorBuilder<'a> {
         ExecutorBuilder::new(plan_node, self.task_id, self.env.clone(), self.epoch)
     }
 
-    fn try_build(&self) -> Result<BoxedExecutor> {
-        let real_executor = build_executor! { self,
-            NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
-            NodeBody::Insert => InsertExecutor2,
-            NodeBody::Delete => DeleteExecutor2,
-            NodeBody::DropTable => DropTableExecutor,
-            NodeBody::Exchange => ExchangeExecutor2,
-            NodeBody::Filter => FilterExecutor2,
-            NodeBody::Project => ProjectExecutor2,
-            NodeBody::SortAgg => SortAggExecutor2,
-            NodeBody::OrderBy => OrderByExecutor2,
-            NodeBody::CreateSource => CreateSourceExecutor,
-            NodeBody::SourceScan => StreamScanExecutor2,
-            NodeBody::TopN => TopNExecutor2,
-            NodeBody::Limit => LimitExecutor2,
-            NodeBody::Values => ValuesExecutor2,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
-            NodeBody::HashJoin => HashJoinExecutor2Builder,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
-            NodeBody::DropSource => DropStreamExecutor,
-            NodeBody::HashAgg => HashAggExecutor2Builder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
-            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
-            NodeBody::HopWindow => NotImplementedBuilder,
-        }?;
-        let input_desc = real_executor.identity().to_string();
-        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
-    }
-
     fn try_build2(&self) -> Result<BoxedExecutor2> {
         let real_executor = build_executor2! { self,
-            NodeBody::CreateTable => CreateTableExecutor,
             NodeBody::RowSeqScan => RowSeqScanExecutor2Builder,
             NodeBody::Insert => InsertExecutor2,
             NodeBody::Delete => DeleteExecutor2,
-            NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor2,
             NodeBody::OrderBy => OrderByExecutor2,
-            NodeBody::CreateSource => CreateSourceExecutor,
             NodeBody::SourceScan => StreamScanExecutor2,
             NodeBody::TopN => TopNExecutor2,
             NodeBody::Limit => LimitExecutor2,
@@ -221,11 +112,11 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor2,
             NodeBody::HashJoin => HashJoinExecutor2Builder,
             NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
-            NodeBody::DropSource => DropStreamExecutor,
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
             NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
-            NodeBody::HopWindow => NotImplementedBuilder,
+            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
+            NodeBody::HopWindow => HopWindowExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor2::new(real_executor, input_desc)))

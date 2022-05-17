@@ -24,7 +24,7 @@ use risingwave_storage::Keyspace;
 
 // use crate::executor::mview::ManagedMViewState;
 
-#[tokio::test]
+#[madsim::test]
 async fn test_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -91,7 +91,7 @@ async fn test_cell_based_table_iter() {
     assert!(res.is_none());
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_multi_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -626,7 +626,7 @@ async fn test_multi_state_table_iter() {
     state_2.commit(epoch).await.unwrap();
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_cell_based_scan_empty_column_ids_cardinality() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -675,7 +675,7 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     assert_eq!(chunk.cardinality(), 2);
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_get_row_by_scan() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -751,7 +751,7 @@ async fn test_get_row_by_scan() {
     assert_eq!(get_no_exist_res, None);
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_get_row_by_muti_get() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -839,7 +839,7 @@ async fn test_get_row_by_muti_get() {
     assert_eq!(get_no_exist_res, None);
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_get_row_for_string() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -928,7 +928,7 @@ async fn test_get_row_for_string() {
     assert_eq!(get_row2_res, None);
 }
 
-#[tokio::test]
+#[madsim::test]
 async fn test_shuffled_column_id_for_get_row() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(3), ColumnId::from(2), ColumnId::from(1)];

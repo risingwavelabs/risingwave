@@ -123,7 +123,6 @@ impl<S: StateStore> StateTable<S> {
         )
         .await
     }
-
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).

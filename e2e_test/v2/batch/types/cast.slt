@@ -37,3 +37,43 @@ query T
 values('1999-01-08 04:05:06'::timestamp::timestamp);
 ----
 1999-01-08 04:05:06
+
+query T
+values(10::integer::boolean);
+----
+t
+
+query T
+values(0::integer::boolean);
+----
+f
+
+query T
+values(false::boolean::integer);
+----
+0
+
+query T
+values(true::boolean::integer);
+----
+1
+
+query T
+values(1.23::float::varchar);
+----
+1.23
+
+query T
+values(1.233333333333333321123123123::decimal::varchar);
+----
+1.233333333333333321123123123
+
+query T
+values(213213::int::varchar);
+----
+213213
+
+query T
+values(2132::smallint::varchar);
+----
+2132

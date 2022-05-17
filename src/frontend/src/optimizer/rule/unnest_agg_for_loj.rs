@@ -54,13 +54,12 @@ impl Rule for UnnestAggForLOJ {
 
         let input = agg.input();
         let input_project = input.as_logical_project()?;
-        let (mut exprs, mut expr_alias, input) = input_project.clone().decompose();
+        let (mut exprs, input) = input_project.clone().decompose();
 
         // Add a constant column at the end of `input_project`.
         exprs.push(ExprImpl::literal_int(1));
-        expr_alias.push(Some("1".into()));
         let idx_of_constant = exprs.len() - 1;
-        let new_project = LogicalProject::new(input, exprs, expr_alias);
+        let new_project = LogicalProject::new(input, exprs);
 
         let new_apply = apply.clone_with_left_right(apply.left(), new_project.into());
 
@@ -102,7 +101,6 @@ impl Rule for UnnestAggForLOJ {
             .enumerate()
             .map(|(i, field)| InputRef::new(i, field.data_type()).into())
             .collect();
-        let mut expr_alias = vec![None; apply.left().schema().len()];
 
         let mut shift_input_ref =
             ColIndexMapping::with_shift_offset(agg.agg_calls().len(), apply_left_len as isize);
@@ -111,9 +109,8 @@ impl Rule for UnnestAggForLOJ {
             // We currently assume that there is no correlated variable in LogicalProject.
             shift_input_ref.rewrite_expr(expr)
         }));
-        expr_alias.extend(project.expr_alias().iter().cloned());
 
-        let project = LogicalProject::new(agg.into(), exprs, expr_alias);
+        let project = LogicalProject::new(agg.into(), exprs);
 
         Some(project.into())
     }

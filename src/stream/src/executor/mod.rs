@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -20,6 +19,7 @@ use enum_as_inner::EnumAsInner;
 use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 use futures::Stream;
+use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;

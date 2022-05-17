@@ -108,7 +108,9 @@
   </div>
 </body>
 
-<script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"
+  integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.2.1/d3.min.js"
   integrity="sha512-wkduu4oQG74ySorPiSRStC0Zl8rQfjr/Ty6dMvYTmjZw6RS5bferdx8TR7ynxeh79ySEp/benIFFisKofMjPbg=="
   crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -124,6 +126,8 @@
   let currentMv = ""
   let currentMvs = new Set
   let showAssociateMv = false
+
+  const types = new Set(["source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
 
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
@@ -166,7 +170,8 @@
   /// Transform a single actor to a d3.hierarchy
   const hierarchyActor = (actor) => {
     /// Find a key ends with `Node`
-    const findTitle = (actorNode) => Object.keys(actorNode).find(x => x.endsWith("Node"))
+
+    const findTitle = (actorNode) => Object.keys(actorNode).find(x => types.has(x))
 
     /// Transform an actor node to a struct that can be parsed by d3.hierarchy
     const hierarchyActorNode = (node) => {
@@ -331,8 +336,8 @@
       actors.forEach(actor => {
         const fragmentId = fragmentIdOf(actor)
 
-        if (actor.nodes.chainNode) {
-          let upstreamActorIds = actor.nodes.input[0].mergeNode.upstreamActorId
+        if (actor.nodes.chain) {
+          let upstreamActorIds = actor.nodes.input[0].merge.upstreamActorId
           if (upstreamActorIds.length != 0) {
             let upstreamFragmentId = fragmentIdOf(actorMap.get(upstreamActorIds[0]))
             actorNodes.get(upstreamFragmentId).parents.push(fragmentId)

@@ -103,6 +103,7 @@ fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> b
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
+                    | (DataType::Struct { .. }, ScalarImpl::Struct(_))
             )
         }
         None => true,
@@ -199,13 +200,6 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         |e| InternalError(format!("Failed to deserialize f64, reason: {:?}", e)),
                     )?)
                     .into(),
-                ),
-                TypeName::Char | TypeName::Symbol => ScalarImpl::Utf8(
-                    std::str::from_utf8(prost_value.get_body())
-                        .map_err(|e| {
-                            InternalError(format!("Failed to deserialize char, reason: {:?}", e))
-                        })?
-                        .to_string(),
                 ),
                 TypeName::Varchar => ScalarImpl::Utf8(
                     std::str::from_utf8(prost_value.get_body())

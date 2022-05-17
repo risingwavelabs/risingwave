@@ -31,48 +31,35 @@ impl DataChunk {
     pub fn rows(&self) -> impl Iterator<Item = RowRef> {
         DataChunkRefIter {
             chunk: self,
-            idx: 0,
+            idx: Some(0),
         }
     }
 }
 
 struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
-    idx: usize,
+    /// `None` means finished
+    idx: Option<usize>,
 }
 
 impl<'a> Iterator for DataChunkRefIter<'a> {
     type Item = RowRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.chunk.visibility() {
-            Some(bitmap) => {
-                loop {
-                    let idx = self.idx;
-                    if idx >= self.chunk.capacity() {
-                        return None;
-                    }
-                    // SAFETY: idx is checked.
-                    let vis = unsafe { bitmap.is_set_unchecked(idx) };
-                    self.idx += 1;
-                    if vis {
-                        return Some(RowRef {
+        match self.idx {
+            None => None,
+            Some(idx) => {
+                self.idx = self.chunk.next_visible_row_idx(idx);
+                match self.idx {
+                    None => None,
+                    Some(idx) => {
+                        self.idx = Some(idx + 1);
+                        Some(RowRef {
                             chunk: self.chunk,
                             idx,
-                        });
+                        })
                     }
                 }
-            }
-            None => {
-                let idx = self.idx;
-                if idx >= self.chunk.capacity() {
-                    return None;
-                }
-                self.idx += 1;
-                Some(RowRef {
-                    chunk: self.chunk,
-                    idx,
-                })
             }
         }
     }

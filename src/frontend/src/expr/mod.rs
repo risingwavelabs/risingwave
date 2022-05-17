@@ -92,7 +92,7 @@ impl ExprImpl {
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
         let mut visitor = CollectInputRef::with_capacity(input_col_num);
         visitor.visit_expr(self);
-        visitor.collect()
+        visitor.into()
     }
 
     /// Check whether self is NULL.

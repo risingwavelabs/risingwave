@@ -69,7 +69,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 ) -> Result<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
-                        _ => todo!("Join type {:?} not implemented", typ),
+                        // _ => todo!("Join type {:?} not implemented", typ),
                     }
                 }
             }
@@ -82,7 +82,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                     { Inner, Inner },
                     { LeftOuter, LeftOuter },
                     { RightOuter, RightOuter },
-                    { FullOuter, FullOuter }
+                    { FullOuter, FullOuter },
+                    { LeftSemi, LeftSemi },
+                    { RightSemi, RightSemi },
+                    { LeftAnti, LeftAnti },
+                    { RightAnti, RightAnti }
                 }
             };
         }

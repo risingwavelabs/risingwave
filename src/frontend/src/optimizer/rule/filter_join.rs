@@ -16,6 +16,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::Rule;
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::rule::BoxedRule;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -46,15 +47,27 @@ pub struct FilterJoinRule {}
 
 impl Rule for FilterJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter = plan.as_logical_filter()?;
-        let input = filter.input();
-        let join = input.as_logical_join()?;
+        let (filter_predicate, join) = match plan.as_logical_filter() {
+            Some(filter) => {
+                let input = filter.input();
+                let join = input.as_logical_join()?;
+                (filter.predicate().clone(), join.clone())
+            }
+            // This rule also handles the case where there's no filter above the join.
+            // We pushdown the predicates within the on-clause.
+            None => {
+                let join = plan.as_logical_join()?;
+                (Condition::true_cond(), join.clone())
+            }
+        };
 
         let join_type = join.join_type();
         let left_col_num = join.left().schema().len();
         let right_col_num = join.right().schema().len();
 
-        let mut new_filter_predicate = filter.predicate().clone();
+        let mut new_filter_predicate = filter_predicate.clone();
+
+        let join_type = self.simplify_outer(&filter_predicate, left_col_num, join_type);
 
         let (left_from_filter, right_from_filter, on) = self.push_down(
             &mut new_filter_predicate,
@@ -179,6 +192,56 @@ impl FilterJoinRule {
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
         )
+    }
+
+    /// Try to simplify the outer join with the predicate on the top of the join
+    ///
+    /// now it is just a naive implementation for comparison expression, we can give a more general
+    /// implementation with constant folding in future
+    fn simplify_outer(
+        &self,
+        predicate: &Condition,
+        left_col_num: usize,
+        join_type: JoinType,
+    ) -> JoinType {
+        let (mut gen_null_in_left, mut gen_null_in_right) = match join_type {
+            JoinType::LeftOuter => (false, true),
+            JoinType::RightOuter => (true, false),
+            JoinType::FullOuter => (true, true),
+            _ => return join_type,
+        };
+
+        for expr in &predicate.conjunctions {
+            if let ExprImpl::FunctionCall(func) = expr {
+                match func.get_expr_type() {
+                    ExprType::Equal
+                    | ExprType::NotEqual
+                    | ExprType::LessThan
+                    | ExprType::LessThanOrEqual
+                    | ExprType::GreaterThan
+                    | ExprType::GreaterThanOrEqual => {
+                        for input in func.inputs() {
+                            if let ExprImpl::InputRef(input) = input {
+                                let idx = input.index;
+                                if idx < left_col_num {
+                                    gen_null_in_left = false;
+                                } else {
+                                    gen_null_in_right = false;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                };
+            }
+        }
+
+        match (gen_null_in_left, gen_null_in_right) {
+            (true, true) => JoinType::FullOuter,
+            (true, false) => JoinType::RightOuter,
+            (false, true) => JoinType::LeftOuter,
+            (false, false) => JoinType::Inner,
+        }
     }
 }
 
