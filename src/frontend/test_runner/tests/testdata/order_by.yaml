@@ -44,6 +44,11 @@
     /* order by ambiguous */
     create table t (v1 bigint, v2 double precision);
     select v1 as a, v2 as a from t order by a;
+  binder_error: 'Bind error: ORDER BY "a" is ambiguous'
+- sql: |
+    /* ambiguous output name is okay as long as not used in order by */
+    create table t (v1 bigint, v2 double precision);
+    select v1 as a, v2 as a from t order by 2;
   batch_plan: |
     BatchExchange { order: [$1 ASC], dist: Single }
       BatchSort { order: [$1 ASC] }
