@@ -36,7 +36,7 @@ use crate::{ConnectorStateV2, KinesisProperties, SplitImpl};
 
 pub struct KinesisMultiSplitReader {
     /// splits are not allowed to be empty, otherwise connector source should create
-    /// [`DummySplitReader`] which is always idling.
+    /// DummySplitReader which is always idling.
     splits: Vec<KinesisSplit>,
     properties: KinesisProperties,
     message_cache: Arc<Mutex<Vec<SourceMessage>>>,
