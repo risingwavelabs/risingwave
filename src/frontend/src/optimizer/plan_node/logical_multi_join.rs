@@ -223,7 +223,7 @@ fn test_connected_component_labeller() {
 impl LogicalMultiJoin {
     pub fn as_reordered_left_deep_join(&self, join_ordering: &[usize]) -> Result<PlanRef> {
         assert_eq!(join_ordering.len(), self.inputs.len());
-        assert!(join_ordering.len() > 0);
+        assert!(!join_ordering.is_empty());
 
         let base_plan = self.inputs[join_ordering[0]].clone();
 
@@ -243,7 +243,7 @@ impl LogicalMultiJoin {
 
         if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
             output =
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(&join_ordering));
+                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering));
         }
 
         // We will later push down the `non_eq_cond` back to the individual joins via the
@@ -276,7 +276,7 @@ impl LogicalMultiJoin {
     pub(crate) fn heuristic_ordering(&self) -> Result<PlanRef> {
         let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
-        let (mut eq_join_conditions, _) = self
+        let (eq_join_conditions, _) = self
             .on
             .clone()
             .split_eq_by_input_col_nums(&self.input_col_nums());
@@ -294,13 +294,9 @@ impl LogicalMultiJoin {
         let mut join_ordering = vec![];
 
         for component in edge_sets {
-            let mut eq_cond_edges = vec![];
-            for edge in component {
-                // Technically, every edge should be in join condition
-                if let Some(_) = eq_join_conditions.remove(&edge) {
-                    eq_cond_edges.push(edge);
-                }
-            }
+            let mut eq_cond_edges: Vec<(usize, usize)> = component.into_iter().collect();
+
+            // TODO: add sorting of eq_cond_edges based on selectivity here
 
             if eq_cond_edges.is_empty() {
                 // There is nothing to join in this connected component
@@ -353,12 +349,6 @@ impl LogicalMultiJoin {
                 join_ordering.push(i);
             }
         }
-        assert_eq!(
-            eq_join_conditions.len(),
-            0,
-            "Eq join conditions should have been exhausted {:?}",
-            eq_join_conditions
-        );
         self.as_reordered_left_deep_join(&join_ordering)
     }
 

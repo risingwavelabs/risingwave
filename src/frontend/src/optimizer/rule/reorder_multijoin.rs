@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyrelation_c 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,11 @@ use crate::optimizer::rule::BoxedRule;
 ///
 /// For inner join, we can do all kinds of pushdown.
 ///
-/// For left/right semi join, we can push filter to left/right and on-clause,
-/// and push on-clause to left/right.
+/// For relation_a/relation_c semi join, we can push filter to relation_a/relation_c and on-clause,
+/// and push on-clause to relation_a/relation_c.
 ///
-/// For left/right anti join, we can push filter to left/right, but on-clause can not be pushed
+/// For relation_a/relation_c anti join, we can push filter to relation_a/relation_c, but on-clause
+/// can not be pushed
 ///
 /// ## Outer Join
 ///
@@ -45,8 +46,8 @@ impl Rule for ReorderMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
-        let left_deep_join = join.heuristic_ordering().ok()?;
-        Some(left_deep_join)
+        let relation_a_deep_join = join.heuristic_ordering().ok()?;
+        Some(relation_a_deep_join)
     }
 }
 
@@ -71,26 +72,45 @@ mod tests {
 
     #[tokio::test]
     async fn test_heuristic_join_reorder_from_multijoin() {
+        // Converts a join graph
+        // A-B C
+        //
+        // with initial ordering:
+        //
+        //      inner
+        //     /   |
+        //  cross  B
+        //  / |
+        // A  C
+        //
+        // to:
+        //
+        //     cross
+        //     /   |
+        //  inner  C
+        //  / |
+        // A  B
+
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..10)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
-        let left = LogicalValues::new(
+        let relation_a = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields[0..3].to_vec(),
             },
             ctx.clone(),
         );
-        let right = LogicalValues::new(
+        let relation_c = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields[3..6].to_vec(),
             },
             ctx.clone(),
         );
-        let mid = LogicalValues::new(
+        let relation_b = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields[6..9].to_vec(),
@@ -99,21 +119,11 @@ mod tests {
         );
 
         let join_type = JoinType::Inner;
-        let on_0: ExprImpl = ExprImpl::FunctionCall(Box::new(
-            FunctionCall::new(
-                Type::Equal,
-                vec![
-                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
-                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty.clone()))),
-                ],
-            )
-            .unwrap(),
-        ));
         let join_0 = LogicalJoin::new(
-            left.clone().into(),
-            right.clone().into(),
+            relation_a.clone().into(),
+            relation_c.clone().into(),
             join_type,
-            Condition::with_expr(on_0),
+            Condition::true_cond(),
         );
 
         let on_1: ExprImpl = ExprImpl::FunctionCall(Box::new(
@@ -127,26 +137,22 @@ mod tests {
             .unwrap(),
         ));
         let join_1 = LogicalJoin::new(
-            mid.clone().into(),
+            relation_b.clone().into(),
             LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
             join_type,
             Condition::with_expr(on_1),
         );
         let multi_join = LogicalMultiJoin::from_join(&join_1.into()).unwrap();
-        for (input, schema) in
-            multi_join
-                .inputs()
-                .iter()
-                .zip_eq(vec![mid.schema(), left.schema(), right.schema()])
-        {
+        for (input, schema) in multi_join.inputs().iter().zip_eq(vec![
+            relation_a.schema(),
+            relation_b.schema(),
+            relation_c.schema(),
+        ]) {
             assert_eq!(input.schema(), schema);
         }
         println!("{:?}", multi_join);
 
-        println!(
-            "{:?}",
-            multi_join.heuristic_ordering()
-        );
+        println!("{:?}", multi_join.heuristic_ordering());
 
         // TODO: continue this test
     }
