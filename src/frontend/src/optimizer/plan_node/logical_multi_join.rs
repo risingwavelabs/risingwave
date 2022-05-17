@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -116,13 +116,13 @@ impl PlanTreeNode for LogicalMultiJoin {
 }
 
 #[derive(Debug)]
-struct VertexLabeller {
+struct ConnectedComponentLabeller {
     vertex_to_label: HashMap<usize, usize>,
     labels_to_vertices: HashMap<usize, HashSet<usize>>,
     labels_to_edges: HashMap<usize, HashSet<(usize, usize)>>,
 }
 
-impl VertexLabeller {
+impl ConnectedComponentLabeller {
     fn new(vertices: usize) -> Self {
         let mut vertex_to_label = HashMap::with_capacity(vertices);
         let mut labels_to_vertices = HashMap::with_capacity(vertices);
@@ -181,32 +181,16 @@ impl VertexLabeller {
         }
     }
 
-    // fn into_connected_components(self) -> HashMap<usize, HashSet<usize>> {
-    //     self.labels_to_vertices
-    // }
+    fn get_labels(&self) -> Vec<HashSet<(usize, usize)>> {
+        self.labels_to_edges.into_values().collect()
+    }
 }
-// #[derive(Default, PartialEq, Eq, PartialOrd, Ord)]
-// struct ConditionSelectivity {
-//     num_pk_in_equicondition: usize,
-//     num_equicondition: usize,
-//     num_non_equicondition: usize,
-// }
-//
-// fn condition_selectivity(c: Condition) -> ConditionSelectivity {
-//     ConditionSelectivity {
-//         ..Default::default()
-//     }
-// }
-//
-// fn selectivity_heuristic(c1: &Condition, c2: &Condition) -> std::cmp::Ordering {
-//     condition_selectivity(c1).cmp(&condition_selectivity(c2))
-// }
-//
-// // Graph: 0-1-2  3-4-5  6
-// // => 0-1-2-3-4-5  6
+
+// Graph: 0-1-2  3-4-5  6
+// => 0-1-2-3-4-5  6
 #[test]
 fn test_get_connected_components() {
-    let mut labeller = VertexLabeller::new(7);
+    let mut labeller = ConnectedComponentLabeller::new(7);
     labeller.add_edge(0, 1);
     labeller.add_edge(1, 2);
 
@@ -235,6 +219,11 @@ fn test_get_connected_components() {
 }
 
 impl LogicalMultiJoin {
+    pub fn as_left_deep_join_with_ordering(&self, ordering: &[usize]) -> Result<PlanRef> {
+        assert_eq!(ordering.len(), self.input.len());
+        
+    }
+
     // Our heuristic join reordering algorithm will try to perform a left-deep join.
     // It will try to do the following:
     //
@@ -256,31 +245,24 @@ impl LogicalMultiJoin {
     //           original ordering of the joins.
     //    The filter will then be pushed down by another filter pushdown pass.
     pub(crate) fn to_left_deep_join_with_heuristic_ordering(&self) -> Result<PlanRef> {
-        let now = std::time::Instant::now();
-        let mut labels = VertexLabeller::new(self.inputs.len());
+        let mut labels = ConnectedComponentLabeller::new(self.inputs.len());
 
         let (mut join_conditions, non_eq_cond) = self
             .on
             .clone()
             .split_eq_by_input_col_nums(&self.input_col_nums());
 
-        println!("JOIN CONDITIONS: {:?}", join_conditions);
-
-        println!("OTHER CONDITIONS: {:?}", non_eq_cond);
-
         // Iterate over all join conditions, whose keys represent edges on the join graph
         for k in join_conditions.keys() {
             labels.add_edge(k.0, k.1);
         }
 
-        let mut connected_components: Vec<_> = labels.labels_to_edges.into_values().collect();
+        let mut connected_components: Vec<_> = labels.get_labels();
 
-        // Sort in decreasing order
+        // Sort in decreasing order of len
         connected_components.sort_by_key(|a| std::cmp::Reverse(a.len()));
 
-        println!("CONNECTED COMPONENTS: {:?}", connected_components);
-
-        let mut left_deep_joins = Vec::<LogicalJoin>::with_capacity(connected_components.len());
+        let mut left_deep_joins = Vec::<PlanRef>::with_capacity(connected_components.len());
         let mut join_ordering = vec![];
 
         for component in connected_components {
@@ -291,9 +273,6 @@ impl LogicalMultiJoin {
                     conditions.push((edge, condition));
                 }
             }
-
-            // Sorted so that
-            // conditions.sort_by(|(_, c1), (_, c2)| selectivity_heuristic(c1, c2));
 
             let (mut join, join_ordering_start_index) = if !conditions.is_empty() {
                 let (edge, condition) = conditions.remove(0);
@@ -313,6 +292,7 @@ impl LogicalMultiJoin {
                     join_ordering_start_index,
                 )
             } else {
+                // There is nothing to join in this connected component
                 break;
             };
 
@@ -320,7 +300,7 @@ impl LogicalMultiJoin {
                 let mut found = vec![];
                 for (idx, (edge, condition)) in conditions.iter().enumerate() {
                     // If the eq join condition is on the existing join, add it to the existing
-                    // join's on condition
+                    // join's on condition (this will be pushed down further later on).
                     if join_ordering.contains(&edge.1) && join_ordering.contains(&edge.0) {
                         let mut remapped_condition = condition.clone();
                         let mut mapping = self
@@ -360,8 +340,12 @@ impl LogicalMultiJoin {
                     }
                 }
                 // This ensures conditions.len() is strictly decreasing per iteration
+                // Since the graph is connected, it is always possible to find at least one edge
+                // remaining that can be connected to the current join result.
                 if found.is_empty() {
-                    panic!("Must find {:?}, {:?}", conditions, join_ordering);
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "Connecting edge not found in join connected subgraph".into(),
+                    )));
                 }
                 let mut idx = 0;
                 conditions.retain(|_| {
@@ -369,36 +353,44 @@ impl LogicalMultiJoin {
                     idx += 1;
                     keep
                 });
-                println!("{:?}, {:?}", conditions, found);
             }
-            left_deep_joins.push(join);
+            left_deep_joins.push(join.into());
         }
-
+        // Deal with singleton inputs (with no eq condition joins between them whatsoever)
+        for i in 0..self.inputs.len() {
+            if !join_ordering.contains(&i) {
+                join_ordering.push(i);
+                left_deep_joins.push(self.inputs[i].clone());
+            }
+        }
         assert_eq!(
             join_conditions.len(),
             0,
-            "JOIN CONDITIONS {:?}",
+            "REMAINING JOIN CONDITIONS {:?}",
             join_conditions
         );
         let mut left_deep_joins_iter = left_deep_joins.iter();
-        let base_join = left_deep_joins_iter
-            .next()
-            .expect("Must have at least one join");
+        let base_join =
+            left_deep_joins_iter
+                .next()
+                .ok_or(RwError::from(ErrorCode::InternalError(
+                    "No relations found in the MultiJoin".into(),
+                )))?;
 
         // Create a bushy join by cross-joining a series of joins with no join graph edge
         // between them in a left-deep fashion.
-        let mut output: PlanRef = left_deep_joins_iter
-            .fold(base_join.clone(), |join: LogicalJoin, next_join| {
+        let mut output: PlanRef =
+            left_deep_joins_iter.fold(base_join.clone(), |join: PlanRef, next_join| {
                 LogicalJoin::new(
-                    join.into(),
+                    join,
                     next_join.clone().into(),
                     JoinType::Inner,
                     Condition {
                         conjunctions: vec![],
                     },
                 )
-            })
-            .into();
+                .into()
+            });
 
         if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
             output =
@@ -407,11 +399,7 @@ impl LogicalMultiJoin {
 
         // We will later push down the `non_eq_cond` back to the individual joins via the
         // `FilterJoinRule`.
-        if !non_eq_cond.always_true() {
-            output = LogicalFilter::create(output, non_eq_cond);
-        }
-
-        println!("TIME ELAPSED: {:?}", now.elapsed().as_micros());
+        output = LogicalFilter::create(output, non_eq_cond);
 
         Ok(output)
     }
