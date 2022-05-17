@@ -393,7 +393,7 @@ async fn test_state_table_iter() {
 
     let res = iter.next().await.unwrap();
     assert!(res.is_some());
-    // this row exists in mem_table
+    // this row exists in cell_based_table
     assert_eq!(
         Row(vec![
             Some(1_i32.into()),

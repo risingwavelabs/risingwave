@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
@@ -473,7 +474,6 @@ pub struct CellBasedTableStreamingIter<S: StateStore> {
     iter: StripPrefixIterator<S::Iter>,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
-    pub cell_based_item: Option<(Vec<u8>, Row)>,
 }
 
 impl<S: StateStore> CellBasedTableStreamingIter<S> {
@@ -487,26 +487,18 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
         let iter = Self {
             iter,
             cell_based_row_deserializer,
-            cell_based_item: None,
         };
         Ok(iter)
     }
 
-    pub async fn peek(&mut self) -> StorageResult<Option<&(Vec<u8>, Row)>> {
-        if self.cell_based_item.is_none() {
-            self.cell_based_item = self.next().await?;
-        }
-        Ok(self.cell_based_item.as_ref())
-    }
-
     /// return a row with its pk.
-    pub async fn next(&mut self) -> StorageResult<Option<(Vec<u8>, Row)>> {
+    #[try_stream( ok = Option<(Vec<u8>, Row)>, error = StorageError)]
+    pub async fn next(&mut self) {
         loop {
             match self.iter.next().await? {
                 None => {
                     let pk_and_row = self.cell_based_row_deserializer.take();
-                    self.cell_based_item = pk_and_row.clone();
-                    return Ok(pk_and_row);
+                    yield pk_and_row;
                 }
                 Some((key, value)) => {
                     tracing::trace!(
@@ -519,9 +511,8 @@ impl<S: StateStore> CellBasedTableStreamingIter<S> {
                         .cell_based_row_deserializer
                         .deserialize(&key, &value)
                         .map_err(err)?;
-                    self.cell_based_item = pk_and_row.clone();
                     match pk_and_row {
-                        Some(pk_row) => return Ok(Some(pk_row)),
+                        Some(pk_row) => yield Some(pk_row),
                         None => {}
                     }
                 }

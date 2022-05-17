@@ -23,6 +23,7 @@ either = "1"
 enum-as-inner = "0.4"
 fail = "0.5"
 farmhash = "1"
+futures-async-stream = "0.2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"

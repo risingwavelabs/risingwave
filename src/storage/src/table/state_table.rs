@@ -16,6 +16,7 @@ use std::collections::btree_map;
 use std::iter::Peekable;
 use std::sync::Arc;
 
+use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
@@ -122,6 +123,7 @@ impl<S: StateStore> StateTable<S> {
         )
         .await
     }
+
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
@@ -129,8 +131,10 @@ impl<S: StateStore> StateTable<S> {
 pub struct StateTableRowIter<'a, S: StateStore> {
     mem_table_iter: Peekable<MemTableIter<'a>>,
     cell_based_streaming_iter: CellBasedTableStreamingIter<S>,
+
     /// The result of the last cell_based_streaming_iter next is saved, which can avoid being
     /// discarded.
+    cell_based_item: Option<(Vec<u8>, Row)>,
     pk_serializer: OrderedRowSerializer,
 }
 type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
@@ -149,6 +153,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         let state_table_iter = Self {
             mem_table_iter,
             cell_based_streaming_iter,
+            cell_based_item: None,
             pk_serializer,
         };
 
@@ -156,19 +161,34 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        // todo(wcy-fdu): use async_stream to implement this part.
+        let cell_based_iter = self.cell_based_streaming_iter.next().peekable();
+        pin_mut!(cell_based_iter);
         let mut mem_table_iter_next_flag = false;
         let mut res = None;
-        match (
-            self.cell_based_streaming_iter.peek().await?,
-            self.mem_table_iter.peek(),
-        ) {
+        if self.cell_based_item.is_none() {
+            self.cell_based_item = cell_based_iter
+                .as_mut()
+                .next()
+                .await
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .clone();
+        }
+        match (self.cell_based_item.as_ref(), self.mem_table_iter.peek()) {
             (None, None) => {
                 res = None;
             }
             (Some((_, row)), None) => {
                 res = Some(row.clone());
-                self.cell_based_streaming_iter.next().await.map_err(err)?;
+                self.cell_based_item = cell_based_iter
+                    .as_mut()
+                    .next()
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .clone();
             }
             (None, Some((_, row_op))) => {
                 mem_table_iter_next_flag = true;
@@ -185,13 +205,27 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     Ordering::Less => {
                         // cell_based_table_item will be return
                         res = Some(cell_based_row.clone());
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                        self.cell_based_item = cell_based_iter
+                            .as_mut()
+                            .next()
+                            .await
+                            .unwrap()
+                            .as_ref()
+                            .unwrap()
+                            .clone();
                     }
                     Ordering::Equal => {
                         // mem_table_item will be return, while both cell_based_streaming_iter and
                         // mem_table_iter need to execute next() once.
                         mem_table_iter_next_flag = true;
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                        self.cell_based_item = cell_based_iter
+                            .as_mut()
+                            .next()
+                            .await
+                            .unwrap()
+                            .as_ref()
+                            .unwrap()
+                            .clone();
                         match mem_table_row_op {
                             RowOp::Insert(row) => {
                                 res = Some(row.clone());
