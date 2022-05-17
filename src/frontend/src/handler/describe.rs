@@ -44,20 +44,17 @@ pub async fn handle_describe(
                 &table.columns,
                 catalog_reader
                     .get_schema_by_name(session.database(), &schema_name)?
-                    .get_index_by_id(&table.id),
+                    .iter_index()
+                    .filter(|x| x.is_index_on == Some(table.id))
+                    .cloned()
+                    .collect_vec(),
             ),
             None => (
                 &catalog_reader
                     .get_source_by_name(session.database(), &schema_name, &table_name)?
                     .columns,
-                None,
+                vec![],
             ),
-        };
-        let indexs = match indexs {
-            None => {
-                vec![]
-            }
-            Some(v) => v.clone(),
         };
         (
             catalogs
