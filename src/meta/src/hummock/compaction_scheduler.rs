@@ -147,7 +147,7 @@ where
                 return;
             }
         };
-        tracing::info!(
+        tracing::trace!(
             "Picked compaction task. {}",
             compact_task_to_string(&compact_task)
         );
@@ -185,7 +185,7 @@ where
                     // Reschedule it in case there are more tasks from this compaction group.
                     self.request_channel.try_send(compaction_group);
                     // TODO: timeout assigned compaction task
-                    tracing::info!(
+                    tracing::trace!(
                         "Assigned compaction task. {}",
                         compact_task_to_string(&compact_task)
                     );

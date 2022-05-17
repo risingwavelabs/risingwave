@@ -600,7 +600,7 @@ where
                 }
 
                 commit_multi_var!(self, None, compact_status)?;
-                tracing::debug!(
+                tracing::trace!(
                     "pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
@@ -739,7 +739,7 @@ where
             )?;
         }
 
-        tracing::info!(
+        tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
             compact_task_to_string(compact_task),
             start_time.elapsed(),
