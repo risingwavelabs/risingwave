@@ -45,7 +45,6 @@ use risingwave_pb::hummock::{
     SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
     UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
 };
-use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -412,7 +411,6 @@ impl HummockMetaClient for MetaClient {
 pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
-    pub catalog_client: CatalogServiceClient<Channel>,
     pub ddl_client: DdlServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
@@ -430,7 +428,6 @@ impl GrpcMetaClient {
             .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let catalog_client = CatalogServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
@@ -438,7 +435,6 @@ impl GrpcMetaClient {
         Ok(Self {
             cluster_client,
             heartbeat_client,
-            catalog_client,
             ddl_client,
             hummock_client,
             notification_client,

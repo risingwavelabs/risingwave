@@ -214,6 +214,10 @@ impl KafkaSplitEnumerator {
             _ => return Err(anyhow!("topic {} not found", self.topic)),
         };
 
+        if topic_meta.partitions().is_empty() {
+            return Err(anyhow!("topic {} not found", self.topic));
+        }
+
         Ok(topic_meta
             .partitions()
             .iter()

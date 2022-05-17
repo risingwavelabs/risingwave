@@ -153,31 +153,20 @@ pub(crate) type QueryStageRef = Arc<QueryStage>;
 struct QueryStageBuilder {
     query_id: QueryId,
     id: StageId,
-    plan_root: PlanRef,
     root: Option<Arc<ExecutionPlanNode>>,
     parallelism: u32,
-    parent_parallelism: Option<u32>,
     exchange_info: ExchangeInfo,
 
     children_stages: Vec<QueryStageRef>,
 }
 
 impl QueryStageBuilder {
-    fn new(
-        root: PlanRef,
-        id: StageId,
-        query_id: QueryId,
-        parallelism: u32,
-        parent_parallelism: Option<u32>,
-        exchange_info: ExchangeInfo,
-    ) -> Self {
+    fn new(id: StageId, query_id: QueryId, parallelism: u32, exchange_info: ExchangeInfo) -> Self {
         Self {
             query_id,
             id,
-            plan_root: root.clone(),
             root: None,
             parallelism,
-            parent_parallelism,
             exchange_info,
             children_stages: vec![],
         }
@@ -212,10 +201,6 @@ pub(crate) struct StageGraph {
 }
 
 impl StageGraph {
-    pub fn get_stage_unchecked(&self, stage_id: &StageId) -> QueryStageRef {
-        self.stages.get(stage_id).unwrap().clone()
-    }
-
     pub fn get_child_stages_unchecked(&self, stage_id: &StageId) -> &HashSet<StageId> {
         self.child_edges.get(stage_id).unwrap()
     }
@@ -317,11 +302,9 @@ impl BatchPlanFragmenter {
         };
 
         let mut builder = QueryStageBuilder::new(
-            root.clone(),
             next_stage_id,
             self.query_id.clone(),
             parallelism as u32,
-            parent_parallelism,
             exchange_info,
         );
 
