@@ -20,7 +20,6 @@ use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
-use crate::hummock::compactor::Compactor;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
@@ -114,22 +113,6 @@ impl StateStoreImpl {
                     state_store_stats.clone(),
                 )
                 .await?;
-                // in-mem and disk object store are local object store. Therefore, if we use them as
-                // remote object store, we should start a compactor locally.
-                if hummock.starts_with("hummock+memory")
-                    || hummock.starts_with("hummock+disk")
-                    || config.disable_remote_compactor
-                {
-                    tracing::info!("start a compactor for in-memory object store");
-                    // todo: set shutdown_sender in HummockStorage.
-                    let (_, _shutdown_sender) = Compactor::start_compactor(
-                        config.clone(),
-                        hummock_meta_client,
-                        sstable_store,
-                        state_store_stats.clone(),
-                    );
-                    // object_store.set_compactor_shutdown_sender(shutdown_sender);
-                }
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
 
