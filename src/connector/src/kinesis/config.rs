@@ -17,8 +17,10 @@ use std::collections::HashMap;
 use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
+use aws_sdk_kinesis::Client;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
+use http::Uri;
 use maplit::hashmap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
@@ -139,4 +141,15 @@ pub fn kinesis_demo_properties() -> HashMap<String, String> {
     "connector".to_string() => "kinesis".to_string()};
 
     properties
+}
+
+pub async fn build_client(properties: KinesisProperties) -> Result<Client> {
+    let config = AwsConfigInfo::build(properties)?;
+    let aws_config = config.load().await?;
+    let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
+    if let Some(endpoint) = &config.endpoint {
+        let uri = endpoint.clone().parse::<Uri>().unwrap();
+        builder = builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
+    }
+    Ok(Client::from_conf(builder.build()))
 }

@@ -70,14 +70,19 @@ impl Binder {
         let offset = query.get_offset_value();
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
-        match &body {
-            BoundSetExpr::Select(s) => s.aliases.iter().enumerate().for_each(|(index, alias)| {
-                if let Some(name) = alias {
-                    name_to_index.insert(name.clone(), index);
-                }
-            }),
-            BoundSetExpr::Values(_) => {}
-        };
+        body.schema()
+            .fields()
+            .iter()
+            .enumerate()
+            .for_each(|(index, field)| {
+                name_to_index
+                    .entry(field.name.clone())
+                    // Ambiguous (duplicate) output names are marked with usize::MAX.
+                    // This is not necessarily an error as long as not actually referenced by order
+                    // by.
+                    .and_modify(|v| *v = usize::MAX)
+                    .or_insert(index);
+            });
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
         let order = query
@@ -113,7 +118,10 @@ impl Binder {
             Some(false) => Direction::Desc,
         };
         let index = match order_by_expr.expr {
-            Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.value) => *index,
+            Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.value) => match *index != usize::MAX {
+                true => *index,
+                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),
+            }
             Expr::Value(Value::Number(number, _)) => match number.parse::<usize>() {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
