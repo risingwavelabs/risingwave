@@ -62,6 +62,7 @@ impl Binder {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
                 }
+                "concat_ws" => ExprType::ConcatWs,
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);

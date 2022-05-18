@@ -26,6 +26,7 @@ mod disk;
 pub mod error;
 pub use error::*;
 
+use crate::monitor::ObjectStoreMetrics;
 use crate::object::disk::LocalDiskObjectStore;
 
 #[derive(Debug, Copy, Clone)]
@@ -72,28 +73,52 @@ pub trait ObjectStore: Send + Sync {
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 
-pub enum ObjectStoreImpl {
-    Mem(InMemObjectStore),
-    S3(S3ObjectStore),
-    Disk(LocalDiskObjectStore),
+pub struct ObjectStoreImpl {
+    inner: Box<dyn ObjectStore>,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
 }
 
 /// Manually dispatch trait methods.
 impl ObjectStoreImpl {
-    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.upload(path, obj).await,
-            ObjectStoreImpl::S3(s3) => s3.upload(path, obj).await,
-            ObjectStoreImpl::Disk(disk) => disk.upload(path, obj).await,
+    pub fn new(store: Box<dyn ObjectStore>, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self {
+            inner: store,
+            object_store_metrics,
         }
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.read(path, block_loc).await,
-            ObjectStoreImpl::S3(s3) => s3.read(path, block_loc).await,
-            ObjectStoreImpl::Disk(disk) => disk.read(path, block_loc).await,
+    /// only for test
+    pub fn new_mem() -> Self {
+        Self {
+            inner: Box::new(InMemObjectStore::new()),
+            object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         }
+    }
+
+    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(obj.len() as u64);
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["upload"])
+            .start_timer();
+        self.inner.upload(path, obj).await?;
+        Ok(())
+    }
+
+    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["read"])
+            .start_timer();
+        let ret = self.inner.read(path, block_loc).await?;
+        self.object_store_metrics
+            .read_bytes
+            .inc_by(ret.len() as u64);
+        Ok(ret)
     }
 
     pub async fn readv(
@@ -101,54 +126,52 @@ impl ObjectStoreImpl {
         path: &str,
         block_locs: &[BlockLocation],
     ) -> ObjectResult<Vec<Bytes>> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.readv(path, block_locs).await,
-            ObjectStoreImpl::S3(s3) => s3.readv(path, block_locs).await,
-            ObjectStoreImpl::Disk(disk) => disk.readv(path, block_locs).await,
-        }
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["readv"])
+            .start_timer();
+        let ret = self.inner.readv(path, block_locs).await?;
+        self.object_store_metrics
+            .read_bytes
+            .inc_by(ret.iter().map(|block| block.len()).sum::<usize>() as u64);
+        Ok(ret)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.metadata(path).await,
-            ObjectStoreImpl::S3(s3) => s3.metadata(path).await,
-            ObjectStoreImpl::Disk(disk) => disk.metadata(path).await,
-        }
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["metadata"])
+            .start_timer();
+        self.inner.metadata(path).await
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        match self {
-            ObjectStoreImpl::Mem(mem) => mem.delete(path).await,
-            ObjectStoreImpl::S3(s3) => s3.delete(path).await,
-            ObjectStoreImpl::Disk(disk) => disk.delete(path).await,
-        }
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["delete"])
+            .start_timer();
+        self.inner.delete(path).await
     }
 }
 
-pub async fn parse_object_store(url: &str, is_remote: bool) -> ObjectStoreImpl {
-    match url {
+pub async fn parse_object_store(
+    url: &str,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+) -> ObjectStoreImpl {
+    let store: Box<dyn ObjectStore> = match url {
         s3 if s3.starts_with("s3://") => {
-            assert!(
-                is_remote,
-                "S3 object store is only supported for remote stores"
-            );
-            ObjectStoreImpl::S3(
-                S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await,
-            )
+            Box::new(S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await)
         }
-        minio if minio.starts_with("minio://") => {
-            assert!(
-                is_remote,
-                "S3 object store is only supported for remote stores"
-            );
-            ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await)
-        }
-        disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(LocalDiskObjectStore::new(
+        minio if minio.starts_with("minio://") => Box::new(S3ObjectStore::with_minio(minio).await),
+        disk if disk.starts_with("disk://") => Box::new(LocalDiskObjectStore::new(
             disk.strip_prefix("disk://").unwrap(),
         )),
         memory if memory.starts_with("memory") => {
             tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
-            ObjectStoreImpl::Mem(InMemObjectStore::new())
+            Box::new(InMemObjectStore::new())
         }
         other => {
             unimplemented!(
@@ -156,5 +179,6 @@ pub async fn parse_object_store(url: &str, is_remote: bool) -> ObjectStoreImpl {
                 other
             )
         }
-    }
+    };
+    ObjectStoreImpl::new(store, object_store_metrics)
 }

@@ -29,7 +29,7 @@ use crate::hummock::{
     HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable, SstableStore, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
+use crate::object::{ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -46,7 +46,7 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_store = Arc::new(ObjectStoreImpl::new_mem());
     mock_sstable_store_with_object_store(object_store)
 }
 
