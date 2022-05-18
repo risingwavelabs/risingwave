@@ -103,17 +103,20 @@ impl InnerConnectorSourceReader {
                 biased;
                 // stop chan has high priority
                 _ = stop.borrow_mut() => {
+                    log::debug!("reader {} stop signal received", self.split.id());
                     break;
                 }
 
                 chunk = self.reader.next() => {
                     match chunk.map_err(|e| internal_error(e.to_string())) {
                         Err(e) => {
+                            log::error!("reader {} error: {}", self.split.id(), e.to_string());
                             // just ignore
                             let _ = output.send(Either::Right(e));
                             break;
                         },
                         Ok(None) => {
+                            log::warn!("reader {} stream stopped", self.split.id());
                             break;
                         },
                         Ok(Some(msg)) => {
@@ -254,7 +257,7 @@ impl ConnectorSource {
         let columns = self.get_target_columns(column_ids)?;
 
         let readers = try_join_all(splits.into_iter().map(|split| {
-            log::debug!("spawning pulsar split reader for split {:?}", split);
+            log::debug!("spawning connector split reader for split {:?}", split);
             let props = config.clone();
             let columns = columns.clone();
             async move { InnerConnectorSourceReader::new(props, split, columns).await }
