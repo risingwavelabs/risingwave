@@ -92,4 +92,4 @@ drop materialized view tpch_q17;
 statement ok
 drop materialized view tpch_q19;
 
-include ../../tpch/drop_tables.slt.part
+include ../tpch/drop_tables.slt.part
