@@ -298,6 +298,7 @@ impl LogicalMultiJoin {
             let mut eq_cond_edges: Vec<(usize, usize)> = component.into_iter().collect();
 
             // TODO(jon-chuang): add sorting of eq_cond_edges based on selectivity here
+            eq_cond_edges.sort();
 
             if eq_cond_edges.is_empty() {
                 // There is nothing to join in this connected component
