@@ -22,7 +22,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::types::{DataType, Scalar,CheckedAddAssign};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -80,8 +80,8 @@ impl<T, S> GenerateSeriesExecutor2<T, S>
 where
     T: Array,
     S: Array,
-    T::OwnedItem: PartialOrd<T::OwnedItem>,
-    T::OwnedItem: for<'a> AddAssign<S::RefItem<'a>>,
+    T::OwnedItem: PartialOrd<T::OwnedItem> ,
+    T::OwnedItem: for<'a> CheckedAddAssign<S::RefItem<'a>>,
 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
@@ -102,7 +102,7 @@ where
                     break;
                 }
                 builder.append(Some(cur.as_scalar_ref())).unwrap();
-                cur += step.as_scalar_ref();
+                cur.check_add_assign(&step.as_scalar_ref())?;
             }
 
             let arr = builder.finish()?;
