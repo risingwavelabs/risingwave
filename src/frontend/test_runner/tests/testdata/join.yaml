@@ -12,16 +12,17 @@
             LogicalScan { table: t2, columns: [_row_id#0, v3, v4] }
           LogicalScan { table: t3, columns: [_row_id#0, v5, v6] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, _row_id#1(hidden), v5, v6, _row_id#2(hidden)], pk_columns: [_row_id#0, _row_id#1, _row_id#2] }
-      StreamExchange { dist: HashShard([2, 5, 8]) }
-        StreamHashJoin { type: Inner, predicate: $0 = $6 }
-          StreamHashJoin { type: Inner, predicate: $0 = $3 }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+    StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, _row_id#0(hidden), _row_id#1(hidden), _row_id#2(hidden)], pk_columns: [_row_id#0, _row_id#1, _row_id#2] }
+      StreamExchange { dist: HashShard([6, 7, 8]) }
+        StreamProject { exprs: [$0, $1, $6, $7, $3, $4, $2, $5, $8] }
+          StreamHashJoin { type: Inner, predicate: $0 = $6 }
+            StreamHashJoin { type: Inner, predicate: $0 = $3 }
+              StreamExchange { dist: HashShard([0]) }
+                StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+              StreamExchange { dist: HashShard([0]) }
+                StreamTableScan { table: t3, columns: [v5, v6, _row_id#0], pk_indices: [2] }
             StreamExchange { dist: HashShard([0]) }
               StreamTableScan { table: t2, columns: [v3, v4, _row_id#0], pk_indices: [2] }
-          StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: t3, columns: [v5, v6, _row_id#0], pk_indices: [2] }
 - sql: |
     /* self join */
     create table t (v1 int, v2 int);
