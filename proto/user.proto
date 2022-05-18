@@ -122,7 +122,7 @@ message RevokePrivilegeResponse {
 }
 
 service UserService {
-  rpc CreateUser(CreateUserRequest) returns (CreateUserRequest);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
 
