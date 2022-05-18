@@ -20,7 +20,7 @@ use crate::optimizer::PlanRoot;
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
-        println!("bound update: {:?}", update);
+        println!("bound update: {:#?}", update);
 
         Err(ErrorCode::NotImplemented("Planning `UPDATE`".to_owned(), 784.into()).into())
     }
