@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::StreamNode;
 use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::manager::HashMappingManagerRef;
 use crate::model::{ActorId, FragmentId};
+use crate::set_table_vnode_mappings;
 use crate::storage::MetaStore;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
@@ -130,6 +131,8 @@ impl<S> Scheduler<S>
 where
     S: MetaStore,
 {
+    set_table_vnode_mappings!();
+
     pub fn new(
         cluster_manager: ClusterManagerRef<S>,
         hash_mapping_manager: HashMappingManagerRef,
@@ -226,47 +229,6 @@ where
             set_fragment_vnode_mapping!(parallel_units);
         }
 
-        Ok(())
-    }
-
-    /// Set vnode mapping for stateful operators.
-    fn set_table_vnode_mappings(
-        &self,
-        stream_node: &StreamNode,
-        fragment_id: FragmentId,
-    ) -> Result<()> {
-        match stream_node.get_node_body()? {
-            NodeBody::Materialize(node) => {
-                let table_id = node.get_table_ref_id()?.get_table_id() as u32;
-                self.hash_mapping_manager
-                    .set_fragment_state_table(fragment_id, table_id);
-            }
-            NodeBody::GlobalSimpleAgg(node) => {
-                let table_ids = node.get_table_ids();
-                for table_id in table_ids {
-                    self.hash_mapping_manager
-                        .set_fragment_state_table(fragment_id, *table_id);
-                }
-            }
-            NodeBody::HashAgg(node) => {
-                let table_ids = node.get_table_ids();
-                for table_id in table_ids {
-                    self.hash_mapping_manager
-                        .set_fragment_state_table(fragment_id, *table_id);
-                }
-            }
-            NodeBody::HashJoin(node) => {
-                self.hash_mapping_manager
-                    .set_fragment_state_table(fragment_id, node.left_table_id);
-                self.hash_mapping_manager
-                    .set_fragment_state_table(fragment_id, node.right_table_id);
-            }
-            _ => {}
-        }
-        let input_nodes = stream_node.get_input();
-        for input_node in input_nodes {
-            self.set_table_vnode_mappings(input_node, fragment_id)?;
-        }
         Ok(())
     }
 }

@@ -20,9 +20,54 @@ mod stream_manager;
 
 #[cfg(test)]
 mod test_fragmenter;
-
 pub use meta::*;
 pub use scheduler::*;
 pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
+
+/// Set vnode mapping for stateful operators.
+#[macro_export]
+macro_rules! set_table_vnode_mappings {
+    () => {
+        fn set_table_vnode_mappings(
+            &self,
+            stream_node: &StreamNode,
+            fragment_id: FragmentId,
+        ) -> Result<()> {
+            match stream_node.get_node_body()? {
+                NodeBody::Materialize(node) => {
+                    let table_id = node.get_table_ref_id()?.get_table_id() as u32;
+                    self.hash_mapping_manager
+                        .set_fragment_state_table(fragment_id, table_id);
+                }
+                NodeBody::GlobalSimpleAgg(node) => {
+                    let table_ids = node.get_table_ids();
+                    for table_id in table_ids {
+                        self.hash_mapping_manager
+                            .set_fragment_state_table(fragment_id, *table_id);
+                    }
+                }
+                NodeBody::HashAgg(node) => {
+                    let table_ids = node.get_table_ids();
+                    for table_id in table_ids {
+                        self.hash_mapping_manager
+                            .set_fragment_state_table(fragment_id, *table_id);
+                    }
+                }
+                NodeBody::HashJoin(node) => {
+                    self.hash_mapping_manager
+                        .set_fragment_state_table(fragment_id, node.left_table_id);
+                    self.hash_mapping_manager
+                        .set_fragment_state_table(fragment_id, node.right_table_id);
+                }
+                _ => {}
+            }
+            let input_nodes = stream_node.get_input();
+            for input_node in input_nodes {
+                self.set_table_vnode_mappings(input_node, fragment_id)?;
+            }
+            Ok(())
+        }
+    };
+}

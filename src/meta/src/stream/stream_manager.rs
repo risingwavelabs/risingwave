@@ -312,8 +312,8 @@ where
 
         let topological_order = table_fragments.generate_topological_order();
 
-        // Schedule each fragment(actors) to nodes. Vnode mapping in fragment will be filled as
-        // well.
+        // Schedule each fragment(actors) to nodes. Vnode mapping in fragment will be filled in
+        // as well.
         for fragment_id in topological_order {
             let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
             self.scheduler.schedule(fragment, &mut locations).await?;
