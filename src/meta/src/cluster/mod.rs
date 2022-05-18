@@ -310,29 +310,6 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
-    // /// Get default hash mapping, which uses all hash parallel units in the cluster.
-    // pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-    //     self.hash_mapping_manager.get_default_mapping()
-    // }
-
-    // /// Build a vnode hash mapping for a fragment based on given parallel units.
-    // pub fn build_hash_mapping(&self, fragment_id: FragmentId, parallel_units: &[ParallelUnit]) ->
-    // Vec<ParallelUnitId> {     self.hash_mapping_manager.
-    // build_fragment_hash_mapping(fragment_id, parallel_units) }
-
-    // pub fn set_fragment_state_table(&self, fragment_id: FragmentId, state_table_id: TableId) {
-    //     self.hash_mapping_manager.set_fragment_state_table(fragment_id, state_table_id)
-    // }
-
-    // /// Get a relational states table's vnode hash mapping.
-    // pub fn get_table_hash_mapping(&self, table_id: TableId) -> Vec<ParallelUnitId> {
-    //     self.get_table_hash_mapping(table_id)
-    // }
-
-    // pub fn get_all_hash_mappings(&self) -> HashMap<TableId, Vec<ParallelUnitId>> {
-
-    // }
-
     async fn generate_cn_parallel_units(
         &self,
         parallel_degree: usize,
