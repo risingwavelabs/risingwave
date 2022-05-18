@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use std::any::type_name;
-use std::cmp::min;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
@@ -123,22 +121,6 @@ where
     atm(l, r)
 }
 
-const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-fn is_leap_year(year: i32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
-}
-
-/// return the days of the `year-month`
-fn get_mouth_days(year: i32, month: usize) -> i32 {
-    if is_leap_year(year) {
-        LEAP_DAYS[month]
-    } else {
-        NORMAL_DAYS[month]
-    }
-}
-
 #[inline(always)]
 pub fn timestamp_timestamp_sub<T1, T2, T3>(
     l: NaiveDateTimeWrapper,
@@ -158,45 +140,7 @@ pub fn interval_timestamp_add<T1, T2, T3>(
     l: IntervalUnit,
     r: NaiveDateTimeWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    let mut date = r.0.date();
-    if l.get_months() != 0 {
-        // NaiveDate don't support add months. We need calculate manually
-        let mut day = date.day() as i32;
-        let mut month = date.month() as i32;
-        let mut year = date.year();
-        // Calculate the number of year in this interval
-        let interval_months = l.get_months();
-        let year_diff = interval_months / 12;
-        year += year_diff;
-
-        // Calculate the number of month in this interval except the added year
-        // The range of month_diff is (-12, 12) (The month is negative when the interval is
-        // negative)
-        let month_diff = interval_months - year_diff * 12;
-        // The range of new month is (-12, 24) ( original month:[1, 12] + month_diff:(-12, 12) )
-        month += month_diff;
-        // Process the overflow months
-        if month > 12 {
-            year += 1;
-            month -= 12;
-        } else if month <= 0 {
-            year -= 1;
-            month += 12;
-        }
-
-        // Fix the days after changing date.
-        // For example, 1970.1.31 + 1 month = 1970.2.28
-        day = min(day, get_mouth_days(year, month as usize));
-        date = NaiveDate::from_ymd(year, month as u32, day as u32);
-    }
-    let mut datetime = NaiveDateTime::new(date, r.0.time());
-    datetime = datetime
-        .checked_add_signed(Duration::days(l.get_days().into()))
-        .ok_or_else(|| InternalError("Date out of range".to_string()))?;
-    datetime = datetime
-        .checked_add_signed(Duration::milliseconds(l.get_ms()))
-        .ok_or_else(|| InternalError("Date out of range".to_string()))?;
-    Ok(NaiveDateTimeWrapper::new(datetime))
+    r.checked_add(l)
 }
 
 #[inline(always)]

@@ -38,7 +38,7 @@ mod ordered_float;
 
 use chrono::{Datelike, Timelike};
 pub use chrono_wrapper::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,CheckedAddAssign
+    CheckedAddAssign, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
 pub use decimal::Decimal;
 pub use interval::*;

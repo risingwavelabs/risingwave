@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
@@ -191,61 +190,7 @@ impl NaiveDateTimeWrapper {
         Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 
-    pub fn sub(&self, rhs: NaiveDateTimeWrapper) -> Duration {
-        self.0 - rhs.0
-    }
-}
-
-// impl Sub<IntervalUnit> for NaiveDateTimeWrapper {
-//     type Output = NaiveDateTimeWrapper;
-
-//     #[inline]
-//     fn sub(self, rhs: IntervalUnit) -> NaiveDateTimeWrapper {
-//         self + rhs.negative()
-//     }
-// }
-
-// impl SubAssign<IntervalUnit> for NaiveDateTimeWrapper {
-//     #[inline]
-//     fn sub_assign(&mut self, rhs: IntervalUnit) {
-//         *self = *self - rhs;
-//     }
-// }
-
-impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
-    type Error = RwError;
-
-    fn try_from(date: NaiveDateWrapper) -> Result<Self> {
-        Ok(NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0)))
-    }
-}
-
-/// return the days of the `year-month`
-fn get_mouth_days(year: i32, month: usize) -> i32 {
-    if is_leap_year(year) {
-        LEAP_DAYS[month]
-    } else {
-        NORMAL_DAYS[month]
-    }
-}
-
-fn is_leap_year(year: i32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
-}
-
-
-pub trait CheckedAddAssign<T>{
-    fn check_add_assign(&mut self, rhs: &T) -> Result<()>;
-}
-
-impl CheckedAddAssign<i32> for i32{
-    fn check_add_assign(&mut self, rhs: &i32) -> Result<()> {
-        *self += rhs;
-        Ok(())
-    }
-}
-impl CheckedAddAssign<IntervalUnit> for NaiveDateTimeWrapper{
-    fn check_add_assign(&mut self, rhs: &IntervalUnit) -> Result<()> {
+    pub fn checked_add(&self, rhs: IntervalUnit) -> Result<Self> {
         let mut date = self.0.date();
         if rhs.get_months() != 0 {
             // NaiveDate don't support add months. We need calculate manually
@@ -285,7 +230,44 @@ impl CheckedAddAssign<IntervalUnit> for NaiveDateTimeWrapper{
             .checked_add_signed(Duration::milliseconds(rhs.get_ms()))
             .ok_or_else(|| InternalError("Date out of range".to_string()))?;
 
-        *self = NaiveDateTimeWrapper::new(datetime);
+        Ok(NaiveDateTimeWrapper::new(datetime))
+    }
+}
+
+impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
+    type Error = RwError;
+
+    fn try_from(date: NaiveDateWrapper) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0)))
+    }
+}
+
+/// return the days of the `year-month`
+fn get_mouth_days(year: i32, month: usize) -> i32 {
+    if is_leap_year(year) {
+        LEAP_DAYS[month]
+    } else {
+        NORMAL_DAYS[month]
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+pub trait CheckedAddAssign<T> {
+    fn checked_add_assign(&mut self, rhs: T) -> Result<()>;
+}
+
+impl CheckedAddAssign<i32> for i32 {
+    fn checked_add_assign(&mut self, rhs: i32) -> Result<()> {
+        *self += rhs;
+        Ok(())
+    }
+}
+impl CheckedAddAssign<IntervalUnit> for NaiveDateTimeWrapper {
+    fn checked_add_assign(&mut self, rhs: IntervalUnit) -> Result<()> {
+        *self = self.checked_add(rhs)?;
         Ok(())
     }
 }

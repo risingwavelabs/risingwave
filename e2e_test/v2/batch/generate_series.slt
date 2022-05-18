@@ -11,6 +11,23 @@ select generate_series from generate_series('2008-03-01 00:00:00'::TIMESTAMP,'20
 2008-03-04 12:00:00
 
 query II
+select * from generate_series(timestamp '2020-01-01 01:02:03', timestamp '2021-01-01 03:04:05', interval '1' month);
+----
+2020-01-01 01:02:03
+2020-02-01 01:02:03
+2020-03-01 01:02:03
+2020-04-01 01:02:03
+2020-05-01 01:02:03
+2020-06-01 01:02:03
+2020-07-01 01:02:03
+2020-08-01 01:02:03
+2020-09-01 01:02:03
+2020-10-01 01:02:03
+2020-11-01 01:02:03
+2020-12-01 01:02:03
+2021-01-01 01:02:03
+
+query III
 SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
 ----
 2
@@ -19,7 +36,7 @@ SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
 8
 10
 
-query III
+query IIII
 SELECT * FROM generate_series('2'::INT + '2'::INT,'10'::INT,'2'::INT);
 ----
 4
