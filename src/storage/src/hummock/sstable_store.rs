@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StateStoreMetrics;
-use crate::object::{BlockLocation, ObjectStoreRef};
+use crate::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
 const DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY: usize = 16;
@@ -41,8 +41,7 @@ pub enum CachePolicy {
 
 pub struct SstableStore {
     path: String,
-    remote_store: ObjectStoreRef,
-    local_store: ObjectStoreRef,
+    store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
     /// Statistics.
@@ -51,8 +50,7 @@ pub struct SstableStore {
 
 impl SstableStore {
     pub fn new(
-        remote_store: ObjectStoreRef,
-        local_store: ObjectStoreRef,
+        store: ObjectStoreRef,
         path: String,
         stats: Arc<StateStoreMetrics>,
         block_cache_capacity: usize,
@@ -65,8 +63,7 @@ impl SstableStore {
         ));
         Self {
             path,
-            remote_store,
-            local_store,
+            store,
             block_cache: BlockCache::new(block_cache_capacity),
             meta_cache,
             stats,
@@ -108,7 +105,7 @@ impl SstableStore {
     async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
         let meta_path = self.get_sst_meta_path(sst.id);
         let meta = Bytes::from(sst.meta.encode_to_bytes());
-        self.get_store_of_table(sst.id)
+        self.store
             .upload(&meta_path, meta)
             .await
             .map_err(HummockError::object_io_error)
@@ -116,7 +113,7 @@ impl SstableStore {
 
     async fn put_sst_data(&self, sst_id: HummockSSTableId, data: Bytes) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
-        self.get_store_of_table(sst_id)
+        self.store
             .upload(&data_path, data)
             .await
             .map_err(HummockError::object_io_error)
@@ -124,13 +121,13 @@ impl SstableStore {
 
     async fn delete_sst_data(&self, sst_id: HummockSSTableId) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
-        self.get_store_of_table(sst_id)
+        self.store
             .delete(&data_path)
             .await
             .map_err(HummockError::object_io_error)
     }
 
-    async fn add_block_cache(
+    pub async fn add_block_cache(
         &self,
         sst_id: HummockSSTableId,
         block_idx: u64,
@@ -161,7 +158,7 @@ impl SstableStore {
             };
             let data_path = self.get_sst_data_path(sst.id);
             let block_data = self
-                .get_store_of_table(sst.id)
+                .store
                 .read(&data_path, Some(block_loc))
                 .await
                 .map_err(HummockError::object_io_error)?;
@@ -200,7 +197,7 @@ impl SstableStore {
             .lookup_with_request_dedup(sst_id, sst_id, || async {
                 let path = self.get_sst_meta_path(sst_id);
                 let buf = self
-                    .get_store_of_table(sst_id)
+                    .store
                     .read(&path, None)
                     .await
                     .map_err(HummockError::object_io_error)?;
@@ -214,27 +211,23 @@ impl SstableStore {
     }
 
     pub fn get_sst_meta_path(&self, sst_id: HummockSSTableId) -> String {
-        format!("{}/{}.meta", self.path, sst_id)
+        let mut ret = format!("{}/{}.meta", self.path, sst_id);
+        if !is_remote_sst_id(sst_id) {
+            ret = get_local_path(&ret);
+        }
+        ret
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSSTableId) -> String {
-        format!("{}/{}.data", self.path, sst_id)
-    }
-
-    pub fn remote_store(&self) -> ObjectStoreRef {
-        self.remote_store.clone()
-    }
-
-    pub fn local_store(&self) -> ObjectStoreRef {
-        self.local_store.clone()
-    }
-
-    fn get_store_of_table(&self, sst_id: HummockSSTableId) -> &ObjectStoreRef {
-        if is_remote_sst_id(sst_id) {
-            &self.remote_store
-        } else {
-            &self.local_store
+        let mut ret = format!("{}/{}.data", self.path, sst_id);
+        if !is_remote_sst_id(sst_id) {
+            ret = get_local_path(&ret);
         }
+        ret
+    }
+
+    pub fn store(&self) -> ObjectStoreRef {
+        self.store.clone()
     }
 
     #[cfg(test)]

@@ -29,8 +29,8 @@ use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{
     HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable, SstableStoreRef,
 };
-use crate::monitor::StateStoreMetrics;
-use crate::object::{ObjectStoreImpl, ObjectStoreRef};
+use crate::monitor::{ObjectStoreMetrics, StateStoreMetrics};
+use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -47,19 +47,16 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let remote_object_store = Arc::new(ObjectStoreImpl::new_mem());
-    let local_object_store = Arc::new(ObjectStoreImpl::new_mem());
-    mock_sstable_store_with_object_store(remote_object_store, local_object_store)
+    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::new(
+        Box::new(InMemObjectStore::new(false)),
+        Arc::new(ObjectStoreMetrics::unused()),
+    )))
 }
 
-pub fn mock_sstable_store_with_object_store(
-    remote_store: ObjectStoreRef,
-    local_store: ObjectStoreRef,
-) -> SstableStoreRef {
+pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
     Arc::new(SstableStore::new(
-        remote_store,
-        local_store,
+        store,
         path,
         Arc::new(StateStoreMetrics::unused()),
         64 << 20,

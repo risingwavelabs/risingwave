@@ -28,7 +28,7 @@ impl Vacuum {
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<()> {
-        let store = sstable_store.remote_store();
+        let store = sstable_store.store();
         let sst_ids = vacuum_task.sstable_ids;
         for sst_id in &sst_ids {
             // Meta
