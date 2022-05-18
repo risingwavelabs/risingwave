@@ -121,6 +121,9 @@ where
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
+        self.write_message_no_flush(&BeMessage::ParameterStatus(
+            BeParameterStatusMessage::ServerVersion(self.session_mgr.version()),
+        ))?;
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }

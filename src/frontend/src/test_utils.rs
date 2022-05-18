@@ -55,6 +55,10 @@ impl SessionManager for LocalFrontend {
     ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
         Ok(self.session_ref())
     }
+
+    fn version(&self) -> &'static str {
+        ""
+    }
 }
 
 impl LocalFrontend {

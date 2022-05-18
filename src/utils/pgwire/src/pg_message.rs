@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error, ErrorKind, IoSlice, Result, Write};
+use std::io::{Error, ErrorKind, Result};
 
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
@@ -120,6 +120,7 @@ pub enum BeMessage<'a> {
 pub enum BeParameterStatusMessage<'a> {
     Encoding(&'a str),
     StandardConformingString(&'a str),
+    ServerVersion(&'a str),
 }
 
 #[derive(Debug)]
@@ -170,19 +171,16 @@ impl<'a> BeMessage<'a> {
                     StandardConformingString(val) => {
                         [b"standard_conforming_strings", val.as_bytes()]
                     }
+                    ServerVersion(val) => [b"server_version", val.as_bytes()],
                 };
-
-                // Parameter names and values are passed as null-terminated strings
-                let iov = &mut [name, b"\0", value, b"\0"].map(IoSlice::new);
-                let mut buffer = [0u8; 64]; // this should be enough
-                let cnt = buffer.as_mut().write_vectored(iov).unwrap();
 
                 buf.put_u8(b'S');
                 write_body(buf, |stream| {
-                    stream.put_slice(&buffer[..cnt]);
+                    // Parameter names and values are passed as null-terminated strings
+                    write_cstr(stream, name)?;
+                    write_cstr(stream, value)?;
                     Ok(())
-                })
-                .unwrap();
+                })?;
             }
 
             // CommandComplete
@@ -233,8 +231,7 @@ impl<'a> BeMessage<'a> {
                         }
                     }
                     Ok(())
-                })
-                .unwrap();
+                })?;
             }
             // RowDescription
             // +-----+-----------+--------------+-------+-----+-------+
@@ -307,8 +304,7 @@ impl<'a> BeMessage<'a> {
 
                     buf.put_u8(0); // terminator
                     Ok(())
-                })
-                .unwrap();
+                })?;
             }
         }
 

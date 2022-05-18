@@ -33,6 +33,7 @@ pub mod sort_util;
 pub mod try_match;
 pub mod epoch;
 pub mod value_encoding;
+pub mod version;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where

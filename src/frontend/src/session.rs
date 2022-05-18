@@ -347,6 +347,10 @@ impl SessionManager for SessionManagerImpl {
             database.to_string(),
         )))
     }
+
+    fn version(&self) -> &'static str {
+        &risingwave_common::util::version::VERSION
+    }
 }
 
 impl SessionManagerImpl {

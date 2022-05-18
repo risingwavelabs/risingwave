@@ -27,6 +27,8 @@ use crate::pg_response::PgResponse;
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
     fn connect(&self, database: &str) -> Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>>;
+
+    fn version(&self) -> &'static str;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
