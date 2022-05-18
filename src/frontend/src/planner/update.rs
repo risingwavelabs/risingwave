@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use super::Planner;
 use crate::binder::BoundUpdate;
-use crate::optimizer::plan_node::{LogicalDelete, LogicalFilter};
-use crate::optimizer::property::{Distribution, Order};
-use crate::optimizer::{PlanRef, PlanRoot};
+use crate::optimizer::PlanRoot;
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
-        todo!()
+        println!("bound update: {:?}", update);
+
+        Err(ErrorCode::NotImplemented("Planning `UPDATE`".to_owned(), 784.into()).into())
     }
 }
