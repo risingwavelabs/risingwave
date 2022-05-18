@@ -79,26 +79,34 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
     };
     use risingwave_pb::expr::*;
     let body = ScalarImpl::to_protobuf(&Some(d.clone()));
-    println!("{:?}",body);
     Some(RexNode::Constant(ConstantValue { body }))
 }
 
 #[cfg(test)]
 mod tests {
+    use prost::Message;
     use risingwave_common::array::StructValue;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_pb::expr::expr_node::RexNode;
+    use risingwave_pb::expr::StructValue as ProstStructValue;
+
     use crate::expr::literal::literal_to_protobuf;
 
     #[test]
     fn test_literal_to_protobuf() {
-
         let value = StructValue::new(vec![
             Some(ScalarImpl::Utf8("12222".to_string())),
             Some(ScalarImpl::Int32(2)),
             Some(ScalarImpl::Int32(3)),
         ]);
         let data = Some(ScalarImpl::Struct(value));
-        literal_to_protobuf(&data);
-        assert_eq!(true,false);
+        let node = literal_to_protobuf(&data);
+        if let RexNode::Constant(c) = node.as_ref().unwrap() {
+            let decoded: ProstStructValue = Message::decode(&c.body[..]).unwrap();
+            let prost = ProstStructValue {
+                body: vec![vec![49, 50, 50, 50, 50], vec![0, 0, 0, 2], vec![0, 0, 0, 3]],
+            };
+            assert_eq!(decoded, prost);
+        }
     }
 }

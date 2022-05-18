@@ -693,8 +693,10 @@ impl ScalarImpl {
 
     pub fn to_protobuf(d: &Datum) -> Vec<u8> {
         let d = match d {
-            None => {return vec![];}
-            Some(d) => {d}
+            None => {
+                return vec![];
+            }
+            Some(d) => d,
         };
 
         let body = match d {
@@ -710,9 +712,7 @@ impl ScalarImpl {
             ScalarImpl::NaiveDate(_) => todo!(),
             ScalarImpl::NaiveDateTime(_) => todo!(),
             ScalarImpl::NaiveTime(_) => todo!(),
-            ScalarImpl::Struct(v) => {
-                v.to_protobuf_owned()
-            },
+            ScalarImpl::Struct(v) => v.to_protobuf_owned(),
             ScalarImpl::List(_) => todo!(),
         };
         body

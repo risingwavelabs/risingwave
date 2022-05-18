@@ -19,7 +19,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use prost::Message;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
+use risingwave_pb::expr::StructValue as ProstStructValue;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
@@ -27,8 +29,7 @@ use super::{
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ScalarImpl};
-
+use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl};
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
 #[derive(Debug)]
@@ -314,9 +315,14 @@ impl StructValue {
     }
 
     pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        self.fields.iter().flat_map(|f|{
-            ScalarImpl::to_protobuf(f)
-        }).collect_vec()
+        let value = ProstStructValue {
+            body: self
+                .fields
+                .iter()
+                .map(ScalarImpl::to_protobuf)
+                .collect_vec(),
+        };
+        value.encode_to_vec()
     }
 }
 

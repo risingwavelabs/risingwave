@@ -92,6 +92,10 @@ message ConstantValue {
   bytes body = 1;
 }
 
+message StructValue {
+  repeated bytes body = 1;
+}
+
 message FunctionCall {
   repeated ExprNode children = 1;
 }
