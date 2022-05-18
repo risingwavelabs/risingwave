@@ -55,8 +55,8 @@ jobs:
       - name: Set outputs
         id: info
         run: |
-          echo "::set-output name=ec2-instance-id-${{ matrix.arch }}::${{ start-ec2-runner.outputs.ec2-instance-id }}"
-          echo "::set-output name=label-${{ matrix.arch }}::${{ start-ec2-runner.outputs.label }}"
+          echo "::set-output name=ec2-instance-id-${{ matrix.arch }}::${{ jobs.start-ec2-runner.outputs.ec2-instance-id }}"
+          echo "::set-output name=label-${{ matrix.arch }}::${{ jobs.start-ec2-runner.outputs.label }}"
 
   stop-runner-d:
     name: ec2-stop-d
