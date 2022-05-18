@@ -34,6 +34,8 @@ pub struct BoundUpdate {
 
     pub selection: Option<ExprImpl>,
 
+    /// Expression used to project to the updated row. The assigned columns will use the new
+    /// expression, and the other columns will be simply `InputRef`.
     pub exprs: Vec<ExprImpl>,
 }
 
@@ -66,10 +68,11 @@ impl Binder {
                 ([id], value) => {
                     vec![(id.clone(), value)]
                 }
+
                 // (col1, col2) = (subquery)
                 (_ids, Expr::Subquery(_)) => {
                     return Err(ErrorCode::NotImplemented(
-                        "subquery on the right side of assignment".to_owned(),
+                        "subquery on the right side of multi-assignment".to_owned(),
                         None.into(),
                     )
                     .into())
@@ -78,7 +81,7 @@ impl Binder {
                 (ids, Expr::Row(values)) if ids.len() == values.len() => {
                     id.into_iter().zip_eq(values.into_iter()).collect()
                 }
-
+                // (col1, col2) = <other expr>
                 _ => {
                     return Err(ErrorCode::BindError(
                         "number of columns does not match number of values".to_owned(),
