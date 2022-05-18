@@ -18,19 +18,19 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::task::{BatchEnvironment, TaskId, TaskOutput, TaskOutputId};
+use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
-pub struct LocalExchangeSource {
-    task_output: TaskOutput,
+pub struct LocalExchangeSource<C> {
+    task_output: TaskOutput<C>,
 
     /// Id of task which contains the `ExchangeExecutor` of this source.
     task_id: TaskId,
 }
 
-impl LocalExchangeSource {
-    pub fn create(output_id: TaskOutputId, env: BatchEnvironment, task_id: TaskId) -> Result<Self> {
-        let task_output = env.task_manager().take_output(&output_id.to_prost())?;
+impl<C: BatchTaskContext> LocalExchangeSource<C> {
+    pub fn create(output_id: TaskOutputId, context: C, task_id: TaskId) -> Result<Self> {
+        let task_output = context.get_task_output(output_id)?;
         Ok(Self {
             task_output,
             task_id,
@@ -38,7 +38,7 @@ impl LocalExchangeSource {
     }
 }
 
-impl Debug for LocalExchangeSource {
+impl<C> Debug for LocalExchangeSource<C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalExchangeSource")
             .field("task_output_id", self.task_output.id())
@@ -47,7 +47,7 @@ impl Debug for LocalExchangeSource {
 }
 
 #[async_trait::async_trait]
-impl ExchangeSource for LocalExchangeSource {
+impl<C: BatchTaskContext> ExchangeSource for LocalExchangeSource<C> {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         let ret = self.task_output.direct_take_data().await?;
         if let Some(data) = ret {
