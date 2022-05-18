@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::HashMap;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::{Deref, Range};
 use std::sync::Arc;
 
@@ -533,7 +533,7 @@ impl StreamGraphBuilder {
             NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
             }
-            NodeBody::Chain(_) => self.resolve_chain_node(ctx, stream_node, actor_id),
+            NodeBody::Chain(_) => self.resolve_chain_node(stream_node),
             _ => {
                 let mut new_stream_node = stream_node.clone();
 
@@ -599,8 +599,7 @@ impl StreamGraphBuilder {
                             };
                         }
                         NodeBody::Chain(_) => {
-                            new_stream_node.input[idx] =
-                                self.resolve_chain_node(ctx, input, actor_id)?;
+                            new_stream_node.input[idx] = self.resolve_chain_node(input)?;
                         }
                         _ => {
                             new_stream_node.input[idx] =
@@ -613,51 +612,13 @@ impl StreamGraphBuilder {
         }
     }
 
-    // TODO: we may totally move this into stream manager because we don't resolve upstream actor
-    // info here in Rust frontend.
-    fn resolve_chain_node(
-        &self,
-        ctx: &mut CreateMaterializedViewContext,
-        stream_node: &StreamNode,
-        actor_id: LocalActorId,
-    ) -> Result<StreamNode> {
-        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap()  else {
+    /// Resolve the chain node, only rewrite the schema of input `MergeNode`.
+    fn resolve_chain_node(&self, stream_node: &StreamNode) -> Result<StreamNode> {
+        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap() else {
             unreachable!()
         };
         let input = stream_node.get_input();
         assert_eq!(input.len(), 2);
-        let table_id = TableId::from(&chain_node.table_ref_id);
-
-        let upstream_actor_ids = HashSet::<ActorId>::from_iter(
-            ctx.table_sink_map
-                .entry(table_id)
-                .or_insert_with(|| self.table_sink_actor_ids.get(&table_id).unwrap().clone())
-                .clone()
-                .into_iter(),
-        );
-
-        if ctx.is_legacy_frontend {
-            for &up_id in &upstream_actor_ids {
-                ctx.dispatches
-                    .entry((up_id, 0))
-                    .or_default()
-                    .push(actor_id.as_global_id());
-            }
-            let chain_upstream_table_node_actors = self.table_node_actors.get(&table_id).unwrap();
-            let chain_upstream_node_actors = chain_upstream_table_node_actors
-                .iter()
-                .flat_map(|(node_id, actor_ids)| {
-                    actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
-                })
-                .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
-                .into_group_map();
-            for (node_id, actor_ids) in chain_upstream_node_actors {
-                ctx.upstream_node_actors
-                    .entry(node_id)
-                    .or_default()
-                    .extend(actor_ids.iter());
-            }
-        }
 
         let merge_node = &input[0];
         assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
@@ -669,11 +630,7 @@ impl StreamGraphBuilder {
                 input: vec![],
                 pk_indices: stream_node.pk_indices.clone(),
                 node_body: Some(NodeBody::Merge(MergeNode {
-                    upstream_actor_id: if ctx.is_legacy_frontend {
-                        Vec::from_iter(upstream_actor_ids.into_iter())
-                    } else {
-                        vec![]
-                    },
+                    upstream_actor_id: vec![],
                     fields: chain_node.upstream_fields.clone(),
                 })),
                 fields: chain_node.upstream_fields.clone(),

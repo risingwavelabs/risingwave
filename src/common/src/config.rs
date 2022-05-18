@@ -137,6 +137,9 @@ pub struct StorageConfig {
     #[serde(default = "default::meta_cache_capacity")]
     pub meta_cache_capacity: usize,
 
+    #[serde(default = "default::disable_remote_compactor")]
+    pub disable_remote_compactor: bool,
+
     /// Local object store root. We should call `get_local_object_store` to get the object store.
     #[serde(default = "default::local_object_store")]
     pub local_object_store: String,
@@ -235,6 +238,10 @@ mod default {
     pub fn meta_cache_capacity() -> usize {
         // 64 MB
         67108864
+    }
+
+    pub fn disable_remote_compactor() -> bool {
+        false
     }
 
     pub fn local_object_store() -> String {

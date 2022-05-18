@@ -79,7 +79,6 @@ impl SstableStore {
         data: Bytes,
         policy: CachePolicy,
     ) -> HummockResult<usize> {
-        let timer = self.stats.sst_store_put_remote_duration.start_timer();
         let len = data.len();
 
         self.put_sst_data(sst.id, data.clone()).await?;
@@ -89,8 +88,6 @@ impl SstableStore {
             self.delete_sst_data(sst.id).await?;
             return Err(e);
         }
-
-        timer.observe_duration();
 
         if let CachePolicy::Fill = policy {
             // TODO: use concurrent put object
@@ -153,8 +150,6 @@ impl SstableStore {
         self.stats.sst_store_block_request_counts.inc();
 
         let fetch_block = async move {
-            let timer = self.stats.sst_store_get_remote_duration.start_timer();
-
             let block_meta = sst
                 .meta
                 .block_metas
@@ -171,8 +166,6 @@ impl SstableStore {
                 .await
                 .map_err(HummockError::object_io_error)?;
             let block = Block::decode(block_data)?;
-
-            timer.observe_duration();
             Ok(Box::new(block))
         };
 

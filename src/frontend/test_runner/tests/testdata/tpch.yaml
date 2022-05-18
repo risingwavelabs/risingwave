@@ -1344,18 +1344,43 @@
       p_brand,
       p_type,
       p_size;
-  logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3] }
-      LogicalAgg { group_keys: [0, 1, 2], agg_calls: [count($3)] }
-        LogicalProject { exprs: [$10, $11, $12, $2] }
-          LogicalFilter { predicate: ($7 = $1) AND ($10 <> 'Brand#45':Varchar) AND Not(Like($11, 'SMALL PLATED%':Varchar)) AND In($12, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-            LogicalJoin { type: LeftAnti, on: ($2 = $16) }
-              LogicalJoin { type: Inner, on: true }
-                LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
-                LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
-              LogicalProject { exprs: [$1] }
-                LogicalFilter { predicate: Like($7, '%Customer%Complaints%':Varchar) }
-                  LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
+  batch_plan: |
+    BatchExchange { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], dist: Single }
+      BatchSort { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC] }
+        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [count($3)] }
+          BatchProject { exprs: [$1, $2, $3, $0] }
+            BatchExchange { order: [], dist: HashShard([1, 2, 3]) }
+              BatchHashJoin { type: LeftAnti, predicate: $0 = $4 }
+                BatchProject { exprs: [$1, $3, $4, $5] }
+                  BatchExchange { order: [], dist: HashShard([1]) }
+                    BatchHashJoin { type: Inner, predicate: $0 = $2 }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchFilter { predicate: ($1 <> 'Brand#45':Varchar) AND Not(Like($2, 'SMALL PLATED%':Varchar)) AND In($3, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+                          BatchScan { table: part, columns: [p_partkey, p_brand, p_type, p_size] }
+                BatchProject { exprs: [$0] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchFilter { predicate: Like($1, '%Customer%Complaints%':Varchar) }
+                      BatchScan { table: supplier, columns: [s_suppkey, s_comment] }
+  stream_plan: |
+    StreamMaterialize { columns: [p_brand, p_type, p_size, agg#0(hidden), supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
+      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, count($3)] }
+        StreamProject { exprs: [$1, $2, $3, $0, $4, $5] }
+          StreamExchange { dist: HashShard([1, 2, 3]) }
+            StreamHashJoin { type: LeftAnti, predicate: $0 = $6 }
+              StreamProject { exprs: [$1, $4, $5, $6, $2, $7] }
+                StreamExchange { dist: HashShard([1]) }
+                  StreamHashJoin { type: Inner, predicate: $0 = $3 }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, _row_id#0], pk_indices: [2] }
+                    StreamExchange { dist: HashShard([0]) }
+                      StreamFilter { predicate: ($1 <> 'Brand#45':Varchar) AND Not(Like($2, 'SMALL PLATED%':Varchar)) AND In($3, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+                        StreamTableScan { table: part, columns: [p_partkey, p_brand, p_type, p_size, _row_id#0], pk_indices: [4] }
+              StreamProject { exprs: [$0, $2] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamFilter { predicate: Like($1, '%Customer%Complaints%':Varchar) }
+                    StreamTableScan { table: supplier, columns: [s_suppkey, s_comment, _row_id#0], pk_indices: [2] }
 - id: tpch_q17
   before:
     - create_tables

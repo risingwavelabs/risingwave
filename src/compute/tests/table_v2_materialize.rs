@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(generators)]
+#![feature(proc_macro_hygiene, stmt_expr_attributes)]
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::Executor as BatchExecutor;
-use risingwave_batch::executor2::executor_wrapper::ExecutorWrapper;
 use risingwave_batch::executor2::monitor::BatchMetrics;
 use risingwave_batch::executor2::{
-    DeleteExecutor2, Executor2, InsertExecutor2, RowSeqScanExecutor2,
+    BoxedDataChunkStream, BoxedExecutor2, DeleteExecutor2, Executor2, InsertExecutor2,
+    RowSeqScanExecutor2,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -59,25 +61,24 @@ impl SingleChunkExecutor {
 }
 
 #[async_trait::async_trait]
-impl BatchExecutor for SingleChunkExecutor {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self.chunk.take())
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-
+impl Executor2 for SingleChunkExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 
     fn identity(&self) -> &str {
         &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl SingleChunkExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        yield self.chunk.unwrap()
     }
 }
 
@@ -166,12 +167,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
     let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner: Box<dyn BatchExecutor> =
+    let insert_inner: BoxedExecutor2 =
         Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let insert = Box::new(InsertExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(ExecutorWrapper::from(insert_inner)),
+        insert_inner,
     ));
 
     tokio::spawn(async move {
@@ -286,12 +287,12 @@ async fn test_table_v2_materialize() -> Result<()> {
         column_nonnull! { F64Array, [1.14] },
     ];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let delete_inner: Box<dyn BatchExecutor> =
+    let delete_inner: BoxedExecutor2 =
         Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let delete = Box::new(DeleteExecutor2::new(
         source_table_id,
         source_manager.clone(),
-        Box::new(ExecutorWrapper::from(delete_inner)),
+        delete_inner,
     ));
 
     tokio::spawn(async move {

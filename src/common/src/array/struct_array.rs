@@ -279,7 +279,15 @@ impl fmt::Display for StructValue {
         write!(
             f,
             "{{{}}}",
-            self.fields.iter().map(|f| format!("{:?}", f)).join(", ")
+            self.fields
+                .iter()
+                .map(|f| {
+                    match f {
+                        Some(f) => format!("{}", f),
+                        None => "None".to_string(),
+                    }
+                })
+                .join(", ")
         )
     }
 }
