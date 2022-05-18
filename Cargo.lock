@@ -64,7 +64,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/apache/avro.git?branch=branch-1.11#36126feb661484f4c33e2091b9145b236a77e572"
+source = "git+https://github.com/singularity-data/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
 dependencies = [
  "byteorder 1.4.3",
  "bzip2",
