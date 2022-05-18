@@ -17,6 +17,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Assignment, Expr, TableFactor, TableWithJoins};
 
@@ -44,10 +45,10 @@ impl Binder {
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
         let table_source = {
-            assert!(table.joins.is_empty());
+            ensure!(table.joins.is_empty());
             let name = match &table.relation {
                 TableFactor::Table { name, .. } => name.clone(),
-                _ => unimplemented!(),
+                _ => unreachable!(),
             };
             self.bind_table_source(name)?
         };
@@ -59,18 +60,47 @@ impl Binder {
 
         let mut assignment_exprs = HashMap::new();
         for Assignment { id, value } in assignments {
-            let id_expr = self.bind_expr(Expr::CompoundIdentifier(id))?;
-            let value_expr = self.bind_expr(value)?.cast_assign(id_expr.return_type())?;
-
-            match assignment_exprs.entry(id_expr) {
-                Entry::Occupied(_) => {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "multiple assignments to same column".to_owned(),
+            // FIXME: Parsing of `id` is not strict. It will even treat `a.b` as `(a, b)`.
+            let assignments = match (id.as_slice(), value) {
+                // col = expr
+                ([id], value) => {
+                    vec![(id.clone(), value)]
+                }
+                // (col1, col2) = (subquery)
+                (_ids, Expr::Subquery(_)) => {
+                    return Err(ErrorCode::NotImplemented(
+                        "subquery on the right side of assignment".to_owned(),
+                        None.into(),
                     )
                     .into())
                 }
-                Entry::Vacant(v) => {
-                    v.insert(value_expr);
+                // (col1, col2) = (expr1, expr2)
+                (ids, Expr::Row(values)) if ids.len() == values.len() => {
+                    id.into_iter().zip_eq(values.into_iter()).collect()
+                }
+
+                _ => {
+                    return Err(ErrorCode::BindError(
+                        "number of columns does not match number of values".to_owned(),
+                    )
+                    .into())
+                }
+            };
+
+            for (id, value) in assignments {
+                let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
+                let value_expr = self.bind_expr(value)?.cast_assign(id_expr.return_type())?;
+
+                match assignment_exprs.entry(id_expr) {
+                    Entry::Occupied(_) => {
+                        return Err(ErrorCode::BindError(
+                            "multiple assignments to same column".to_owned(),
+                        )
+                        .into())
+                    }
+                    Entry::Vacant(v) => {
+                        v.insert(value_expr);
+                    }
                 }
             }
         }
