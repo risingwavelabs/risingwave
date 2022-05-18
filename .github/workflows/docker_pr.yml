@@ -18,7 +18,17 @@ permissions:
 
 jobs:
   start-runner-d:
-    name: ec2-start-d
+    strategy:
+      matrix:
+        arch: [x86, arm]
+        include:
+          - arch: x86
+            instance_type: c5.4xlarge
+            ami: ami-05a99cf0eb100c377
+          - arch: arm
+            instance_type: a1.4xlarge
+            ami: ami-008e02c1f94100fd9
+    name: "ec2-start-d-{{ matrix.arch }}"
     runs-on: ubuntu-latest
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
@@ -36,12 +46,12 @@ jobs:
         with:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
+          ec2-image-id: ${{ matrix.ami }}
+          ec2-instance-type: ${{ matrix.instance_type }}
           subnet-id: subnet-59743123
           security-group-id: sg-9ec32bfe
   stop-runner-d:
-    name: ec2-stop-d
+    name: "ec2-stop-d-{{ matrix.arch }}"
     needs:
       - start-runner-d
       - build_docker_images
@@ -63,6 +73,7 @@ jobs:
           ec2-instance-id: ${{ needs.start-runner-d.outputs.ec2-instance-id }}
         if: ${{ always() }}
   build_docker_images:
+    name: "build_images-{{ matrix.arch }}"
     runs-on: ${{ needs.start-runner-d.outputs.label }}
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
@@ -116,7 +127,7 @@ jobs:
           file: ./docker/Dockerfile
           target: compute-node
           push: false
-          tags: ghcr.io/singularity-data/compute-node
+          tags: "ghcr.io/singularity-data/compute-node-{{ matrix.arch }}"
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
       - name: Build meta-node
@@ -126,7 +137,7 @@ jobs:
           file: ./docker/Dockerfile
           target: meta-node
           push: false
-          tags: ghcr.io/singularity-data/meta-node
+          tags: "ghcr.io/singularity-data/meta-node-{{ matrix.arch }}"
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
       - name: Build frontend-node
@@ -136,7 +147,7 @@ jobs:
           file: ./docker/Dockerfile
           target: frontend-node
           push: false
-          tags: ghcr.io/singularity-data/frontend-node
+          tags: "ghcr.io/singularity-data/frontend-node-{{ matrix.arch }}"
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
       - name: Build compactor
@@ -146,6 +157,6 @@ jobs:
           file: ./docker/Dockerfile
           target: compactor-node
           push: false
-          tags: ghcr.io/singularity-data/compactor-node
+          tags: "ghcr.io/singularity-data/compactor-node-{{ matrix.arch }}"
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=inline
