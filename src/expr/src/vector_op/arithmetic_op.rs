@@ -19,7 +19,10 @@ use std::fmt::Debug;
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{
+    CheckedAdd as NaiveDateTimeCheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper,
+    NaiveDateWrapper,
+};
 
 use super::cast::date_to_timestamp;
 

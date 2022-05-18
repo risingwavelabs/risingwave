@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrorCode, Result, RwError};
 mod native_type;
-
+mod ops;
 mod scalar_impl;
 
 use std::fmt::{Debug, Display, Formatter};
@@ -38,11 +38,12 @@ mod ordered_float;
 
 use chrono::{Datelike, Timelike};
 pub use chrono_wrapper::{
-    CheckedAddAssign, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
+    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
+pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
