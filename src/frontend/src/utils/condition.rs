@@ -109,8 +109,14 @@ impl Condition {
         .unwrap()
     }
 
-    /// Split the condition expressions into N + 1 groups: those containing two columns and others
-    /// TODO: how to prevent this from having N^2 complexity...
+    /// Split the condition expressions into (N choose 2) + 1 groups: those containing two columns
+    /// from different buckets and equal condition between them, and others.
+    ///
+    /// `input_num_cols` are the number of columns in each of the input buckets. For instance, with
+    /// bucket0: col0, col1, col2 | bucket1: col3, col4 | bucket2: col5
+    /// input_num_cols = [3, 2, 1]
+    ///
+    /// Returns hashmap with keys of the form (col1, col2) where col1 < col2 in terms of their col index.
     #[must_use]
     pub fn split_eq_by_input_col_nums(
         self,

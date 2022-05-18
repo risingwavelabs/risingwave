@@ -243,10 +243,11 @@ impl LogicalMultiJoin {
 
         if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
             output =
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering)).into();
+                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering))
+                    .into();
         }
 
-        // We will later push down the `non_eq_cond` back to the individual joins via the
+        // We will later push down all of the filters back to the individual joins via the
         // `FilterJoinRule`.
         output = LogicalFilter::create(output, self.on.clone());
 
@@ -296,7 +297,7 @@ impl LogicalMultiJoin {
         for component in edge_sets {
             let mut eq_cond_edges: Vec<(usize, usize)> = component.into_iter().collect();
 
-            // TODO: add sorting of eq_cond_edges based on selectivity here
+            // TODO(jon-chuang): add sorting of eq_cond_edges based on selectivity here
 
             if eq_cond_edges.is_empty() {
                 // There is nothing to join in this connected component
@@ -309,8 +310,8 @@ impl LogicalMultiJoin {
             while !eq_cond_edges.is_empty() {
                 let mut found = vec![];
                 for (idx, edge) in eq_cond_edges.iter().enumerate() {
-                    // If the eq join condition is on the existing join, add it to the existing
-                    // join's on condition (this will be pushed down further later on).
+                    // If the eq join condition is on the existing join, we don't add any new
+                    // inputs to the join
                     if join_ordering.contains(&edge.1) && join_ordering.contains(&edge.0) {
                         found.push(idx);
                     } else {
