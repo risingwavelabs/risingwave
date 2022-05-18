@@ -39,14 +39,14 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 pub use table_v2::*;
 
-use crate::connector_source::{ConnectorSource, ConnectorStreamReader};
+use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
 
 pub mod parser;
 
-pub mod connector_source;
 mod manager;
 
 mod common;
+pub mod connector_source;
 mod row_id;
 mod table_v2;
 
@@ -71,7 +71,7 @@ pub enum SourceImpl {
 #[allow(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
-    Connector(ConnectorStreamReader),
+    Connector(ConnectorSourceReader),
 }
 
 #[async_trait]
