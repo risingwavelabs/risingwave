@@ -145,6 +145,16 @@ fn build_binary_atm_funcs(
     }
 }
 
+fn build_unary_atm_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    args: &[DataTypeName],
+) {
+    for (e, arg) in iproduct!(exprs, args) {
+        map.insert(FuncSign::new(*e, vec![*arg]), *arg);
+    }
+}
+
 fn build_commutative_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     expr: ExprType,
@@ -215,10 +225,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         }
     }
 
-    // arithmetic expressions
-    for t in num_types {
-        map.insert(FuncSign::new(E::Neg, vec![t]), t);
-    }
+    let unary_atm_exprs = &[E::Abs, E::Neg];
+
+    build_unary_atm_funcs(&mut map, unary_atm_exprs, &num_types);
     build_binary_atm_funcs(
         &mut map,
         &[E::Add, E::Subtract, E::Multiply, E::Divide],
