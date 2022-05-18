@@ -27,10 +27,9 @@ use risingwave_connector::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
-use crate::connector_source::ConnectorSource;
 use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
-use crate::{SourceFormat, SourceImpl, SourceParserImpl};
+use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
