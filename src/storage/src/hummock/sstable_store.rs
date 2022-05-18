@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
+use futures::future::try_join_all;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
@@ -24,9 +25,11 @@ use crate::object::{BlockLocation, ObjectStoreRef};
 
 const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
 const DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY: usize = 16;
+const PREFETCH_BLOCK_COUNT: usize = 20;
 pub type TableHolder = CachableEntry<u64, Box<Sstable>>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
+#[derive(Clone, Copy)]
 pub enum CachePolicy {
     Disable,
     Fill,
@@ -64,16 +67,10 @@ impl SstableStore {
         }
     }
 
-    pub async fn put(
-        &self,
-        sst: &Sstable,
-        data: Bytes,
-        policy: CachePolicy,
-    ) -> HummockResult<usize> {
+    pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
         let timer = self.stats.sst_store_put_remote_duration.start_timer();
 
         let meta = Bytes::from(sst.meta.encode_to_bytes());
-        let len = data.len();
 
         let data_path = self.get_sst_data_path(sst.id);
         self.store
@@ -105,7 +102,62 @@ impl SstableStore {
                 .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst.clone()));
         }
 
-        Ok(len)
+        Ok(())
+    }
+
+    pub async fn get_with_prefetch(
+        &self,
+        sst: &Sstable,
+        block_index: u64,
+    ) -> HummockResult<BlockHolder> {
+        self.stats.sst_store_block_request_counts.inc();
+        if let Some(block) = self.block_cache.get(sst.id, block_index) {
+            return Ok(block);
+        }
+        let timer = self.stats.sst_store_get_remote_duration.start_timer();
+        let index = block_index as usize;
+        let block_meta = sst
+            .meta
+            .block_metas
+            .get(index)
+            .ok_or_else(HummockError::invalid_block)?;
+        let mut read_size = block_meta.len;
+        if index + 1 < sst.meta.block_metas.len() {
+            let end = std::cmp::min(index + 1 + PREFETCH_BLOCK_COUNT, sst.meta.block_metas.len());
+            for block in &sst.meta.block_metas[(index + 1)..end] {
+                read_size += block.len;
+            }
+        }
+
+        let block_loc = BlockLocation {
+            offset: block_meta.offset as usize,
+            size: read_size as usize,
+        };
+        let data_path = self.get_sst_data_path(sst.id);
+        let block_data = self
+            .store
+            .read(&data_path, Some(block_loc))
+            .await
+            .map_err(HummockError::object_io_error)?;
+        let block = Block::decode(block_data.slice(..block_meta.len as usize))?;
+        let ret = self
+            .block_cache
+            .insert(sst.id, block_index, Box::new(block));
+        if index + 1 < sst.meta.block_metas.len() {
+            let mut index_offset = block_index + 1;
+            let end = std::cmp::min(index + 1 + PREFETCH_BLOCK_COUNT, sst.meta.block_metas.len());
+            let mut offset = block_meta.len as usize;
+            for block_meta in &sst.meta.block_metas[(index + 1)..end] {
+                let end_offset = offset + block_meta.len as usize;
+                let block = Block::decode(block_data.slice(offset..end_offset))?;
+                self.block_cache
+                    .insert(sst.id, index_offset, Box::new(block));
+                offset = end_offset;
+                index_offset += 1;
+            }
+        }
+        timer.observe_duration();
+        Ok(ret)
     }
 
     pub async fn get(
@@ -165,6 +217,16 @@ impl SstableStore {
         }
     }
 
+    pub async fn prefetch_sstables(&self, sst_ids: Vec<u64>) -> HummockResult<()> {
+        let mut results = vec![];
+        for id in sst_ids {
+            let f = self.sstable(id);
+            results.push(f);
+        }
+        let _ = try_join_all(results).await?;
+        Ok(())
+    }
+
     pub async fn sstable(&self, sst_id: u64) -> HummockResult<TableHolder> {
         let entry = self
             .meta_cache
@@ -203,3 +265,5 @@ impl SstableStore {
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
+
+

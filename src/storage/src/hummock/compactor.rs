@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
+use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
 use futures::Future;
 use itertools::Itertools;
@@ -43,6 +44,7 @@ use super::sstable_store::SstableStoreRef;
 use super::{
     HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
 };
+use crate::hummock::iterator::ReadOptions;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreMetrics;
@@ -227,6 +229,24 @@ impl Compactor {
                 })
                 .collect(),
         );
+        let tables = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.id)
+            .collect_vec();
+        if let Err(e) = compactor
+            .context
+            .sstable_store
+            .prefetch_sstables(tables)
+            .await
+        {
+            tracing::warn!(
+                "Compaction task {} prefetch failed with error: {}",
+                compact_task.task_id,
+                e
+            );
+        }
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
@@ -371,14 +391,17 @@ impl Compactor {
         let mut ssts = Vec::new();
         ssts.reserve(builder.len());
         // TODO: decide upload concurrency
+        let policy = if self.context.is_share_buffer_compact {
+            super::CachePolicy::NotFill
+        } else {
+            super::CachePolicy::Fill
+        };
+        let mut pending_requests = vec![];
         for (table_id, data, meta, vnode_bitmaps) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
-            let len = self
-                .context
-                .sstable_store
-                .put(&sst, data, super::CachePolicy::Fill)
-                .await?;
-
+            let len = data.len();
+            ssts.push((sst.clone(), vnode_bitmaps));
+            pending_requests.push(self.context.sstable_store.put(sst, data, policy));
             if self.context.is_share_buffer_compact {
                 self.context
                     .stats
@@ -387,16 +410,15 @@ impl Compactor {
             } else {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
-
-            ssts.push((sst, vnode_bitmaps));
         }
-
+        try_join_all(pending_requests).await?;
         Ok((split_index, ssts))
     }
 
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
+        let read_options = Arc::new(ReadOptions { prefetch: true });
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -417,6 +439,7 @@ impl Compactor {
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
+                    read_options.clone(),
                 )));
             } else {
                 for table_info in &level.table_infos {
@@ -424,6 +447,7 @@ impl Compactor {
                     table_iters.push(Box::new(SSTableIterator::new(
                         table,
                         self.context.sstable_store.clone(),
+                        read_options.clone(),
                     )));
                 }
             }

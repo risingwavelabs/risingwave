@@ -59,6 +59,7 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::iterator::ReadOptions;
 use crate::hummock::local_version_manager::LocalVersionManager;
 
 /// Hummock is the state store backend.
@@ -134,6 +135,7 @@ impl HummockStorage {
         table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
+        read_options: Arc<ReadOptions>,
     ) -> HummockResult<Option<Bytes>> {
         if table.value().surely_not_have_user_key(key) {
             self.stats.bloom_filter_true_negative_counts.inc();
@@ -141,7 +143,7 @@ impl HummockStorage {
         }
         // Might have the key, take it as might positive.
         self.stats.bloom_filter_might_positive_counts.inc();
-        let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
+        let mut iter = SSTableIterator::new(table, self.sstable_store.clone(), read_options);
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
         if !iter.is_valid() {

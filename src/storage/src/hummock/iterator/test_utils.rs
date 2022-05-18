@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use crate::hummock::iterator::BoxedForwardHummockIterator;
+use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{
@@ -133,7 +133,7 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 key_count,
             ));
             let handle = cache.insert(table.id, table.id, 1, Box::new(table));
-            Box::new(SSTableIterator::new(handle, sstable_store.clone()))
+            Box::new(SSTableIterator::new(handle, sstable_store.clone(), Arc::new(ReadOptions::default())))
                 as BoxedForwardHummockIterator
         })
         .collect_vec()
