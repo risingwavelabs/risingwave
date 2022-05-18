@@ -186,13 +186,6 @@ impl NaiveDateTimeWrapper {
         Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 
-    pub fn parse_from_str(s: &str) -> Result<Self> {
-        Ok(NaiveDateTimeWrapper::new(
-            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-        ))
-    }
-
     pub fn sub(&self, rhs: NaiveDateTimeWrapper) -> Duration {
         self.0 - rhs.0
     }

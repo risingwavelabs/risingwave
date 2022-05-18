@@ -13,6 +13,9 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+#![feature(generators)]
+#![feature(proc_macro_hygiene)]
+#![feature(stmt_expr_attributes)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]

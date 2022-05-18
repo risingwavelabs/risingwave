@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::{Either, Itertools};
-use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -30,9 +29,6 @@ impl Rule for PullUpCorrelatedPredicate {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (apply_left, apply_right, apply_on, join_type) = apply.clone().decompose();
-        if !matches!(join_type, JoinType::LeftOuter | JoinType::LeftSemi) {
-            return None;
-        }
 
         let project = apply_right.as_logical_project()?;
         let (mut proj_exprs, _) = project.clone().decompose();

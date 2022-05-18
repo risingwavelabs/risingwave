@@ -62,6 +62,7 @@ pub mod stream_service_serde;
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
 
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);
 

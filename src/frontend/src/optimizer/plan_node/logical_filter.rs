@@ -15,10 +15,11 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
-    ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
@@ -102,28 +103,42 @@ impl fmt::Display for LogicalFilter {
 }
 
 impl ColPrunable for LogicalFilter {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
 
-        let mut visitor = CollectInputRef::new(required_cols.clone());
+        let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
         self.predicate.visit_expr(&mut visitor);
-        let input_required_cols = visitor.collect();
+        let predicate_required_cols: FixedBitSet = visitor.into();
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let input_required_cols = {
+            let mut tmp = predicate_required_cols.clone();
+            tmp.union_with(&required_cols_bitset);
+            tmp.ones().collect_vec()
+        };
+        let mut mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
-
-        if required_cols == &input_required_cols {
+        if predicate_required_cols.is_subset(&required_cols_bitset) {
             filter.into()
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            // Given that `LogicalFilter` always has same schema of its input, if predicate's
+            // `InputRef`s are not subset of the requirement of downstream operator, a
+            // `LogicalProject` node should be added.
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = filter.schema().len();
             LogicalProject::with_mapping(
                 filter.into(),
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
+            .into()
         }
     }
 }
@@ -198,11 +213,11 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
+        let filter: PlanRef =
+            LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(3);
-        required_cols.insert(2);
+        let required_cols = vec![2];
         let plan = filter.prune_col(&required_cols);
 
         // Check the result
@@ -267,9 +282,7 @@ mod tests {
         let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
-        let mut required_cols = FixedBitSet::with_capacity(3);
-        required_cols.insert(1);
-        required_cols.insert(2);
+        let required_cols = vec![1, 2];
         let plan = filter.prune_col(&required_cols);
 
         // Check the result

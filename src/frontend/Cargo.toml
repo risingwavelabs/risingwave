@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_frontend"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,6 +12,7 @@ async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
+derivative = "2"
 downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 enum-as-inner = "0.4"
@@ -47,10 +48,11 @@ tokio = { version = "1", features = [
     "signal",
     "fs",
 ] }
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 uuid = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
+assert_matches = "1"
 tempfile = "3"

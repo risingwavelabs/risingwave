@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_batch"
-version = "0.1.6"
+version = "0.1.7"
 
 [dependencies]
 anyhow = "1"
@@ -49,7 +49,7 @@ tokio = { version = "1", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 tracing-futures = "0.2"
 twox-hash = "1"

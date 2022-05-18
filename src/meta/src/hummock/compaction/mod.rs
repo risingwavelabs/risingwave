@@ -32,7 +32,10 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
-use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+use crate::hummock::compaction::overlap_strategy::{
+    HashStrategy, OverlapStrategy, RangeOverlapStrategy,
+};
+use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::Transactional;
@@ -92,6 +95,12 @@ pub struct SearchResult {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum CompactionMode {
+    RangeMode,
+    ConsistentHashMode,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompactionConfig {
     pub max_bytes_for_level_base: u64,
     pub max_level: usize,
@@ -99,6 +108,7 @@ pub struct CompactionConfig {
     pub max_compaction_bytes: u64,
     pub level0_max_file_number: usize,
     pub level0_trigger_number: usize,
+    pub compaction_mode: CompactionMode,
 }
 
 impl Default for CompactionConfig {
@@ -110,6 +120,7 @@ impl Default for CompactionConfig {
             max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
             level0_max_file_number: DEFAULT_LEVEL0_MAX_FILE_NUMBER,
             level0_trigger_number: DEFAULT_LEVEL0_TRIGGER_NUMBER,
+            compaction_mode: ConsistentHashMode,
         }
     }
 }
@@ -120,14 +131,15 @@ impl CompactStatus {
         for level in 0..=config.max_level {
             level_handlers.push(LevelHandler::new(level as u32));
         }
+        let overlap_strategy = match config.compaction_mode {
+            RangeMode => Arc::new(RangeOverlapStrategy::default()) as Arc<dyn OverlapStrategy>,
+            ConsistentHashMode => Arc::new(HashStrategy::default()),
+        };
         CompactStatus {
             level_handlers,
             next_compact_task_id: 1,
             // TODO: create selector and overlap strategy by configure.
-            compaction_selector: Box::new(DynamicLevelSelector::new(
-                config,
-                Arc::new(RangeOverlapStrategy::default()),
-            )),
+            compaction_selector: Box::new(DynamicLevelSelector::new(config, overlap_strategy)),
         }
     }
 

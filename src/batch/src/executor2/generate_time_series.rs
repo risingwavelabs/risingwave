@@ -17,14 +17,12 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, NaiveDateTimeArrayBuilder};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper};
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::RwError;
+use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor2::{BoxedDataChunkStream, Executor2};
 
 pub struct GenerateSeriesTimestampExecutor2 {
     start: NaiveDateTimeWrapper,
@@ -34,21 +32,21 @@ pub struct GenerateSeriesTimestampExecutor2 {
     schema: Schema,
     identity: String,
 }
-
-impl BoxedExecutor2Builder for GenerateSeriesTimestampExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
-        let node = try_match_expand!(
-            source.plan_node().get_node_body().unwrap(),
-            NodeBody::GenerateTimeSeries
-        )?;
-
-        Ok(Box::new(Self {
-            start: NaiveDateTimeWrapper::parse_from_str(node.get_start())?,
-            stop: NaiveDateTimeWrapper::parse_from_str(node.get_stop())?,
-            step: node.get_step()?.into(),
-            schema: Schema::new(vec![Field::unnamed(DataType::Timestamp)]),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+impl GenerateSeriesTimestampExecutor2 {
+    pub fn new(
+        start: NaiveDateTimeWrapper,
+        stop: NaiveDateTimeWrapper,
+        step: IntervalUnit,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
+        Self {
+            start,
+            stop,
+            step,
+            schema,
+            identity,
+        }
     }
 }
 
@@ -103,14 +101,17 @@ impl GenerateSeriesTimestampExecutor2 {
 mod tests {
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl};
+    use risingwave_common::catalog::Field;
     use risingwave_common::try_match_expand;
+    use risingwave_common::types::DataType;
+    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
 
     #[tokio::test]
     async fn test_generate_time_series() {
-        let start_time = NaiveDateTimeWrapper::parse_from_str("2008-03-01 00:00:00").unwrap();
-        let stop_time = NaiveDateTimeWrapper::parse_from_str("2008-03-09 00:00:00").unwrap();
+        let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
+        let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
         let one_minute_step = IntervalUnit::from_minutes(1);
         let one_hour_step = IntervalUnit::from_minutes(60);
         let one_day_step = IntervalUnit::from_days(1);

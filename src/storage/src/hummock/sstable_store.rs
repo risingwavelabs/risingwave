@@ -18,9 +18,7 @@ use bytes::Bytes;
 use fail::fail_point;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
-use crate::hummock::{
-    BlockHolder, CachableEntry, HummockError, HummockResult, LookupResult, LruCache,
-};
+use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
@@ -72,8 +70,6 @@ impl SstableStore {
         data: Bytes,
         policy: CachePolicy,
     ) -> HummockResult<usize> {
-        let timer = self.stats.sst_store_put_remote_duration.start_timer();
-
         let meta = Bytes::from(sst.meta.encode_to_bytes());
         let len = data.len();
 
@@ -92,8 +88,6 @@ impl SstableStore {
                 .map_err(HummockError::object_io_error)?;
             return Err(HummockError::object_io_error(e));
         }
-
-        timer.observe_duration();
 
         if let CachePolicy::Fill = policy {
             // TODO: use concurrent put object
@@ -119,8 +113,6 @@ impl SstableStore {
         self.stats.sst_store_block_request_counts.inc();
 
         let fetch_block = async move {
-            let timer = self.stats.sst_store_get_remote_duration.start_timer();
-
             let block_meta = sst
                 .meta
                 .block_metas
@@ -137,8 +129,6 @@ impl SstableStore {
                 .await
                 .map_err(HummockError::object_io_error)?;
             let block = Block::decode(block_data)?;
-
-            timer.observe_duration();
             Ok(Box::new(block))
         };
 
@@ -168,32 +158,22 @@ impl SstableStore {
     }
 
     pub async fn sstable(&self, sst_id: u64) -> HummockResult<TableHolder> {
-        match self.meta_cache.lookup_for_request(sst_id, sst_id) {
-            LookupResult::Cached(entry) => Ok(entry),
-            LookupResult::WaitPendingRequest(recv) => recv.await.map_err(HummockError::other),
-            LookupResult::Miss => {
+        let entry = self
+            .meta_cache
+            .lookup_with_request_dedup(sst_id, sst_id, || async {
                 let path = self.get_sst_meta_path(sst_id);
-                match self
+                let buf = self
                     .store
                     .read(&path, None)
                     .await
-                    .map_err(HummockError::object_io_error)
-                {
-                    Ok(buf) => {
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
-                        let sst = Box::new(Sstable { id: sst_id, meta });
-                        let handle =
-                            self.meta_cache
-                                .insert(sst_id, sst_id, sst.encoded_size(), sst);
-                        Ok(handle)
-                    }
-                    Err(e) => {
-                        self.meta_cache.clear_pending_request(&sst_id, sst_id);
-                        Err(e)
-                    }
-                }
-            }
-        }
+                    .map_err(HummockError::object_io_error)?;
+                let meta = SstableMeta::decode(&mut &buf[..])?;
+                let sst = Box::new(Sstable { id: sst_id, meta });
+                let size = sst.encoded_size();
+                Ok((sst, size))
+            })
+            .await?;
+        Ok(entry)
     }
 
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {

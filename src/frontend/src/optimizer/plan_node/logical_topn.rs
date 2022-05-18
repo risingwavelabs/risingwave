@@ -15,9 +15,10 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 use crate::utils::ColIndexMapping;
@@ -111,16 +112,26 @@ impl fmt::Display for LogicalTopN {
 }
 
 impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
+        let order_required_cols = {
+            let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
+            self.order
+                .field_order
+                .iter()
+                .for_each(|fo| order_required_cols.insert(fo.index));
+            order_required_cols
+        };
 
-        let mut input_required_cols = required_cols.clone();
-        self.order
-            .field_order
-            .iter()
-            .for_each(|fo| input_required_cols.insert(fo.index));
-
-        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let input_required_cols = {
+            let mut tmp = order_required_cols.clone();
+            tmp.union_with(&input_required_bitset);
+            tmp.ones().collect_vec()
+        };
+        let mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         let new_order = Order {
             field_order: self
                 .order
@@ -132,18 +143,18 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
-        let new_input = self.input.prune_col(required_cols);
+        let new_input = self.input.prune_col(&input_required_cols);
         let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
 
-        if *required_cols == input_required_cols {
+        if order_required_cols.is_subset(&input_required_bitset) {
             top_n
         } else {
-            let mut remaining_columns = FixedBitSet::with_capacity(top_n.schema().fields().len());
-            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            let src_size = top_n.schema().len();
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(&remaining_columns),
+                ColIndexMapping::with_remaining_columns(required_cols, src_size),
             )
+            .into()
         }
     }
 }

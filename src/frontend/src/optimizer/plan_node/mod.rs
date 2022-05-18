@@ -33,7 +33,6 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
-use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -62,17 +61,6 @@ pub trait PlanNode:
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
     fn convention(&self) -> Convention;
-
-    // TODO: find a better place declear this func
-    fn must_contain_columns(&self, required_cols: &FixedBitSet) {
-        // Having equal length also implies:
-        // required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len()))
-        assert_eq!(
-            required_cols.len(),
-            self.plan_base().schema.fields().len(),
-            "required cols capacity != columns available",
-        );
-    }
 }
 
 impl_downcast!(PlanNode);
@@ -239,6 +227,7 @@ mod logical_hop_window;
 mod logical_insert;
 mod logical_join;
 mod logical_limit;
+mod logical_multi_join;
 mod logical_project;
 mod logical_scan;
 mod logical_source;
@@ -283,6 +272,7 @@ pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
+pub use logical_multi_join::LogicalMultiJoin;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
@@ -335,6 +325,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, TopN }
             , { Logical, HopWindow }
             , { Logical, GenerateSeries }
+            , { Logical, MultiJoin }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -389,6 +380,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, TopN }
             , { Logical, HopWindow }
             , { Logical, GenerateSeries }
+            , { Logical, MultiJoin }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }

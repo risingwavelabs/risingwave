@@ -114,42 +114,10 @@ jobs:
           label: ${{ needs.start-runner-b.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner-b.outputs.ec2-instance-id }}
         if: ${{ always() }}
-  frontend-check:
-    name: frontend-check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-      - name: Set up JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
-      - name: Cache Gradle packages
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-      - name: Run java style check, tests, and build
-        run: |
-          make java_check java_coverage_report java_build
-      - uses: actions/upload-artifact@v2
-        with:
-          name: risingwave-fe-runnable.jar
-          if-no-files-found: error
-          path: |
-            legacy/pgserver/build/libs/risingwave-fe-runnable.jar
   end-to-end-risedev-dev:
     name: e2e-test-risedev-dev
     needs:
       - compute-node-build-dev
-      - frontend-check
       - start-runner-a
     runs-on: ${{ needs.start-runner-a.outputs.label }}
     container:
@@ -161,11 +129,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Set up JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
       - name: Install rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -186,11 +149,6 @@ jobs:
         with:
           name: risingwave-dev
           path: ./target/debug
-      - uses: actions/download-artifact@v2
-        name: Download frontend binary
-        with:
-          name: risingwave-fe-runnable.jar
-          path: ./.risingwave/bin
       - uses: actions/download-artifact@v2
         name: Download playground binary
         with:
@@ -245,20 +203,6 @@ jobs:
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node (legacy frontend)
-        timeout-minutes: 5
-        run: |
-          ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e test batch 3-node (legacy frontend)
-        timeout-minutes: 3
-        run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
       - name: Dump last 300 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
@@ -272,7 +216,6 @@ jobs:
     name: e2e-test-source
     needs:
       - compute-node-build-dev
-      - frontend-check
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -335,11 +278,6 @@ jobs:
           name: risingwave-dev
           path: ./target/debug
       - uses: actions/download-artifact@v2
-        name: Download frontend binary
-        with:
-          name: risingwave-fe-runnable.jar
-          path: ./.risingwave/bin
-      - uses: actions/download-artifact@v2
         name: Download playground binary
         with:
           name: risedev-playground-dev
@@ -365,23 +303,7 @@ jobs:
         run: |
           ~/cargo-make/makers pre-start-playground
           ~/cargo-make/makers link-all-in-one-binaries
-      - name: regress test batch 3-node
-        timeout-minutes: 1
-        run: |
-          ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
-          psql --version
-          RUST_LOG=info target/debug/risingwave_regress_test -h 127.0.0.1 \
-            -p ${{ env.RW_PORT }} \
-            --input `pwd`/src/tests/regress/data \
-            --output `pwd`/src/tests/regress/output \
-            --schedule `pwd`/src/tests/regress/data/schedule
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
-      - name: e2e test w/ Rust frontend ci-3node, source with kafka
+      - name: e2e test w/ Rust frontend - source with kafka
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
@@ -503,12 +425,15 @@ jobs:
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
           cargo clippy --all-targets --all-features --locked -- -D warnings
-      - name: Run rust doc check
+      - name: Build documentation
         run: |
           cargo doc --document-private-items --no-deps
       - name: Run rust failpoints test
         run: |
           cargo nextest run failpoints  --features failpoints --no-fail-fast
+      - name: Run rust doc check
+        run: |
+          cargo test --doc
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info -- --no-fail-fast
@@ -541,8 +466,6 @@ jobs:
           ./.github/workflow-template/generate.sh --check
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
-        with:
-          ignore_paths: legacy
       - name: Check protobuf code format
         run: |
           buf format -d --exit-code

@@ -667,6 +667,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bit-vec"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1233,8 +1242,18 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a01d95850c592940db9b8194bc39f4bc0e89dee5c4265e4b1807c34a9aba453c"
 dependencies = [
- "darling_core",
- "darling_macro",
+ "darling_core 0.13.4",
+ "darling_macro 0.13.4",
+]
+
+[[package]]
+name = "darling"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4529658bdda7fd6769b8614be250cdcfc3aeb0ee72fe66f9e41e5e5eb73eac02"
+dependencies = [
+ "darling_core 0.14.1",
+ "darling_macro 0.14.1",
 ]
 
 [[package]]
@@ -1252,12 +1271,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling_core"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "649c91bc01e8b1eac09fb91e8dbc7d517684ca6be8ebc75bb9cafc894f9fdb6f"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn",
+]
+
+[[package]]
 name = "darling_macro"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c972679f83bdf9c42bd905396b6c3588a843a17f0f16dfcfa3e2c5d57441835"
 dependencies = [
- "darling_core",
+ "darling_core 0.13.4",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddfc69c5bfcbd2fc09a0f38451d2daf0e372e367986a83906d1b0dbc88134fb5"
+dependencies = [
+ "darling_core 0.14.1",
  "quote",
  "syn",
 ]
@@ -1579,6 +1623,17 @@ checksum = "c3083ce4b914124575708913bca19bfe887522d6e2e6d0952943f5eac4a74010"
 dependencies = [
  "futures-core",
  "futures-sink",
+]
+
+[[package]]
+name = "futures-concurrency"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48e98b7b5aedee7c34a5cfb1ee1681af8faf46e2f30c0b8af5ea08eba517d61c"
+dependencies = [
+ "async-trait",
+ "futures-core",
+ "pin-project",
 ]
 
 [[package]]
@@ -2201,6 +2256,63 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "madsim"
+version = "0.2.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0388d0406d38a382335ee9c55d8277c43cb0a6a02b879f5705795ab373712fc8"
+dependencies = [
+ "bincode",
+ "bytes",
+ "env_logger",
+ "futures",
+ "log 0.4.17",
+ "madsim-macros",
+ "rand 0.8.5",
+ "serde",
+ "tokio",
+ "tokio-util 0.7.1",
+]
+
+[[package]]
+name = "madsim-macros"
+version = "0.2.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e89839c0c226f4ef524e2760983b24f09c4a3358ae12ac7a4c6533fbaecf43c4"
+dependencies = [
+ "darling 0.14.1",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "madsim-tonic"
+version = "0.2.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2dbc733c4b8d83f679c5386254912811962595b72ebd67349ddd14d7fcd89b2"
+dependencies = [
+ "async-stream",
+ "futures",
+ "log 0.4.17",
+ "madsim",
+ "tonic",
+]
+
+[[package]]
+name = "madsim-tonic-build"
+version = "0.2.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320839c356bc1af23e730fbe460abe9bc338b5ccae220fe4c7924644b4535455"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "prost-build",
+ "quote",
+ "syn",
+ "tonic-build",
 ]
 
 [[package]]
@@ -3302,7 +3414,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3325,7 +3437,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3342,6 +3454,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log 0.4.17",
+ "madsim-tonic",
  "memcomparable",
  "num-traits",
  "parking_lot 0.12.0",
@@ -3366,7 +3479,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tonic",
  "tracing",
  "tracing-futures",
  "twox-hash",
@@ -3402,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "clap 3.1.17",
  "log 0.4.17",
@@ -3420,7 +3532,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "clap 3.1.17",
@@ -3440,7 +3552,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3457,6 +3569,7 @@ dependencies = [
  "lazy_static",
  "log 0.4.17",
  "lru",
+ "madsim-tonic",
  "memcomparable",
  "more-asserts",
  "num-traits",
@@ -3472,7 +3585,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
- "tonic",
  "tower",
  "tower-http",
  "tracing",
@@ -3486,6 +3598,7 @@ name = "risingwave_compactor"
 version = "0.1.0"
 dependencies = [
  "clap 3.1.17",
+ "madsim-tonic",
  "prometheus",
  "risingwave_common",
  "risingwave_pb",
@@ -3496,13 +3609,12 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "toml",
- "tonic",
  "tracing",
 ]
 
 [[package]]
 name = "risingwave_compute"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3516,10 +3628,12 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "futures-async-stream",
  "hyper",
  "itertools",
  "lazy_static",
  "log 0.4.17",
+ "madsim-tonic",
  "memcomparable",
  "num-traits",
  "paste",
@@ -3543,7 +3657,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tonic",
  "tower",
  "tower-http",
  "tracing",
@@ -3554,7 +3667,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3573,12 +3686,15 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "futures-async-stream",
+ "futures-concurrency",
  "globset",
  "http",
  "http-serde",
  "hyper",
  "itertools",
  "log 0.4.17",
+ "madsim-tonic",
  "maplit",
  "memcomparable",
  "num-traits",
@@ -3601,7 +3717,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.1",
- "tonic",
  "twox-hash",
  "url",
  "urlencoding",
@@ -3611,7 +3726,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3626,7 +3741,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3640,6 +3755,7 @@ dependencies = [
  "lazy_static",
  "log 0.4.17",
  "lru",
+ "madsim-tonic",
  "memcomparable",
  "num-traits",
  "paste",
@@ -3653,22 +3769,23 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
- "tonic",
  "value-encoding",
  "workspace-hack",
 ]
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "arc-swap",
  "assert-impl",
+ "assert_matches",
  "async-trait",
  "byteorder 1.4.3",
  "bytes",
  "clap 3.1.17",
+ "derivative",
  "downcast-rs",
  "dyn-clone",
  "enum-as-inner",
@@ -3678,6 +3795,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log 0.4.17",
+ "madsim-tonic",
  "maplit",
  "num-integer",
  "num-traits",
@@ -3696,7 +3814,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tonic",
  "tracing",
  "uuid 1.0.0",
  "workspace-hack",
@@ -3754,7 +3871,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3776,6 +3893,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log 0.4.17",
+ "madsim-tonic",
  "memcomparable",
  "moka",
  "num-integer",
@@ -3787,6 +3905,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -3799,7 +3918,6 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tokio-stream",
- "tonic",
  "tower",
  "tower-http",
  "tracing",
@@ -3812,6 +3930,8 @@ name = "risingwave_pb"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "madsim-tonic",
+ "madsim-tonic-build",
  "pbjson",
  "pbjson-build",
  "prost",
@@ -3819,8 +3939,6 @@ dependencies = [
  "prost-types",
  "quote",
  "serde",
- "tonic",
- "tonic-build",
  "workspace-hack",
 ]
 
@@ -3840,24 +3958,24 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "futures",
  "log 0.4.17",
+ "madsim-tonic",
  "paste",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "tokio",
- "tonic",
  "tracing",
  "workspace-hack",
 ]
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -3876,6 +3994,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log 0.4.17",
+ "madsim-tonic",
  "maplit",
  "memcomparable",
  "num-traits",
@@ -3902,7 +4021,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tonic",
  "tracing",
  "twox-hash",
  "url",
@@ -3911,7 +4029,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "itertools",
  "log 0.4.17",
@@ -3937,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3966,6 +4084,7 @@ dependencies = [
  "libc",
  "log 0.4.17",
  "lz4",
+ "madsim-tonic",
  "memcomparable",
  "moka",
  "num-integer",
@@ -3985,11 +4104,11 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.3",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-retry",
  "tokio-stream",
- "tonic",
  "tracing",
  "twox-hash",
  "uuid 1.0.0",
@@ -3999,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -4020,6 +4139,8 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log 0.4.17",
+ "madsim",
+ "madsim-tonic",
  "memcomparable",
  "moka",
  "num-traits",
@@ -4027,7 +4148,6 @@ dependencies = [
  "paste",
  "prometheus",
  "prost",
- "rand 0.8.5",
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
@@ -4044,7 +4164,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tonic",
  "tower",
  "tracing",
  "tracing-futures",
@@ -4292,7 +4411,7 @@ version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e182d6ec6f05393cc0e5ed1bf81ad6db3a8feedf8ee515ecdd369809bcce8082"
 dependencies = [
- "darling",
+ "darling 0.13.4",
  "proc-macro2",
  "quote",
  "syn",
@@ -5380,11 +5499,9 @@ dependencies = [
  "fail",
  "fixedbitset",
  "futures",
- "futures-channel",
  "futures-executor",
  "futures-io",
  "futures-sink",
- "futures-task",
  "futures-util",
  "hashbrown 0.11.2",
  "hyper",

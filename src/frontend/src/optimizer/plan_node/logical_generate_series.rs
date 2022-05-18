@@ -14,29 +14,28 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
 
 use super::{ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::BatchGenerateSeries;
 use crate::session::OptimizerContextRef;
 /// `LogicalGenerateSeries` implements Hop Table Function.
 #[derive(Debug, Clone)]
 pub struct LogicalGenerateSeries {
     pub base: PlanBase,
-    pub(super) start: NaiveDateTimeWrapper,
-    pub(super) stop: NaiveDateTimeWrapper,
-    pub(super) step: IntervalUnit,
+    pub(super) start: ExprImpl,
+    pub(super) stop: ExprImpl,
+    pub(super) step: ExprImpl,
 }
 
 impl LogicalGenerateSeries {
     /// Create a [`LogicalGenerateSeries`] node. Used internally by optimizer.
     pub fn new(
-        start: NaiveDateTimeWrapper,
-        stop: NaiveDateTimeWrapper,
-        step: IntervalUnit,
+        start: ExprImpl,
+        stop: ExprImpl,
+        step: ExprImpl,
         schema: Schema,
         ctx: OptimizerContextRef,
     ) -> Self {
@@ -52,9 +51,9 @@ impl LogicalGenerateSeries {
 
     /// Create a [`LogicalGenerateSeries`] node. Used by planner.
     pub fn create(
-        start: NaiveDateTimeWrapper,
-        stop: NaiveDateTimeWrapper,
-        step: IntervalUnit,
+        start: ExprImpl,
+        stop: ExprImpl,
+        step: ExprImpl,
         schema: Schema,
         ctx: OptimizerContextRef,
     ) -> PlanRef {
@@ -65,7 +64,7 @@ impl LogicalGenerateSeries {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ start: {:?} stop: {:?} step: {} }}",
+            "{} {{ start: {:?} stop: {:?} step: {:?} }}",
             name, self.start, self.stop, self.step,
         )
     }
@@ -81,7 +80,7 @@ impl fmt::Display for LogicalGenerateSeries {
 
 // the leaf node don't need colprunable
 impl ColPrunable for LogicalGenerateSeries {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
     }

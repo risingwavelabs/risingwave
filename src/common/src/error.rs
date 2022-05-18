@@ -122,6 +122,11 @@ pub enum ErrorCode {
     ValueEncodingError(ValueEncodingError),
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
+    #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
+    InvalidConfigValue {
+        config_entry: String,
+        config_value: String,
+    },
 
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
@@ -290,6 +295,7 @@ impl ErrorCode {
             ErrorCode::InvalidInputSyntax(_) => 14,
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::ValueEncodingError(_) => 16,
+            ErrorCode::InvalidConfigValue { .. } => 17,
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,

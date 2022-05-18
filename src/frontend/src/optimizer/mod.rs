@@ -149,8 +149,7 @@ impl PlanRoot {
         // they shouldn't be a part of output columns, so we use `out_fields` to control the
         // visibility of these expressions. To avoid these expressions being pruned, we can't
         // use `self.out_fields` as `required_cols` here.
-        let mut required_cols = FixedBitSet::with_capacity(self.plan.schema().len());
-        required_cols.insert_range(..);
+        let required_cols = (0..self.plan.schema().len()).collect_vec();
         plan = plan.prune_col(&required_cols);
 
         plan = {

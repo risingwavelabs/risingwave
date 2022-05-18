@@ -45,3 +45,5 @@ mod pull_up_correlated_predicate;
 pub use pull_up_correlated_predicate::*;
 mod index_delta_join;
 pub use index_delta_join::*;
+mod multijoin_join;
+pub use multijoin_join::*;

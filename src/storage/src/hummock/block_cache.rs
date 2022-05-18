@@ -20,8 +20,8 @@ use std::sync::Arc;
 use futures::Future;
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::cache::{CachableEntry, LookupResult, LruCache};
-use super::{Block, HummockError, HummockResult};
+use super::cache::{CachableEntry, LruCache};
+use super::{Block, HummockResult};
 
 const CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const DEFAULT_OBJECT_POOL_SIZE: usize = 1024; // we only need a small object pool because when the cache reach the limit of capacity, it will
@@ -105,23 +105,15 @@ impl BlockCache {
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
-        match self.inner.lookup_for_request(h, key) {
-            LookupResult::Cached(entry) => Ok(BlockHolder::from_cached_block(entry)),
-            LookupResult::WaitPendingRequest(recv) => {
-                let entry = recv.await.map_err(HummockError::other)?;
-                Ok(BlockHolder::from_cached_block(entry))
-            }
-            LookupResult::Miss => match f.await {
-                Ok(block) => {
-                    let entry = self.inner.insert(key, h, block.len(), block);
-                    Ok(BlockHolder::from_cached_block(entry))
-                }
-                Err(e) => {
-                    self.inner.clear_pending_request(&key, h);
-                    Err(e)
-                }
-            },
-        }
+        let entry = self
+            .inner
+            .lookup_with_request_dedup(h, key, || async {
+                let block = f.await?;
+                let len = block.len();
+                Ok((block, len))
+            })
+            .await?;
+        Ok(BlockHolder::from_cached_block(entry))
     }
 
     fn hash(sst_id: HummockSSTableId, block_idx: u64) -> u64 {
