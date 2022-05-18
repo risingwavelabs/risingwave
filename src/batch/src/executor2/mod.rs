@@ -14,9 +14,7 @@
 
 mod delete;
 mod filter;
-mod generate_i32_series;
 mod generate_series;
-mod generate_time_series;
 mod generic_exchange;
 mod hash_agg;
 mod hop_window;
@@ -36,9 +34,7 @@ mod values;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
-pub use generate_i32_series::*;
 pub use generate_series::*;
-pub use generate_time_series::*;
 pub use generic_exchange::*;
 pub use hash_agg::*;
 pub use hop_window::*;
