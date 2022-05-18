@@ -362,12 +362,7 @@ impl Compactor {
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
             || async {
-                let table_id = self
-                    .context
-                    .hummock_meta_client
-                    .get_new_table_id()
-                    .await
-                    .map_err(HummockError::meta_error)?;
+                let table_id = (self.context.sstable_id_generator)().await?;
                 let builder = SSTableBuilder::new(SSTableBuilderOptions::from_storage_config(
                     &self.context.options,
                 ));
