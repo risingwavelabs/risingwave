@@ -1,4 +1,9 @@
 steps:
-  - command: "echo \"Hello World!\""
+  - command: "~/cargo-make/makers ci-start ci-3cn-1fe"
+    plugins:
+      - docker-compose#v3.9.0:
+          run: risingwave-dev
+          config: ../docker-compose.yml
   
   - command: "echo \"Hello Huangjw!\""
+
