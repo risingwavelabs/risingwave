@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  risingwave-dev:
+    image: risingwave-dev:latest
+    build:
+      context: ..
+      dockerfile: ./ci/Dockerfile
+      target: risingwave-dev
+    container_name: risingwave-dev
+  risingwave-release:
+    image: risingwave-release:latest
+    build:
+      context: ..
+      dockerfile: ./ci/Dockerfile
+      target: risingwave-release
+    container_name: risingwave-release

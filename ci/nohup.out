@@ -1,0 +1,20 @@
+
+[38;5;48m   _           _ _     _ _    _ _                                _
+  | |         (_) |   | | |  (_) |                              | |
+  | |__  _   _ _| | __| | | ___| |_ ___    __ _  __ _  ___ _ __ | |_
+  | '_ \| | | | | |/ _` | |/ / | __/ _ \  / _` |/ _` |/ _ \ '_ \| __|
+  | |_) | |_| | | | (_| |   <| | ||  __/ | (_| | (_| |  __/ | | | |_
+  |_.__/ \__,_|_|_|\__,_|_|\_\_|\__\___|  \__,_|\__, |\___|_| |_|\__|
+                                                 __/ |
+ https://buildkite.com/agent                    |___/
+[0m
+[1;36m2022-05-18 07:34:13 NOTICE[0m [0mStarting buildkite-agent v3.35.2 with PID: 2558[0m
+[1;36m2022-05-18 07:34:13 NOTICE[0m [0mThe agent source code can be found here: https://github.com/buildkite/agent[0m
+[1;36m2022-05-18 07:34:13 NOTICE[0m [0mFor questions and support, email us at: hello@buildkite.com[0m
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [0mConfiguration loaded[0m [1;38;5;251mpath=[0m[0m$HOME/.buildkite-agent/buildkite-agent.cfg[0m
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [0mRegistering agent with Buildkite...[0m
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [0mSuccessfully registered agent "ip-172-31-37-182.us-east-2.compute.internal-1" with tags [queue=default][0m
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [0mStarting 1 Agent(s)[0m
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [0mYou can press Ctrl-C to stop the agents[0m
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [38;5;243mip-172-31-37-182.us-east-2.compute.internal-1[0m [0mConnecting to Buildkite...[0m 
+[38;5;48m2022-05-18 07:34:13 INFO  [0m [38;5;243mip-172-31-37-182.us-east-2.compute.internal-1[0m [0mWaiting for work...[0m 

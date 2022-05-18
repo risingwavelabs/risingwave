@@ -47,4 +47,4 @@ log/
 risedev-components.user.env
 riselab-components.user.env
 
-.git/
+#.git/
