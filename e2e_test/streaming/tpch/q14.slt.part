@@ -1,0 +1,4 @@
+query R
+select ROUND(promo_revenue, 16) from tpch_q14;
+----
+15.2302126115972488

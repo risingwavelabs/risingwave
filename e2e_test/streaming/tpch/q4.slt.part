@@ -1,0 +1,8 @@
+query TI
+select * from tpch_q4;
+----
+ 1-URGENT 16
+ 2-HIGH 9
+ 3-MEDIUM 6
+ 4-NOT SPECIFIED 8
+ 5-LOW 6

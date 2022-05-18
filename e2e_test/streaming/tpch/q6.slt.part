@@ -1,0 +1,4 @@
+query RIR
+select revenue from tpch_q6;
+----
+90927.6243
