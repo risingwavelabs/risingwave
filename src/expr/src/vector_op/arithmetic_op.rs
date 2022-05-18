@@ -16,10 +16,10 @@ use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
 use super::cast::date_to_timestamp;
 
@@ -94,6 +94,19 @@ pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
         Some(expr) => Ok(expr),
         None => Err(RwError::from(NumericValueOutOfRange)),
     }
+}
+
+#[inline(always)]
+pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
+    if expr.is_negative() {
+        general_neg(expr)
+    } else {
+        Ok(expr)
+    }
+}
+
+pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
+    Ok(Decimal::abs(&decimal).unwrap())
 }
 
 #[inline(always)]
