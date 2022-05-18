@@ -98,8 +98,8 @@ impl StateStoreImpl {
                 let local_object_store =
                     Arc::from(parse_object_store(config.local_object_store.as_str(), true).await);
                 let hybrid_object_store = Box::new(HybridObjectStore::new(
-                    remote_object_store,
                     local_object_store,
+                    remote_object_store,
                 ));
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(ObjectStoreImpl::new(
