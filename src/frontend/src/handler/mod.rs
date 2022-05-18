@@ -96,7 +96,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ),
         },
         Statement::Query(_) => query::handle_query(context, stmt).await,
-        Statement::Insert { .. } | Statement::Delete { .. } => dml::handle_dml(context, stmt).await,
+        Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
+            dml::handle_dml(context, stmt).await
+        }
         Statement::CreateView {
             materialized: true,
             or_replace: false,

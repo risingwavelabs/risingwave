@@ -20,7 +20,7 @@ use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -254,51 +254,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         chunk = self.refill_row_id_column(chunk);
                     }
 
-                    let (data, ops) = chunk.into_parts();
-                    let mut chunks = DataChunk::rechunk(&[data], PROCESSING_WINDOW_SIZE)
-                        .unwrap()
-                        .into_iter();
-                    let mut ops_batch = ops.chunks(PROCESSING_WINDOW_SIZE);
-                    let mut next_chunk = None;
-                    let mut next_ops: Option<Vec<Op>> = None;
-                    loop {
-                        let (mut chunk, mut ops) = {
-                            if let Some(chunk) = std::mem::take(&mut next_chunk) {
-                                let ops = std::mem::take(&mut next_ops).unwrap();
-                                (chunk, ops.to_vec())
-                            } else if let Some(chunk) = chunks.next() {
-                                (chunk, ops_batch.next().unwrap().to_vec())
-                            } else {
-                                break;
-                            }
-                        };
-
-                        // There is paired `UpdateDelete` and `UpdateInsert` split by border, we
-                        // should re-chunk current stream chunk with next stream chunk
-                        if ops[ops.len() - 1] == Op::UpdateDelete {
-                            let pair_chunk = chunks.next().unwrap();
-                            let pair_ops = ops_batch.next().unwrap();
-                            assert!(pair_ops[0] == Op::UpdateInsert);
-
-                            let head_chunk_size = chunk.capacity() + 1;
-                            let mut new_chunks =
-                                DataChunk::rechunk_head(vec![chunk, pair_chunk], head_chunk_size)
-                                    .map_err(StreamExecutorError::eval_error)?;
-                            assert_eq!(new_chunks.len(), 2);
-
-                            chunk = std::mem::take(&mut new_chunks[0]);
-                            ops.push(pair_ops[0]);
-                            next_chunk = Some(std::mem::take(&mut new_chunks[1]));
-                            next_ops = Some(pair_ops[1..].to_vec());
-                        }
-
-                        let stream_chunk = StreamChunk::from_parts(ops, chunk);
-                        self.metrics
-                            .source_output_row_count
-                            .with_label_values(&[self.source_identify.as_str()])
-                            .inc_by(stream_chunk.cardinality() as u64);
-                        yield Message::Chunk(stream_chunk);
-                    }
+                    self.metrics
+                        .source_output_row_count
+                        .with_label_values(&[self.source_identify.as_str()])
+                        .inc_by(chunk.cardinality() as u64);
+                    yield Message::Chunk(chunk);
                 }
             }
         }

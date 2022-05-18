@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
-use crate::binder::BoundStatement;
+use super::Planner;
+use crate::binder::BoundUpdate;
 use crate::optimizer::PlanRoot;
-use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
-        match stmt {
-            BoundStatement::Insert(i) => self.plan_insert(*i),
-            BoundStatement::Delete(d) => self.plan_delete(*d),
-            BoundStatement::Update(u) => self.plan_update(*u),
-            BoundStatement::Query(q) => self.plan_query(*q),
-        }
+    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
+        println!("bound update: {:#?}", update);
+
+        Err(ErrorCode::NotImplemented("Planning `UPDATE`".to_owned(), 784.into()).into())
     }
 }
