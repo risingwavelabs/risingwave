@@ -129,12 +129,12 @@ where
     S: MetaStore,
 {
     // Start compaction scheduler
-    let shutdown_sender = compaction_scheduler.shutdown_sender();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let join_handle = tokio::spawn(async move {
-        compaction_scheduler.start().await;
+        compaction_scheduler.start(shutdown_rx).await;
     });
 
-    (join_handle, shutdown_sender)
+    (join_handle, shutdown_tx)
 }
 
 /// Vacuum is triggered at this rate.

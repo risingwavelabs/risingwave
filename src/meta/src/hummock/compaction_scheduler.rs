@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
@@ -68,7 +68,6 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    shutdown_sender: RwLock<Option<UnboundedSender<()>>>,
 }
 
 impl<S> CompactionScheduler<S>
@@ -82,19 +81,13 @@ where
         Self {
             hummock_manager,
             compactor_manager,
-            shutdown_sender: RwLock::new(None),
         }
     }
 
-    pub async fn start(&self) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    pub async fn start(&self, mut shutdown_rx: UnboundedReceiver<()>) {
         let (request_tx, mut request_rx) =
             tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
-        assert!(
-            self.shutdown_sender.write().replace(shutdown_tx).is_none(),
-            "Compaction scheduler has already started"
-        );
         self.hummock_manager
             .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
@@ -195,13 +188,5 @@ where
                 }
             }
         }
-    }
-
-    pub fn shutdown_sender(&self) -> UnboundedSender<()> {
-        self.shutdown_sender
-            .read()
-            .as_ref()
-            .expect("Compaction scheduler has not started")
-            .clone()
     }
 }
