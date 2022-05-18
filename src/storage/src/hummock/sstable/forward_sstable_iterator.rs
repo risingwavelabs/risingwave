@@ -182,9 +182,12 @@ mod tests {
 
     use super::*;
     use crate::assert_bytes_eq;
-    use crate::hummock::{CachePolicy, Sstable};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT, gen_test_sstable_data};
+    use crate::hummock::test_utils::{
+        create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
+        gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
+    };
+    use crate::hummock::{CachePolicy, Sstable};
 
     #[tokio::test]
     async fn test_table_iterator() {
@@ -200,7 +203,8 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
-        let mut sstable_iter = SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
+        let mut sstable_iter =
+            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -228,7 +232,8 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
-        let mut sstable_iter = SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
+        let mut sstable_iter =
+            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

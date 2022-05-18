@@ -265,5 +265,3 @@ impl SstableStore {
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
-
-

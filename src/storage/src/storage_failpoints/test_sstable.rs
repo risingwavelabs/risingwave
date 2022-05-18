@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+
 use futures::executor::block_on;
 use risingwave_hummock_sdk::key::key_with_epoch;
 

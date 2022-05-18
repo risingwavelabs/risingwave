@@ -47,6 +47,7 @@ use super::{
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
+use crate::hummock::CachePolicy;
 use crate::monitor::StateStoreMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
@@ -390,18 +391,14 @@ impl Compactor {
 
         let mut ssts = Vec::new();
         ssts.reserve(builder.len());
-        // TODO: decide upload concurrency
-        let policy = if self.context.is_share_buffer_compact {
-            super::CachePolicy::NotFill
-        } else {
-            super::CachePolicy::Fill
-        };
+        // TODO: decide upload concurrency. Maybe we shall create a upload task channel for multiple
+        // compaction tasks.
         let mut pending_requests = vec![];
         for (table_id, data, meta, vnode_bitmaps) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
             let len = data.len();
             ssts.push((sst.clone(), vnode_bitmaps));
-            pending_requests.push(self.context.sstable_store.put(sst, data, policy));
+            pending_requests.push(self.context.sstable_store.put(sst, data, CachePolicy::Fill));
             if self.context.is_share_buffer_compact {
                 self.context
                     .stats

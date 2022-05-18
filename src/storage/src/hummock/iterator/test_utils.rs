@@ -133,8 +133,11 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 key_count,
             ));
             let handle = cache.insert(table.id, table.id, 1, Box::new(table));
-            Box::new(SSTableIterator::new(handle, sstable_store.clone(), Arc::new(ReadOptions::default())))
-                as BoxedForwardHummockIterator
+            Box::new(SSTableIterator::new(
+                handle,
+                sstable_store.clone(),
+                Arc::new(ReadOptions::default()),
+            )) as BoxedForwardHummockIterator
         })
         .collect_vec()
 }

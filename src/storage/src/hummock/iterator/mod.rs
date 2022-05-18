@@ -137,12 +137,8 @@ impl HummockIteratorDirection for Backward {
     }
 }
 
+#[derive(Default)]
 pub struct ReadOptions {
     pub prefetch: bool,
 }
 
-impl Default for ReadOptions {
-    fn default() -> Self {
-        ReadOptions { prefetch: false }
-    }
-}
