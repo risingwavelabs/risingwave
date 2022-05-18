@@ -59,12 +59,11 @@ impl DebugExecutor {
     }
 
     #[allow(clippy::let_and_return)]
-    #[allow(dead_code)]
     fn wrap_debug(
         info: Arc<ExecutorInfo>,
         extra: DebugExtraInfo,
-        stream: impl MessageStream,
-    ) -> impl MessageStream {
+        stream: impl MessageStream + 'static,
+    ) -> impl MessageStream + 'static {
         // Trace
         let stream = trace::trace(
             info.clone(),
@@ -85,12 +84,11 @@ impl DebugExecutor {
     }
 
     #[allow(clippy::let_and_return)]
-    #[allow(dead_code)]
     fn wrap_release(
         info: Arc<ExecutorInfo>,
         extra: DebugExtraInfo,
-        stream: impl MessageStream,
-    ) -> impl MessageStream {
+        stream: impl MessageStream + 'static,
+    ) -> impl MessageStream + 'static {
         // Metrics
         let stream = trace::metrics(extra.actor_id, extra.metrics, stream);
 
@@ -100,18 +98,16 @@ impl DebugExecutor {
         stream
     }
 
-    #[allow(clippy::redundant_clone)]
-    #[allow(clippy::let_and_return)]
     fn wrap(
         info: Arc<ExecutorInfo>,
         extra: DebugExtraInfo,
-        stream: impl MessageStream,
-    ) -> impl MessageStream {
-        #[cfg(debug_assertions)]
-        return Self::wrap_debug(info, extra, stream);
-
-        #[cfg(not(debug_assertions))]
-        return Self::wrap_release(info, extra, stream);
+        stream: impl MessageStream + 'static,
+    ) -> BoxedMessageStream {
+        if cfg!(debug_assertions) {
+            Self::wrap_debug(info, extra, stream).boxed()
+        } else {
+            Self::wrap_release(info, extra, stream).boxed()
+        }
     }
 }
 
