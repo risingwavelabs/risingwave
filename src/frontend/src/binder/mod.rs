@@ -25,6 +25,7 @@ mod select;
 mod set_expr;
 mod statement;
 mod struct_field;
+mod update;
 mod values;
 
 pub use bind_context::BindContext;
@@ -38,6 +39,7 @@ pub use relation::{
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
+pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
