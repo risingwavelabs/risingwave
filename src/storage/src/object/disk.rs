@@ -23,7 +23,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::{CachableEntry, HummockError, LruCache};
 use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
@@ -91,7 +90,6 @@ pub type OpenReadFileHolder = Arc<CachableEntry<PathBuf, File>>;
 pub struct LocalDiskObjectStore {
     path_prefix: String,
     opened_read_file_cache: Arc<LruCache<PathBuf, File>>,
-    compactor_shutdown_sender: parking_lot::Mutex<Option<UnboundedSender<()>>>,
 }
 
 const OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS: usize = 2;
@@ -106,7 +104,6 @@ impl LocalDiskObjectStore {
                 OPENED_FILE_CACHE_DEFAULT_CAPACITY,
                 OPENED_FILE_CACHE_DEFAULT_CAPACITY,
             )),
-            compactor_shutdown_sender: parking_lot::Mutex::new(None),
         }
     }
 
@@ -120,10 +117,6 @@ impl LocalDiskObjectStore {
         let mut ret = PathBuf::from(&self.path_prefix);
         ret.push(path);
         Ok(ret)
-    }
-
-    pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
-        *self.compactor_shutdown_sender.lock() = Some(shutdown_sender);
     }
 
     pub async fn get_read_file(&self, path: &str) -> ObjectResult<OpenReadFileHolder> {
@@ -154,14 +147,6 @@ impl LocalDiskObjectStore {
                 )
             })?;
         Ok(Arc::new(entry))
-    }
-}
-
-impl Drop for LocalDiskObjectStore {
-    fn drop(&mut self) {
-        if let Some(sender) = self.compactor_shutdown_sender.lock().take() {
-            let _ = sender.send(());
-        }
     }
 }
 

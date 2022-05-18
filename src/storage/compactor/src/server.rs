@@ -24,7 +24,7 @@ use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::SstableStore;
-use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
 use risingwave_storage::object::parse_object_store;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -60,6 +60,7 @@ pub async fn compactor_serve(
     // Boot compactor
     let registry = prometheus::Registry::new();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
+    let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
         hummock_metrics.clone(),
@@ -71,7 +72,7 @@ pub async fn compactor_serve(
             opts.state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
-            true,
+            object_metrics,
         )
         .await,
     );

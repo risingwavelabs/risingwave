@@ -67,6 +67,8 @@ impl Binder {
             Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
             Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
             Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
+            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(false, *left, *right),
+            Expr::IsNotDistinctFrom(left, right) => self.bind_distinct_from(true, *left, *right),
             Expr::Case {
                 operand,
                 conditions,
@@ -315,6 +317,51 @@ impl Binder {
     pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
+    }
+
+    pub(super) fn bind_distinct_from(
+        &mut self,
+        negated: bool,
+        left: Expr,
+        right: Expr,
+    ) -> Result<ExprImpl> {
+        let left = self.bind_expr(left)?;
+        let right = self.bind_expr(right)?;
+        let both_not_null = FunctionCall::new(
+            ExprType::And,
+            vec![
+                FunctionCall::new(ExprType::IsNotNull, vec![left.clone()])?.into(),
+                FunctionCall::new(ExprType::IsNotNull, vec![right.clone()])?.into(),
+            ],
+        );
+
+        let func_call = FunctionCall::new(
+            ExprType::Or,
+            vec![
+                FunctionCall::new(
+                    ExprType::And,
+                    vec![
+                        FunctionCall::new(ExprType::IsNull, vec![left.clone()])?.into(),
+                        FunctionCall::new(ExprType::IsNull, vec![right.clone()])?.into(),
+                    ],
+                )?
+                .into(),
+                FunctionCall::new(
+                    ExprType::And,
+                    vec![
+                        both_not_null?.into(),
+                        FunctionCall::new(ExprType::Equal, vec![left, right])?.into(),
+                    ],
+                )?
+                .into(),
+            ],
+        );
+
+        if negated {
+            Ok(func_call?.into())
+        } else {
+            Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
+        }
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {

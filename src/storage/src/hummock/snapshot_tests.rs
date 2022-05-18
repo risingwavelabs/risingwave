@@ -20,7 +20,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::*;
 use crate::hummock::test_utils::default_config_for_test;
-use crate::object::{InMemObjectStore, ObjectStoreImpl};
+use crate::object::ObjectStoreImpl;
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
 use crate::StateStore;
@@ -58,7 +58,7 @@ macro_rules! assert_count_backward_range_scan {
 
 async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     let remote_dir = "hummock_001";
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_store = Arc::new(ObjectStoreImpl::new_mem());
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
@@ -151,7 +151,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
 }
 
 async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_store = Arc::new(ObjectStoreImpl::new_mem());
     let remote_dir = "hummock_001";
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
@@ -213,7 +213,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
 }
 
 async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+    let object_store = Arc::new(ObjectStoreImpl::new_mem());
     let remote_dir = "/test";
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),

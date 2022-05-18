@@ -19,11 +19,10 @@ use risingwave_pb::batch_plan::PlanNode;
 
 use crate::executor2::{
     BoxedExecutor2, BoxedExecutor2Builder, DeleteExecutor2, ExchangeExecutor2, FilterExecutor2,
-    GenerateSeriesI32Executor2, GenerateSeriesTimestampExecutor2, HashAggExecutor2Builder,
-    HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2,
-    MergeSortExchangeExecutor2, NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2,
-    RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, TopNExecutor2,
-    TraceExecutor2, ValuesExecutor2,
+    GenerateSeriesExecutor2Builder, HashAggExecutor2Builder, HashJoinExecutor2Builder,
+    HopWindowExecutor2, InsertExecutor2, LimitExecutor2, MergeSortExchangeExecutor2,
+    NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2, RowSeqScanExecutor2Builder,
+    SortAggExecutor2, SortMergeJoinExecutor2, TopNExecutor2, TraceExecutor2, ValuesExecutor2,
 };
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -113,8 +112,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::SortMergeJoin => SortMergeJoinExecutor2,
             NodeBody::HashAgg => HashAggExecutor2Builder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutor2,
-            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor2,
-            NodeBody::GenerateTimeSeries => GenerateSeriesTimestampExecutor2,
+            NodeBody::GenerateSeries => GenerateSeriesExecutor2Builder,
             NodeBody::HopWindow => HopWindowExecutor2,
         }?;
         let input_desc = real_executor.identity().to_string();
