@@ -58,9 +58,9 @@ impl DebugExecutor {
         }
     }
 
-    #[allow(clippy::redundant_clone)]
     #[allow(clippy::let_and_return)]
-    fn wrap(
+    #[allow(dead_code)]
+    fn wrap_debug(
         info: Arc<ExecutorInfo>,
         extra: DebugExtraInfo,
         stream: impl MessageStream,
@@ -73,14 +73,45 @@ impl DebugExecutor {
             extra.metrics,
             stream,
         );
+
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
         // Epoch check
         let stream = epoch_check::epoch_check(info.clone(), stream);
         // Update check
-        let stream = update_check::update_check(info.clone(), stream);
+        let stream = update_check::update_check(info, stream);
 
         stream
+    }
+
+    #[allow(clippy::let_and_return)]
+    #[allow(dead_code)]
+    fn wrap_release(
+        info: Arc<ExecutorInfo>,
+        extra: DebugExtraInfo,
+        stream: impl MessageStream,
+    ) -> impl MessageStream {
+        // Metrics
+        let stream = trace::metrics(extra.actor_id, extra.metrics, stream);
+
+        // Epoch check
+        let stream = epoch_check::epoch_check(info, stream);
+
+        stream
+    }
+
+    #[allow(clippy::redundant_clone)]
+    #[allow(clippy::let_and_return)]
+    fn wrap(
+        info: Arc<ExecutorInfo>,
+        extra: DebugExtraInfo,
+        stream: impl MessageStream,
+    ) -> impl MessageStream {
+        #[cfg(debug_assertions)]
+        return Self::wrap_debug(info, extra, stream);
+
+        #[cfg(not(debug_assertions))]
+        return Self::wrap_release(info, extra, stream);
     }
 }
 
