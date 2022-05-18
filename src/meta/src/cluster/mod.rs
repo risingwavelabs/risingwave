@@ -30,9 +30,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::{
-    HashMappingManager, HashMappingManagerRef, IdCategory, LocalNotification, MetaSrvEnv, TableId,
-};
+use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
@@ -68,7 +66,6 @@ pub struct ClusterManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     max_heartbeat_interval: Duration,
-    hash_mapping_manager: HashMappingManagerRef<S>,
 
     core: RwLock<ClusterManagerCore>,
 }
@@ -80,12 +77,9 @@ where
     pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
-        let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
-        let dispatch_manager = Arc::new(HashMappingManager::new(&compute_nodes, meta_store).await?);
 
         Ok(Self {
             env,
-            hash_mapping_manager: dispatch_manager,
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
@@ -134,13 +128,6 @@ where
                     parallel_units,
                 };
 
-                // Alter consistent hash mapping.
-                if r#type == WorkerType::ComputeNode {
-                    self.hash_mapping_manager
-                        .add_worker_node(&worker_node)
-                        .await?;
-                }
-
                 let worker = Worker::from_protobuf(worker_node.clone());
 
                 // Persist worker node.
@@ -181,12 +168,6 @@ where
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
         let worker_node = worker.to_protobuf();
-        // Alter consistent hash mapping.
-        if worker_type == WorkerType::ComputeNode {
-            self.hash_mapping_manager
-                .delete_worker_node(&worker.worker_node)
-                .await?;
-        }
 
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
@@ -329,28 +310,28 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
-    /// Get default hash mapping, which uses all hash parallel units in the cluster.
-    pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-        self.hash_mapping_manager.get_default_mapping().await
-    }
+    // /// Get default hash mapping, which uses all hash parallel units in the cluster.
+    // pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
+    //     self.hash_mapping_manager.get_default_mapping()
+    // }
 
-    /// Get hash mapping for a specific relational state table. If the mapping does not exist yet,
-    /// then build one and return the mapping.
-    pub async fn get_table_hash_mapping(&self, table_id: &TableId) -> Result<Vec<ParallelUnitId>> {
-        match self.hash_mapping_manager.get_table_mapping(table_id).await {
-            Some(mapping) => Ok(mapping),
-            None => {
-                self.hash_mapping_manager
-                    .build_table_mapping(*table_id)
-                    .await?;
-                Ok(self
-                    .hash_mapping_manager
-                    .get_table_mapping(table_id)
-                    .await
-                    .unwrap())
-            }
-        }
-    }
+    // /// Build a vnode hash mapping for a fragment based on given parallel units.
+    // pub fn build_hash_mapping(&self, fragment_id: FragmentId, parallel_units: &[ParallelUnit]) ->
+    // Vec<ParallelUnitId> {     self.hash_mapping_manager.
+    // build_fragment_hash_mapping(fragment_id, parallel_units) }
+
+    // pub fn set_fragment_state_table(&self, fragment_id: FragmentId, state_table_id: TableId) {
+    //     self.hash_mapping_manager.set_fragment_state_table(fragment_id, state_table_id)
+    // }
+
+    // /// Get a relational states table's vnode hash mapping.
+    // pub fn get_table_hash_mapping(&self, table_id: TableId) -> Vec<ParallelUnitId> {
+    //     self.get_table_hash_mapping(table_id)
+    // }
+
+    // pub fn get_all_hash_mappings(&self) -> HashMap<TableId, Vec<ParallelUnitId>> {
+
+    // }
 
     async fn generate_cn_parallel_units(
         &self,
@@ -539,8 +520,6 @@ impl ClusterManagerCore {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
     use crate::storage::MemStore;
@@ -585,16 +564,6 @@ mod tests {
                 .unwrap();
         }
         assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
-
-        let mapping = cluster_manager
-            .hash_mapping_manager
-            .get_default_mapping()
-            .await;
-        let unique_parallel_units = HashSet::<ParallelUnitId>::from_iter(mapping.into_iter());
-        assert_eq!(
-            unique_parallel_units.len(),
-            DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1
-        );
 
         Ok(())
     }

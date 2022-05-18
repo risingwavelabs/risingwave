@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{StreamClients, StreamClientsRef};
+use super::{HashMappingManager, HashMappingManagerRef, StreamClients, StreamClientsRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
 };
@@ -39,6 +39,9 @@ where
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
+
+    /// hash mapping manager.
+    hash_mapping_manager: HashMappingManagerRef,
 
     /// stream clients memorization.
     stream_clients: StreamClientsRef,
@@ -71,11 +74,13 @@ where
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
         let notification_manager = Arc::new(NotificationManager::new());
+        let hash_mapping_manager = Arc::new(HashMappingManager::new());
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
+            hash_mapping_manager,
             stream_clients,
             opts: opts.into(),
         }
@@ -105,6 +110,14 @@ where
         self.notification_manager.deref()
     }
 
+    pub fn hash_mapping_manager_ref(&self) -> HashMappingManagerRef {
+        self.hash_mapping_manager.clone()
+    }
+
+    pub fn hash_mapping_manager(&self) -> &HashMappingManager {
+        self.hash_mapping_manager.deref()
+    }
+
     pub fn stream_clients_ref(&self) -> StreamClientsRef {
         self.stream_clients.clone()
     }
@@ -123,11 +136,13 @@ impl MetaSrvEnv<MemStore> {
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new());
         let stream_clients = Arc::new(StreamClients::default());
+        let hash_mapping_manager = Arc::new(HashMappingManager::new());
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
+            hash_mapping_manager,
             stream_clients,
             opts: MetaOpts::default().into(),
         }
