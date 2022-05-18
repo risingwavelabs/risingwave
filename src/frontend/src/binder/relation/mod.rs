@@ -173,7 +173,7 @@ impl Binder {
                         )
                     })?;
                     Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(kind, args)?,
+                        self.bind_window_table_function(alias, kind, args)?,
                     )))
                 }
             }
