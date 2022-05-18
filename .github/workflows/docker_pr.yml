@@ -28,11 +28,13 @@ jobs:
           - arch: arm
             instance_type: a1.4xlarge
             ami: ami-008e02c1f94100fd9
-    name: "ec2-start-d-{{ matrix.arch }}"
+    name: ec2-start-d
     runs-on: ubuntu-latest
     outputs:
-      label: ${{ steps.start-ec2-runner.outputs.label }}
-      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+      label-x86: ${{ steps.info.outputs.label-x86 }}
+      ec2-instance-id-x86: ${{ steps.info.outputs.ec2-instance-id-x86 }}
+      label-arm: ${{ steps.info.outputs.label-x86 }}
+      ec2-instance-id-arm: ${{ steps.info.outputs.ec2-instance-id-arm }}
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -50,11 +52,28 @@ jobs:
           ec2-instance-type: ${{ matrix.instance_type }}
           subnet-id: subnet-59743123
           security-group-id: sg-9ec32bfe
+      - name: Set outputs
+        id: info
+        run: |
+          echo "::set-output name=ec2-instance-id-${{ matrix.arch }}::${{ start-ec2-runner.outputs.ec2-instance-id }}"
+          echo "::set-output name=label-${{ matrix.arch }}::${{ start-ec2-runner.outputs.label }}"
+
   stop-runner-d:
-    name: "ec2-stop-d-{{ matrix.arch }}"
+    name: ec2-stop-d
     needs:
       - start-runner-d
       - build_docker_images
+    strategy:
+      matrix:
+        arch: [x86, arm]
+        includes:
+          - arch: x86
+            ec2-instance-id: ${{ needs.start-runner-d.outputs.ec2-instance-id-x86 }}
+            label: ${{ needs.start-runner-d.outputs.label-x86 }}
+          - arch: arm
+            ec2-instance-id: ${{ needs.start-runner-d.outputs.ec2-instance-id-arm }}
+            label: ${{ needs.start-runner-d.outputs.label-arm }}
+
     runs-on: ubuntu-latest
     if: ${{ always() }}
     steps:
@@ -69,18 +88,26 @@ jobs:
         with:
           mode: stop
           github-token: ${{ secrets.WUTAO_PAT }}
-          label: ${{ needs.start-runner-d.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner-d.outputs.ec2-instance-id }}
+          label: ${{ matrix.label }}
+          ec2-instance-id: ${{ matrix.ec2-instance-id }}
         if: ${{ always() }}
   build_docker_images:
-    name: "build_images-{{ matrix.arch }}"
-    runs-on: ${{ needs.start-runner-d.outputs.label }}
+    name: build_images
+    needs:
+      - start-runner-d
+    strategy:
+      matrix:
+        arch: [x86, arm]
+        includes:
+          - arch: x86
+            label: ${{ needs.start-runner-d.outputs.label-x86 }}
+          - arch: arm
+            label: ${{ needs.start-runner-d.outputs.label-arm }}
+    runs-on: ${{ matrix.label }}
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: -v /var/run/docker.sock:/var/run/docker.sock --security-opt seccomp=unconfined
     timeout-minutes: 60
-    needs:
-      - start-runner-d
     steps:
       - name: Checkout
         uses: actions/checkout@v2
