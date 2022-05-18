@@ -690,6 +690,33 @@ impl ScalarImpl {
             }
         })
     }
+
+    pub fn to_protobuf(d: &Datum) -> Vec<u8> {
+        let d = match d {
+            None => {return vec![];}
+            Some(d) => {d}
+        };
+
+        let body = match d {
+            ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
+            ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
+            ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
+            ScalarImpl::Float32(v) => v.to_be_bytes().to_vec(),
+            ScalarImpl::Float64(v) => v.to_be_bytes().to_vec(),
+            ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
+            ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
+            ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
+            ScalarImpl::Interval(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveDate(_) => todo!(),
+            ScalarImpl::NaiveDateTime(_) => todo!(),
+            ScalarImpl::NaiveTime(_) => todo!(),
+            ScalarImpl::Struct(v) => {
+                v.to_protobuf_owned()
+            },
+            ScalarImpl::List(_) => todo!(),
+        };
+        body
+    }
 }
 
 #[cfg(test)]

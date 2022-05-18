@@ -77,24 +77,28 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
     let Some(d) = d.as_ref() else {
         return None;
     };
-
     use risingwave_pb::expr::*;
-
-    let body = match d {
-        ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
-        ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
-        ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
-        ScalarImpl::Float32(v) => v.to_be_bytes().to_vec(),
-        ScalarImpl::Float64(v) => v.to_be_bytes().to_vec(),
-        ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
-        ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
-        ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
-        ScalarImpl::Interval(v) => v.to_protobuf_owned(),
-        ScalarImpl::NaiveDate(_) => todo!(),
-        ScalarImpl::NaiveDateTime(_) => todo!(),
-        ScalarImpl::NaiveTime(_) => todo!(),
-        ScalarImpl::Struct(_) => todo!(),
-        ScalarImpl::List(_) => todo!(),
-    };
+    let body = ScalarImpl::to_protobuf(&Some(d.clone()));
+    println!("{:?}",body);
     Some(RexNode::Constant(ConstantValue { body }))
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::StructValue;
+    use risingwave_common::types::ScalarImpl;
+    use crate::expr::literal::literal_to_protobuf;
+
+    #[test]
+    fn test_literal_to_protobuf() {
+
+        let value = StructValue::new(vec![
+            Some(ScalarImpl::Utf8("12222".to_string())),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int32(3)),
+        ]);
+        let data = Some(ScalarImpl::Struct(value));
+        literal_to_protobuf(&data);
+        assert_eq!(true,false);
+    }
 }

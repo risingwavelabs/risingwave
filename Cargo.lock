@@ -3052,7 +3052,7 @@ dependencies = [
  "memchr",
  "parking_lot 0.11.2",
  "procfs 0.10.1",
- "protobuf",
+ "protobuf 2.27.1",
  "thiserror",
 ]
 
@@ -3124,6 +3124,12 @@ dependencies = [
 
 [[package]]
 name = "protobuf"
+version = "1.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e14ccd6b79ec748412d4f2dfde1a80fa363a67def4062969f8aed3d790a30f28"
+
+[[package]]
+name = "protobuf"
 version = "2.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf7e6d18738ecd0902d30d1ad232c9125985a3422929b16c65517b38adc14f96"
@@ -3134,7 +3140,7 @@ version = "2.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aec1632b7c8f2e620343439a7dfd1f3c47b18906c4be58982079911482b5d707"
 dependencies = [
- "protobuf",
+ "protobuf 2.27.1",
 ]
 
 [[package]]
@@ -3143,7 +3149,7 @@ version = "2.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f8122fdb18e55190c796b088a16bdb70cd7acdcd48f7a8b796b58c62e532cc6"
 dependencies = [
- "protobuf",
+ "protobuf 2.27.1",
  "protobuf-codegen",
 ]
 
@@ -3700,7 +3706,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost",
- "protobuf",
+ "protobuf 2.27.1",
  "pulsar",
  "rand 0.8.5",
  "rdkafka",
@@ -3802,6 +3808,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "paste",
  "pgwire",
+ "protobuf 1.7.5",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_expr",
@@ -4001,7 +4008,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "paste",
  "prost",
- "protobuf",
+ "protobuf 2.27.1",
  "protobuf-codegen-pure",
  "rand 0.8.5",
  "rdkafka",
@@ -4324,7 +4331,7 @@ checksum = "386e6493f9a732832e6b595ac2757a3c8c9285f4ab0c27313b7696b1712c32e4"
 dependencies = [
  "linked-hash-map",
  "log 0.4.17",
- "protobuf",
+ "protobuf 2.27.1",
  "serde",
  "thiserror",
 ]

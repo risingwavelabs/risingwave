@@ -27,7 +27,7 @@ use super::{
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ScalarImpl};
 
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -311,6 +311,12 @@ impl StructValue {
 
     pub fn fields(&self) -> &[Datum] {
         &self.fields
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        self.fields.iter().flat_map(|f|{
+            ScalarImpl::to_protobuf(f)
+        }).collect_vec()
     }
 }
 
