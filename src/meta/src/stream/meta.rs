@@ -27,7 +27,7 @@ use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::{ParallelUnitId, WorkerId};
-use crate::manager::{HashMappingManager, HashMappingManagerRef, MetaSrvEnv};
+use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::set_table_vnode_mappings;
 use crate::storage::{MetaStore, Transaction};
