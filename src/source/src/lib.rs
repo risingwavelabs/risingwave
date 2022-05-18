@@ -39,16 +39,14 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 pub use table_v2::*;
 
-use crate::connector_source::{ConnectorSource, ConnectorStreamReader};
-use crate::parallel_connector_source::{ParallelConnectorSource, ParallelConnectorSourceReader};
+use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
 
 pub mod parser;
 
-pub mod connector_source;
 mod manager;
 
 mod common;
-pub mod parallel_connector_source;
+pub mod connector_source;
 mod row_id;
 mod table_v2;
 
@@ -68,14 +66,12 @@ pub enum SourceFormat {
 pub enum SourceImpl {
     TableV2(TableSourceV2),
     Connector(ConnectorSource),
-    ParallelConnector(ParallelConnectorSource),
 }
 
 #[allow(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     TableV2(TableV2StreamReader),
-    Connector(ConnectorStreamReader),
-    ParallelConnector(ParallelConnectorSourceReader),
+    Connector(ConnectorSourceReader),
 }
 
 #[async_trait]
@@ -84,7 +80,6 @@ impl StreamSourceReader for SourceStreamReaderImpl {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await,
             SourceStreamReaderImpl::Connector(c) => c.next().await,
-            SourceStreamReaderImpl::ParallelConnector(c) => c.next().await,
         }
     }
 }

@@ -204,16 +204,12 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
-            SourceImpl::Connector(c) => c
-                .stream_reader(recover_state, self.column_ids.clone())
-                .await
-                .map(SourceStreamReaderImpl::Connector),
-            SourceImpl::ParallelConnector(c) => {
+            SourceImpl::Connector(c) => {
                 let splits = try_match_expand!(recover_state, ConnectorStateV2::Splits)
                     .expect("Parallel Connector Source only support Vec<Split> as state");
                 c.stream_reader(splits, self.column_ids.clone())
                     .await
-                    .map(SourceStreamReaderImpl::ParallelConnector)
+                    .map(SourceStreamReaderImpl::Connector)
             }
         }
         .map_err(StreamExecutorError::source_error)?;

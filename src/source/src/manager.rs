@@ -29,7 +29,7 @@ use risingwave_pb::plan_common::RowFormatType;
 
 use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
-use crate::{ParallelConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
+use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
@@ -134,7 +134,7 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = info.row_id_index as usize;
 
-        let source = SourceImpl::ParallelConnector(ParallelConnectorSource {
+        let source = SourceImpl::Connector(ConnectorSource {
             config: ConnectorProperties::new(info.properties)?,
             columns: columns.clone(),
             parser,
