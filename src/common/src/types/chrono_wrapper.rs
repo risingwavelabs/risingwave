@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::AddAssign;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
@@ -232,13 +231,6 @@ impl NaiveDateTimeWrapper {
             .ok_or_else(|| InternalError("Date out of range".to_string()))?;
 
         Ok(NaiveDateTimeWrapper::new(datetime))
-    }
-}
-
-impl AddAssign<IntervalUnit> for NaiveDateTimeWrapper {
-    fn add_assign(&mut self, rhs: IntervalUnit) {
-        let durantion: Duration = rhs.into();
-        *self = NaiveDateTimeWrapper::new(self.0 + durantion);
     }
 }
 
