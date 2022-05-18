@@ -36,8 +36,8 @@ jobs:
         with:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
+          ec2-image-id: ami-008e02c1f94100fd9
+          ec2-instance-type: a1.4xlarge
           subnet-id: subnet-59743123
           security-group-id: sg-9ec32bfe
   stop-runner-d:
