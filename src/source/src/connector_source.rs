@@ -103,20 +103,20 @@ impl InnerConnectorSourceReader {
                 biased;
                 // stop chan has high priority
                 _ = stop.borrow_mut() => {
-                    log::debug!("reader {} stop signal received", self.split.id());
+                    log::debug!("connector reader {} stop signal received", self.split.id());
                     break;
                 }
 
                 chunk = self.reader.next() => {
                     match chunk.map_err(|e| internal_error(e.to_string())) {
                         Err(e) => {
-                            log::error!("reader {} error: {}", self.split.id(), e.to_string());
+                            log::error!("connector reader {} error happened {}", self.split.id(), e.to_string());
                             // just ignore
                             let _ = output.send(Either::Right(e));
                             break;
                         },
                         Ok(None) => {
-                            log::warn!("reader {} stream stopped", self.split.id());
+                            log::warn!("connector reader {} stream stopped", self.split.id());
                             break;
                         },
                         Ok(Some(msg)) => {
