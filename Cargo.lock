@@ -3732,6 +3732,7 @@ dependencies = [
  "bytes",
  "clap 3.1.17",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
