@@ -139,7 +139,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut enumerator = NexmarkSplitEnumerator::new(&props)?;
+        let mut enumerator = NexmarkSplitEnumerator::new(Box::new(props.clone())).await?;
         let list_splits_resp = enumerator
             .list_splits()
             .await?

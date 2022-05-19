@@ -33,6 +33,59 @@ use crate::pulsar::source::reader::PulsarSplitReader;
 use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
 use crate::ConnectorProperties;
 
+/// [`SplitEnumerator`] fetches the split metadata from the external source service.
+/// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
+#[async_trait]
+pub trait SplitEnumerator: Sized {
+    type Split: SplitMetaData + Send + Sync;
+    type Properties;
+
+    async fn new(properties: Self::Properties) -> Result<Self>;
+    async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+}
+
+/// [`SplitReader`] is an abstraction of the external connector read interface,
+/// used to read messages from the outside and transform them into source-oriented
+/// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
+/// messages at a time, [`Option`] is used to be compatible with the Stream API, but the stream of a
+/// Streaming system should not end
+#[async_trait]
+pub trait SplitReader: Sized {
+    type Properties;
+
+    async fn new(properties: Self::Properties, state: ConnectorStateV2) -> Result<Self>;
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+}
+
+const PULSAR_SPLIT_TYPE: &str = "pulsar";
+const S3_SPLIT_TYPE: &str = "s3";
+const KINESIS_SPLIT_TYPE: &str = "kinesis";
+const KAFKA_SPLIT_TYPE: &str = "kafka";
+const NEXMARK_SPLIT_TYPE: &str = "nexmark";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SplitImpl {
+    Kafka(KafkaSplit),
+    Pulsar(PulsarSplit),
+    Kinesis(KinesisSplit),
+    Nexmark(NexmarkSplit),
+}
+
+pub enum SplitReaderImpl {
+    Kinesis(Box<KinesisMultiSplitReader>),
+    Kafka(Box<KafkaSplitReader>),
+    Dummy(Box<DummySplitReader>),
+    Nexmark(Box<NexmarkSplitReader>),
+    Pulsar(Box<PulsarSplitReader>),
+}
+
+pub enum SplitEnumeratorImpl {
+    Kafka(KafkaSplitEnumerator),
+    Pulsar(PulsarSplitEnumerator),
+    Kinesis(KinesisSplitEnumerator),
+    Nexmark(NexmarkSplitEnumerator),
+}
+
 pub type DataType = risingwave_common::types::DataType;
 
 #[derive(Clone, Debug)]
@@ -40,17 +93,6 @@ pub struct Column {
     pub name: String,
     pub data_type: DataType,
 }
-
-const KAFKA_SOURCE: &str = "kafka";
-const KINESIS_SOURCE: &str = "kinesis";
-const PULSAR_SOURCE: &str = "pulsar";
-const NEXMARK_SOURCE: &str = "nexmark";
-
-const PULSAR_SPLIT_TYPE: &str = "pulsar";
-const S3_SPLIT_TYPE: &str = "s3";
-const KINESIS_SPLIT_TYPE: &str = "kinesis";
-const KAFKA_SPLIT_TYPE: &str = "kafka";
-const NEXMARK_SPLIT_TYPE: &str = "nexmark";
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
@@ -68,38 +110,112 @@ pub trait SplitMetaData: Sized {
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
-/// `SplitEnumerator` fetches the split metadata from the external source service.
-/// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
-#[async_trait]
-pub trait SplitEnumerator {
-    type Split: SplitMetaData + Send + Sync;
+macro_rules! impl_split_enumerator {
+    ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
+        impl SplitEnumeratorImpl {
 
-    async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+             pub async fn create(properties: ConnectorProperties) -> Result<Self> {
+                match properties {
+                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name), )*
+                    other => Err(anyhow!("split enumerator type for config {:?} is not supported", other)),
+                }
+             }
+
+             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::$variant_name).collect_vec()), )*
+                }
+             }
+        }
+    }
 }
 
-#[async_trait]
-pub trait SplitReader: Sized {
-    type Properties;
-
-    async fn new(properties: Self::Properties, state: ConnectorStateV2) -> Result<Self>;
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+impl_split_enumerator! {
+            [ ] ,
+            { Kafka, KafkaSplitEnumerator},
+            { Pulsar, PulsarSplitEnumerator },
+            { Kinesis, KinesisSplitEnumerator },
+            { Nexmark, NexmarkSplitEnumerator }
 }
 
+macro_rules! impl_split {
+    ([], $({ $variant_name:ident, $split_name:ident, $split:ty} ),*) => {
+        impl SplitImpl {
+            pub fn id(&self) -> String {
+                match self {
+                    $( Self::$variant_name(inner) => inner.id(), )*
+                }
+            }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SplitImpl {
-    Kafka(KafkaSplit),
-    Pulsar(PulsarSplit),
-    Kinesis(KinesisSplit),
-    Nexmark(NexmarkSplit),
+            pub fn to_json_bytes(&self) -> Bytes {
+                match self {
+                    $( Self::$variant_name(inner) => inner.encode_to_bytes(), )*
+                }
+            }
+
+            pub fn get_type(&self) -> String {
+                match self {
+                    $( Self::$variant_name(_) => $split_name, )*
+                }
+                    .to_string()
+            }
+
+            pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
+                match split_type.as_str() {
+                    $( $split_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*
+                    other => Err(anyhow!("split type {} not supported", other)),
+                }
+            }
+        }
+    }
 }
 
-pub enum SplitReaderImpl {
-    Kinesis(Box<KinesisMultiSplitReader>),
-    Kafka(Box<KafkaSplitReader>),
-    Dummy(Box<DummySplitReader>),
-    Nexmark(Box<NexmarkSplitReader>),
-    Pulsar(Box<PulsarSplitReader>),
+impl_split! {
+            [ ] ,
+            { Kafka, KAFKA_SPLIT_TYPE, KafkaSplit },
+            { Pulsar, PULSAR_SPLIT_TYPE, PulsarSplit },
+            { Kinesis, KINESIS_SPLIT_TYPE, KinesisSplit },
+            { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit }
+}
+
+macro_rules! impl_split_reader {
+    ([], $({ $variant_name:ident, $split_reader_name:ident} ),*) => {
+        impl SplitReaderImpl {
+            pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.next().await, )*
+                }
+            }
+
+             pub async fn create(
+                config: ConnectorProperties,
+                state: ConnectorStateV2,
+                _columns: Option<Vec<Column>>,
+            ) -> Result<Self> {
+                if let ConnectorStateV2::Splits(s) = &state {
+                    if s.is_empty() {
+                        return Ok(Self::Dummy(Box::new(DummySplitReader {})));
+                    }
+                }
+
+                let connector = match config {
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state).await?)), )*
+                    _ => todo!()
+                };
+
+                Ok(connector)
+            }
+        }
+    }
+}
+
+impl_split_reader! {
+            [ ] ,
+            { Kafka, KafkaSplitReader },
+            { Pulsar, PulsarSplitReader },
+            { Kinesis, KinesisMultiSplitReader },
+            { Nexmark, NexmarkSplitReader },
+            { Dummy, DummySplitReader }
 }
 
 /// The persistent state of the connector.
@@ -125,6 +241,7 @@ impl ConnectorState {
     }
 }
 
+// TODO: use macro and trait to simplify the code here
 impl From<SplitImpl> for ConnectorState {
     fn from(split: SplitImpl) -> Self {
         match split {
@@ -189,133 +306,4 @@ pub enum ConnectorStateV2 {
     State(ConnectorState),
     Splits(Vec<SplitImpl>),
     None,
-}
-
-pub enum SplitEnumeratorImpl {
-    Kafka(KafkaSplitEnumerator),
-    Pulsar(PulsarSplitEnumerator),
-    Kinesis(KinesisSplitEnumerator),
-    Nexmark(NexmarkSplitEnumerator),
-}
-
-impl SplitEnumeratorImpl {
-    pub async fn create(properties: ConnectorProperties) -> Result<Self> {
-        match properties {
-            ConnectorProperties::Kafka(props) => KafkaSplitEnumerator::new(props).map(Self::Kafka),
-            ConnectorProperties::Pulsar(props) => {
-                PulsarSplitEnumerator::new(props).map(Self::Pulsar)
-            }
-            ConnectorProperties::Kinesis(props) => {
-                KinesisSplitEnumerator::new(props).await.map(Self::Kinesis)
-            }
-            ConnectorProperties::Nexmark(props) => {
-                NexmarkSplitEnumerator::new(props.as_ref()).map(Self::Nexmark)
-            }
-            ConnectorProperties::S3(_) => todo!(),
-            _ => todo!(),
-        }
-    }
-}
-
-macro_rules! impl_split_enumerator {
-    ([], $({ $variant_name:ident, $split_name:ident, $split:ty} ),*) => {
-        impl SplitEnumeratorImpl {
-             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::$variant_name).collect_vec()), )*
-                }
-             }
-        }
-    }
-}
-
-impl_split_enumerator! {
-            [ ] ,
-            { Kafka, KAFKA_SPLIT_TYPE, KafkaSplit },
-            { Pulsar, PULSAR_SPLIT_TYPE, PulsarSplit },
-            { Kinesis, KINESIS_SPLIT_TYPE, KinesisSplit },
-            { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit }
-}
-
-macro_rules! impl_split {
-    ([], $({ $variant_name:ident, $split_name:ident, $split:ty} ),*) => {
-        impl SplitImpl {
-            pub fn id(&self) -> String {
-                match self {
-                    $( Self::$variant_name(inner) => inner.id(), )*
-                }
-            }
-
-            pub fn to_json_bytes(&self) -> Bytes {
-                match self {
-                    $( Self::$variant_name(inner) => inner.encode_to_bytes(), )*
-                }
-            }
-
-            pub fn get_type(&self) -> String {
-                match self {
-                    $( Self::$variant_name(_) => $split_name, )*
-                }
-                    .to_string()
-            }
-
-            pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
-                match split_type.as_str() {
-                    $( $split_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*
-                    other => Err(anyhow!("split type {} not supported", other)),
-                }
-            }
-        }
-    }
-}
-
-impl_split! {
-            [ ] ,
-            { Kafka, KAFKA_SPLIT_TYPE, KafkaSplit },
-            { Pulsar, PULSAR_SPLIT_TYPE, PulsarSplit },
-            { Kinesis, KINESIS_SPLIT_TYPE, KinesisSplit },
-            { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit }
-}
-
-
-
-
-macro_rules! impl_split_reader {
-    ([], $({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderImpl {
-            pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.next().await, )*
-                }
-            }
-
-             pub async fn create(
-                config: ConnectorProperties,
-                state: ConnectorStateV2,
-                _columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
-                if let ConnectorStateV2::Splits(s) = &state {
-                    if s.is_empty() {
-                        return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                    }
-                }
-
-                let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state).await?)), )*
-                    _ => todo!()
-                };
-
-                Ok(connector)
-            }
-        }
-    }
-}
-
-impl_split_reader! {
-            [ ] ,
-            { Kafka, KafkaSplitReader },
-            { Pulsar, PulsarSplitReader },
-            { Kinesis, KinesisMultiSplitReader },
-            { Nexmark, NexmarkSplitReader },
-            { Dummy, DummySplitReader }
 }
