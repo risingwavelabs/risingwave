@@ -66,7 +66,6 @@ impl MinOverlappingPicker {
         target_input_ssts: Vec<SstableInfo>,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let target_level = self.level + 1;
-        println!("target_input_ssts {}", target_input_ssts.len());
         let select_overlap_files = self
             .overlap_strategy
             .check_base_level_overlap(&target_input_ssts, &levels[self.level].table_infos);
@@ -93,7 +92,6 @@ impl MinOverlappingPicker {
             .iter()
             .map(|table| table.file_size)
             .sum::<u64>();
-        println!("select_overlap_files: {}, target_overlap_files: {}", select_overlap_files.len(), target_overlap_files.len());
         if select_file_size + target_file_size > self.config.max_compaction_bytes {
             (select_input_ssts, target_input_ssts)
         } else {
@@ -140,12 +138,8 @@ impl CompactionPicker for MinOverlappingPicker {
             .overlap_strategy
             .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
         if !target_input_ssts.is_empty() {
-            let (expand_select_ssts, expand_target_ssts) = self.try_expand_input(
-                levels,
-                level_handlers,
-                select_input_ssts,
-                target_input_ssts,
-            );
+            let (expand_select_ssts, expand_target_ssts) =
+                self.try_expand_input(levels, level_handlers, select_input_ssts, target_input_ssts);
             select_input_ssts = expand_select_ssts;
             target_input_ssts = expand_target_ssts;
         }
@@ -179,9 +173,12 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let picker = MinOverlappingPicker::new(0, 1, Arc::new(RangeOverlapStrategy::default(),
-        ),
-        Arc::new(CompactionConfig::default()));
+        let picker = MinOverlappingPicker::new(
+            0,
+            1,
+            Arc::new(RangeOverlapStrategy::default()),
+            Arc::new(CompactionConfig::default()),
+        );
         let levels = vec![
             Level {
                 level_idx: 0,
@@ -245,5 +242,60 @@ pub mod tests {
         assert_eq!(ret.select_level.table_infos[0].id, 1);
         assert_eq!(ret.target_level.table_infos[0].id, 5);
         assert_eq!(ret.target_level.table_infos[1].id, 6);
+    }
+
+    #[test]
+    fn test_expand_l1_files() {
+        let picker = MinOverlappingPicker::new(
+            0,
+            1,
+            Arc::new(RangeOverlapStrategy::default()),
+            Arc::new(CompactionConfig::default()),
+        );
+        let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![],
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(0, 1, 0, 100, 2),
+                    generate_table(1, 1, 101, 200, 2),
+                    generate_table(2, 1, 201, 300, 2),
+                ],
+            },
+            Level {
+                level_idx: 2,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: vec![
+                    generate_table(3, 1, 0, 50, 1),
+                    generate_table(4, 1, 51, 199, 1),
+                    generate_table(5, 1, 200, 299, 1),
+                    generate_table(6, 1, 300, 400, 1),
+                ],
+            },
+        ];
+        let mut levels_handler = vec![
+            LevelHandler::new(0),
+            LevelHandler::new(1),
+            LevelHandler::new(2),
+        ];
+
+        // pick a non-overlapping files. It means that this file could be trival move to next level.
+        let ret = picker
+            .pick_compaction(&levels, &mut levels_handler)
+            .unwrap();
+        assert_eq!(ret.select_level.level_idx, 1);
+        assert_eq!(ret.target_level.level_idx, 2);
+        assert_eq!(ret.select_level.table_infos.len(), 2);
+        assert_eq!(ret.select_level.table_infos[0].id, 1);
+        assert_eq!(ret.select_level.table_infos[1].id, 2);
+        assert_eq!(ret.target_level.table_infos.len(), 2);
+        assert_eq!(ret.target_level.table_infos[0].id, 4);
+        assert_eq!(ret.target_level.table_infos[1].id, 5);
+        assert_eq!(ret.target_level.table_infos[2].id, 6);
     }
 }
