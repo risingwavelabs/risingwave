@@ -135,7 +135,7 @@ impl LogicalMultiJoin {
                 .into()
             });
 
-        if join_ordering != (0..self.input_col_nums().iter().sum()).collect::<Vec<_>>() {
+        if join_ordering != (0..self.schema().len()) {
             output =
                 LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering))
                     .into();
@@ -201,7 +201,7 @@ impl LogicalMultiJoin {
             };
 
             let edge = eq_cond_edges.remove(0);
-            join_ordering.append(&mut vec![edge.0, edge.1]);
+            join_ordering.extend(&vec![edge.0, edge.1]);
 
             while !eq_cond_edges.is_empty() {
                 let mut found = vec![];
