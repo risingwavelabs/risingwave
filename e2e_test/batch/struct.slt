@@ -39,3 +39,17 @@ select (v2).v2 from st;
 
 statement ok
 drop table st;
+
+statement ok
+create table st (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
+
+statement ok
+insert into st values(1,(1,(1,null)));
+
+query II
+select * from st;
+----
+1 (1, (1,  ))
+
+statement ok
+drop table st;

@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 
 #[derive(Debug)]
 pub struct BoundInsert {
@@ -130,7 +130,21 @@ impl Binder {
                 return exprs
                     .into_iter()
                     .zip_eq(expected_types)
-                    .map(|(e, t)| e.cast_assign(t))
+                    .map(|(mut e, t)| {
+                        if let ExprImpl::Literal(literal) = &e {
+                            if let Some(ScalarImpl::Struct(value)) = literal.get_data() {
+                                if value.check_data_type(e.return_type().clone()) {
+                                    e = Literal::new(
+                                        Some(ScalarImpl::Struct(value.clone())),
+                                        t.clone(),
+                                    )
+                                    .into();
+                                }
+                            }
+                        }
+                        println!("{:?}",e);
+                        e.cast_assign(t)
+                    })
                     .try_collect()
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
