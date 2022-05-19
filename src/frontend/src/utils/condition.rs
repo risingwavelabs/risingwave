@@ -110,18 +110,22 @@ impl Condition {
     }
 
     /// Split the condition expressions into (N choose 2) + 1 groups: those containing two columns
-    /// from different buckets and equal condition between them, and others.
+    /// from different buckets (and optionally, needing an equal condition between them), and
+    /// others.
     ///
     /// `input_num_cols` are the number of columns in each of the input buckets. For instance, with
     /// bucket0: col0, col1, col2 | bucket1: col3, col4 | bucket2: col5
-    /// `input_num_cols` = [3, 2, 1]
+    /// input_num_cols = [3, 2, 1]
     ///
     /// Returns hashmap with keys of the form (col1, col2) where col1 < col2 in terms of their col
     /// index.
+    ///
+    /// `only_eq`: whether to only split those conditions with an eq condition predicate between two buckets.
     #[must_use]
-    pub fn split_eq_by_input_col_nums(
+    pub fn split_by_input_col_nums(
         self,
         input_col_nums: &[usize],
+        only_eq: bool,
     ) -> (HashMap<(usize, usize), Self>, Self) {
         let mut bitmaps = Vec::with_capacity(input_col_nums.len());
         let mut cols_seen = 0;
@@ -141,7 +145,7 @@ impl Condition {
                     subset_indices.push(idx);
                 }
             }
-            if subset_indices.len() != 2 || Self::as_eq_cond(&expr).is_none() {
+            if subset_indices.len() != 2 || (only_eq && Self::as_eq_cond(&expr).is_none()) {
                 non_eq_join.push(expr);
             } else {
                 // The key has the canonical ordering (lower, higher)
@@ -164,6 +168,8 @@ impl Condition {
         )
     }
 
+    /// Returns the InputRefs of an Equality predicate if it matches
+    /// ordered by the canonical ordering (lower, higher), else returns None
     fn as_eq_cond(expr: &ExprImpl) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = expr.clone()
             && function_call.get_expr_type() == ExprType::Equal
