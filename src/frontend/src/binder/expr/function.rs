@@ -69,6 +69,8 @@ impl Binder {
                     ExprType::RoundDigit
                 }
                 "abs" => ExprType::Abs,
+                "booleq" => ExprType::BoolEq,
+                "boolne" => ExprType::BoolNe,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),

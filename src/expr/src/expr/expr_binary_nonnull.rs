@@ -267,6 +267,12 @@ pub fn new_binary_expr(
     use crate::expr::data_types::*;
 
     match expr_type {
+        Type::BoolEq => {
+            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, str_eq, l, r, ret}
+        }
+        Type::BoolNe => {
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, str_ne, l, r, ret}
+        }
         Type::Equal => {
             gen_binary_expr_cmp! {gen_cmp_impl, general_eq, str_eq, l, r, ret}
         }

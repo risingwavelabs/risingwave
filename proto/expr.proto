@@ -63,6 +63,8 @@ message ExprNode {
     IS_NOT_FALSE = 304;
     IS_NULL = 305;
     IS_NOT_NULL = 306;
+    BOOL_EQ = 307;
+    BOOL_NE = 308;
     // Unary operators
     NEG = 401;
     // Nested selection operators
