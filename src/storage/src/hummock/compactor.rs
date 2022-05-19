@@ -402,7 +402,10 @@ impl Compactor {
             let sst = Sstable { id: table_id, meta };
             let len = data.len();
             ssts.push((sst.clone(), vnode_bitmaps));
-            pending_requests.push(self.context.sstable_store.put(sst, data, CachePolicy::Fill));
+            let sstable_store = self.context.sstable_store.clone();
+            let ret =
+                tokio::spawn(async move { sstable_store.put(sst, data, CachePolicy::Fill).await });
+            pending_requests.push(ret);
             if self.context.is_share_buffer_compact {
                 self.context
                     .stats
@@ -412,7 +415,12 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
         }
-        try_join_all(pending_requests).await?;
+        for ret in try_join_all(pending_requests)
+            .await
+            .map_err(HummockError::other)?
+        {
+            ret?;
+        }
         Ok((split_index, ssts))
     }
 

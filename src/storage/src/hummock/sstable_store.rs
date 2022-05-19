@@ -68,8 +68,6 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        let timer = self.stats.sst_store_put_remote_duration.start_timer();
-
         let meta = Bytes::from(sst.meta.encode_to_bytes());
 
         let data_path = self.get_sst_data_path(sst.id);
@@ -112,7 +110,6 @@ impl SstableStore {
         if let Some(block) = self.block_cache.get(sst.id, block_index) {
             return Ok(block);
         }
-        let timer = self.stats.sst_store_get_remote_duration.start_timer();
         let index = block_index as usize;
         let block_meta = sst
             .meta
@@ -154,7 +151,6 @@ impl SstableStore {
                 index_offset += 1;
             }
         }
-        timer.observe_duration();
         Ok(ret)
     }
 

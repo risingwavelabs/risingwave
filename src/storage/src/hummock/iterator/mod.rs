@@ -141,4 +141,3 @@ impl HummockIteratorDirection for Backward {
 pub struct ReadOptions {
     pub prefetch: bool,
 }
-

@@ -210,8 +210,8 @@ mod default {
     }
 
     pub fn shared_buffer_capacity() -> u32 {
-        // 256MB
-        268435456
+        // 1GB
+        1073741824
     }
 
     pub fn data_directory() -> String {
