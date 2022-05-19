@@ -242,7 +242,10 @@ impl TestCase {
         for stmt in statements {
             let context = OptimizerContext::new(session.clone());
             match stmt.clone() {
-                Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
+                Statement::Query(_)
+                | Statement::Insert { .. }
+                | Statement::Delete { .. }
+                | Statement::Update { .. } => {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
