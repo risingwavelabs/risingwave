@@ -22,8 +22,11 @@ use std::sync::Arc;
 use risingwave_pb::hummock::Level;
 
 use crate::hummock::compaction::compaction_picker::{CompactionPicker, MinOverlappingPicker};
-use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::overlap_strategy::{
+    HashStrategy, OverlapStrategy, RangeOverlapStrategy,
+};
 use crate::hummock::compaction::tier_compaction_picker::TierCompactionPicker;
+use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::compaction::{CompactionConfig, SearchResult};
 use crate::hummock::level_handler::LevelHandler;
 
@@ -62,10 +65,12 @@ pub struct DynamicLevelSelector {
 
 impl Default for DynamicLevelSelector {
     fn default() -> Self {
-        DynamicLevelSelector::new(
-            Arc::new(CompactionConfig::default()),
-            Arc::new(RangeOverlapStrategy::default()),
-        )
+        let config = Arc::new(CompactionConfig::default());
+        let overlap_strategy = match &config.compaction_mode {
+            RangeMode => Arc::new(RangeOverlapStrategy::default()) as Arc<dyn OverlapStrategy>,
+            ConsistentHashMode => Arc::new(HashStrategy::default()),
+        };
+        DynamicLevelSelector::new(config, overlap_strategy)
     }
 }
 
@@ -263,6 +268,7 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
+    use crate::hummock::compaction::CompactionMode::RangeMode;
 
     pub fn generate_tables(
         ids: Range<u64>,
@@ -291,6 +297,7 @@ pub mod tests {
             max_compaction_bytes: 0,
             level0_max_file_number: 0,
             level0_trigger_number: 2,
+            compaction_mode: RangeMode,
         };
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
@@ -367,6 +374,7 @@ pub mod tests {
             max_compaction_bytes: 10000,
             level0_max_file_number: 0,
             level0_trigger_number: 2,
+            compaction_mode: RangeMode,
         };
         let selector =
             DynamicLevelSelector::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));

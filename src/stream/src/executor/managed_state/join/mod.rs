@@ -21,7 +21,7 @@ use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
@@ -61,9 +61,14 @@ impl JoinRow {
         self.degree
     }
 
-    pub fn dec_degree(&mut self) -> u64 {
+    pub fn dec_degree(&mut self) -> RwResult<u64> {
+        if self.degree == 0 {
+            return Err(
+                ErrorCode::InternalError("Tried to decrement zero join row degree".into()).into(),
+            );
+        }
         self.degree -= 1;
-        self.degree
+        Ok(self.degree)
     }
 
     /// Serialize the `JoinRow` into a binary bytes. All values must not be null.
@@ -217,10 +222,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             Some(_) => Ok(self.inner.get_mut(key)),
             None => {
                 let keyspace = self.get_state_keyspace(key)?;
-                let all_data = keyspace
-                    .scan_strip_prefix(None, self.current_epoch)
-                    .await
-                    .unwrap();
+                let all_data = keyspace.scan(None, self.current_epoch).await.unwrap();
                 let total_count = all_data.len();
                 if total_count > 0 {
                     let state = JoinEntryState::new(

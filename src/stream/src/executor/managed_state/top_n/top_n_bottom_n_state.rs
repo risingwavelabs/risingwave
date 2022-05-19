@@ -15,9 +15,9 @@
 #![allow(clippy::mutable_key_type)]
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
 use std::vec::Drain;
 
+use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -368,7 +368,7 @@ mod tests {
         )
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_top_n_bottom_n_state() {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Descending, OrderType::Ascending];

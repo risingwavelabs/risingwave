@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
@@ -63,7 +63,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
@@ -76,6 +76,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -95,4 +96,8 @@ harness = false
 
 [[bench]]
 name = "bench_merge_iter"
+harness = false
+
+[[bench]]
+name = "bench_fs_operation"
 harness = false

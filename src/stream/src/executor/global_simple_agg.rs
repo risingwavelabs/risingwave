@@ -25,7 +25,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
 use crate::executor::aggregation::{
-    agg_input_array_refs, generate_agg_schema, generate_agg_state, AggCall, AggState,
+    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -146,9 +146,15 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
         if states.is_none() {
-            let state =
-                generate_agg_state(None, agg_calls, keyspace, input_pk_data_types, epoch, None)
-                    .await?;
+            let state = generate_managed_agg_state(
+                None,
+                agg_calls,
+                keyspace,
+                input_pk_data_types,
+                epoch,
+                None,
+            )
+            .await?;
             *states = Some(state);
         }
         let states = states.as_mut().unwrap();
@@ -289,7 +295,7 @@ mod tests {
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_local_simple_aggregation_in_memory() {
         test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
     }
@@ -322,26 +328,31 @@ mod tests {
         tx.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
+        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only,
             },
         ];
 

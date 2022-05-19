@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, FrontendConfig,
-    FrontendServiceV2, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService,
-    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
+    FrontendService, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService, PrometheusConfig,
+    PrometheusGen, PrometheusService, RedPandaConfig,
 };
 
 #[serde_with::skip_serializing_none]
@@ -39,6 +39,7 @@ pub struct ComposeService {
     pub environment: HashMap<String, String>,
     pub user: Option<String>,
     pub container_name: String,
+    pub network_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,7 +161,7 @@ impl Compose for MetaNodeConfig {
 impl Compose for FrontendConfig {
     fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
         let mut command = Command::new("frontend-node");
-        FrontendServiceV2::apply_command_args(&mut command, self)?;
+        FrontendService::apply_command_args(&mut command, self)?;
         let command = get_cmd_args(&command, true)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
@@ -255,8 +256,8 @@ impl Compose for RedPandaConfig {
         ));
 
         command.arg("--advertise-kafka-addr").arg(format!(
-            "PLAINTEXT://redpanda:{},OUTSIDE://localhost:{}",
-            self.internal_port, self.outside_port
+            "PLAINTEXT://{}:{},OUTSIDE://localhost:{}",
+            self.address, self.internal_port, self.outside_port
         ));
 
         let command = get_cmd_args(&command, true)?;
@@ -264,7 +265,10 @@ impl Compose for RedPandaConfig {
         Ok(ComposeService {
             image: image.redpanda.clone(),
             command,
-            expose: vec![self.internal_port.to_string()],
+            expose: vec![
+                self.internal_port.to_string(),
+                self.outside_port.to_string(),
+            ],
             ports: vec![format!("{}:{}", self.outside_port, self.outside_port)],
             ..Default::default()
         })

@@ -20,10 +20,11 @@ use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
@@ -59,7 +60,9 @@ pub struct SourceExecutor<S: StateStore> {
     source_identify: String,
 
     split_state_store: SourceStateHandler<S>,
-    // store latest split to offset mapping
+
+    // store latest split to offset mapping.
+    // None if there is no update on source state since the previsouly seen barrier.
     state_cache: Option<Vec<ConnectorState>>,
 }
 
@@ -201,10 +204,13 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
-            SourceImpl::Connector(c) => c
-                .stream_reader(recover_state, self.column_ids.clone())
-                .await
-                .map(SourceStreamReaderImpl::Connector),
+            SourceImpl::Connector(c) => {
+                let splits = try_match_expand!(recover_state, ConnectorStateV2::Splits)
+                    .expect("Parallel Connector Source only support Vec<Split> as state");
+                c.stream_reader(splits, self.column_ids.clone())
+                    .await
+                    .map(SourceStreamReaderImpl::Connector)
+            }
         }
         .map_err(StreamExecutorError::source_error)?;
 
@@ -231,6 +237,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                             InternalError(e.to_string()),
                                         ))
                                     })?;
+                                self.state_cache = None;
                             }
                             yield Message::Barrier(barrier)
                         }
@@ -251,51 +258,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         chunk = self.refill_row_id_column(chunk);
                     }
 
-                    let (data, ops) = chunk.into_parts();
-                    let mut chunks = DataChunk::rechunk(&[data], PROCESSING_WINDOW_SIZE)
-                        .unwrap()
-                        .into_iter();
-                    let mut ops_batch = ops.chunks(PROCESSING_WINDOW_SIZE);
-                    let mut next_chunk = None;
-                    let mut next_ops: Option<Vec<Op>> = None;
-                    loop {
-                        let (mut chunk, mut ops) = {
-                            if let Some(chunk) = std::mem::take(&mut next_chunk) {
-                                let ops = std::mem::take(&mut next_ops).unwrap();
-                                (chunk, ops.to_vec())
-                            } else if let Some(chunk) = chunks.next() {
-                                (chunk, ops_batch.next().unwrap().to_vec())
-                            } else {
-                                break;
-                            }
-                        };
-
-                        // There is paired `UpdateDelete` and `UpdateInsert` split by border, we
-                        // should re-chunk current stream chunk with next stream chunk
-                        if ops[ops.len() - 1] == Op::UpdateDelete {
-                            let pair_chunk = chunks.next().unwrap();
-                            let pair_ops = ops_batch.next().unwrap();
-                            assert!(pair_ops[0] == Op::UpdateInsert);
-
-                            let head_chunk_size = chunk.capacity() + 1;
-                            let mut new_chunks =
-                                DataChunk::rechunk_head(vec![chunk, pair_chunk], head_chunk_size)
-                                    .map_err(StreamExecutorError::eval_error)?;
-                            assert_eq!(new_chunks.len(), 2);
-
-                            chunk = std::mem::take(&mut new_chunks[0]);
-                            ops.push(pair_ops[0]);
-                            next_chunk = Some(std::mem::take(&mut new_chunks[1]));
-                            next_ops = Some(pair_ops[1..].to_vec());
-                        }
-
-                        let stream_chunk = StreamChunk::from_parts(ops, chunk);
-                        self.metrics
-                            .source_output_row_count
-                            .with_label_values(&[self.source_identify.as_str()])
-                            .inc_by(stream_chunk.cardinality() as u64);
-                        yield Message::Chunk(stream_chunk);
-                    }
+                    self.metrics
+                        .source_output_row_count
+                        .with_label_values(&[self.source_identify.as_str()])
+                        .inc_by(chunk.cardinality() as u64);
+                    yield Message::Chunk(chunk);
                 }
             }
         }
@@ -346,7 +313,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
@@ -428,10 +395,11 @@ mod tests {
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
-            tokio::spawn(async move {
+            madsim::task::spawn(async move {
                 let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            })
+            .detach();
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
@@ -473,7 +441,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_table_dropped() -> Result<()> {
         let table_id = TableId::default();
 
@@ -549,10 +517,11 @@ mod tests {
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
-            tokio::spawn(async move {
+            madsim::task::spawn(async move {
                 let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            })
+            .detach();
         };
 
         write_chunk(chunk.clone());

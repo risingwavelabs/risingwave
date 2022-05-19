@@ -23,6 +23,7 @@ use crate::error::{ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
+
 use std::fmt::{Debug, Display, Formatter};
 
 pub use native_type::*;
@@ -34,10 +35,14 @@ mod decimal;
 pub mod interval;
 
 mod ordered_float;
+
 use chrono::{Datelike, Timelike};
-pub use chrono_wrapper::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+pub use chrono_wrapper::{
+    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
+};
 pub use decimal::Decimal;
 pub use interval::*;
+use itertools::Itertools;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
@@ -87,22 +92,21 @@ impl From<&ProstDataType> for DataType {
             TypeName::Float => DataType::Float32,
             TypeName::Double => DataType::Float64,
             TypeName::Boolean => DataType::Boolean,
-            // TODO(TaoWu): Java frontend still interprets CHAR as a separate type.
-            // So to run e2e, we may return VARCHAR that mismatches with what Java frontend
-            // expected. Fix this when Java frontend fully deprecated.
-            TypeName::Varchar | TypeName::Char => DataType::Varchar,
+            TypeName::Varchar => DataType::Varchar,
             TypeName::Date => DataType::Date,
             TypeName::Time => DataType::Time,
             TypeName::Timestamp => DataType::Timestamp,
             TypeName::Timestampz => DataType::Timestampz,
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
-            TypeName::Symbol => DataType::Varchar,
-            TypeName::Struct => DataType::Struct {
-                fields: Arc::new([]),
-            },
+            TypeName::Struct => {
+                let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
+                DataType::Struct {
+                    fields: fields.into(),
+                }
+            }
             TypeName::List => DataType::List {
-                datatype: Box::new(DataType::Int32),
+                datatype: Box::new((&proto.field_type[0]).into()),
             },
         }
     }
@@ -163,9 +167,21 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
+        let field_type = {
+            match self {
+                DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
+                DataType::List { datatype } => {
+                    vec![datatype.to_protobuf()]
+                }
+                _ => {
+                    vec![]
+                }
+            }
+        };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
+            field_type,
             ..Default::default()
         }
     }
@@ -496,6 +512,7 @@ impl From<f32> for ScalarImpl {
         Self::Float32(f.into())
     }
 }
+
 impl From<f64> for ScalarImpl {
     fn from(f: f64) -> Self {
         Self::Float64(f.into())

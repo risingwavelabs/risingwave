@@ -20,7 +20,8 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use risedev::{
-    Compose, ComposeFile, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
+    Compose, ComposeFile, ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig,
+    ServiceConfig,
 };
 use serde::Deserialize;
 
@@ -33,6 +34,11 @@ pub struct RiseDevComposeOpts {
 
     #[clap(default_value = "compose")]
     profile: String,
+
+    /// Whether to use `network_mode: host` for compose. If enabled, will generate multiple compose
+    /// files based on listen address.
+    #[clap(long)]
+    host_mode: bool,
 }
 
 fn load_docker_image_config(risedev_config: &str) -> Result<DockerImageConfig> {
@@ -57,26 +63,25 @@ fn main() -> Result<()> {
     let risedev_config = ConfigExpander::expand(&risedev_config)?;
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
-    let mut compose_services = BTreeMap::new();
+    let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
     let mut volumes = BTreeMap::new();
 
     for step in steps.iter() {
         let service = services.get(step).unwrap();
-        let mut compose = match service {
+        let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
-                c.compose(&docker_image_config)?
+                (c.address.clone(), c.compose(&docker_image_config)?)
             }
             ServiceConfig::Etcd(_) => return Err(anyhow!("not supported")),
             ServiceConfig::Prometheus(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
-                c.compose(&docker_image_config)?
+                (c.address.clone(), c.compose(&docker_image_config)?)
             }
-            ServiceConfig::ComputeNode(c) => c.compose(&docker_image_config)?,
-            ServiceConfig::MetaNode(c) => c.compose(&docker_image_config)?,
-            ServiceConfig::Frontend(_) => return Err(anyhow!("not supported")),
-            ServiceConfig::FrontendV2(c) => c.compose(&docker_image_config)?,
-            ServiceConfig::Compactor(c) => c.compose(&docker_image_config)?,
+            ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&docker_image_config)?),
+            ServiceConfig::MetaNode(c) => (c.address.clone(), c.compose(&docker_image_config)?),
+            ServiceConfig::FrontendV2(c) => (c.address.clone(), c.compose(&docker_image_config)?),
+            ServiceConfig::Compactor(c) => (c.address.clone(), c.compose(&docker_image_config)?),
             ServiceConfig::Grafana(_) => {
                 return Err(anyhow!("not supported, please run Grafana outside cluster"))
             }
@@ -88,25 +93,64 @@ fn main() -> Result<()> {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
             ServiceConfig::AwsS3(_) => continue,
-            ServiceConfig::RedPanda(c) => c.compose(&docker_image_config)?,
+            ServiceConfig::RedPanda(c) => (c.address.clone(), c.compose(&docker_image_config)?),
         };
         compose.container_name = service.id().to_string();
-        compose_services.insert(step.to_string(), compose);
+        if opts.host_mode {
+            compose.network_mode = Some("host".into());
+            compose.volumes.push("/etc/hosts:/etc/hosts".into());
+            compose.depends_on = vec![];
+        }
+        compose_services
+            .entry(address)
+            .or_default()
+            .insert(step.to_string(), compose);
     }
 
-    let compose_file = ComposeFile {
-        version: "3".into(),
-        services: compose_services,
-        volumes,
-        name: format!("risingwave-{}", opts.profile),
-    };
+    if opts.host_mode {
+        for (node, services) in compose_services {
+            let mut node_volumes = BTreeMap::new();
+            services.keys().for_each(|k| {
+                if let Some(v) = volumes.get(k) {
+                    node_volumes.insert(k.clone(), v.clone());
+                }
+            });
+            let compose_file = ComposeFile {
+                version: "3".into(),
+                services,
+                volumes: node_volumes,
+                name: format!("risingwave-{}", opts.profile),
+            };
 
-    let yaml = serde_yaml::to_string(&compose_file)?;
+            let yaml = serde_yaml::to_string(&compose_file)?;
 
-    if let Some(directory) = opts.directory {
-        fs::write(Path::new(&directory).join("docker-compose.yml"), yaml)?;
+            if let Some(ref directory) = opts.directory {
+                fs::write(Path::new(directory).join(format!("{}.yml", node)), yaml)?;
+            } else {
+                return Err(anyhow!("need to specify a directory"));
+            }
+        }
     } else {
-        println!("{}", yaml);
+        let mut services = BTreeMap::new();
+        for (_, s) in compose_services {
+            for (k, v) in s {
+                services.insert(k, v);
+            }
+        }
+        let compose_file = ComposeFile {
+            version: "3".into(),
+            services,
+            volumes,
+            name: format!("risingwave-{}", opts.profile),
+        };
+
+        let yaml = serde_yaml::to_string(&compose_file)?;
+
+        if let Some(directory) = opts.directory {
+            fs::write(Path::new(&directory).join("docker-compose.yml"), yaml)?;
+        } else {
+            println!("{}", yaml);
+        }
     }
 
     Ok(())

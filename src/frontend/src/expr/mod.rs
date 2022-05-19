@@ -92,7 +92,7 @@ impl ExprImpl {
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
         let mut visitor = CollectInputRef::with_capacity(input_col_num);
         visitor.visit_expr(self);
-        visitor.collect()
+        visitor.into()
     }
 
     /// Check whether self is NULL.
@@ -188,6 +188,35 @@ impl ExprImpl {
         };
         visitor.visit_expr(self);
         visitor.has
+    }
+
+    /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
+    /// Equivalent to `!has_input_ref && !has_agg_call && !has_subquery &&
+    /// !has_correlated_input_ref` but checks them in one pass.
+    pub fn is_const(&self) -> bool {
+        struct Has {
+            has: bool,
+        }
+        impl ExprVisitor for Has {
+            fn visit_input_ref(&mut self, _: &InputRef) {
+                self.has = true;
+            }
+
+            fn visit_agg_call(&mut self, _: &AggCall) {
+                self.has = true;
+            }
+
+            fn visit_subquery(&mut self, _: &Subquery) {
+                self.has = true;
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
+                self.has = true;
+            }
+        }
+        let mut visitor = Has { has: false };
+        visitor.visit_expr(self);
+        !visitor.has
     }
 }
 

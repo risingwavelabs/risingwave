@@ -21,3 +21,13 @@ query T
 values(round(42.4382));
 ----
 42
+
+query T
+values(round(42));
+----
+42
+
+query T
+values(round(42, 1));
+----
+42

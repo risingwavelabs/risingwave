@@ -13,6 +13,9 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+#![feature(generators)]
+#![feature(proc_macro_hygiene)]
+#![feature(stmt_expr_attributes)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -33,9 +36,12 @@ mod filesystem;
 mod kafka;
 pub mod kinesis;
 mod nexmark;
+mod properties;
 mod pulsar;
-mod utils;
+
 pub use base::*;
-pub use utils::{AnyhowProperties, Properties};
+pub use properties::*;
+
+pub mod aws_utils;
 pub mod dummy_connector;
 pub mod state;

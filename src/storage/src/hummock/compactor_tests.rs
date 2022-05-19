@@ -26,7 +26,7 @@ mod tests {
     use crate::hummock::compactor::{Compactor, CompactorContext};
     use crate::hummock::{HummockStorage, SstableStore};
     use crate::monitor::StateStoreMetrics;
-    use crate::object::{InMemObjectStore, ObjectStoreImpl};
+    use crate::object::ObjectStoreImpl;
     use crate::storage_value::StorageValue;
     use crate::StateStore;
 
@@ -43,7 +43,7 @@ mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
+        let obj_client = Arc::new(ObjectStoreImpl::new_mem());
         let block_cache_capacity = 65536;
         let meta_cache_capacity = 65536;
         let sstable_store = Arc::new(SstableStore::new(
@@ -107,9 +107,13 @@ mod tests {
 
         // 2. get compact task
         let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
+            .get_compact_task()
             .await
             .unwrap()
+            .unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .await
             .unwrap();
 
         // assert compact_task
@@ -152,10 +156,7 @@ mod tests {
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
-        let compact_task = hummock_manager_ref
-            .get_compact_task(worker_node.id)
-            .await
-            .unwrap();
+        let compact_task = hummock_manager_ref.get_compact_task().await.unwrap();
 
         assert!(compact_task.is_none());
     }

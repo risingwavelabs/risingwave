@@ -65,9 +65,10 @@ impl FeMessage {
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
             b'X' => Ok(FeMessage::Terminate),
-            _ => {
-                unimplemented!("Do not support other tags regular message yet")
-            }
+            _ => Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Unsupported tag of regular message: {}", val),
+            )),
         }
     }
 }
@@ -88,10 +89,13 @@ impl FeStartupMessage {
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => Ok(FeMessage::CancelQuery),
-            _ => unimplemented!(
-                "Unsupported protocol number in start up msg {:?}",
-                protocol_num
-            ),
+            _ => Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Unsupported protocol number in start up msg {:?}",
+                    protocol_num
+                ),
+            )),
         }
     }
 }
@@ -114,8 +118,9 @@ pub enum BeMessage<'a> {
 
 #[derive(Debug)]
 pub enum BeParameterStatusMessage<'a> {
-    Encoding(&'a str),
+    ClientEncoding(&'a str),
     StandardConformingString(&'a str),
+    ServerVersion(&'a str),
 }
 
 #[derive(Debug)]
@@ -162,10 +167,11 @@ impl<'a> BeMessage<'a> {
             BeMessage::ParameterStatus(param) => {
                 use BeParameterStatusMessage::*;
                 let [name, value] = match param {
-                    Encoding(val) => [b"client_encoding", val.as_bytes()],
+                    ClientEncoding(val) => [b"client_encoding", val.as_bytes()],
                     StandardConformingString(val) => {
                         [b"standard_conforming_strings", val.as_bytes()]
                     }
+                    ServerVersion(val) => [b"server_version", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings

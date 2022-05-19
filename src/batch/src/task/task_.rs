@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use futures_async_stream::for_await;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -25,7 +26,8 @@ use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
 use tracing_futures::Instrument;
 
-use crate::executor::{BoxedExecutor, ExecutorBuilder};
+use crate::executor::ExecutorBuilder;
+use crate::executor2::BoxedExecutor2;
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::{BatchEnvironment, BatchManager};
@@ -225,7 +227,7 @@ impl BatchTaskExecution {
             self.env.clone(),
             self.epoch,
         )
-        .build()?;
+        .build2()?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         self.receivers
@@ -264,15 +266,15 @@ impl BatchTaskExecution {
         Ok(())
     }
 
-    async fn try_execute(mut root: BoxedExecutor, sender: &mut ChanSenderImpl) -> Result<()> {
-        root.open().await?;
-        while let Some(chunk) = root.next().await? {
+    async fn try_execute(root: BoxedExecutor2, sender: &mut ChanSenderImpl) -> Result<()> {
+        #[for_await]
+        for chunk in root.execute() {
+            let chunk = chunk?;
             if chunk.cardinality() > 0 {
                 sender.send(Some(chunk)).await?;
             }
         }
         sender.send(None).await?;
-        root.close().await?;
         Ok(())
     }
 

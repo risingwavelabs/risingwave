@@ -181,7 +181,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, LocalSimpleAggExecutor};
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_no_chunk() -> Result<()> {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]);
@@ -193,6 +193,7 @@ mod tests {
             kind: AggKind::RowCount,
             args: AggArgs::None,
             return_type: DataType::Int64,
+            append_only: false,
         }];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
@@ -219,7 +220,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_local_simple_agg() -> Result<()> {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
@@ -246,16 +247,19 @@ mod tests {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                append_only: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                append_only: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                append_only: false,
             },
         ];
 

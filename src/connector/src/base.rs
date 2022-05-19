@@ -21,24 +21,25 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::dummy_connector::DummySplitReader;
-use crate::kafka::source::KafkaSplitReader;
-use crate::kinesis::source::reader::KinesisSplitReader;
-use crate::kinesis::split::KinesisOffset;
-use crate::nexmark::source::reader::NexmarkSplitReader;
-
-pub enum SourceOffset {
-    Number(i64),
-    String(String),
-}
-
 use crate::kafka::enumerator::KafkaSplitEnumerator;
+use crate::kafka::source::KafkaSplitReader;
 use crate::kafka::KafkaSplit;
-use crate::kinesis::split::KinesisSplit;
+use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
+use crate::kinesis::source::reader::KinesisMultiSplitReader;
+use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::nexmark::source::reader::NexmarkSplitReader;
 use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
 use crate::pulsar::source::reader::PulsarSplitReader;
 use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
-use crate::utils::AnyhowProperties;
-use crate::{kafka, kinesis, nexmark, pulsar, Properties};
+use crate::{kafka, kinesis, nexmark, pulsar, ConnectorProperties};
+
+pub type DataType = risingwave_common::types::DataType;
+
+#[derive(Clone, Debug)]
+pub struct Column {
+    pub name: String,
+    pub data_type: DataType,
+}
 
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
@@ -153,18 +154,13 @@ pub enum ConnectorStateV2 {
 #[async_trait]
 pub trait SplitReader {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
-    /// `state` is used to recover from the formerly persisted state.
-    /// If the reader is newly created via CREATE SOURCE, the state will be none.
-    async fn new(properties: Properties, state: ConnectorStateV2) -> Result<Self>
-    where
-        Self: Sized;
 }
 
 pub enum SplitReaderImpl {
-    Kafka(KafkaSplitReader),
-    Kinesis(KinesisSplitReader),
+    Kinesis(Box<KinesisMultiSplitReader>),
+    Kafka(Box<KafkaSplitReader>),
     Dummy(DummySplitReader),
-    Nexmark(NexmarkSplitReader),
+    Nexmark(Box<NexmarkSplitReader>),
     Pulsar(PulsarSplitReader),
 }
 
@@ -179,19 +175,30 @@ impl SplitReaderImpl {
         }
     }
 
-    pub async fn create(config: Properties, state: ConnectorStateV2) -> Result<Self> {
+    pub async fn create(
+        config: ConnectorProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self> {
         if let ConnectorStateV2::Splits(s) = &state {
             if s.is_empty() {
                 return Ok(Self::Dummy(DummySplitReader {}));
             }
         }
 
-        let upstream_type = config.get_connector_type()?;
-        let connector = match upstream_type.as_str() {
-            KAFKA_SOURCE => Self::Kafka(KafkaSplitReader::new(config, state).await?),
-            KINESIS_SOURCE => Self::Kinesis(KinesisSplitReader::new(config, state).await?),
-            NEXMARK_SOURCE => Self::Nexmark(NexmarkSplitReader::new(config, state).await?),
-            PULSAR_SOURCE => Self::Pulsar(PulsarSplitReader::new(config, state).await?),
+        let connector = match config {
+            ConnectorProperties::Kafka(props) => {
+                Self::Kafka(Box::new(KafkaSplitReader::new(props, state).await?))
+            }
+            ConnectorProperties::Kinesis(props) => {
+                Self::Kinesis(Box::new(KinesisMultiSplitReader::new(props, state).await?))
+            }
+            ConnectorProperties::Nexmark(props) => {
+                Self::Nexmark(Box::new(NexmarkSplitReader::new(*props, state).await?))
+            }
+            ConnectorProperties::Pulsar(props) => {
+                Self::Pulsar(PulsarSplitReader::new(props, state).await?)
+            }
             _other => {
                 todo!()
             }
@@ -291,18 +298,19 @@ impl SplitEnumeratorImpl {
         }
     }
 
-    pub fn create(properties: &AnyhowProperties) -> Result<SplitEnumeratorImpl> {
-        let source_type = properties.get_connector_type()?;
-        match source_type.as_str() {
-            KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
-            PULSAR_SOURCE => {
-                PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
+    pub async fn create(properties: ConnectorProperties) -> Result<Self> {
+        match properties {
+            ConnectorProperties::Kafka(props) => KafkaSplitEnumerator::new(props).map(Self::Kafka),
+            ConnectorProperties::Pulsar(props) => {
+                PulsarSplitEnumerator::new(props).map(Self::Pulsar)
             }
-            KINESIS_SOURCE => todo!(),
-            NEXMARK_SOURCE => {
-                NexmarkSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Nexmark)
+            ConnectorProperties::Kinesis(props) => {
+                KinesisSplitEnumerator::new(props).await.map(Self::Kinesis)
             }
-            _ => Err(anyhow!("unsupported source type: {}", source_type)),
+            ConnectorProperties::Nexmark(props) => {
+                NexmarkSplitEnumerator::new(props.as_ref()).map(Self::Nexmark)
+            }
+            ConnectorProperties::S3(_) => todo!(),
         }
     }
 }

@@ -60,4 +60,8 @@ pub struct AggCall {
     pub args: AggArgs,
     /// The return type of aggregation function.
     pub return_type: DataType,
+
+    /// Whether the stream is append-only.
+    /// Specific `StreamingAggStateImpl` may optimize its implementation based on this knowledge.
+    pub append_only: bool,
 }

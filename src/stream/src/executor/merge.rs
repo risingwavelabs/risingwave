@@ -198,16 +198,16 @@ impl MergeExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use std::thread::sleep;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
     use futures::channel::mpsc::channel;
     use futures::SinkExt;
     use itertools::Itertools;
+    use madsim::collections::HashSet;
+    use madsim::time::sleep;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::data::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -230,7 +230,7 @@ mod tests {
         StreamChunk::new(ops, vec![], None)
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_merger() {
         const CHANNEL_NUMBER: usize = 10;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
@@ -247,7 +247,7 @@ mod tests {
 
         for mut tx in txs {
             let epochs = epochs.clone();
-            let handle = tokio::spawn(async move {
+            let handle = madsim::task::spawn(async move {
                 for epoch in epochs {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
@@ -255,7 +255,7 @@ mod tests {
                     tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
                     Barrier::new_test_barrier(1000)
@@ -289,7 +289,7 @@ mod tests {
         );
 
         for handle in handles {
-            handle.await.unwrap();
+            handle.await;
         }
     }
 
@@ -345,7 +345,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[madsim::test(flavor = "multi_thread")]
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
@@ -357,7 +357,7 @@ mod tests {
             rpc_called: rpc_called.clone(),
         });
         let cp_server_run = server_run.clone();
-        let join_handle = tokio::spawn(async move {
+        let join_handle = madsim::task::spawn(async move {
             cp_server_run.store(true, Ordering::SeqCst);
             tonic::transport::Server::builder()
                 .add_service(exchange_svc)
@@ -368,10 +368,10 @@ mod tests {
                 .unwrap();
         });
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
         assert!(server_run.load(Ordering::SeqCst));
         let (tx, mut rx) = channel(16);
-        let input_handle = tokio::spawn(async move {
+        let input_handle = madsim::task::spawn(async move {
             let remote_input =
                 RemoteInput::create(ComputeClient::new(addr.into()).await.unwrap(), (0, 0), tx)
                     .await
@@ -388,8 +388,8 @@ mod tests {
             assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
-        input_handle.await.unwrap();
+        input_handle.await;
         shutdown_send.send(()).unwrap();
-        join_handle.await.unwrap();
+        join_handle.await;
     }
 }

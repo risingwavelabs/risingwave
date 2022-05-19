@@ -23,6 +23,7 @@ impl Planner {
         match stmt {
             BoundStatement::Insert(i) => self.plan_insert(*i),
             BoundStatement::Delete(d) => self.plan_delete(*d),
+            BoundStatement::Update(u) => self.plan_update(*u),
             BoundStatement::Query(q) => self.plan_query(*q),
         }
     }

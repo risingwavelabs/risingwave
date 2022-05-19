@@ -27,7 +27,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
@@ -142,7 +142,7 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_materialized_view(
         &self,
         mut table: ProstTable,
-        _plan: StreamNode,
+        _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
@@ -154,12 +154,12 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         source: ProstSource,
         mut table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<()> {
         let source_id = self.create_source_inner(source)?;
         table.optional_associated_source_id =
             Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
-        self.create_materialized_view(table, plan).await?;
+        self.create_materialized_view(table, graph).await?;
         Ok(())
     }
 

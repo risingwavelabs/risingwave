@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_ctl"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
@@ -8,6 +8,7 @@ anyhow = "1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
 risingwave_common = { path = "../common" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
