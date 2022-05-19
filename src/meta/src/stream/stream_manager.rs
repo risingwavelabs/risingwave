@@ -133,7 +133,6 @@ where
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
                 same_worker_node_as_upstream: bool,
-                // hash_mapping_manager: HashMappingManagerRef,
             ) -> Result<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                         // If node is not chain node, recursively deal with input nodes
@@ -266,7 +265,6 @@ where
                         stream_node,
                         actor.actor_id,
                         actor.same_worker_node_as_upstream,
-                        // self.hash_mapping_manager.clone(),
                     )?;
                 }
             }

@@ -159,25 +159,6 @@ where
             return Err(InternalError("fragment has no actor".to_string()).into());
         }
 
-        macro_rules! set_fragment_vnode_mapping {
-            ($parallel_units:expr) => {
-                let vnode_mapping = self
-                    .hash_mapping_manager
-                    .build_fragment_hash_mapping(fragment.fragment_id, &$parallel_units);
-                let (original_indices, data) = compress_data(&vnode_mapping);
-                fragment.vnode_mapping = Some(ParallelUnitMapping {
-                    original_indices,
-                    data,
-                    ..Default::default()
-                });
-                // FIXME: singleton fragment really need to check this?
-                for actor in &fragment.actors {
-                    let stream_node = actor.get_nodes()?;
-                    self.set_table_vnode_mappings(stream_node, fragment.fragment_id)?;
-                }
-            };
-        }
-
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // Singleton fragment
             let actor = &fragment.actors[0];
@@ -204,7 +185,10 @@ where
                     fragment.actors[0].actor_id,
                     single_parallel_units[single_idx].clone(),
                 );
-                set_fragment_vnode_mapping!([single_parallel_units[single_idx].clone()]);
+                self.set_fragment_vnode_mapping(
+                    fragment,
+                    &[single_parallel_units[single_idx].clone()],
+                )?;
             }
         } else {
             // Normal fragment
@@ -226,9 +210,30 @@ where
                     );
                 }
             }
-            set_fragment_vnode_mapping!(parallel_units);
+            self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
         }
 
+        Ok(())
+    }
+
+    fn set_fragment_vnode_mapping(
+        &self,
+        fragment: &mut Fragment,
+        parallel_units: &[ParallelUnit],
+    ) -> Result<()> {
+        let vnode_mapping = self
+            .hash_mapping_manager
+            .build_fragment_hash_mapping(fragment.fragment_id, parallel_units);
+        let (original_indices, data) = compress_data(&vnode_mapping);
+        fragment.vnode_mapping = Some(ParallelUnitMapping {
+            original_indices,
+            data,
+            ..Default::default()
+        });
+        for actor in &fragment.actors {
+            let stream_node = actor.get_nodes()?;
+            self.set_table_vnode_mappings(stream_node, fragment.fragment_id)?;
+        }
         Ok(())
     }
 }
