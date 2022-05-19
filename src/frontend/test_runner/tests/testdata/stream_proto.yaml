@@ -19,11 +19,11 @@
                         typeName: INT32
                         isNullable: true
                       columnId: 1
-                      name: "t#v1"
+                      name: v1
                     - columnType:
                         typeName: INT64
                         isNullable: true
-                      name: "t#_row_id#0"
+                      name: "_row_id#0"
                   distributionKeys:
                     - 1
             pkIndices:
@@ -150,11 +150,11 @@
                     typeName: INT32
                     isNullable: true
                   columnId: 1
-                  name: "t#v1"
+                  name: v1
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: "t#_row_id#0"
+                  name: "_row_id#0"
               distributionKeys:
                 - 1
         pkIndices:
@@ -251,11 +251,11 @@
                     typeName: INT32
                     isNullable: true
                   columnId: 1
-                  name: "t#v1"
+                  name: v1
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: "t#_row_id#0"
+                  name: "_row_id#0"
               distributionKeys:
                 - 1
         pkIndices:
@@ -358,11 +358,11 @@
                             typeName: INT32
                             isNullable: true
                           columnId: 1
-                          name: "t#v1"
+                          name: v1
                         - columnType:
                             typeName: INT64
                             isNullable: true
-                          name: "t#_row_id#0"
+                          name: "_row_id#0"
                       distributionKeys:
                         - 1
                 pkIndices:
@@ -509,16 +509,16 @@
                                     typeName: INT32
                                     isNullable: true
                                   columnId: 1
-                                  name: "t#v1"
+                                  name: v1
                                 - columnType:
                                     typeName: INT32
                                     isNullable: true
                                   columnId: 2
-                                  name: "t#v2"
+                                  name: v2
                                 - columnType:
                                     typeName: INT64
                                     isNullable: true
-                                  name: "t#_row_id#0"
+                                  name: "_row_id#0"
                               distributionKeys:
                                 - 2
                         pkIndices:

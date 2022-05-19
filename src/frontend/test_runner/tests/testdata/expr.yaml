@@ -58,7 +58,7 @@
     BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = $0))] }
       BatchSimpleAgg { aggs: [min($0)] }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [t#v1] }
+          BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: scalar subquery */
     create table t (v1 int);
@@ -69,10 +69,10 @@
       BatchFilter { predicate: (In(1:Int32::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (1:Int32 = $1)) }
         BatchNestedLoopJoin { type: LeftOuter, predicate: true }
           BatchExchange { order: [], dist: Single }
-            BatchScan { table: b, columns: [b#b2] }
+            BatchScan { table: b, columns: [b2] }
           BatchSimpleAgg { aggs: [min($0)] }
             BatchExchange { order: [], dist: Single }
-              BatchScan { table: t, columns: [t#v1] }
+              BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: correlated ref */
     create table t (v1 int);
@@ -82,10 +82,10 @@
     BatchProject { exprs: [$1] }
       BatchNestedLoopJoin { type: LeftSemi, predicate: (In($2::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR ($3 = $0)) }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: b, columns: [b#b1, b#b2] }
+          BatchScan { table: b, columns: [b1, b2] }
         BatchExchange { order: [], dist: Single }
           BatchProject { exprs: [$0, $0] }
-            BatchScan { table: t, columns: [t#v1] }
+            BatchScan { table: t, columns: [v1] }
 - sql: |
     select +1.0, -2.0;
   batch_plan: |
@@ -139,11 +139,11 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1] }
-        StreamTableScan { table: t, columns: [t#v1, t#_row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     /* case searched form without else */
     create table t (v1 int);
@@ -151,7 +151,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2.1:Decimal)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     /* case simple form */
     create table t (v1 int);
@@ -159,7 +159,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2.0:Decimal), 2:Int32::Decimal, 0.0:Decimal)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     /* case misaligned result types */
     create table t (v1 int);
@@ -176,11 +176,11 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
       StreamProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0), $1] }
-        StreamTableScan { table: t, columns: [t#v1, t#_row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1, 2) from t;
@@ -195,18 +195,18 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Coalesce($0, 1:Int32)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
       StreamProject { exprs: [Coalesce($0, 1:Int32), $1] }
-        StreamTableScan { table: t, columns: [t#v1, t#_row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1.2) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Coalesce($0::Decimal, 1.2:Decimal)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 int);
     select coalesce() from t;
@@ -221,18 +221,18 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [ConcatWs($0, 1:Int32::Varchar)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
       StreamProject { exprs: [ConcatWs($0, 1:Int32::Varchar), $1] }
-        StreamTableScan { table: t, columns: [t#v1, t#_row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1.2) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [ConcatWs($0, 1.2:Decimal::Varchar)] }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 int);
     select concat_ws(v1, 1.2) from t;

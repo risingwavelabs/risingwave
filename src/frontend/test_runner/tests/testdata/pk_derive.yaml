@@ -25,11 +25,11 @@
           StreamProject { exprs: [$2, $0] }
             StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
               StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t1, columns: [t1#id, t1#v1, t1#_row_id#0], pk_indices: [2] }
+                StreamTableScan { table: t1, columns: [id, v1, _row_id#0], pk_indices: [2] }
           StreamProject { exprs: [$2, $0] }
             StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
               StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t2, columns: [t2#id, t2#v2, t2#_row_id#0], pk_indices: [2] }
+                StreamTableScan { table: t2, columns: [id, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (id int, v int);
     SELECT Tone.max_v, Ttwo.min_v
@@ -56,8 +56,8 @@
           StreamProject { exprs: [$2, $0] }
             StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
               StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [t#id, t#v, t#_row_id#0], pk_indices: [2] }
+                StreamTableScan { table: t, columns: [id, v, _row_id#0], pk_indices: [2] }
           StreamProject { exprs: [$2, $0] }
             StreamHashAgg { group_keys: [$0], aggs: [count, min($1)] }
               StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [t#id, t#v, t#_row_id#0], pk_indices: [2] }
+                StreamTableScan { table: t, columns: [id, v, _row_id#0], pk_indices: [2] }

@@ -8,10 +8,10 @@
     select * from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t#v1, t#v2] }
+      BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
-      StreamTableScan { table: t, columns: [t#v1, t#v2, t#_row_id#0], pk_indices: [2] }
+      StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -26,18 +26,18 @@
   stream_plan: |
     StreamMaterialize { columns: [t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
       StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
-        StreamTableScan { table: t, columns: [t#_row_id#0], pk_indices: [0] }
+        StreamTableScan { table: t, columns: [_row_id#0], pk_indices: [0] }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: ($0 < 1:Int32) }
-        BatchScan { table: t, columns: [t#v1] }
+        BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
       StreamFilter { predicate: ($0 < 1:Int32) }
-        StreamTableScan { table: t, columns: [t#v1, t#_row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     /* test boolean expression common factor extraction */
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
@@ -45,7 +45,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: $0 AND $1 AND ($0 OR $2) }
-        BatchScan { table: t, columns: [t#v1, t#v2, t#v3] }
+        BatchScan { table: t, columns: [v1, v2, v3] }
 - sql: |
     /* test boolean expression simplification */
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
@@ -53,7 +53,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: $0 AND Not($0) AND Not($1) AND $1 }
-        BatchScan { table: t, columns: [t#v1, t#v2, t#v3] }
+        BatchScan { table: t, columns: [v1, v2, v3] }
 - sql: |
     /* test boolean expression simplification */
     create table t (v1 Boolean, v2 Boolean);
@@ -61,7 +61,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: $0 AND $1 }
-        BatchScan { table: t, columns: [t#v1, t#v2] }
+        BatchScan { table: t, columns: [v1, v2] }
 - sql: |
     /* constant folding for IS TRUE, IS FALSE, IS NULL*/
     create table t(a Boolean);
@@ -69,7 +69,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: $1 }
-        LogicalScan { table: t, columns: [t#_row_id#0, t#a] }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
     /* constant folding for IS NOT TRUE, IS NOT FALSE */
     create table t(a Boolean);
@@ -77,7 +77,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: IsNotTrue($1) }
-        LogicalScan { table: t, columns: [t#_row_id#0, t#a] }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
     /* constant folding IS NOT NULL */
     create table t(a double precision);
@@ -85,16 +85,16 @@
   logical_plan: |
     LogicalProject { exprs: [$1] }
       LogicalFilter { predicate: IsNotNull($1) }
-        LogicalScan { table: t, columns: [t#_row_id#0, t#a] }
+        LogicalScan { table: t, columns: [_row_id#0, a] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t#v1] }
+      BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t#_row_id#0(hidden)], pk_columns: [t#_row_id#0] }
-      StreamTableScan { table: t, columns: [t#v1, t#_row_id#0], pk_indices: [1] }
+      StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: select 1
   batch_plan: |
     BatchProject { exprs: [1:Int32] }
@@ -104,17 +104,17 @@
     select a from t as t2(a);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t#v1] }
+      BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |
     BatchDelete { table: t }
-      BatchScan { table: t, columns: [t#_row_id#0, t#v1, t#v2] }
+      BatchScan { table: t, columns: [_row_id#0, v1, v2] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
     BatchDelete { table: t }
       BatchFilter { predicate: ($1 = 1:Int32) }
-        BatchScan { table: t, columns: [t#_row_id#0, t#v1, t#v2] }
+        BatchScan { table: t, columns: [_row_id#0, v1, v2] }
