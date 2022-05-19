@@ -140,6 +140,9 @@ pub struct StorageConfig {
     #[serde(default = "default::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
+    #[serde(default = "default::enable_local_spill")]
+    pub enable_local_spill: bool,
+
     /// Local object store root. We should call `get_local_object_store` to get the object store.
     #[serde(default = "default::local_object_store")]
     pub local_object_store: String,
@@ -242,6 +245,10 @@ mod default {
 
     pub fn disable_remote_compactor() -> bool {
         false
+    }
+
+    pub fn enable_local_spill() -> bool {
+        true
     }
 
     pub fn local_object_store() -> String {

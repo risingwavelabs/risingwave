@@ -157,6 +157,7 @@ async fn main() {
         block_cache_capacity: opts.block_cache_capacity_mb as usize * (1 << 20),
         meta_cache_capacity: opts.meta_cache_capacity_mb as usize * (1 << 20),
         disable_remote_compactor: true,
+        enable_local_spill: false,
         local_object_store: "memory".to_string(),
     });
 
