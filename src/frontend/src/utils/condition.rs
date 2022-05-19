@@ -115,12 +115,13 @@ impl Condition {
     ///
     /// `input_num_cols` are the number of columns in each of the input buckets. For instance, with
     /// bucket0: col0, col1, col2 | bucket1: col3, col4 | bucket2: col5
-    /// input_num_cols = [3, 2, 1]
+    /// `input_num_cols` = [3, 2, 1]
     ///
     /// Returns hashmap with keys of the form (col1, col2) where col1 < col2 in terms of their col
     /// index.
     ///
-    /// `only_eq`: whether to only split those conditions with an eq condition predicate between two buckets.
+    /// `only_eq`: whether to only split those conditions with an eq condition predicate between two
+    /// buckets.
     #[must_use]
     pub fn split_by_input_col_nums(
         self,
@@ -168,7 +169,7 @@ impl Condition {
         )
     }
 
-    /// Returns the InputRefs of an Equality predicate if it matches
+    /// Returns the `InputRefs` of an Equality predicate if it matches
     /// ordered by the canonical ordering (lower, higher), else returns None
     fn as_eq_cond(expr: &ExprImpl) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = expr.clone()

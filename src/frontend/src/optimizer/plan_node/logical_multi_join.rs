@@ -171,10 +171,11 @@ impl LogicalMultiJoin {
     pub(crate) fn heuristic_ordering(&self) -> Result<Vec<usize>> {
         let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
-        let (eq_join_conditions, _) =
-            self.on
-                .clone()
-                .split_by_input_col_nums(&self.input_col_nums(), /* only_eq= */ true);
+        let (eq_join_conditions, _) = self.on.clone().split_by_input_col_nums(
+            &self.input_col_nums(),
+            // only_eq=
+            true,
+        );
 
         // Iterate over all join conditions, whose keys represent edges on the join graph
         for k in eq_join_conditions.keys() {
