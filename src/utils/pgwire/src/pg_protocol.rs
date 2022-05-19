@@ -75,13 +75,31 @@ where
     }
 
     async fn do_process(&mut self) -> Result<bool> {
-        let msg = self.read_message().await?;
+        let msg = match self.read_message().await {
+            Ok(msg) => msg,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    return Err(e);
+                }
+                tracing::error!("unable to read message: {}", e);
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
+                return Ok(false);
+            }
+        };
         match msg {
             FeMessage::Ssl => {
-                self.write_message_no_flush(&BeMessage::EncryptionResponse)?;
+                self.write_message_no_flush(&BeMessage::EncryptionResponse)
+                    .map_err(|e| {
+                        tracing::error!("failed to handle ssl request: {}", e);
+                        e
+                    })?;
             }
             FeMessage::Startup(msg) => {
-                self.process_startup_msg(msg)?;
+                self.process_startup_msg(msg).map_err(|e| {
+                    tracing::error!("failed to set up pg session: {}", e);
+                    e
+                })?;
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
@@ -94,10 +112,6 @@ where
             }
             FeMessage::Terminate => {
                 self.process_terminate();
-            }
-            FeMessage::ReadError(err) => {
-                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
-                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
             }
         }
         self.flush().await?;
@@ -116,10 +130,13 @@ where
         self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::Encoding("utf8"),
+            BeParameterStatusMessage::ClientEncoding("utf8"),
         ))?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString("on"),
+        ))?;
+        self.write_message_no_flush(&BeMessage::ParameterStatus(
+            BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())

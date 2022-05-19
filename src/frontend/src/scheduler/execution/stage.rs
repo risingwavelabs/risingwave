@@ -53,8 +53,8 @@ enum StageState {
         handle: JoinHandle<Result<()>>,
     },
     Running {
-        sender: Sender<StageMessage>,
-        handle: JoinHandle<Result<()>>,
+        _sender: Sender<StageMessage>,
+        _handle: JoinHandle<Result<()>>,
     },
     Completed,
     Failed,
@@ -77,7 +77,7 @@ pub enum StageEvent {
 
 #[derive(Clone)]
 pub struct TaskStatus {
-    task_id: TaskId,
+    _task_id: TaskId,
 
     // None before task is scheduled.
     location: Option<HostAddress>,
@@ -116,7 +116,7 @@ struct StageRunner {
 impl TaskStatusHolder {
     fn new(task_id: TaskId) -> Self {
         let task_status = TaskStatus {
-            task_id,
+            _task_id: task_id,
             location: None,
         };
 
@@ -256,7 +256,10 @@ impl StageRunner {
             swap(&mut *s, &mut tmp_s);
             match tmp_s {
                 StageState::Started { sender, handle } => {
-                    *s = StageState::Running { sender, handle };
+                    *s = StageState::Running {
+                        _sender: sender,
+                        _handle: handle,
+                    };
                 }
                 _ => unreachable!(),
             }
@@ -312,7 +315,7 @@ impl StageRunner {
             .await?;
 
         self.tasks[&t_id].inner.store(Arc::new(TaskStatus {
-            task_id: t_id,
+            _task_id: t_id,
             location: Some(worker_node.host.unwrap()),
         }));
 

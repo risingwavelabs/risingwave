@@ -32,6 +32,6 @@ include ../../batch/tpch/q17.slt.part
 include ../../batch/tpch/q18.slt.part
 include ../../batch/tpch/q19.slt.part
 include ../../batch/tpch/q20.slt.part
-# include ../../batch/tpch/q21.slt.part
+include ../../batch/tpch/q21.slt.part
 
 include ../../tpch/drop_tables.slt.part

@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, FrontendConfig,
-    FrontendServiceV2, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService,
-    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
+    FrontendService, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService, PrometheusConfig,
+    PrometheusGen, PrometheusService, RedPandaConfig,
 };
 
 #[serde_with::skip_serializing_none]
@@ -161,7 +161,7 @@ impl Compose for MetaNodeConfig {
 impl Compose for FrontendConfig {
     fn compose(&self, image: &DockerImageConfig) -> Result<ComposeService> {
         let mut command = Command::new("frontend-node");
-        FrontendServiceV2::apply_command_args(&mut command, self)?;
+        FrontendService::apply_command_args(&mut command, self)?;
         let command = get_cmd_args(&command, true)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();

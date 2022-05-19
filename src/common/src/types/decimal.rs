@@ -473,6 +473,21 @@ impl Decimal {
             _ => unreachable!(),
         }
     }
+
+    pub fn abs(&self) -> Option<Self> {
+        match self {
+            Self::Normalized(d) => {
+                if d.is_sign_negative() {
+                    Some(Self::Normalized(-d))
+                } else {
+                    Some(Self::Normalized(*d))
+                }
+            }
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveINF => Some(Self::PositiveINF),
+            Self::NegativeINF => Some(Self::PositiveINF),
+        }
+    }
 }
 
 impl Default for Decimal {

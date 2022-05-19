@@ -28,7 +28,7 @@ RUN rustup self update \
 RUN cargo fetch
 RUN mkdir -p /risingwave/bin
 RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release && \
-  mv /risingwave/target/release/{frontend-v2,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
+  mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
 
 FROM ubuntu:20.04 as image-base
@@ -36,9 +36,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl 
 
 FROM image-base as frontend-node
 RUN mkdir -p /risingwave/bin
-COPY --from=builder /risingwave/bin/frontend-v2 /risingwave/bin/frontend-v2
+COPY --from=builder /risingwave/bin/frontend /risingwave/bin/frontend
 EXPOSE 4566
-ENTRYPOINT [ "/risingwave/bin/frontend-v2" ]
+ENTRYPOINT [ "/risingwave/bin/frontend" ]
 
 FROM image-base as compute-node
 RUN mkdir -p /risingwave/bin

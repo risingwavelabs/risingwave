@@ -19,17 +19,17 @@ use std::ops::RangeBounds;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_pb::hummock::{LevelType, VNodeBitmap};
+use risingwave_pb::hummock::VNodeBitmap;
 
 use super::iterator::{
     BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
     BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
 };
-use super::utils::{bitmap_overlap, validate_epoch, validate_table_key_range};
+use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
-use crate::hummock::utils::{prune_ssts, search_sst_idx};
+use crate::hummock::utils::prune_ssts;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -95,59 +95,55 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            match level.level_type() {
-                LevelType::Overlapping => {
-                    let table_infos =
-                        prune_ssts(level.get_table_infos().iter(), &key_range, backward, None);
-                    if table_infos.is_empty() {
-                        continue;
-                    }
+            let table_infos =
+                prune_ssts(level.get_table_infos().iter(), &key_range, backward, None);
+            if table_infos.is_empty() {
+                continue;
+            }
+            if can_concat(&table_infos) {
+                let start_table_idx = match key_range.start_bound() {
+                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                    _ => 0,
+                };
+                let end_table_idx = match key_range.end_bound() {
+                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                    _ => table_infos.len().saturating_sub(1),
+                };
+                assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
+                let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                    for table_info in table_infos.into_iter().rev() {
-                        let table = self.sstable_store.sstable(table_info.id).await?;
-                        if backward {
-                            overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
-                                table,
-                                self.sstable_store(),
-                            ))
-                                as BoxedBackwardHummockIterator);
-                        } else {
-                            overlapped_forward_iters.push(Box::new(SSTableIterator::new(
-                                table,
-                                self.sstable_store(),
-                            ))
-                                as BoxedForwardHummockIterator);
-                        };
-                    }
-                }
-                LevelType::Nonoverlapping => {
-                    if level.get_table_infos().is_empty() {
-                        continue;
-                    }
-
-                    let start_table_idx = match key_range.start_bound() {
-                        Included(key) | Excluded(key) => search_sst_idx(level, key),
-                        _ => 0,
-                    };
-                    let end_table_idx = match key_range.end_bound() {
-                        Included(key) | Excluded(key) => search_sst_idx(level, key),
-                        _ => level.table_infos.len().saturating_sub(1),
-                    };
-                    assert!(
-                        start_table_idx < level.table_infos.len()
-                            && end_table_idx < level.table_infos.len()
-                    );
-                    let table_infos = &level.get_table_infos()[start_table_idx..=end_table_idx];
-
+                if backward {
+                    overlapped_backward_iters.push(Box::new(BackwardConcatIterator::new(
+                        matched_table_infos
+                            .iter()
+                            .rev()
+                            .map(|&info| info.clone())
+                            .collect(),
+                        self.sstable_store(),
+                    ))
+                        as BoxedBackwardHummockIterator);
+                } else {
+                    overlapped_forward_iters.push(Box::new(ConcatIterator::new(
+                        matched_table_infos
+                            .iter()
+                            .map(|&info| info.clone())
+                            .collect_vec(),
+                        self.sstable_store(),
+                    ))
+                        as BoxedForwardHummockIterator);
+                };
+            } else {
+                for table_info in table_infos.into_iter().rev() {
+                    let table = self.sstable_store.sstable(table_info.id).await?;
                     if backward {
-                        overlapped_backward_iters.push(Box::new(BackwardConcatIterator::new(
-                            table_infos.iter().rev().cloned().collect(),
+                        overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
+                            table,
                             self.sstable_store(),
                         ))
                             as BoxedBackwardHummockIterator);
                     } else {
-                        overlapped_forward_iters.push(Box::new(ConcatIterator::new(
-                            table_infos.iter().cloned().collect_vec(),
+                        overlapped_forward_iters.push(Box::new(SSTableIterator::new(
+                            table,
                             self.sstable_store(),
                         ))
                             as BoxedForwardHummockIterator);
@@ -252,8 +248,7 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-            match level.level_type() {
-                LevelType::Overlapping => {
+             {
                     let table_infos = prune_ssts(
                         level.table_infos.iter(),
                         &(key..=key),
@@ -268,6 +263,7 @@ impl HummockStorage {
                         }
                     }
                 }
+                /*
                 LevelType::Nonoverlapping => {
                     let table_idx = search_sst_idx(level, key);
                     assert!(table_idx < level.table_infos.len());
@@ -289,7 +285,7 @@ impl HummockStorage {
                         }
                     }
                 }
-            }
+                */
         }
 
         self.stats

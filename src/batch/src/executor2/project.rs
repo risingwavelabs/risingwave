@@ -56,7 +56,11 @@ impl ProjectExecutor2 {
                 .iter_mut()
                 .map(|expr| expr.eval(&data_chunk).map(Column::new))
                 .collect::<Result<Vec<_>>>()?;
-            let ret = DataChunk::builder().columns(arrays).build();
+            let ret = if arrays.is_empty() {
+                DataChunk::new_dummy(data_chunk.cardinality())
+            } else {
+                DataChunk::builder().columns(arrays).build()
+            };
             yield ret
         }
     }

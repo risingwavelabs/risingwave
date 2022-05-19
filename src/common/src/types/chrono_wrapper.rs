@@ -15,9 +15,11 @@
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
+use std::ops::AddAssign;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
+use super::IntervalUnit;
 use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
 use crate::util::value_encoding::error::ValueEncodingError;
@@ -186,19 +188,19 @@ impl NaiveDateTimeWrapper {
         Self::with_secs_nsecs(secs, nsecs).map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 
-    pub fn parse_from_str(s: &str) -> Result<Self> {
-        Ok(NaiveDateTimeWrapper::new(
-            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-        ))
-    }
-
     pub fn sub(&self, rhs: NaiveDateTimeWrapper) -> Duration {
         self.0 - rhs.0
     }
 
     pub fn add(&self, duration: Duration) -> Self {
         NaiveDateTimeWrapper::new(self.0 + duration)
+    }
+}
+
+impl AddAssign<IntervalUnit> for NaiveDateTimeWrapper {
+    fn add_assign(&mut self, rhs: IntervalUnit) {
+        let durantion: Duration = rhs.into();
+        *self = NaiveDateTimeWrapper::new(self.0 + durantion);
     }
 }
 

@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
+use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName, TableAlias};
 
 use super::{Binder, Relation, Result};
 use crate::expr::{ExprImpl, InputRef};
@@ -54,6 +54,7 @@ pub struct BoundWindowTableFunction {
 impl Binder {
     pub(super) fn bind_window_table_function(
         &mut self,
+        alias: Option<TableAlias>,
         kind: WindowTableFunctionKind,
         args: Vec<FunctionArg>,
     ) -> Result<BoundWindowTableFunction> {
@@ -77,7 +78,6 @@ impl Binder {
         }?;
         let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
 
-        // TODO: support alias.
         let base = self.bind_table_or_source(&schema_name, &table_name, None)?;
 
         let Some(time_col_arg) = args.next() else {
@@ -136,8 +136,8 @@ impl Binder {
                 ]
                 .into_iter(),
             );
-        // TODO: support alias.
-        self.bind_context(columns, table_name.clone(), None)?;
+
+        self.bind_context(columns, table_name.clone(), alias)?;
 
         let exprs: Vec<_> = args
             .map(|arg| self.bind_function_arg(arg))

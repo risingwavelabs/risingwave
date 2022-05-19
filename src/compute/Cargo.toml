@@ -58,5 +58,7 @@ url = "2"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
+futures-async-stream = "0.2"
 rand = "0.8"
 tempfile = "3"
+
