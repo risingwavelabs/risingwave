@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -10,12 +11,6 @@ option optimize_for = SPEED;
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint64 original_indices = 1;
-  repeated uint32 data = 2;
-}
-
-// Hash mapping for compute node. Stores mapping from virtual node to parallel unit id.
-message ParallelUnitMapping {
   repeated uint64 original_indices = 1;
   repeated uint32 data = 2;
 }
@@ -165,7 +160,7 @@ message BatchPlanNode {
   plan_common.TableRefId table_ref_id = 1;
   repeated plan_common.ColumnDesc column_descs = 2;
   repeated int32 distribution_keys = 3;
-  ParallelUnitMapping hash_mapping = 4;
+  common.ParallelUnitMapping hash_mapping = 4;
   uint32 parallel_unit_id = 5;
 }
 

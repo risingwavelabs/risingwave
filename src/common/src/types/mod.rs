@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrorCode, Result, RwError};
 mod native_type;
-
+mod ops;
 mod scalar_impl;
 
 use std::fmt::{Debug, Display, Formatter};
@@ -43,6 +43,7 @@ pub use chrono_wrapper::{
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
+pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
