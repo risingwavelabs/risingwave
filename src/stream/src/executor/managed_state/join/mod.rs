@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -76,14 +76,10 @@ impl JoinRow {
         let mut vec = Vec::with_capacity(10);
 
         // Serialize row.
-        for v in &self.row.0 {
-            vec.extend_from_slice(&serialize_cell(v)?)
-        }
+        vec.extend_from_slice(&self.row.value_encode()?);
 
         // Serialize degree.
-        let mut degree_buf: Vec<u8> = vec![];
-        degree_buf.put_u64_le(self.degree);
-        vec.extend_from_slice(&degree_buf);
+        vec.extend_from_slice(&self.degree.to_le_bytes());
 
         Ok(vec)
     }
@@ -101,15 +97,13 @@ impl JoinRowDeserializer {
     }
 
     /// Deserialize the row from a memcomparable bytes.
-    pub fn deserialize(&self, mut data: &[u8]) -> RwResult<JoinRow> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
-        for ty in &self.data_types {
-            values.push(deserialize_cell(&mut data, ty)?);
-        }
+    pub fn deserialize(&self, mut data: impl Buf) -> RwResult<JoinRow> {
+        
+        let deserializer = RowDeserializer::new(self.data_types.clone());
+        let row = deserializer.value_decode(data)?;
         let degree = data.get_u64_le();
         Ok(JoinRow {
-            row: Row(values),
+            row,
             degree,
         })
     }

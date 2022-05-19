@@ -15,6 +15,7 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops;
 
+use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
@@ -25,6 +26,8 @@ use crate::types::{
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
+use crate::util::value_encoding::{serialize_datum, deserialize_datum};
+use crate::error::Result as RwResult;
 
 impl DataChunk {
     /// Get an iterator for visible rows.
@@ -254,6 +257,17 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
+    /// Serialize the row into a value encode bytes.
+    ///
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    pub fn value_encode(&self) -> RwResult<Vec<u8>> {
+        let mut vec = vec![];
+        for v in &self.0 {
+            vec.extend_from_slice(&serialize_datum(v)?);
+        }
+        Ok(vec)
+    }
+
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()
@@ -325,6 +339,16 @@ impl RowDeserializer {
         let mut deserializer = memcomparable::Deserializer::new(data);
         let datum = deserialize_datum_from(&self.data_types[datum_idx], &mut deserializer)?;
         Ok(datum)
+    }
+
+    /// Deserialize the row from a value encoding bytes.
+    pub fn value_decode(&self, mut data: impl Buf) -> RwResult<Row> {
+        let mut values = vec![];
+        values.reserve(self.data_types.len());
+        for ty in &self.data_types {
+            values.push(deserialize_datum(&mut data, ty)?);
+        }
+        Ok(Row(values))
     }
 }
 
