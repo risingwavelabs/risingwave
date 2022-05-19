@@ -29,8 +29,8 @@ use tokio::sync::RwLock;
 use crate::cluster::{ParallelUnitId, WorkerId};
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
-use crate::set_table_vnode_mappings;
 use crate::storage::{MetaStore, Transaction};
+use crate::stream::set_table_vnode_mappings;
 
 struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
@@ -431,46 +431,22 @@ where
         hash_mapping_manager: HashMappingManagerRef,
         table_fragments: &HashMap<TableId, TableFragments>,
     ) -> Result<()> {
-        use risingwave_pb::stream_plan::stream_node::NodeBody;
-        use risingwave_pb::stream_plan::StreamNode;
-
-        use crate::model::FragmentId;
-
-        struct RestoreEnv {
-            hash_mapping_manager: HashMappingManagerRef,
-        }
-
-        impl RestoreEnv {
-            set_table_vnode_mappings!();
-
-            fn restore_vnode_mappings(
-                &self,
-                table_fragments: &HashMap<TableId, TableFragments>,
-            ) -> Result<()> {
-                for fragments in table_fragments.values() {
-                    for (fragment_id, fragment) in &fragments.fragments {
-                        let mapping = fragment.vnode_mapping.as_ref().unwrap();
-                        let vnode_mapping =
-                            decompress_data(&mapping.original_indices, &mapping.data);
-                        assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
-                        self.hash_mapping_manager
-                            .set_fragment_hash_mapping(*fragment_id, vnode_mapping);
-                        for actor in &fragment.actors {
-                            let stream_node = actor.get_nodes()?;
-                            self.set_table_vnode_mappings(stream_node, fragment.fragment_id)?;
-                        }
-                    }
+        for fragments in table_fragments.values() {
+            for (fragment_id, fragment) in &fragments.fragments {
+                let mapping = fragment.vnode_mapping.as_ref().unwrap();
+                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
+                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+                hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
+                for actor in &fragment.actors {
+                    let stream_node = actor.get_nodes()?;
+                    set_table_vnode_mappings(
+                        &hash_mapping_manager,
+                        stream_node,
+                        fragment.fragment_id,
+                    )?;
                 }
-                Ok(())
             }
         }
-
-        let restore_env = RestoreEnv {
-            hash_mapping_manager,
-        };
-
-        restore_env.restore_vnode_mappings(table_fragments)?;
-
         Ok(())
     }
 }

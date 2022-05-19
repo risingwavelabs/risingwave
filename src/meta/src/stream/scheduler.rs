@@ -21,13 +21,11 @@ use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
 
+use super::set_table_vnode_mappings;
 use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::manager::HashMappingManagerRef;
-use crate::model::{ActorId, FragmentId};
-use crate::set_table_vnode_mappings;
+use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
@@ -131,8 +129,6 @@ impl<S> Scheduler<S>
 where
     S: MetaStore,
 {
-    set_table_vnode_mappings!();
-
     pub fn new(
         cluster_manager: ClusterManagerRef<S>,
         hash_mapping_manager: HashMappingManagerRef,
@@ -232,7 +228,11 @@ where
         });
         for actor in &fragment.actors {
             let stream_node = actor.get_nodes()?;
-            self.set_table_vnode_mappings(stream_node, fragment.fragment_id)?;
+            set_table_vnode_mappings(
+                &self.hash_mapping_manager,
+                stream_node,
+                fragment.fragment_id,
+            )?;
         }
         Ok(())
     }
@@ -247,7 +247,8 @@ mod test {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::plan_common::TableRefId;
-    use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, TopNNode};
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
 
     use super::*;
     use crate::cluster::ClusterManager;
