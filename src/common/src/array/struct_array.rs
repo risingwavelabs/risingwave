@@ -30,6 +30,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl};
+use crate::util::display_comma_separated;
+
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
 #[derive(Debug)]
@@ -406,19 +408,17 @@ impl Display for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StructRef::Indexed { arr, idx } => {
-                let mut s = "(".to_string();
-                arr.children.iter().for_each(|a| match a.value_at(*idx) {
-                    None => {
-                        s = s.clone() + "null,";
-                    }
-                    Some(scalar) => {
-                        s = s.clone() + &format!("{},", scalar.into_scalar_impl());
-                    }
-                });
-                s = s[0..s.len() - 1].to_string();
-                s = s.clone() + ")";
-                tracing::info!("{}",s);
-                write!(f, "{}", s)
+                let values: Vec<String> = arr
+                    .children
+                    .iter()
+                    .map(|a| match a.value_at(*idx) {
+                        None => "null".to_string(),
+                        Some(scalar) => {
+                            format!("{}", scalar.into_scalar_impl())
+                        }
+                    })
+                    .collect_vec();
+                write!(f, "({})", display_comma_separated(&values))
             }
             StructRef::ValueRef { val } => write!(f, "({})", val),
         }

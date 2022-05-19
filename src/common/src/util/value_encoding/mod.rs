@@ -65,14 +65,17 @@ fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
         ScalarRefImpl::Struct(StructRef::ValueRef { val }) => {
-            let bytes = val.to_protobuf_owned();
-            buf.put_u32_le(bytes.len() as u32);
-            buf.put_slice(bytes.as_slice());
+            serialize_struct(val.to_protobuf_owned(), buf);
         }
         _ => {
             panic!("Type is unable to be serialized.")
         }
     }
+}
+
+fn serialize_struct(bytes: Vec<u8>, mut buf: impl BufMut) {
+    buf.put_u32_le(bytes.len() as u32);
+    buf.put_slice(bytes.as_slice());
 }
 
 fn serialize_str(bytes: &[u8], mut buf: impl BufMut) {
