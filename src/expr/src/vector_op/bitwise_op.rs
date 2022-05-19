@@ -19,7 +19,8 @@ use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange}
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-
+mod arithmetic_op;
+use arithmetic_op::general_atm;
 
 #[inline(always)]
 pub fn general_shl<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
