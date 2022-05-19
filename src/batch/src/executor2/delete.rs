@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -104,9 +101,7 @@ impl DeleteExecutor2 {
             array_builder.append(Some(rows_deleted as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(array.into()))])
-                .build();
+            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
 
             yield ret_chunk
         }

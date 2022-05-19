@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::iter::once;
-use std::sync::Arc;
 
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
@@ -118,9 +117,7 @@ impl InsertExecutor2 {
             array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(array.into()))])
-                .build();
+            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
 
             yield ret_chunk
         }

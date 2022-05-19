@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
@@ -30,6 +29,7 @@ use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Build
 
 /// [`UpdateExecutor`] implements table updation with values from its child executor and given
 /// expressions.
+// TODO: multiple `UPDATE`s in a single epoch may cause problems. Need validation on materialize.
 // TODO: concurrent `UPDATE` may cause problems. A scheduler might be required.
 pub struct UpdateExecutor {
     /// Target table id.
@@ -82,6 +82,7 @@ impl UpdateExecutor {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table_v2().expect("not table source");
 
+        let schema = self.child.schema().clone();
         let mut notifiers = Vec::new();
 
         #[for_await]
@@ -99,12 +100,33 @@ impl UpdateExecutor {
                 DataChunk::builder().columns(columns).build()
             };
 
-            // TODO: May merge two chunks into one with `Op::UpdateDelete` and `Op::UpdateInsert`.
-            for (op, data_chunk) in [(Op::Delete, data_chunk), (Op::Insert, updated_data_chunk)] {
-                let stream_chunk = StreamChunk::from_parts(vec![op; len], data_chunk);
-                let notifier = source.write_chunk(stream_chunk)?;
-                notifiers.push(notifier);
+            // Merge two data chunks into (U-, U+) pairs.
+            // TODO: split chunks
+            let mut builders = schema.create_array_builders(len * 2)?;
+            for row in data_chunk
+                .rows()
+                .zip_eq(updated_data_chunk.rows())
+                .flat_map(|(a, b)| [a, b])
+            {
+                for (datum_ref, builder) in row.values().zip_eq(builders.iter_mut()) {
+                    builder.append_datum_ref(datum_ref)?;
+                }
             }
+            let columns = builders
+                .into_iter()
+                .map(|b| b.finish().map(|a| a.into()))
+                .collect::<Result<Vec<_>>>()?;
+
+            let ops = [Op::UpdateDelete, Op::UpdateInsert]
+                .into_iter()
+                .cycle()
+                .take(len * 2)
+                .collect();
+
+            let stream_chunk = StreamChunk::new(ops, columns, None);
+
+            let notifier = source.write_chunk(stream_chunk)?;
+            notifiers.push(notifier);
         }
 
         // Wait for all chunks to be taken / written.
@@ -119,15 +141,13 @@ impl UpdateExecutor {
             .sum::<usize>()
             / 2;
 
-        // create ret value
+        // Create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
             array_builder.append(Some(rows_updated as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(array.into()))])
-                .build();
+            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
 
             yield ret_chunk
         }
@@ -156,7 +176,11 @@ impl BoxedExecutor2Builder for UpdateExecutor {
         })?;
         let child = source.clone_for_plan(proto_child).build2()?;
 
-        assert_eq!(child.schema().len(), exprs.len());
+        assert_eq!(
+            child.schema().data_types(),
+            exprs.iter().map(|e| e.return_type()).collect_vec(),
+            "bad update schema"
+        );
 
         Ok(Box::new(Self::new(
             table_id,
