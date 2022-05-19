@@ -44,8 +44,8 @@ pub struct SSTableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
-impl SSTableBuilderOptions {
-    pub fn from_storage_config(options: &StorageConfig) -> SSTableBuilderOptions {
+impl From<&StorageConfig> for SSTableBuilderOptions {
+    fn from(options: &StorageConfig) -> SSTableBuilderOptions {
         SSTableBuilderOptions {
             capacity: options.sstable_size as usize,
             block_capacity: options.block_size as usize,

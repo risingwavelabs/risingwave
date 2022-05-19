@@ -44,7 +44,7 @@ use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{HummockError, SSTableBuilderOptions};
+use crate::hummock::HummockError;
 use crate::monitor::StateStoreMetrics;
 
 pub type SstableIdGenerator =
@@ -363,9 +363,7 @@ impl Compactor {
         let mut builder = GroupedSstableBuilder::new(
             || async {
                 let table_id = (self.context.sstable_id_generator)().await?;
-                let builder = SSTableBuilder::new(SSTableBuilderOptions::from_storage_config(
-                    &self.context.options,
-                ));
+                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
                 Ok((table_id, builder))
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
