@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+// TODO: could try to optimize using union-find algorithm
 #[derive(Debug)]
 pub(crate) struct ConnectedComponentLabeller {
     vertex_to_label: HashMap<usize, usize>,
