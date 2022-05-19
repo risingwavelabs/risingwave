@@ -169,10 +169,10 @@ impl Binder {
                         return false;
                     }
                 }
-                return true;
+                true
             }
             (_, _) => {
-                return true;
+                false
             }
         }
     }
