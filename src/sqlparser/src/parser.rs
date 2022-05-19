@@ -187,6 +187,7 @@ impl Parser {
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
+                Keyword::ABORT => Ok(Statement::Abort),
                 // `BEGIN` is a nonstandard but common alias for the
                 // standard `START TRANSACTION` statement. It is supported
                 // by at least PostgreSQL and MySQL.

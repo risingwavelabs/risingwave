@@ -68,7 +68,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
-                let value = state.to_json_bytes();
+                let value = state.encode_to_bytes();
                 // TODO(Yuanxin): Implement value meta
                 local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
@@ -147,7 +147,7 @@ mod tests {
             self.partition.clone()
         }
 
-        fn to_json_bytes(&self) -> Bytes {
+        fn encode_to_bytes(&self) -> Bytes {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
-        let encode_value = state_instance.to_json_bytes();
+        let encode_value = state_instance.encode_to_bytes();
         let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
@@ -133,6 +134,18 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             }
             create_index::handle_create_index(context, name, table_name, columns).await
         }
+        // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
+        // 1. Fully support transaction is too hard and gives few benefits to us.
+        // 2. Some client e.g. psycopg2 will use this statement.
+        // TODO: Track issues #2595 #2541
+        Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
+            START_TRANSACTION,
+            "Ignored temporarily.See detail in issue#2541".to_string(),
+        )),
+        Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
+            ABORT,
+            "Ignored temporarily.See detail in issue#2541".to_string(),
+        )),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }

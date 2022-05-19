@@ -119,7 +119,7 @@ impl SplitMetaData for S3FileSplit {
         format!("{}/{}", self.bucket, self.s3_file.object.path)
     }
 
-    fn to_json_bytes(&self) -> Bytes {
+    fn encode_to_bytes(&self) -> Bytes {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
@@ -147,50 +147,6 @@ impl Drop for S3FileReader {
 }
 
 impl S3FileReader {
-    /// 1. The config include all information about the connection to S3, for example:
-    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's
-    /// `access_key` and secret. For now, only static credential is supported.
-    /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
-    pub async fn new(props: S3Properties, state: ConnectorStateV2) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let s3_basic_config = S3SourceBasicConfig::from(props);
-        let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
-            AwsCredentialV2::None
-        } else {
-            AwsCredentialV2::Static {
-                access_key: s3_basic_config.clone().access,
-                secret_access: s3_basic_config.clone().secret,
-                session_token: None,
-            }
-        };
-        let aws_config = AwsConfigV2 {
-            region: None,
-            arn: None,
-            credential,
-            endpoint: None,
-        };
-        // TODO: should be use external_id parameter.
-        let shared_config = aws_config.load_config(None).await;
-        let s3_source_config = S3SourceConfig {
-            basic_config: s3_basic_config.clone(),
-            shared_config,
-            custom_config: Some(AwsCustomConfig::default()),
-            sqs_config: SqsReceiveMsgConfig::default(),
-        };
-        let mut s3_file_reader = S3FileReader::build_from_config(s3_source_config);
-        if let ConnectorStateV2::State(s3_state) = state {
-            if let Err(err) = s3_file_reader.add_s3_split(s3_state) {
-                Err(err)
-            } else {
-                Ok(s3_file_reader)
-            }
-        } else {
-            Ok(s3_file_reader)
-        }
-    }
-
     fn build_from_config(s3_source_config: S3SourceConfig) -> Self {
         let (tx, rx) = mpsc::channel(MAX_CHANNEL_BUFFER_SIZE);
         let (split_s, mut split_r) = mpsc::unbounded_channel();
@@ -356,6 +312,52 @@ impl S3FileReader {
 
 #[async_trait]
 impl SplitReader for S3FileReader {
+    type Properties = S3Properties;
+
+    /// 1. The config include all information about the connection to S3, for example:
+    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's
+    /// `access_key` and secret. For now, only static credential is supported.
+    /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
+    async fn new(props: S3Properties, state: ConnectorStateV2) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let s3_basic_config = S3SourceBasicConfig::from(props);
+        let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
+            AwsCredentialV2::None
+        } else {
+            AwsCredentialV2::Static {
+                access_key: s3_basic_config.clone().access,
+                secret_access: s3_basic_config.clone().secret,
+                session_token: None,
+            }
+        };
+        let aws_config = AwsConfigV2 {
+            region: None,
+            arn: None,
+            credential,
+            endpoint: None,
+        };
+        // TODO: should be use external_id parameter.
+        let shared_config = aws_config.load_config(None).await;
+        let s3_source_config = S3SourceConfig {
+            basic_config: s3_basic_config.clone(),
+            shared_config,
+            custom_config: Some(AwsCustomConfig::default()),
+            sqs_config: SqsReceiveMsgConfig::default(),
+        };
+        let mut s3_file_reader = S3FileReader::build_from_config(s3_source_config);
+        if let ConnectorStateV2::State(s3_state) = state {
+            if let Err(err) = s3_file_reader.add_s3_split(s3_state) {
+                Err(err)
+            } else {
+                Ok(s3_file_reader)
+            }
+        } else {
+            Ok(s3_file_reader)
+        }
+    }
+
     async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
         let mut read_chunk = self
             .s3_receive_stream
