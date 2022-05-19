@@ -22,6 +22,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorType, SstableStoreRef, TableHolder,
 };
+use crate::monitor::StoreLocalMetrics;
 
 /// Iterates backwards on a table.
 pub struct BackwardSSTableIterator {
@@ -35,6 +36,8 @@ pub struct BackwardSSTableIterator {
     pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
+
+    metrics: StoreLocalMetrics,
 }
 
 impl BackwardSSTableIterator {
@@ -44,6 +47,7 @@ impl BackwardSSTableIterator {
             cur_idx: table.value().meta.block_metas.len() - 1,
             sst: table,
             sstable_store,
+            metrics: StoreLocalMetrics::default(),
         }
     }
 
@@ -58,6 +62,7 @@ impl BackwardSSTableIterator {
                     self.sst.value(),
                     idx as u64,
                     crate::hummock::CachePolicy::Fill,
+                    &mut self.metrics,
                 )
                 .await?;
             let mut block_iter = BlockIterator::new(block);

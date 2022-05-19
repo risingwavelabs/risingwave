@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::{StateStoreMetrics, StoreLocalMetrics};
 use crate::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
@@ -44,15 +44,12 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
-    /// Statistics.
-    stats: Arc<StateStoreMetrics>,
 }
 
 impl SstableStore {
     pub fn new(
         store: ObjectStoreRef,
         path: String,
-        stats: Arc<StateStoreMetrics>,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
@@ -66,7 +63,6 @@ impl SstableStore {
             store,
             block_cache: BlockCache::new(block_cache_capacity),
             meta_cache,
-            stats,
         }
     }
 
@@ -143,10 +139,11 @@ impl SstableStore {
         sst: &Sstable,
         block_index: u64,
         policy: CachePolicy,
+        metrics: &mut StoreLocalMetrics,
     ) -> HummockResult<BlockHolder> {
-        self.stats.sst_store_block_request_counts.inc();
-
-        let fetch_block = async move {
+        metrics.cache_data_block_total += 1;
+        let fetch_block = async {
+            metrics.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
                 .block_metas

@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
+use crate::monitor::StoreLocalMetrics;
 
 pub trait SSTableIteratorType {
     type SSTableIterator: HummockIterator;
@@ -39,6 +40,7 @@ pub struct SSTableIterator {
     pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
+    metrics: StoreLocalMetrics,
 }
 
 impl SSTableIterator {
@@ -48,6 +50,7 @@ impl SSTableIterator {
             cur_idx: 0,
             sst: table,
             sstable_store,
+            metrics: StoreLocalMetrics::default(),
         }
     }
 
@@ -68,6 +71,7 @@ impl SSTableIterator {
                     self.sst.value(),
                     idx as u64,
                     crate::hummock::CachePolicy::Fill,
+                    &mut self.metrics,
                 )
                 .await?;
             let mut block_iter = BlockIterator::new(block);
