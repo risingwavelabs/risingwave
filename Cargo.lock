@@ -64,7 +64,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/apache/avro.git?branch=branch-1.11#36126feb661484f4c33e2091b9145b236a77e572"
+source = "git+https://github.com/singularity-data/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
 dependencies = [
  "byteorder 1.4.3",
  "bzip2",
@@ -1623,6 +1623,17 @@ checksum = "c3083ce4b914124575708913bca19bfe887522d6e2e6d0952943f5eac4a74010"
 dependencies = [
  "futures-core",
  "futures-sink",
+]
+
+[[package]]
+name = "futures-concurrency"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48e98b7b5aedee7c34a5cfb1ee1681af8faf46e2f30c0b8af5ea08eba517d61c"
+dependencies = [
+ "async-trait",
+ "futures-core",
+ "pin-project",
 ]
 
 [[package]]
@@ -3675,6 +3686,8 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "futures-async-stream",
+ "futures-concurrency",
  "globset",
  "http",
  "http-serde",
@@ -3719,6 +3732,7 @@ dependencies = [
  "bytes",
  "clap 3.1.17",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",

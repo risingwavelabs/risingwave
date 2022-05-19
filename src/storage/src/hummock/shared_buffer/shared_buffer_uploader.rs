@@ -13,17 +13,20 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
 use super::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::compactor::{Compactor, CompactorContext};
+use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
@@ -65,6 +68,7 @@ pub struct SharedBufferUploader {
 
     sstable_store: SstableStoreRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
 }
 
@@ -84,6 +88,7 @@ impl SharedBufferUploader {
             uploader_rx,
             sstable_store,
             hummock_meta_client,
+            next_local_sstable_id: Arc::new(AtomicU64::new(0)),
             stats,
         }
     }
@@ -118,7 +123,7 @@ impl SharedBufferUploader {
                         )),
                     );
                 } else {
-                    match self.flush(epoch, &payload).await {
+                    match self.flush(epoch, false, &payload).await {
                         Ok(tables) => {
                             task_results.insert((epoch, task_id), Ok(tables));
                         }
@@ -140,6 +145,7 @@ impl SharedBufferUploader {
     async fn flush(
         &mut self,
         epoch: HummockEpoch,
+        is_local: bool,
         batches: &Vec<SharedBufferBatch>,
     ) -> HummockResult<Vec<SstableInfo>> {
         if batches.is_empty() {
@@ -153,6 +159,18 @@ impl SharedBufferUploader {
             sstable_store: self.sstable_store.clone(),
             stats: self.stats.clone(),
             is_share_buffer_compact: true,
+            sstable_id_generator: if is_local {
+                let atomic = self.next_local_sstable_id.clone();
+                Arc::new(move || {
+                    {
+                        let atomic = atomic.clone();
+                        async move { Ok(get_local_sst_id(atomic.fetch_add(1, Relaxed))) }
+                    }
+                    .boxed()
+                })
+            } else {
+                get_remote_sstable_id_generator(self.hummock_meta_client.clone())
+            },
         };
 
         let tables = Compactor::compact_shared_buffer(

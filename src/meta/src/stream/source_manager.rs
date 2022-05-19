@@ -72,6 +72,7 @@ where
 
         let properties = ConnectorProperties::new(info.properties.clone())?;
         SplitEnumeratorImpl::create(properties)
+            .await
             .to_rw_result()?
             .list_splits()
             .await
