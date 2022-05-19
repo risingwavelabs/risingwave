@@ -17,8 +17,8 @@ include ../streaming/tpch/views/q3.slt.part
 include ../streaming/tpch/views/q5.slt.part
 include ../streaming/tpch/views/q6.slt.part
 include ../streaming/tpch/views/q7.slt.part
-include ../streaming/tpch/views/q8.join_reorder.workaround.slt.part
-include ../streaming/tpch/views/q9.join_reorder.workaround.slt.part
+include ../streaming/tpch/views/q8.slt.part
+include ../streaming/tpch/views/q9.slt.part
 include ../streaming/tpch/views/q10.slt.part
 include ../streaming/tpch/views/q12.slt.part
 include ../streaming/tpch/views/q14.slt.part
@@ -70,4 +70,3 @@ statement ok
 drop materialized view tpch_q19;
 
 include ../tpch/drop_tables.slt.part
-
