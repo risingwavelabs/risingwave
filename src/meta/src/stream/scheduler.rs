@@ -226,14 +226,15 @@ where
             data,
             ..Default::default()
         });
-        for actor in &fragment.actors {
-            let stream_node = actor.get_nodes()?;
-            set_table_vnode_mappings(
-                &self.hash_mapping_manager,
-                stream_node,
-                fragment.fragment_id,
-            )?;
-        }
+        // Looking at the first actor is enough, since all actors in one fragment have identical
+        // state table id.
+        let actor = fragment.actors.first().unwrap();
+        let stream_node = actor.get_nodes()?;
+        set_table_vnode_mappings(
+            &self.hash_mapping_manager,
+            stream_node,
+            fragment.fragment_id,
+        )?;
         Ok(())
     }
 }

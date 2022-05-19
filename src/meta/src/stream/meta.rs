@@ -437,14 +437,12 @@ where
                 let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
                 assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
                 hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
-                for actor in &fragment.actors {
-                    let stream_node = actor.get_nodes()?;
-                    set_table_vnode_mappings(
-                        &hash_mapping_manager,
-                        stream_node,
-                        fragment.fragment_id,
-                    )?;
-                }
+
+                // Looking at the first actor is enough, since all actors in one fragment have
+                // identical state table id.
+                let actor = fragment.actors.first().unwrap();
+                let stream_node = actor.get_nodes()?;
+                set_table_vnode_mappings(&hash_mapping_manager, stream_node, fragment.fragment_id)?;
             }
         }
         Ok(())
