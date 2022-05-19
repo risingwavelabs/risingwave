@@ -6,7 +6,7 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-/// AuthInfo is the information required to log in to a server.
+/// AuthInfo is the information required to login to a server.
 message AuthInfo {
   enum EncryptionType {
     UNKNOWN = 0;
