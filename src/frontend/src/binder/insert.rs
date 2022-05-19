@@ -142,7 +142,6 @@ impl Binder {
                                 }
                             }
                         }
-                        println!("{:?}", e);
                         e.cast_assign(t)
                     })
                     .try_collect()
