@@ -23,7 +23,7 @@
                     - columnType:
                         typeName: INT64
                         isNullable: true
-                      name: "_row_id#0"
+                      name: _row_id
                   distributionKeys:
                     - 1
             pkIndices:
@@ -36,7 +36,7 @@
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "_row_id#0"
+                name: _row_id
             chain:
               tableRefId:
                 tableId: 2
@@ -44,7 +44,7 @@
                 - dataType:
                     typeName: INT64
                     isNullable: true
-                  name: "_row_id#0"
+                  name: _row_id
                 - dataType:
                     typeName: INT32
                     isNullable: true
@@ -62,7 +62,7 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "_row_id#0"
+            name: _row_id
         filter:
           searchCondition:
             exprType: LESS_THAN
@@ -92,7 +92,7 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "_row_id#0"
+        name: _row_id
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -120,7 +120,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "_row_id#0"
+          name: _row_id
         isHidden: true
     orderColumnIds:
       - 1
@@ -154,7 +154,7 @@
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: "_row_id#0"
+                  name: _row_id
               distributionKeys:
                 - 1
         pkIndices:
@@ -167,7 +167,7 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "_row_id#0"
+            name: _row_id
         chain:
           tableRefId:
             tableId: 2
@@ -175,7 +175,7 @@
             - dataType:
                 typeName: INT64
                 isNullable: true
-              name: "_row_id#0"
+              name: _row_id
             - dataType:
                 typeName: INT32
                 isNullable: true
@@ -193,7 +193,7 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "_row_id#0"
+        name: _row_id
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -221,7 +221,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "_row_id#0"
+          name: _row_id
         isHidden: true
     orderColumnIds:
       - 1
@@ -255,7 +255,7 @@
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: "_row_id#0"
+                  name: _row_id
               distributionKeys:
                 - 1
         pkIndices:
@@ -268,7 +268,7 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "_row_id#0"
+            name: _row_id
         chain:
           tableRefId:
             tableId: 2
@@ -276,7 +276,7 @@
             - dataType:
                 typeName: INT64
                 isNullable: true
-              name: "_row_id#0"
+              name: _row_id
             - dataType:
                 typeName: INT32
                 isNullable: true
@@ -298,7 +298,7 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "_row_id#0"
+        name: _row_id
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -326,7 +326,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "_row_id#0"
+          name: _row_id
         isHidden: true
     orderColumnIds:
       - 1
@@ -362,7 +362,7 @@
                         - columnType:
                             typeName: INT64
                             isNullable: true
-                          name: "_row_id#0"
+                          name: _row_id
                       distributionKeys:
                         - 1
                 pkIndices:
@@ -375,7 +375,7 @@
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: "_row_id#0"
+                    name: _row_id
                 chain:
                   tableRefId:
                     tableId: 2
@@ -383,7 +383,7 @@
                     - dataType:
                         typeName: INT64
                         isNullable: true
-                      name: "_row_id#0"
+                      name: _row_id
                     - dataType:
                         typeName: INT32
                         isNullable: true
@@ -401,7 +401,7 @@
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "_row_id#0"
+                name: _row_id
             exchange:
               strategy:
                 type: SIMPLE
@@ -518,7 +518,7 @@
                                 - columnType:
                                     typeName: INT64
                                     isNullable: true
-                                  name: "_row_id#0"
+                                  name: _row_id
                               distributionKeys:
                                 - 2
                         pkIndices:
@@ -535,7 +535,7 @@
                           - dataType:
                               typeName: INT64
                               isNullable: true
-                            name: "_row_id#0"
+                            name: _row_id
                         chain:
                           tableRefId:
                             tableId: 2
@@ -543,7 +543,7 @@
                             - dataType:
                                 typeName: INT64
                                 isNullable: true
-                              name: "_row_id#0"
+                              name: _row_id
                             - dataType:
                                 typeName: INT32
                                 isNullable: true
@@ -570,7 +570,7 @@
                       - dataType:
                           typeName: INT64
                           isNullable: true
-                        name: "_row_id#0"
+                        name: _row_id
                     exchange:
                       strategy:
                         type: HASH
@@ -590,7 +590,7 @@
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: "_row_id#0"
+                    name: _row_id
                 project:
                   selectList:
                     - exprType: INPUT_REF
