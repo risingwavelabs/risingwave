@@ -36,8 +36,8 @@ use tokio::task::JoinHandle;
 
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
+use crate::handler::dml::IMPLICIT_FLUSH;
 use crate::handler::handle;
-use crate::handler::query::IMPLICIT_FLUSH;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
@@ -375,7 +375,10 @@ impl Session for SessionImpl {
         sql: &str,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)?;
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
         // With pgwire, there would be at most 1 statement in the vec.
         assert!(stmts.len() <= 1);
         if stmts.is_empty() {
@@ -387,7 +390,10 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await?;
+        let rsp = handle(self, stmt).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
         Ok(rsp)
     }
 }
