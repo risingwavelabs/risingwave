@@ -74,10 +74,14 @@ impl LogicalUpdate {
         )
     }
 
-    /// Get the logical delete's source id.
+    /// Get the logical update's source id.
     #[must_use]
     pub fn source_id(&self) -> TableId {
         self.source_id
+    }
+
+    pub fn exprs(&self) -> &[ExprImpl] {
+        self.exprs.as_ref()
     }
 }
 
@@ -122,10 +126,10 @@ impl ToBatch for LogicalUpdate {
 
 impl ToStream for LogicalUpdate {
     fn to_stream(&self) -> Result<PlanRef> {
-        unreachable!("delete should always be converted to batch plan");
+        unreachable!("update should always be converted to batch plan");
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
-        unreachable!("delete should always be converted to batch plan");
+        unreachable!("update should always be converted to batch plan");
     }
 }
