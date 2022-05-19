@@ -29,7 +29,9 @@ use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
@@ -64,6 +66,10 @@ pub struct SourceExecutor<S: StateStore> {
     // store latest split to offset mapping.
     // None if there is no update on source state since the previsouly seen barrier.
     state_cache: Option<Vec<ConnectorState>>,
+
+    /// store the handler that bridging two channels, only modify when reconstructing chunk stream
+    bridge_handler: Option<JoinHandle<UnboundedReceiver<Barrier>>>,
+    bridge_stop_tx: Option<oneshot::Sender<()>>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -95,6 +101,8 @@ impl<S: StateStore> SourceExecutor<S> {
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             split_state_store: SourceStateHandler::new(keyspace),
             state_cache: None,
+            bridge_handler: None,
+            bridge_stop_tx: None,
         })
     }
 
@@ -179,94 +187,129 @@ impl SourceReader {
     }
 }
 
+async fn bridge_channel(
+    mut rx: UnboundedReceiver<Barrier>,
+    tx: UnboundedSender<Barrier>,
+    mut stop_rx: oneshot::Receiver<()>,
+) -> UnboundedReceiver<Barrier> {
+    loop {
+        if stop_rx.try_recv().is_ok() {
+            break;
+        };
+        tx.send(rx.recv().await.unwrap()).unwrap();
+    }
+    rx
+}
+
 impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver.recv().await.unwrap();
-
         let epoch = barrier.epoch.prev;
+
+        yield Message::Barrier(barrier);
 
         let mut recover_state = ConnectorStateV2::Splits(self.stream_source_splits.clone());
         if !self.stream_source_splits.is_empty() {
             if let Ok(state) = self
                 .split_state_store
+                // TODO(tabVersion): try_recover_from_state_store change to return SplitImpl later
                 .try_recover_from_state_store(&self.stream_source_splits[0], epoch)
                 .await
             {
                 recover_state = ConnectorStateV2::State(state);
             }
         }
+        loop {
+            // avoid using original channel
+            if self.bridge_handler.is_some() {
+                self.bridge_stop_tx.take().unwrap().send(()).unwrap();
+                self.barrier_receiver = Some(self.bridge_handler.take().unwrap().await.unwrap());
+            }
+            let (tx_bk, rx_bk) = unbounded_channel::<Barrier>();
+            let (stop_tx, stop_rx) = oneshot::channel::<()>();
+            self.bridge_handler = Some(tokio::spawn(bridge_channel(
+                self.barrier_receiver.take().unwrap(),
+                tx_bk,
+                stop_rx,
+            )));
+            self.bridge_stop_tx = Some(stop_tx);
 
-        // todo: use epoch from msg to restore state from state store
-        let stream_reader = match self.source_desc.source.as_ref() {
-            SourceImpl::TableV2(t) => t
-                .stream_reader(self.column_ids.clone())
-                .await
-                .map(SourceStreamReaderImpl::TableV2),
-            SourceImpl::Connector(c) => {
-                let splits = try_match_expand!(recover_state, ConnectorStateV2::Splits)
-                    .expect("Parallel Connector Source only support Vec<Split> as state");
-                c.stream_reader(splits, self.column_ids.clone())
+            // todo: use epoch from msg to restore state from state store
+            let stream_reader = match self.source_desc.source.as_ref() {
+                SourceImpl::TableV2(t) => t
+                    .stream_reader(self.column_ids.clone())
                     .await
-                    .map(SourceStreamReaderImpl::Connector)
+                    .map(SourceStreamReaderImpl::TableV2),
+                SourceImpl::Connector(c) => {
+                    let splits = try_match_expand!(recover_state.clone(), ConnectorStateV2::Splits)
+                        .expect("Parallel Connector Source only support Vec<Split> as state");
+                    c.stream_reader(splits, self.column_ids.clone())
+                        .await
+                        .map(SourceStreamReaderImpl::Connector)
+                }
             }
-        }
-        .map_err(StreamExecutorError::source_error)?;
+            .map_err(StreamExecutorError::source_error)?;
 
-        let reader = SourceReader {
-            stream_reader: Box::new(stream_reader),
-            barrier_receiver,
-        };
-        yield Message::Barrier(barrier);
+            let reader = SourceReader {
+                stream_reader: Box::new(stream_reader),
+                barrier_receiver: rx_bk,
+            };
 
-        #[for_await]
-        for msg in reader.into_stream() {
-            match msg {
-                // This branch will be preferred.
-                Either::Left(barrier) => {
-                    match barrier.map_err(StreamExecutorError::source_error)? {
-                        Message::Barrier(barrier) => {
-                            let epoch = barrier.epoch.prev;
-                            if self.state_cache.is_some() {
-                                self.split_state_store
-                                    .take_snapshot(self.state_cache.clone().unwrap(), epoch)
-                                    .await
-                                    .map_err(|e| {
-                                        StreamExecutorError::source_error(RwError::from(
-                                            InternalError(e.to_string()),
-                                        ))
-                                    })?;
-                                self.state_cache = None;
+            #[for_await]
+            for msg in reader.into_stream() {
+                match msg {
+                    // This branch will be preferred.
+                    Either::Left(barrier) => {
+                        match barrier.map_err(StreamExecutorError::source_error)? {
+                            Message::Barrier(barrier) => {
+                                let epoch = barrier.epoch.prev;
+                                if self.state_cache.is_some() {
+                                    self.split_state_store
+                                        .take_snapshot(self.state_cache.clone().unwrap(), epoch)
+                                        .await
+                                        .map_err(|e| {
+                                            StreamExecutorError::source_error(RwError::from(
+                                                InternalError(e.to_string()),
+                                            ))
+                                        })?;
+                                    self.state_cache = None;
+                                }
+                                if false {
+                                    // TODO handle mutation here
+                                    recover_state = ConnectorStateV2::Splits(vec![]);
+                                    break;
+                                }
+
+                                yield Message::Barrier(barrier)
                             }
-                            yield Message::Barrier(barrier)
+                            _ => unreachable!(),
                         }
-                        _ => unreachable!(),
                     }
-                }
-                Either::Right(chunk_with_state) => {
-                    let chunk_with_state =
-                        chunk_with_state.map_err(StreamExecutorError::source_error)?;
-                    if chunk_with_state.split_offset_mapping.is_some() {
-                        self.state_cache = Some(ConnectorState::from_hashmap(
-                            chunk_with_state.split_offset_mapping.unwrap(),
-                        ));
-                    }
-                    let mut chunk = chunk_with_state.chunk;
+                    Either::Right(chunk_with_state) => {
+                        let chunk_with_state =
+                            chunk_with_state.map_err(StreamExecutorError::source_error)?;
+                        if chunk_with_state.split_offset_mapping.is_some() {
+                            self.state_cache = Some(ConnectorState::from_hashmap(
+                                chunk_with_state.split_offset_mapping.unwrap(),
+                            ));
+                        }
+                        let mut chunk = chunk_with_state.chunk;
 
-                    if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-                        chunk = self.refill_row_id_column(chunk);
-                    }
+                        if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
+                            chunk = self.refill_row_id_column(chunk);
+                        }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(&[self.source_identify.as_str()])
-                        .inc_by(chunk.cardinality() as u64);
-                    yield Message::Chunk(chunk);
+                        self.metrics
+                            .source_output_row_count
+                            .with_label_values(&[self.source_identify.as_str()])
+                            .inc_by(chunk.cardinality() as u64);
+                        yield Message::Chunk(chunk);
+                    }
                 }
             }
         }
-        unreachable!();
     }
 }
 
