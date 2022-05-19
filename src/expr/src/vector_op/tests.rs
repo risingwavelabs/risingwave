@@ -154,29 +154,42 @@ fn test_comparison() {
         Some(Decimal::from_str("1.0").unwrap()),
         Some(2)
     )
+    .unwrap()
     .unwrap());
     assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
         Some(Decimal::from_str("1.0").unwrap()),
         Some(2.0)
     )
+    .unwrap()
     .unwrap());
     assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
         Some(Decimal::from_str("1.0").unwrap()),
         None
     )
+    .unwrap()
     .unwrap());
-    assert!(general_is_distinct_from::<Decimal, i32, Decimal>(None, Some(1)).unwrap());
+    assert!(
+        general_is_distinct_from::<Decimal, i32, Decimal>(None, Some(1))
+            .unwrap()
+            .unwrap()
+    );
     assert!(!general_is_distinct_from::<Decimal, i32, Decimal>(
         Some(Decimal::from_str("1.0").unwrap()),
         Some(1)
     )
+    .unwrap()
     .unwrap());
     assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(
         Some(Decimal::from_str("1.0").unwrap()),
         Some(1.0)
     )
+    .unwrap()
     .unwrap());
-    assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(None, None).unwrap());
+    assert!(
+        !general_is_distinct_from::<Decimal, f32, Decimal>(None, None)
+            .unwrap()
+            .unwrap()
+    );
     assert!(general_eq::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(!general_ne::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
     assert!(!general_lt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
@@ -186,6 +199,7 @@ fn test_comparison() {
     assert!(
         !general_is_distinct_from::<OrderedF32, i32, OrderedF64>(Some(1.0.into()), Some(1))
             .unwrap()
+            .unwrap()
     );
     assert!(general_eq::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!general_ne::<i64, i32, i64>(1i64, 1).unwrap());
@@ -193,7 +207,11 @@ fn test_comparison() {
     assert!(general_le::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!general_gt::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(general_ge::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!general_is_distinct_from::<i64, i32, i64>(Some(1i64), Some(1)).unwrap());
+    assert!(
+        !general_is_distinct_from::<i64, i32, i64>(Some(1i64), Some(1))
+            .unwrap()
+            .unwrap()
+    );
 }
 
 #[test]
