@@ -116,7 +116,8 @@ impl Condition {
     /// bucket0: col0, col1, col2 | bucket1: col3, col4 | bucket2: col5
     /// `input_num_cols` = [3, 2, 1]
     ///
-    /// Returns hashmap with keys of the form (col1, col2) where col1 < col2 in terms of their col index.
+    /// Returns hashmap with keys of the form (col1, col2) where col1 < col2 in terms of their col
+    /// index.
     #[must_use]
     pub fn split_eq_by_input_col_nums(
         self,
