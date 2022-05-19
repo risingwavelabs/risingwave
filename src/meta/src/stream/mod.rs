@@ -39,9 +39,9 @@ pub fn set_table_vnode_mappings(
     stream_node: &StreamNode,
     fragment_id: FragmentId,
 ) -> Result<()> {
-    // We only consider stateful operator with multiple parallel degrees here. Singleton stateful
+    // We only consider stateful operators with multiple parallel degrees here. Singleton stateful
     // operators will not have vnode mappings, so that compactors could omit the unnecessary probing
-    // for vnode mappings.
+    // on vnode mappings.
     match stream_node.get_node_body()? {
         NodeBody::Materialize(node) => {
             let table_id = node.get_table_ref_id()?.get_table_id() as u32;
