@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -88,25 +89,57 @@ impl BlockLocation {
     }
 }
 
+pub trait EmptyFutureTrait<'a> = Future<Output = ObjectResult<()>> + 'a;
+pub trait ReadFutureTrait<'a> = Future<Output = ObjectResult<Bytes>> + 'a;
+pub trait ReadvFutureTrait<'a> = Future<Output = ObjectResult<Vec<Bytes>>> + 'a;
+pub trait MetadataFutureTrait<'a> = Future<Output = ObjectResult<ObjectMetadata>> + 'a;
+
+#[macro_export]
+macro_rules! define_object_store_associated_types {
+    () => {
+        type UploadFuture<'a> = impl $crate::object::EmptyFutureTrait<'a>;
+        type ReadFuture<'a> = impl $crate::object::ReadFutureTrait<'a>;
+        type ReadvFuture<'a> = impl $crate::object::ReadvFutureTrait<'a>;
+        type MetadataFuture<'a> = impl $crate::object::MetadataFutureTrait<'a>;
+        type DeleteFuture<'a> = impl $crate::object::EmptyFutureTrait<'a>;
+    };
+}
+
 /// The implementation must be thread-safe.
-#[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
+    type UploadFuture<'a>: EmptyFutureTrait<'a>
+    where
+        Self: 'a;
+    type ReadFuture<'a>: ReadFutureTrait<'a>
+    where
+        Self: 'a;
+    type ReadvFuture<'a>: ReadvFutureTrait<'a>
+    where
+        Self: 'a;
+    type MetadataFuture<'a>: MetadataFutureTrait<'a>
+    where
+        Self: 'a;
+    type DeleteFuture<'a>: EmptyFutureTrait<'a>
+    where
+        Self: 'a;
+
     /// Uploads the object to `ObjectStore`.
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
+    fn upload<'a>(&'a self, path: &'a str, obj: Bytes) -> Self::UploadFuture<'_>;
 
     /// If the `block_loc` is None, the whole object will be return.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
+    fn read<'a>(&'a self, path: &'a str, block_loc: Option<BlockLocation>) -> Self::ReadFuture<'_>;
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
+    fn readv<'a>(&'a self, path: &'a str, block_locs: &'a [BlockLocation])
+        -> Self::ReadvFuture<'_>;
 
     /// Obtains the object metadata.
-    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
+    fn metadata<'a>(&'a self, path: &'a str) -> Self::MetadataFuture<'_>;
 
     /// Deletes blob permanently.
-    async fn delete(&self, path: &str) -> ObjectResult<()>;
+    fn delete<'a>(&'a self, path: &'a str) -> Self::DeleteFuture<'_>;
 
     fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
     where
