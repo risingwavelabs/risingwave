@@ -214,7 +214,7 @@ To run end-to-end test, you will need to start a full cluster first:
 Then run some e2e tests:
 
 ```shell
-./risedev slt -p 4566 './e2e_test/v2/**/*.slt'
+./risedev slt -p 4566 './e2e_test/streaming/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.
