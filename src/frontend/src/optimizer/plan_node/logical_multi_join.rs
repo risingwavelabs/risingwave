@@ -135,7 +135,7 @@ impl LogicalMultiJoin {
                 .into()
             });
 
-        if join_ordering != (0..self.schema().len()) {
+        if join_ordering != (0..self.schema().len()).collect::<Vec<_>>() {
             output =
                 LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering))
                     .into();
