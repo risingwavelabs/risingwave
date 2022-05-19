@@ -348,6 +348,7 @@ impl ColPrunable for LogicalJoin {
                 join.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns, self.schema().len()),
             )
+            .into()
         }
     }
 }
@@ -854,5 +855,84 @@ mod tests {
         // // Expected plan: HashJoin(($1 = $3) AND ($2 == 42))
         // let hash_join = result.as_stream_hash_join().unwrap();
         // assert_eq!(hash_join.eq_join_predicate().all_cond().as_expr(), on_cond);
+    }
+    /// Pruning
+    /// ```text
+    /// Join(on: input_ref(1)=input_ref(3))
+    ///   TableScan(v1, v2, v3)
+    ///   TableScan(v4, v5, v6)
+    /// ```
+    /// with required columns [3, 2] will result in
+    /// ```text
+    /// Project(input_ref(2), input_ref(1))
+    ///   Join(on: input_ref(0)=input_ref(2))
+    ///     TableScan(v2, v3)
+    ///     TableScan(v4)
+    /// ```
+    #[tokio::test]
+    async fn test_join_column_prune_with_order_required() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = (1..7)
+            .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
+            .collect();
+        let left = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields[0..3].to_vec(),
+            },
+            ctx.clone(),
+        );
+        let right = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields[3..6].to_vec(),
+            },
+            ctx,
+        );
+        let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty))),
+                ],
+            )
+            .unwrap(),
+        ));
+        let join_type = JoinType::Inner;
+        let join = LogicalJoin::new(
+            left.into(),
+            right.into(),
+            join_type,
+            Condition::with_expr(on),
+        );
+
+        // Perform the prune
+        let required_cols = vec![3, 2];
+        let plan = join.prune_col(&required_cols);
+
+        // Check the result
+        let project = plan.as_logical_project().unwrap();
+        assert_eq!(project.exprs().len(), 2);
+        assert_eq_input_ref!(&project.exprs()[0], 2);
+        assert_eq_input_ref!(&project.exprs()[1], 1);
+
+        let join = project.input();
+        let join = join.as_logical_join().unwrap();
+        assert_eq!(join.schema().fields().len(), 3);
+        assert_eq!(join.schema().fields(), &fields[1..4]);
+
+        let expr: ExprImpl = join.on.clone().into();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
+        assert_eq_input_ref!(&call.inputs()[1], 2);
+
+        let left = join.left();
+        let left = left.as_logical_values().unwrap();
+        assert_eq!(left.schema().fields(), &fields[1..3]);
+        let right = join.right();
+        let right = right.as_logical_values().unwrap();
+        assert_eq!(right.schema().fields(), &fields[3..4]);
     }
 }

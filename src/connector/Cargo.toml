@@ -21,6 +21,8 @@ crc32fast = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
+futures-concurrency = "2.0.3"
 globset = "0.4.8"
 http = "0.2"
 http-serde = "1.1.0"
