@@ -1,12 +1,12 @@
 include ./views/q1.slt.part
-include ./views/q2.join_reorder.workaround.slt.part
+include ./views/q2.slt.part
 include ./views/q3.slt.part
 #include ./views/q4.slt.part
 include ./views/q5.slt.part
 include ./views/q6.slt.part
 include ./views/q7.slt.part
-include ./views/q8.join_reorder.workaround.slt.part
-include ./views/q9.join_reorder.workaround.slt.part
+include ./views/q8.slt.part
+include ./views/q9.slt.part
 include ./views/q10.slt.part
 include ./views/q12.slt.part
 include ./views/q13.slt.part
