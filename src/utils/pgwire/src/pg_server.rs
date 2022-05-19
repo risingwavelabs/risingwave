@@ -75,7 +75,7 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
                 }
             }
             Err(e) => {
-                if matches!(e.kind(), ErrorKind::UnexpectedEof) {
+                if e.kind() == ErrorKind::UnexpectedEof {
                     break;
                 }
                 // Execution error should not break current connection.

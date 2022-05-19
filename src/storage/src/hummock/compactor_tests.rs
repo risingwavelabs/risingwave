@@ -23,10 +23,10 @@ mod tests {
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use crate::hummock::compactor::{Compactor, CompactorContext};
-    use crate::hummock::{HummockStorage, SstableStore};
+    use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::HummockStorage;
     use crate::monitor::StateStoreMetrics;
-    use crate::object::{InMemObjectStore, ObjectStoreImpl};
     use crate::storage_value::StorageValue;
     use crate::StateStore;
 
@@ -43,16 +43,7 @@ mod tests {
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
-        let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-        let block_cache_capacity = 65536;
-        let meta_cache_capacity = 65536;
-        let sstable_store = Arc::new(SstableStore::new(
-            obj_client.clone(),
-            remote_dir,
-            Arc::new(StateStoreMetrics::unused()),
-            block_cache_capacity,
-            meta_cache_capacity,
-        ));
+        let sstable_store = mock_sstable_store();
         let storage = HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
@@ -85,6 +76,7 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
         };
 
         // 1. add sstables

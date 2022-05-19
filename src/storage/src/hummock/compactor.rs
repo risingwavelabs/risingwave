@@ -13,19 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use futures::stream::{self, StreamExt};
-use futures::Future;
+use futures::future::BoxFuture;
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{
     CompactTask, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
 };
@@ -39,13 +40,30 @@ use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
 };
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use super::sstable_store::SstableStoreRef;
-use super::{
-    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
-};
+use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
+use crate::hummock::HummockError;
 use crate::monitor::StateStoreMetrics;
+
+pub type SstableIdGenerator =
+    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSSTableId>> + Send + Sync>;
+
+pub fn get_remote_sstable_id_generator(
+    meta_client: Arc<dyn HummockMetaClient>,
+) -> SstableIdGenerator {
+    Arc::new(move || {
+        let meta_client = meta_client.clone();
+        async move {
+            meta_client
+                .get_new_table_id()
+                .await
+                .map_err(HummockError::meta_error)
+        }
+        .boxed()
+    })
+}
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
@@ -64,6 +82,8 @@ pub struct CompactorContext {
 
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
+
+    pub sstable_id_generator: SstableIdGenerator,
 }
 
 #[derive(Clone)]
@@ -182,6 +202,13 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
+                for (table, _) in &sst {
+                    compactor
+                        .context
+                        .stats
+                        .write_build_l0_bytes
+                        .inc_by(table.meta.estimated_size as u64);
+                }
                 level0.extend(sst);
             }
 
@@ -199,6 +226,12 @@ impl Compactor {
             compact_task_to_string(&compact_task)
         );
         let start_time = Instant::now();
+        for level in &compact_task.input_ssts {
+            for f in &level.table_infos {
+                context.stats.compaction_read_bytes.inc_by(f.file_size);
+            }
+        }
+        let timer = context.stats.compact_task_duration.start_timer();
 
         if !compact_task.vnode_mappings.is_empty() {
             compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
@@ -266,6 +299,7 @@ impl Compactor {
             compact_task.task_id,
             start_time.elapsed()
         );
+        timer.observe_duration();
         compact_success
     }
 
@@ -276,23 +310,9 @@ impl Compactor {
             .sorted_output_ssts
             .reserve(self.compact_task.splits.len());
 
-        for (_, sst) in output_ssts {
-            // for table in &sub_output {
-            //     add_table(
-            //         compact_task
-            //             .metrics
-            //             .as_mut()
-            //             .unwrap()
-            //             .write
-            //             .as_mut()
-            //             .unwrap(),
-            //         table,
-            //     );
-            // }
-
-            self.compact_task
-                .sorted_output_ssts
-                .extend(sst.into_iter().map(|(sst, vnode_bitmaps)| SstableInfo {
+        for (_, ssts) in output_ssts {
+            for (sst, vnode_bitmaps) in ssts {
+                let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
@@ -301,7 +321,13 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
-                }));
+                };
+                self.context
+                    .stats
+                    .compaction_write_bytes
+                    .inc_by(sst_info.file_size);
+                self.compact_task.sorted_output_ssts.push(sst_info);
+            }
         }
 
         if let Err(e) = self
@@ -319,6 +345,7 @@ impl Compactor {
     }
 
     /// Compact the given key range and merge iterator.
+    /// Upon a successful return, the built SSTs are already uploaded to object store.
     async fn compact_key_range(
         &self,
         split_index: usize,
@@ -335,23 +362,18 @@ impl Compactor {
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
             || async {
-                let table_id = self
-                    .context
-                    .hummock_meta_client
-                    .get_new_table_id()
-                    .await
-                    .map_err(HummockError::meta_error)?;
-                let builder = HummockStorage::get_builder(&self.context.options);
+                let table_id = (self.context.sstable_id_generator)().await?;
+                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
                 Ok((table_id, builder))
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
         );
 
         // Monitor time cost building shared buffer to SSTs.
-        let build_l0_sst_timer = if self.context.is_share_buffer_compact {
-            Some(self.context.stats.write_build_l0_sst_duration.start_timer())
+        let timer = if self.context.is_share_buffer_compact {
+            self.context.stats.write_build_l0_sst_duration.start_timer()
         } else {
-            None
+            self.context.stats.compact_sst_duration.start_timer()
         };
         Compactor::compact_and_build_sst(
             &mut builder,
@@ -361,9 +383,7 @@ impl Compactor {
             self.compact_task.watermark,
         )
         .await?;
-        if let Some(timer) = build_l0_sst_timer {
-            timer.observe_duration();
-        }
+        timer.observe_duration();
 
         // Seal.
         builder.seal_current();
@@ -470,6 +490,7 @@ impl Compactor {
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);
