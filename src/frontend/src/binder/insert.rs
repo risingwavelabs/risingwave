@@ -133,7 +133,7 @@ impl Binder {
                     .map(|(mut e, t)| {
                         if let ExprImpl::Literal(literal) = &e {
                             if let Some(ScalarImpl::Struct(value)) = literal.get_data() {
-                                if value.check_data_type(e.return_type().clone()) {
+                                if value.check_data_type(e.return_type()) {
                                     e = Literal::new(
                                         Some(ScalarImpl::Struct(value.clone())),
                                         t.clone(),
@@ -142,7 +142,7 @@ impl Binder {
                                 }
                             }
                         }
-                        println!("{:?}",e);
+                        println!("{:?}", e);
                         e.cast_assign(t)
                     })
                     .try_collect()
