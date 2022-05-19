@@ -48,6 +48,12 @@ impl UpdateExecutor {
         child: BoxedExecutor2,
         exprs: Vec<BoxedExpression>,
     ) -> Self {
+        assert_eq!(
+            child.schema().data_types(),
+            exprs.iter().map(|e| e.return_type()).collect_vec(),
+            "bad update schema"
+        );
+
         Self {
             table_id,
             source_manager,
@@ -175,12 +181,6 @@ impl BoxedExecutor2Builder for UpdateExecutor {
             )))
         })?;
         let child = source.clone_for_plan(proto_child).build2()?;
-
-        assert_eq!(
-            child.schema().data_types(),
-            exprs.iter().map(|e| e.return_type()).collect_vec(),
-            "bad update schema"
-        );
 
         Ok(Box::new(Self::new(
             table_id,
