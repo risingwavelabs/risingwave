@@ -83,6 +83,15 @@ impl SourceDesc {
     pub fn next_row_id(&self) -> RowId {
         self.row_id_generator.as_ref().lock().next()
     }
+
+    pub fn next_row_id_batch(&self, length: usize) -> Vec<RowId> {
+        let mut guard = self.row_id_generator.as_ref().lock();
+        let mut result = Vec::with_capacity(length);
+        for _ in 0..length {
+            result.push(guard.next());
+        }
+        result
+    }
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
