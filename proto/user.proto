@@ -20,7 +20,7 @@ message AuthInfo {
 
 /// User defines a user in the system.
 message UserInfo {
-  int32 id = 1;
+  uint32 id = 1;
   string name = 2;
   bool is_supper = 3;
   bool can_create_db = 4;
@@ -71,6 +71,7 @@ message GrantPrivilege {
     GrantAllTables grant_all_tables = 4;
   }
   repeated Privilege privileges = 5;
+  bool with_grant_option = 6;
 }
 
 message CreateUserRequest {
