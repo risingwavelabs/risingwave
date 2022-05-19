@@ -12,7 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod field_generator;
 mod generator;
 mod message;
 mod reader;
+use anyhow::Result;
 pub use reader::*;
+use serde_json::Value;
+pub trait FieldGenerator
+where
+    Self: Sized,
+{
+    fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>;
+    fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>;
+    fn generate(&mut self) -> Value;
+}
+
+// Generator of this '#' field. Can be 'sequence' or 'random'.
+pub enum FieldKind {
+    Sequence,
+    Random,
+}
+
+impl Default for FieldKind {
+    fn default() -> Self {
+        FieldKind::Random
+    }
+}

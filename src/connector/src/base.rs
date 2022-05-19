@@ -189,12 +189,22 @@ impl SplitReaderImpl {
     pub async fn create(
         config: ConnectorProperties,
         state: ConnectorStateV2,
-        _columns: Option<Vec<Column>>,
+        columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         if let ConnectorStateV2::Splits(s) = &state {
             if s.is_empty() {
                 return Ok(Self::Dummy(DummySplitReader {}));
             }
+        }
+
+        if columns.as_ref().is_none() {
+            return Err(anyhow!("columns is None!"));
+        }
+
+        let columns = columns.unwrap();
+
+        if columns.is_empty() {
+            return Err(anyhow!("columns is empty"));
         }
 
         let connector = match config {
@@ -211,7 +221,7 @@ impl SplitReaderImpl {
                 Self::Pulsar(PulsarSplitReader::new(props, state).await?)
             }
             ConnectorProperties::Datagen(props) => {
-                Self::Datagen(DatagenSplitReader::new(props, state).await?)
+                Self::Datagen(DatagenSplitReader::new(props, state, columns).await?)
             }
             _other => {
                 todo!()

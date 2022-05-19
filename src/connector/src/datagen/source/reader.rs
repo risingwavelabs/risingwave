@@ -16,7 +16,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::generator::DatagenEventGenerator;
-use crate::{ConnectorStateV2, DatagenProperties, SourceMessage, SplitReader};
+use crate::{Column, ConnectorStateV2, DatagenProperties, SourceMessage, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -32,7 +32,11 @@ impl SplitReader for DatagenSplitReader {
 }
 
 impl DatagenSplitReader {
-    pub async fn new(properties: DatagenProperties, state: ConnectorStateV2) -> Result<Self>
+    pub async fn new(
+        properties: DatagenProperties,
+        state: ConnectorStateV2,
+        columns: Vec<Column>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -42,6 +46,7 @@ impl DatagenSplitReader {
 
         Ok(DatagenSplitReader {
             generator: DatagenEventGenerator {
+                columns,
                 last_offset: 0,
                 batch_chunk_size,
                 rows_per_second,
