@@ -326,23 +326,6 @@ impl StructValue {
         };
         value.encode_to_vec()
     }
-
-    pub fn check_data_type(&self, data_type: DataType) -> bool {
-        if let DataType::Struct { fields } = data_type {
-            for (f, d) in self.fields.iter().zip_eq(fields.iter()) {
-                if let Some(ScalarImpl::Struct(value)) = f {
-                    if !value.check_data_type(d.clone()) {
-                        return false;
-                    }
-                } else if f.is_none() && d != &DataType::Boolean {
-                    return false;
-                }
-            }
-            true
-        } else {
-            false
-        }
-    }
 }
 
 #[derive(Copy, Clone)]
