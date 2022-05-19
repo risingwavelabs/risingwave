@@ -17,7 +17,7 @@
             BatchExchange { order: [], dist: HashShard([0]) }
               BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
                 BatchExchange { order: [], dist: HashShard([0, 1]) }
-                  BatchScan { table: t, columns: [a, b] }
+                  BatchScan { table: t, columns: [t#a, t#b] }
   stream_plan: |
     StreamMaterialize { columns: [max_num, a], pk_columns: [a] }
       StreamProject { exprs: [$2, $0] }
@@ -26,4 +26,4 @@
             StreamExchange { dist: HashShard([0]) }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
                 StreamExchange { dist: HashShard([0, 1]) }
-                  StreamTableScan { table: t, columns: [a, b, _row_id#0], pk_indices: [2] }
+                  StreamTableScan { table: t, columns: [t#a, t#b, t#_row_id#0], pk_indices: [2] }

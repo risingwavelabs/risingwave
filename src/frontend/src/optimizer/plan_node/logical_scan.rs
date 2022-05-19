@@ -17,7 +17,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
@@ -62,7 +62,9 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| {
                 let col = &table_desc.columns[*tb_idx];
                 id_to_op_idx.insert(col.column_id, op_idx);
-                col.into()
+                let mut field: Field = col.into();
+                field.name = table_name.clone() + "#" + &field.name;
+                field
             })
             .collect();
 

@@ -66,7 +66,7 @@
     insert into t select v1 from t;
   batch_plan: |
     BatchInsert { table: t }
-      BatchScan { table: t, columns: [v1] }
+      BatchScan { table: t, columns: [t#v1] }
 - sql: |
     /* insert into select with cast */
     create table t (v1 time, v2 int, v3 real);
