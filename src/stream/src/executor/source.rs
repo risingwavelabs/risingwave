@@ -196,7 +196,9 @@ async fn bridge_channel(
         if stop_rx.try_recv().is_ok() {
             break;
         };
-        tx.send(rx.recv().await.unwrap()).unwrap();
+        if let Some(msg) = rx.recv().await {
+            tx.send(msg).unwrap();
+        }
     }
     rx
 }
