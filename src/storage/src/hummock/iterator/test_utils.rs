@@ -22,10 +22,8 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
 
-
 use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
 use crate::hummock::sstable_store::SstableStore;
-
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{

@@ -18,10 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use futures::future::try_join_all;
-use futures::future::BoxFuture;
-use futures::{stream, Future, FutureExt, StreamExt};
-
+use futures::future::{try_join_all, BoxFuture};
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
@@ -42,14 +40,12 @@ use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
 };
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-
 use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use crate::hummock::iterator::ReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::HummockError;
-use crate::hummock::CachePolicy;
-
+use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::StateStoreMetrics;
 
 pub type SstableIdGenerator =
@@ -406,7 +402,6 @@ impl Compactor {
             self.compact_task.watermark,
         )
         .await?;
-        timer.observe_duration();
 
         // Seal.
         builder.seal_current();
@@ -433,6 +428,7 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
         }
+        timer.observe_duration();
         for ret in try_join_all(pending_requests)
             .await
             .map_err(HummockError::other)?
