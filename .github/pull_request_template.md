@@ -13,5 +13,6 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 - [ ] I have written necessary docs and comments
 - [ ] I have added necessary unit tests and integration tests
+- [ ] This PR contains changes that are visible to users. Our documentation team will use this option to determine if the user docs need to be updated to reflect the changes.
 
 ## Refer to a related PR or issue link (optional)
