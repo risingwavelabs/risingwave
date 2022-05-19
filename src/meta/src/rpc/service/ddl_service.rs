@@ -418,14 +418,12 @@ where
         );
 
         // Resolve fragments.
-        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let parallel_degree = self
             .cluster_manager
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))
             .await;
         let mut ctx = CreateMaterializedViewContext {
             affiliated_source,
-            hash_mapping,
             ..Default::default()
         };
         let graph = ActorGraphBuilder::generate_graph(

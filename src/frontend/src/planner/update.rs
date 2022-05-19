@@ -12,16 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
+use fixedbitset::FixedBitSet;
+use risingwave_common::error::Result;
 
+use super::select::LogicalFilter;
 use super::Planner;
 use crate::binder::BoundUpdate;
-use crate::optimizer::PlanRoot;
+use crate::optimizer::plan_node::LogicalUpdate;
+use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
-        println!("bound update: {:#?}", update);
+        let name = update.table_source.name.clone();
+        let source_id = update.table_source.source_id;
+        let scan = self.plan_relation(update.table)?;
+        let input = if let Some(expr) = update.selection {
+            LogicalFilter::create_with_expr(scan, expr)
+        } else {
+            scan
+        };
+        let plan: PlanRef = LogicalUpdate::create(input, name, source_id, update.exprs)?.into();
 
-        Err(ErrorCode::NotImplemented("Planning `UPDATE`".to_owned(), 784.into()).into())
+        let order = Order::any().clone();
+        // For update, frontend will only schedule one task so do not need this to be single.
+        let dist = Distribution::Any;
+        let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
+        out_fields.insert_range(..);
+        let out_names = plan.schema().names();
+
+        let root = PlanRoot::new(plan, dist, order, out_fields, out_names);
+        Ok(root)
     }
 }

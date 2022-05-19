@@ -35,7 +35,7 @@ Currently, only x86_64 is supported. We will provide arm64 builds in the future.
 # Pull nightly build of RisingWave
 docker pull ghcr.io/singularity-data/risingwave:latest
 # Start RisingWave in single-binary playground mode
-docker run -it ghcr.io/singularity-data/risingwave:latest playground
+docker run -it --network host ghcr.io/singularity-data/risingwave:latest playground
 ```
 
 **Compile from Source with [RiseDev](./CONTRIBUTING.md#setting-up-development-environment) (Linux and macOS)**

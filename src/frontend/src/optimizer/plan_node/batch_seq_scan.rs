@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc};
@@ -94,6 +94,9 @@ impl ToBatchProst for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        todo!()
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "not implement yet".to_string(),
+            None.into(),
+        )))
     }
 }

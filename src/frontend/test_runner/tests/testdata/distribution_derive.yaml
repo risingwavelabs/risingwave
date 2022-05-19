@@ -26,4 +26,4 @@
             StreamExchange { dist: HashShard([0]) }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
                 StreamExchange { dist: HashShard([0, 1]) }
-                  StreamTableScan { table: t, columns: [a, b, _row_id#0], pk_indices: [2] }
+                  StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }

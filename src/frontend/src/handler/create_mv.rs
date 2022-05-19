@@ -99,7 +99,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -151,7 +151,7 @@ pub mod tests {
         let city_type = DataType::Struct {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "country.zipcode" => DataType::Varchar,

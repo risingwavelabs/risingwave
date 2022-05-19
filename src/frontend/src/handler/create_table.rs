@@ -161,7 +161,7 @@ mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -200,7 +200,7 @@ mod tests {
             .map(|col| (col.name.as_str(), col.data_type.clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = gen_row_id_column_name(0);
+        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
