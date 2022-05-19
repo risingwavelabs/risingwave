@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 use risingwave_pb::hummock::VNodeBitmap;
 
@@ -37,10 +38,23 @@ pub struct SSTableBuilderOptions {
     pub block_capacity: usize,
     /// Restart point interval.
     pub restart_interval: usize,
-    /// False prsitive probability of bloom filter.
+    /// False positive probability of bloom filter.
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
+}
+
+impl From<&StorageConfig> for SSTableBuilderOptions {
+    fn from(options: &StorageConfig) -> SSTableBuilderOptions {
+        SSTableBuilderOptions {
+            capacity: options.sstable_size as usize,
+            block_capacity: options.block_size as usize,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: options.bloom_false_positive,
+            // TODO: Make this configurable.
+            compression_algorithm: CompressionAlgorithm::None,
+        }
+    }
 }
 
 impl Default for SSTableBuilderOptions {

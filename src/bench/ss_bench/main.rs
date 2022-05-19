@@ -22,7 +22,7 @@ use operations::*;
 use risingwave_common::config::StorageConfig;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_storage::hummock::compactor::{get_remote_sstable_id_generator, CompactorContext};
 use risingwave_storage::monitor::{ObjectStoreMetrics, Print, StateStoreMetrics};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
@@ -157,6 +157,8 @@ async fn main() {
         block_cache_capacity: opts.block_cache_capacity_mb as usize * (1 << 20),
         meta_cache_capacity: opts.meta_cache_capacity_mb as usize * (1 << 20),
         disable_remote_compactor: true,
+        enable_local_spill: false,
+        local_object_store: "memory".to_string(),
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -183,6 +185,9 @@ async fn main() {
                 sstable_store: hummock.inner().sstable_store(),
                 stats: state_store_stats.clone(),
                 is_share_buffer_compact: false,
+                sstable_id_generator: get_remote_sstable_id_generator(
+                    mock_hummock_meta_client.clone(),
+                ),
             }),
             hummock.inner().local_version_manager().clone(),
         ));
