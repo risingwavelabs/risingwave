@@ -190,3 +190,126 @@ impl BoxedExecutor2Builder for UpdateExecutor {
         )))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use futures::StreamExt;
+    use risingwave_common::array::{Array, I32Array};
+    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::column_nonnull;
+    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
+
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::*;
+
+    #[tokio::test]
+    async fn test_update_executor() -> Result<()> {
+        let source_manager = Arc::new(MemSourceManager::default());
+
+        // Schema for mock executor.
+        let schema = schema_test_utils::ii();
+        let mut mock_executor = MockExecutor::new(schema.clone());
+
+        // Schema of the table
+        let schema = schema_test_utils::ii();
+
+        let table_columns: Vec<_> = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| ColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: ColumnId::from(i as i32), // use column index as column id
+                name: f.name.clone(),
+                field_descs: vec![],
+                type_name: "".to_string(),
+            })
+            .collect();
+
+        let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
+        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        mock_executor.add(data_chunk.clone());
+
+        // Update expressions, will swap two columns.
+        let exprs = vec![
+            Box::new(InputRefExpression::new(DataType::Int32, 1)) as BoxedExpression,
+            Box::new(InputRefExpression::new(DataType::Int32, 0)),
+        ];
+
+        // Create the table.
+        let table_id = TableId::new(0);
+        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
+
+        // Create reader
+        let source_desc = source_manager.get_source(&table_id)?;
+        let source = source_desc.source.as_table_v2().unwrap();
+        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
+
+        // Update
+        let update_executor = Box::new(UpdateExecutor::new(
+            table_id,
+            source_manager.clone(),
+            Box::new(mock_executor),
+            exprs,
+        ));
+
+        let handle = tokio::spawn(async move {
+            let fields = &update_executor.schema().fields;
+            assert_eq!(fields[0].data_type, DataType::Int64);
+
+            let mut stream = update_executor.execute();
+            let result = stream.next().await.unwrap().unwrap();
+
+            assert_eq!(
+                result
+                    .column_at(0)
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                vec![Some(5)] // updated rows
+            );
+        });
+
+        // Read
+        let chunk = reader.next().await?;
+
+        assert_eq!(
+            chunk.chunk.ops().chunks(2).collect_vec(),
+            vec![&[Op::UpdateDelete, Op::UpdateInsert]; 5]
+        );
+
+        assert_eq!(
+            chunk.chunk.columns()[0]
+                .array()
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
+            (1..=5)
+                .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
+                .map(Some)
+                .collect_vec()
+        );
+
+        assert_eq!(
+            chunk.chunk.columns()[1]
+                .array()
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
+            (1..=5)
+                .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
+                .map(Some)
+                .collect_vec()
+        );
+
+        handle.await.unwrap();
+
+        Ok(())
+    }
+}

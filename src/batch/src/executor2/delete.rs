@@ -137,7 +137,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
@@ -170,8 +170,8 @@ mod tests {
             })
             .collect();
 
-        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
+        let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
         let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
         mock_executor.add(data_chunk.clone());
 
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(
             chunk.chunk.columns()[0]
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(
             chunk.chunk.columns()[1]
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
