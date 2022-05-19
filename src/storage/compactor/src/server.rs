@@ -25,7 +25,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::SstableStore;
 use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
-use risingwave_storage::object::{parse_object_store, ObjectStoreImpl};
+use risingwave_storage::object::{parse_remote_object_store, ObjectStoreImpl};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -67,15 +67,14 @@ pub async fn compactor_serve(
     ));
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let object_store = Arc::new(ObjectStoreImpl::new(
-        parse_object_store(
+    let object_store = Arc::new(ObjectStoreImpl::Remote(
+        parse_remote_object_store(
             opts.state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
-            false,
+            object_metrics,
         )
         .await,
-        object_metrics,
     ));
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
