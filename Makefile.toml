@@ -40,7 +40,7 @@ end
 default_to_workspace = false
 skip_core_tasks = true
 skip_git_env_info = true
-skip_rust_env_info = true
+skip_rust_env_info = false
 skip_crate_env_info = true
 
 [tasks.clean-full]
