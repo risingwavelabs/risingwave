@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use crate::error::ErrorCode::InternalError;
+use crate::error::Result;
+pub trait CheckedAdd<T>
+where
+    Self: Sized,
+{
+    fn checked_add(&self, rhs: T) -> Result<Self>;
+}
 
-use crate::binder::BoundStatement;
-use crate::optimizer::PlanRoot;
-use crate::planner::Planner;
-
-impl Planner {
-    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
-        match stmt {
-            BoundStatement::Insert(i) => self.plan_insert(*i),
-            BoundStatement::Delete(d) => self.plan_delete(*d),
-            BoundStatement::Update(u) => self.plan_update(*u),
-            BoundStatement::Query(q) => self.plan_query(*q),
-        }
+impl<T: num_traits::CheckedAdd> CheckedAdd<T> for T {
+    fn checked_add(&self, rhs: T) -> Result<Self> {
+        let res = <Self as num_traits::CheckedAdd>::checked_add(self, &rhs)
+            .ok_or_else(|| InternalError("CheckedAdd Error".to_string()))?;
+        Ok(res)
     }
 }
