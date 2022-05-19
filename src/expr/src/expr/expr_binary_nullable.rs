@@ -16,62 +16,13 @@
 
 use risingwave_common::array::{Array, BoolArray, Utf8Array};
 use risingwave_common::types::*;
+use risingwave_common::for_all_cmp_variants;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
-use crate::expr::data_types::*;
 use crate::expr::template::BinaryNullableExpression;
 use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
 use crate::vector_op::conjunction::{and, or};
-
-macro_rules! for_all_types {
-    ($macro:ident, $l:expr, $r:expr, $ret:expr, $general_f:ident) => {
-        $macro! {
-            [$l, $r, $ret],
-            { int16, int16, int16, $general_f },
-            { int16, int32, int32, $general_f },
-            { int16, int64, int64, $general_f },
-            { int16, float32, float64, $general_f },
-            { int16, float64, float64, $general_f },
-            { int32, int16, int32, $general_f },
-            { int32, int32, int32, $general_f },
-            { int32, int64, int64, $general_f },
-            { int32, float32, float64, $general_f },
-            { int32, float64, float64, $general_f },
-            { int64, int16,int64, $general_f },
-            { int64, int32,int64, $general_f },
-            { int64, int64, int64, $general_f },
-            { int64, float32, float64 , $general_f},
-            { int64, float64, float64, $general_f },
-            { float32, int16, float64, $general_f },
-            { float32, int32, float64, $general_f },
-            { float32, int64, float64 , $general_f},
-            { float32, float32, float32, $general_f },
-            { float32, float64, float64, $general_f },
-            { float64, int16, float64, $general_f },
-            { float64, int32, float64, $general_f },
-            { float64, int64, float64, $general_f },
-            { float64, float32, float64, $general_f },
-            { float64, float64, float64, $general_f },
-            { decimal, int16, decimal, $general_f },
-            { decimal, int32, decimal, $general_f },
-            { decimal, int64, decimal, $general_f },
-            { decimal, float32, float64, $general_f },
-            { decimal, float64, float64, $general_f },
-            { int16, decimal, decimal, $general_f },
-            { int32, decimal, decimal, $general_f },
-            { int64, decimal, decimal, $general_f },
-            { decimal, decimal, decimal, $general_f },
-            { float32, decimal, float64, $general_f },
-            { float64, decimal, float64, $general_f },
-            { timestamp, timestamp, timestamp, $general_f },
-            { date, date, date, $general_f },
-            { boolean, boolean, boolean, $general_f },
-            { timestamp, date, timestamp, $general_f },
-            { date, timestamp, timestamp, $general_f }
-        }
-    };
-}
 
 macro_rules! gen_nullable_cmp_impl {
     ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),*) => {
@@ -132,6 +83,8 @@ pub fn new_distinct_from_expr(
     r: BoxedExpression,
     ret: DataType,
 ) -> BoxedExpression {
+    use crate::expr::data_types::*;
+
     match (l.return_type(), r.return_type()) {
         (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
             Utf8Array,
@@ -142,7 +95,7 @@ pub fn new_distinct_from_expr(
             l, r, ret, str_is_distinct_from
         )),
         _ => {
-            for_all_types! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
+            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
         }
     }
 }

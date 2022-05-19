@@ -331,9 +331,9 @@ impl Binder {
         let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
 
         if negated {
-            Ok(func_call?.into())
-        } else {
             Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
+        } else {
+            Ok(func_call?.into())
         }
     }
 
