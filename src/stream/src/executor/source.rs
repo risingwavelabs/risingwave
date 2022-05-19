@@ -207,6 +207,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver.recv().await.unwrap();
         let epoch = barrier.epoch.prev;
+        self.barrier_receiver = Some(barrier_receiver);
 
         yield Message::Barrier(barrier);
 
