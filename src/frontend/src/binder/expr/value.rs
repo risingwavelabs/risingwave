@@ -18,7 +18,7 @@ use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField, Value};
 
 use crate::binder::Binder;
-use crate::expr::Literal;
+use crate::expr::{align_types, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
@@ -113,12 +113,37 @@ impl Binder {
 
         Ok(literal)
     }
+
+    /// `ARRAY[...]` is represented as an function call at the binder stage.
+    pub(super) fn bind_array(
+        &mut self,
+        exprs: Vec<risingwave_sqlparser::ast::Expr>,
+    ) -> Result<ExprImpl> {
+        let mut exprs = exprs
+            .into_iter()
+            .map(|e| self.bind_expr(e))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+        let element_type = align_types(exprs.iter_mut())?;
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            exprs,
+            DataType::List {
+                datatype: Box::new(element_type),
+            },
+        )
+        .into();
+        Ok(expr)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
+    use risingwave_common::types::DataType;
+    use risingwave_expr::expr::build_from_prost;
+
     use crate::binder::test_utils::mock_binder;
+    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
 
     #[test]
     fn test_bind_value() {
@@ -162,5 +187,25 @@ mod tests {
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }
+    }
+
+    #[test]
+    fn test_array_expr() {
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::Array,
+            vec![ExprImpl::literal_int(1)],
+            DataType::List {
+                datatype: Box::new(DataType::Int32),
+            },
+        )
+        .into();
+        let expr_pb = expr.to_expr_proto();
+        let expr = build_from_prost(&expr_pb).unwrap();
+        match expr.return_type() {
+            DataType::List { datatype } => {
+                assert_eq!(datatype, Box::new(DataType::Int32));
+            }
+            _ => panic!("unexpected type"),
+        };
     }
 }
