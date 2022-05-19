@@ -1,0 +1,5 @@
+query II rowsort
+select * from nexmark_q4;
+----
+10  84935
+11  43672280
