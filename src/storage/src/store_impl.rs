@@ -23,7 +23,7 @@ use crate::error::StorageResult;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
-use crate::object::parse_object_store;
+use crate::object::{parse_object_store, HybridObjectStore, ObjectStoreImpl};
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
 use crate::StateStore;
@@ -92,15 +92,25 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let object_store = Arc::new(
-                    parse_object_store(
-                        hummock.strip_prefix("hummock+").unwrap(),
-                        object_store_metrics,
-                    )
-                    .await,
-                );
+                let remote_object_store =
+                    parse_object_store(hummock.strip_prefix("hummock+").unwrap(), false).await;
+                let object_store = if config.enable_local_spill {
+                    let local_object_store = Arc::from(
+                        parse_object_store(config.local_object_store.as_str(), true).await,
+                    );
+                    Box::new(HybridObjectStore::new(
+                        local_object_store,
+                        Arc::from(remote_object_store),
+                    ))
+                } else {
+                    remote_object_store
+                };
+
                 let sstable_store = Arc::new(SstableStore::new(
-                    object_store.clone(),
+                    Arc::new(ObjectStoreImpl::new(
+                        object_store,
+                        object_store_metrics.clone(),
+                    )),
                     config.data_directory.to_string(),
                     state_store_stats.clone(),
                     config.block_cache_capacity,

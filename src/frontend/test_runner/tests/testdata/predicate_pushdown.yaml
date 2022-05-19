@@ -65,3 +65,11 @@
       LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
         LogicalFilter { predicate: ($0 > 1:Int32) AND (1:Int32 > 0:Int32) }
           LogicalScan { table: t, columns: [t#v1, t#v2] }
+- sql: |
+    /* Always false should not be pushed below SimpleAgg */
+    create table t(v1 int, v2 int, v3 int, v4 int);
+    select min(v1) from t having false;
+  optimized_logical_plan: |
+    LogicalFilter { predicate: false:Boolean }
+      LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+        LogicalScan { table: t, columns: [t#v1] }
