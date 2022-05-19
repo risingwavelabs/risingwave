@@ -279,7 +279,7 @@ impl fmt::Display for StructValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{{}}}",
+            "({})",
             self.fields
                 .iter()
                 .map(|f| {
@@ -403,8 +403,25 @@ impl Debug for StructRef<'_> {
 }
 
 impl Display for StructRef<'_> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StructRef::Indexed { arr, idx } => {
+                let mut s = "(".to_string();
+                arr.children.iter().for_each(|a| match a.value_at(*idx) {
+                    None => {
+                        s = s.clone() + "null,";
+                    }
+                    Some(scalar) => {
+                        s = s.clone() + &format!("{},", scalar.into_scalar_impl());
+                    }
+                });
+                s = s[0..s.len() - 1].to_string();
+                s = s.clone() + ")";
+                tracing::info!("{}",s);
+                write!(f, "{}", s)
+            }
+            StructRef::ValueRef { val } => write!(f, "({})", val),
+        }
     }
 }
 

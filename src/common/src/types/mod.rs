@@ -25,11 +25,13 @@ mod native_type;
 mod scalar_impl;
 
 use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::str::FromStr;
 
 pub use native_type::*;
-use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::data_type::IntervalType::*;
+use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
-
 mod chrono_wrapper;
 mod decimal;
 pub mod interval;
@@ -45,10 +47,14 @@ pub use interval::*;
 use itertools::Itertools;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
+use prost::Message;
+use risingwave_pb::expr::StructValue as ProstStructValue;
 
 use crate::array::{
-    ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
+    read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
+    StructValue,
 };
+use crate::error::ErrorCode::InternalError;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -716,6 +722,112 @@ impl ScalarImpl {
             ScalarImpl::List(_) => todo!(),
         };
         body
+    }
+
+    fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
+        // TODO: remove IntervalType later.
+        match ty {
+            // the unit is months
+            Year | YearToMonth | Month => {
+                let bytes = bytes.try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
+                })?;
+                let mouths = i32::from_be_bytes(bytes);
+                Ok(IntervalUnit::from_month(mouths))
+            }
+            // the unit is ms
+            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
+            | Minute | MinuteToSecond | Second => {
+                let bytes = bytes.try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
+                })?;
+                let ms = i64::from_be_bytes(bytes);
+                Ok(IntervalUnit::from_millis(ms))
+            }
+            Invalid => {
+                // Invalid means the interval is from the new frontend.
+                // TODO: make this default path later.
+                let mut cursor = Cursor::new(bytes);
+                read_interval_unit(&mut cursor)
+            }
+        }
+    }
+
+    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> Result<ScalarImpl> {
+        let value = match data_type.get_type_name()? {
+            TypeName::Boolean => ScalarImpl::Bool(
+                i8::from_be_bytes(b.as_slice().try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize bool, reason: {:?}", e))
+                })?) == 1,
+            ),
+            TypeName::Int16 => {
+                ScalarImpl::Int16(i16::from_be_bytes(b.as_slice().try_into().map_err(
+                    |e| InternalError(format!("Failed to deserialize i16, reason: {:?}", e)),
+                )?))
+            }
+            TypeName::Int32 => {
+                ScalarImpl::Int32(i32::from_be_bytes(b.as_slice().try_into().map_err(
+                    |e| InternalError(format!("Failed to deserialize i32, reason: {:?}", e)),
+                )?))
+            }
+            TypeName::Int64 => {
+                ScalarImpl::Int64(i64::from_be_bytes(b.as_slice().try_into().map_err(
+                    |e| InternalError(format!("Failed to deserialize i64, reason: {:?}", e)),
+                )?))
+            }
+            TypeName::Float => ScalarImpl::Float32(
+                f32::from_be_bytes(b.as_slice().try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
+                })?)
+                .into(),
+            ),
+            TypeName::Double => ScalarImpl::Float64(
+                f64::from_be_bytes(b.as_slice().try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
+                })?)
+                .into(),
+            ),
+            TypeName::Varchar => ScalarImpl::Utf8(
+                std::str::from_utf8(b)
+                    .map_err(|e| {
+                        InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
+                    })?
+                    .to_string(),
+            ),
+            TypeName::Decimal => {
+                ScalarImpl::Decimal(Decimal::from_str(std::str::from_utf8(b).unwrap()).map_err(
+                    |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
+                )?)
+            }
+            TypeName::Interval => ScalarImpl::Interval(ScalarImpl::make_interval(
+                b,
+                data_type.get_interval_type()?,
+            )?),
+            TypeName::Struct => {
+                let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
+                let fields: Vec<Datum> = struct_value
+                    .body
+                    .iter()
+                    .zip_eq(data_type.field_type.iter())
+                    .map(|(b, d)| {
+                        if b.is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
+                        }
+                    })
+                    .collect::<Result<Vec<Datum>>>()?;
+                ScalarImpl::Struct(StructValue::new(fields))
+            }
+            _ => {
+                return Err(InternalError(format!(
+                    "Unrecognized type name: {:?}",
+                    data_type.get_type_name()
+                ))
+                .into());
+            }
+        };
+        Ok(value)
     }
 }
 

@@ -15,13 +15,8 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
-use std::ops::Deref;
-
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
-use itertools::Itertools;
-use prost::Message;
-use risingwave_pb::expr::StructValue as ProstStructValue;
 
 use crate::error::{Result, RwError};
 use crate::types::{
@@ -32,7 +27,7 @@ use crate::types::{
 pub mod error;
 use error::ValueEncodingError;
 
-use crate::array::{StructRef, StructValue};
+use crate::array::StructRef;
 
 /// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
@@ -124,29 +119,18 @@ fn deserialize_value(ty: &DataType, mut data: impl Buf) -> Result<Datum> {
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
         DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
-        DataType::Struct { fields } => {
-            ScalarImpl::Struct(deserialize_struct(fields.deref(), data)?)
-        }
+        DataType::Struct { fields: _ } => deserialize_struct(ty, data)?,
         _ => {
             panic!("Type is unable to be deserialized.")
         }
     }))
 }
 
-fn deserialize_struct(data_type: &[DataType], mut data: impl Buf) -> Result<StructValue> {
+fn deserialize_struct(data_type: &DataType, mut data: impl Buf) -> Result<ScalarImpl> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
-    tracing::info!("{:?}", len);
     data.copy_to_slice(&mut bytes);
-    let struct_value: ProstStructValue = Message::decode(bytes.as_slice())?;
-    tracing::info!("{:?}", struct_value.body);
-    let fields = struct_value
-        .body
-        .iter()
-        .zip_eq(data_type.iter())
-        .map(|(b, d)| deserialize_value(d, b.as_slice()))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(StructValue::new(fields))
+    ScalarImpl::bytes_to_scalar(&bytes, &data_type.to_protobuf())
 }
 
 fn deserialize_str(mut data: impl Buf) -> Result<String> {
