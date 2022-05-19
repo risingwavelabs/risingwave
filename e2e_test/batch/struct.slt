@@ -28,8 +28,8 @@ select * from st;
 query I
 select (v2).v2.v1 from st;
 ----
-2
-3
+1
+1
 
 query I
 select (v2).v2 from st;
