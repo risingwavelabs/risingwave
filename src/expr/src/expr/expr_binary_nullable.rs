@@ -15,8 +15,8 @@
 //! For expression that only accept two nullable arguments as input.
 
 use risingwave_common::array::{Array, BoolArray, Utf8Array};
-use risingwave_common::types::*;
 use risingwave_common::for_all_cmp_variants;
+use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
