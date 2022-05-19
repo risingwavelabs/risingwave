@@ -46,7 +46,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
   stream_plan: |
-    StreamMaterialize { columns: [auction, bidder, price, dateTime, bid#_row_id#0(hidden)], pk_columns: [bid#_row_id#0] }
+    StreamMaterialize { columns: [auction, bidder, price, dateTime, _row_id#0(hidden)], pk_columns: [_row_id#0] }
       StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id#0], pk_indices: [4] }
 - id: nexmark_q1
   before:
@@ -63,7 +63,7 @@
       BatchProject { exprs: [$0, $1, (0.908:Decimal * $2), $3] }
         BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
   stream_plan: |
-    StreamMaterialize { columns: [auction, bidder, price, dateTime, bid#_row_id#0(hidden)], pk_columns: [bid#_row_id#0] }
+    StreamMaterialize { columns: [auction, bidder, price, dateTime, _row_id#0(hidden)], pk_columns: [_row_id#0] }
       StreamProject { exprs: [$0, $1, (0.908:Decimal * $2), $3, $4] }
         StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id#0], pk_indices: [4] }
 - id: nexmark_q2
@@ -75,7 +75,7 @@
       BatchFilter { predicate: ((((($0 = 1007:Int32) OR ($0 = 1020:Int32)) OR ($0 = 2001:Int32)) OR ($0 = 2019:Int32)) OR ($0 = 2087:Int32)) }
         BatchScan { table: bid, columns: [auction, price] }
   stream_plan: |
-    StreamMaterialize { columns: [auction, price, bid#_row_id#0(hidden)], pk_columns: [bid#_row_id#0] }
+    StreamMaterialize { columns: [auction, price, _row_id#0(hidden)], pk_columns: [_row_id#0] }
       StreamFilter { predicate: ((((($0 = 1007:Int32) OR ($0 = 1020:Int32)) OR ($0 = 2001:Int32)) OR ($0 = 2019:Int32)) OR ($0 = 2087:Int32)) }
         StreamTableScan { table: bid, columns: [auction, price, _row_id#0], pk_indices: [2] }
 - id: nexmark_q3
@@ -100,7 +100,7 @@
             BatchFilter { predicate: ((($3 = 'or':Varchar) OR ($3 = 'id':Varchar)) OR ($3 = 'ca':Varchar)) }
               BatchScan { table: person, columns: [id, name, city, state] }
   stream_plan: |
-    StreamMaterialize { columns: [name, city, state, id, auction#_row_id#0(hidden), person#_row_id#0(hidden)], pk_columns: [auction#_row_id#0, person#_row_id#0] }
+    StreamMaterialize { columns: [name, city, state, id, _row_id#0(hidden), _row_id#0#1(hidden)], pk_columns: [_row_id#0, _row_id#0#1] }
       StreamExchange { dist: HashShard([4, 5]) }
         StreamProject { exprs: [$4, $5, $6, $0, $2, $7] }
           StreamHashJoin { type: Inner, predicate: $1 = $3 }

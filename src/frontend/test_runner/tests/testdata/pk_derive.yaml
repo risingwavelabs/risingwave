@@ -19,7 +19,7 @@
     ON
         Tone.id = Ttwo.id;
   stream_plan: |
-    StreamMaterialize { columns: [max_v1, max_v2, t1#id(hidden), t2#id(hidden)], pk_columns: [t1#id, t2#id] }
+    StreamMaterialize { columns: [max_v1, max_v2, id(hidden), id#1(hidden)], pk_columns: [id, id#1] }
       StreamProject { exprs: [$0, $2, $1, $3] }
         StreamHashJoin { type: Inner, predicate: $1 = $3 }
           StreamProject { exprs: [$2, $0] }
@@ -50,7 +50,7 @@
     ON
         Tone.id = Ttwo.id;
   stream_plan: |
-    StreamMaterialize { columns: [max_v, min_v, t#id(hidden), t#id#1(hidden)], pk_columns: [t#id, t#id#1] }
+    StreamMaterialize { columns: [max_v, min_v, id(hidden), id#1(hidden)], pk_columns: [id, id#1] }
       StreamProject { exprs: [$0, $2, $1, $3] }
         StreamHashJoin { type: Inner, predicate: $1 = $3 }
           StreamProject { exprs: [$2, $0] }

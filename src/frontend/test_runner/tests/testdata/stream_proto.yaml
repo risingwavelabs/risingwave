@@ -32,11 +32,11 @@
               - dataType:
                   typeName: INT32
                   isNullable: true
-                name: "t#v1"
+                name: v1
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "t#_row_id#0"
+                name: "_row_id#0"
             chain:
               tableRefId:
                 tableId: 2
@@ -58,11 +58,11 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: "t#v1"
+            name: v1
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "t#_row_id#0"
+            name: "_row_id#0"
         filter:
           searchCondition:
             exprType: LESS_THAN
@@ -88,11 +88,11 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: "t#v1"
+        name: v1
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "t#_row_id#0"
+        name: "_row_id#0"
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -120,7 +120,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "t#_row_id#0"
+          name: "_row_id#0"
         isHidden: true
     orderColumnIds:
       - 1
@@ -163,11 +163,11 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: "t#v1"
+            name: v1
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "t#_row_id#0"
+            name: "_row_id#0"
         chain:
           tableRefId:
             tableId: 2
@@ -189,11 +189,11 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: "t#v1"
+        name: v1
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "t#_row_id#0"
+        name: "_row_id#0"
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -221,7 +221,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "t#_row_id#0"
+          name: "_row_id#0"
         isHidden: true
     orderColumnIds:
       - 1
@@ -264,11 +264,11 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: "t#v1"
+            name: v1
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "t#_row_id#0"
+            name: "_row_id#0"
         chain:
           tableRefId:
             tableId: 2
@@ -294,11 +294,11 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: "t#v1"
+        name: v1
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "t#_row_id#0"
+        name: "_row_id#0"
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -326,7 +326,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: "t#_row_id#0"
+          name: "_row_id#0"
         isHidden: true
     orderColumnIds:
       - 1
@@ -371,11 +371,11 @@
                   - dataType:
                       typeName: INT32
                       isNullable: true
-                    name: "t#v1"
+                    name: v1
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: "t#_row_id#0"
+                    name: "_row_id#0"
                 chain:
                   tableRefId:
                     tableId: 2
@@ -397,11 +397,11 @@
               - dataType:
                   typeName: INT32
                   isNullable: true
-                name: "t#v1"
+                name: v1
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "t#_row_id#0"
+                name: "_row_id#0"
             exchange:
               strategy:
                 type: SIMPLE
@@ -527,15 +527,15 @@
                           - dataType:
                               typeName: INT32
                               isNullable: true
-                            name: "t#v1"
+                            name: v1
                           - dataType:
                               typeName: INT32
                               isNullable: true
-                            name: "t#v2"
+                            name: v2
                           - dataType:
                               typeName: INT64
                               isNullable: true
-                            name: "t#_row_id#0"
+                            name: "_row_id#0"
                         chain:
                           tableRefId:
                             tableId: 2
@@ -562,15 +562,15 @@
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: "t#v1"
+                        name: v1
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: "t#v2"
+                        name: v2
                       - dataType:
                           typeName: INT64
                           isNullable: true
-                        name: "t#_row_id#0"
+                        name: "_row_id#0"
                     exchange:
                       strategy:
                         type: HASH
@@ -582,15 +582,15 @@
                   - dataType:
                       typeName: INT32
                       isNullable: true
-                    name: "t#v2"
+                    name: v2
                   - dataType:
                       typeName: INT32
                       isNullable: true
-                    name: "t#v1"
+                    name: v1
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: "t#_row_id#0"
+                    name: "_row_id#0"
                 project:
                   selectList:
                     - exprType: INPUT_REF
@@ -616,7 +616,7 @@
               - dataType:
                   typeName: INT32
                   isNullable: true
-                name: "t#v2"
+                name: v2
               - dataType:
                   typeName: INT64
                   isNullable: true
@@ -653,7 +653,7 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: "t#v2"
+            name: v2
         project:
           selectList:
             - exprType: INPUT_REF
@@ -677,7 +677,7 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: "t#v2"
+        name: v2
     materialize:
       columnOrders:
         - orderType: ASCENDING
@@ -705,7 +705,7 @@
             typeName: INT32
             isNullable: true
           columnId: 1
-          name: "t#v2"
+          name: v2
         isHidden: true
     orderColumnIds:
       - 1
