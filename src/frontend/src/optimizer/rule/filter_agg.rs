@@ -31,6 +31,15 @@ impl Rule for FilterAggRule {
         assert!(num_group_keys + num_agg_calls == agg.schema().len());
 
         // If the filter references agg_calls, we can not push it.
+        // Specially, SimpleAgg should be skipped because the predicate either references agg_calls
+        // or is const.
+        // When it is constantly true, pushing is useless and may actually cause more evaulation
+        // cost of the predicate.
+        // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
+        // returns 1 row.
+        if num_group_keys == 0 {
+            return None;
+        }
         let mut agg_call_columns = FixedBitSet::with_capacity(num_group_keys + num_agg_calls);
         agg_call_columns.insert_range(num_group_keys..num_group_keys + num_agg_calls);
         let (agg_call_pred, pushed_predicate) =
