@@ -271,6 +271,7 @@ mod tests {
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
@@ -286,17 +287,6 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
     async fn execute_count_star_int32() -> Result<()> {
-        use risingwave_common::array::ArrayImpl;
-        let anchor: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3, 4] }.into());
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(array_nonnull! { I32Array, [1, 1, 3, 3] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [7, 8, 8, 9] }.into())),
-            ])
-            .build();
-
         // mock a child executor
         let schema = Schema {
             fields: vec![
@@ -306,25 +296,27 @@ mod tests {
             ],
         };
         let mut child = MockExecutor::new(schema);
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(array_nonnull! { I32Array, [3, 4, 4, 5] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
-            ])
-            .build();
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(array_nonnull! { I32Array, [5, 5, 5, 5] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
-            ])
-            .build();
-        child.add(chunk);
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 1 7
+             2 1 8
+             3 3 8
+             4 3 9",
+        ));
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 3 9
+             2 4 9
+             3 4 9
+             4 5 9",
+        ));
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 5 9
+             2 5 9
+             3 5 9
+             4 5 9",
+        ));
 
         let prost = AggCall {
             r#type: Type::Count as i32,
@@ -382,21 +374,6 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
     async fn execute_count_star_int32_grouped() -> Result<()> {
-        use risingwave_common::array::ArrayImpl;
-        let anchor: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3, 4, 5] }.into());
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [1, 1, 3, 3, 4] }.into(),
-                )),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [7, 8, 8, 9, 9] }.into(),
-                )),
-            ])
-            .build();
-
         // mock a child executor
         let schema = Schema {
             fields: vec![
@@ -406,35 +383,33 @@ mod tests {
             ],
         };
         let mut child = MockExecutor::new(schema);
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [1, 2, 3, 4, 5, 6, 7, 8] }.into(),
-                )),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [4, 4, 4, 5, 6, 7, 7, 8] }.into(),
-                )),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [9, 9, 9, 9, 9, 9, 9, 9] }.into(),
-                )),
-            ])
-            .build();
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [8, 8, 8, 8, 8] }.into(),
-                )),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [9, 9, 9, 9, 9] }.into(),
-                )),
-            ])
-            .build();
-        child.add(chunk);
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 1 7
+             2 1 8
+             3 3 8
+             4 3 9
+             5 4 9",
+        ));
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 4 9
+             2 4 9
+             3 4 9
+             4 5 9
+             5 6 9
+             6 7 9
+             7 7 9
+             8 8 9",
+        ));
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 8 9
+             2 8 9
+             3 8 9
+             4 8 9
+             5 8 9",
+        ));
 
         let prost = AggCall {
             r#type: Type::Count as i32,
@@ -601,17 +576,6 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32_grouped() -> Result<()> {
-        use risingwave_common::array::ArrayImpl;
-        let anchor: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3, 4] }.into());
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(array_nonnull! { I32Array, [1, 1, 3, 3] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [7, 8, 8, 9] }.into())),
-            ])
-            .build();
-
         // mock a child executor
         let schema = Schema {
             fields: vec![
@@ -621,25 +585,27 @@ mod tests {
             ],
         };
         let mut child = MockExecutor::new(schema);
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(array_nonnull! { I32Array, [3, 4, 4, 5] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
-            ])
-            .build();
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(anchor.clone()),
-                Column::new(Arc::new(array_nonnull! { I32Array, [5, 5, 5, 5] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [9, 9, 9, 9] }.into())),
-            ])
-            .build();
-        child.add(chunk);
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 1 7
+             2 1 8
+             3 3 8
+             4 3 9",
+        ));
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 3 9
+             2 4 9
+             3 4 9
+             4 5 9",
+        ));
+        child.add(DataChunk::from_pretty(
+            "i i i
+             1 5 9
+             2 5 9
+             3 5 9
+             4 5 9",
+        ));
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
@@ -686,7 +652,7 @@ mod tests {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let output_size_limit = anchor.len();
+        let output_size_limit = 4;
         let executor = Box::new(SortAggExecutor {
             agg_states,
             group_keys: group_exprs,
@@ -736,20 +702,6 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32_grouped_execeed_limit() -> Result<()> {
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }.into(),
-                )),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [1, 1, 3, 3, 4, 4, 5, 5, 6, 6] }.into(),
-                )),
-                Column::new(Arc::new(
-                    array_nonnull! { I32Array, [7, 8, 8, 8, 9, 9, 9, 9, 10, 10] }.into(),
-                )),
-            ])
-            .build();
-
         // mock a child executor
         let schema = Schema {
             fields: vec![
@@ -759,16 +711,24 @@ mod tests {
             ],
         };
         let mut child = MockExecutor::new(schema);
-        child.add(chunk);
-
-        let chunk = DataChunk::builder()
-            .columns(vec![
-                Column::new(Arc::new(array_nonnull! { I32Array, [1, 2] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [6, 7] }.into())),
-                Column::new(Arc::new(array_nonnull! { I32Array, [10, 12] }.into())),
-            ])
-            .build();
-        child.add(chunk);
+        child.add(DataChunk::from_pretty(
+            " i  i  i
+              1  1  7
+              2  1  8
+              3  3  8
+              4  3  8
+              5  4  9
+              6  4  9
+              7  5  9
+              8  5  9
+              9  6 10
+             10  6 10",
+        ));
+        child.add(DataChunk::from_pretty(
+            " i  i  i
+              1  6 10
+              2  7 12",
+        ));
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
