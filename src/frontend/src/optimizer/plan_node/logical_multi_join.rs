@@ -148,26 +148,26 @@ impl LogicalMultiJoin {
         output
     }
 
-    // Our heuristic join reordering algorithm will try to perform a left-deep join.
-    // It will try to do the following:
-    //
-    // 1. First, split the join graph, with eq join conditions as graph edges, into their connected
-    //    components. Repeat the procedure in 2. with the largest connected components down to
-    //    the smallest.
-    // 2. For each connected component, add joins to the chain, prioritizing adding those
-    //    joins to the bottom of the chain if their join conditions have:
-    //       a. eq joins between primary keys on both sides
-    //       b. eq joins with primary keys on one side
-    //       c. more equijoin conditions
-    //    in that order. This forms our selectivity heuristic.
-    // 3. Thirdly, we will emit a left-deep cross-join of each of the left-deep joins of the
-    //    connected components. Depending on the type of plan, this may result in a planner failure
-    //    (e.g. for streaming). No cross-join will be emitted for a single connected component.
-    // 4. Finally, we will emit, above the left-deep join tree:
-    //        a. a filter with the non eq conditions
-    //        b. a projection which reorders the output column ordering to agree with the
-    //           original ordering of the joins.
-    //    The filter will then be pushed down by another filter pushdown pass.
+    /// Our heuristic join reordering algorithm will try to perform a left-deep join.
+    /// It will try to do the following:
+    ///
+    /// 1. First, split the join graph, with eq join conditions as graph edges, into their connected
+    ///    components. Repeat the procedure in 2. with the largest connected components down to
+    ///    the smallest.
+    /// 2. For each connected component, add joins to the chain, prioritizing adding those
+    ///    joins to the bottom of the chain if their join conditions have:
+    ///       a. eq joins between primary keys on both sides
+    ///       b. eq joins with primary keys on one side
+    ///       c. more equijoin conditions
+    ///    in that order. This forms our selectivity heuristic.
+    /// 3. Thirdly, we will emit a left-deep cross-join of each of the left-deep joins of the
+    ///    connected components. Depending on the type of plan, this may result in a planner failure
+    ///    (e.g. for streaming). No cross-join will be emitted for a single connected component.
+    /// 4. Finally, we will emit, above the left-deep join tree:
+    ///        a. a filter with the non eq conditions
+    ///        b. a projection which reorders the output column ordering to agree with the
+    ///           original ordering of the joins.
+    ///   The filter will then be pushed down by another filter pushdown pass.
     pub(crate) fn heuristic_ordering(&self) -> Result<Vec<usize>> {
         let mut labeller = ConnectedComponentLabeller::new(self.inputs.len());
 
