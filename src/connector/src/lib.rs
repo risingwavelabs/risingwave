@@ -45,3 +45,4 @@ pub use properties::*;
 pub mod aws_utils;
 pub mod dummy_connector;
 pub mod state;
+mod macros;
