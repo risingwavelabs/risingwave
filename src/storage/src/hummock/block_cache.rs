@@ -73,6 +73,9 @@ pub struct BlockCache {
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
+        if capacity == 0 {
+            panic!("block cache capacity == 0");
+        }
         let cache = LruCache::new(CACHE_SHARD_BITS, capacity, DEFAULT_OBJECT_POOL_SIZE);
         Self {
             inner: Arc::new(cache),
