@@ -131,10 +131,6 @@ pub struct StorageConfig {
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
 
-    /// Whether to enable async checkpoint
-    #[serde(default = "default::async_checkpoint_enabled")]
-    pub async_checkpoint_enabled: bool,
-
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
@@ -231,10 +227,6 @@ mod default {
 
     pub fn data_directory() -> String {
         "hummock_001".to_string()
-    }
-
-    pub fn async_checkpoint_enabled() -> bool {
-        true
     }
 
     pub fn write_conflict_detection_enabled() -> bool {
