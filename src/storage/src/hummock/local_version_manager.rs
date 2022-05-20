@@ -121,7 +121,7 @@ impl LocalVersionManager {
                 shared_buffer_uploader_tx,
             },
             buffer_tracker: BufferTracker {
-                capacity: options.shared_buffer_capacity as usize,
+                capacity: (options.shared_buffer_capacity_mb as usize) * (1 << 20),
                 upload_size: global_upload_batches_size,
                 replicate_size: global_replicate_batches_size,
             },

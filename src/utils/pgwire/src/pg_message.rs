@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
@@ -40,11 +41,18 @@ pub struct FeQueryMessage {
 }
 
 impl FeQueryMessage {
-    pub fn get_sql(&self) -> &str {
-        // Why there is a \0..
-        match std::str::from_utf8(&self.sql_bytes[..]) {
-            Ok(v) => v.trim_end_matches('\0'),
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    pub fn get_sql(&self) -> Result<&str> {
+        match CStr::from_bytes_with_nul(&self.sql_bytes) {
+            Ok(cstr) => cstr.to_str().map_err(|err| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Invalid UTF-8 sequence: {}", err),
+                )
+            }),
+            Err(err) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Input end error: {}", err),
+            )),
         }
     }
 }
@@ -368,4 +376,23 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::pg_message::FeQueryMessage;
+
+    #[tokio::test]
+    async fn test_get_sql() {
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![255, 255, 255, 255, 255, 255, 0]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
+    }
 }

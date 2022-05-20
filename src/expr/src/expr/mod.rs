@@ -15,6 +15,7 @@
 mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
+mod expr_array;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
@@ -44,6 +45,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::build_expr_from_prost::*;
+use crate::expr::expr_array::ArrayExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
@@ -96,6 +98,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Translate => build_translate_expr(prost),
         In => build_in_expr(prost),
         Field => FieldExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        Array => ArrayExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

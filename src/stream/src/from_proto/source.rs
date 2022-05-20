@@ -79,6 +79,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.op_info,
             params.executor_stats,
             stream_source_splits,
+            stream.config.checkpoint_interval_ms as u64,
         )?))
     }
 }

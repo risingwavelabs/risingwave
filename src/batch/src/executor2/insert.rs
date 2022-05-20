@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::iter::once;
-use std::sync::Arc;
 
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
@@ -118,9 +117,7 @@ impl InsertExecutor2 {
             array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
-            let ret_chunk = DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(array.into()))])
-                .build();
+            let ret_chunk = DataChunk::builder().columns(vec![array.into()]).build();
 
             yield ret_chunk
         }
@@ -157,7 +154,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::{Array, ArrayImpl, I32Array, I64Array, StructArray};
+    use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
@@ -200,8 +197,8 @@ mod tests {
             })
             .collect();
 
-        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
+        let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
         let array = StructArray::from_slices(
             &[true, false, false, false, false],
             vec![
@@ -265,7 +262,7 @@ mod tests {
         assert_eq!(
             chunk.chunk.columns()[1]
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
@@ -274,7 +271,7 @@ mod tests {
         assert_eq!(
             chunk.chunk.columns()[2]
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]

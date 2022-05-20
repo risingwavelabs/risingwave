@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::util::compress::compress_data;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::CompactionGroupId;
@@ -27,6 +28,7 @@ use risingwave_hummock_sdk::{
     get_remote_sst_id, HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId,
     HummockVersionId,
 };
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
@@ -45,9 +47,7 @@ use crate::hummock::model::{
     INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{
-    compressed_hash_mapping, MetadataModel, ValTransaction, VarTransaction, Worker,
-};
+use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
 
@@ -591,12 +591,19 @@ where
                     .collect::<HashSet<u32>>();
                 compact_task.vnode_mappings.reserve_exact(table_ids.len());
                 for table_id in table_ids {
-                    let vnode_mapping = self
-                        .cluster_manager
+                    if let Some(vnode_mapping) = self
+                        .env
+                        .hash_mapping_manager()
                         .get_table_hash_mapping(&table_id)
-                        .await?;
-                    let compressed_mapping = compressed_hash_mapping(table_id, &vnode_mapping);
-                    compact_task.vnode_mappings.push(compressed_mapping);
+                    {
+                        let (original_indices, compressed_data) = compress_data(&vnode_mapping);
+                        let compressed_mapping = ParallelUnitMapping {
+                            table_id,
+                            original_indices,
+                            data: compressed_data,
+                        };
+                        compact_task.vnode_mappings.push(compressed_mapping);
+                    }
                 }
 
                 commit_multi_var!(self, None, compact_status)?;

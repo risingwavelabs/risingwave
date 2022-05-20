@@ -102,10 +102,9 @@ impl LogicalScan {
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
+        self.required_col_idx
             .iter()
-            .map(|f| f.name.clone())
+            .map(|i| self.table_desc.columns[*i].name.clone())
             .collect()
     }
 

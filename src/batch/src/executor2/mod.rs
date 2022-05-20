@@ -29,6 +29,7 @@ mod row_seq_scan;
 mod sort_agg;
 mod top_n;
 mod trace;
+mod update;
 mod values;
 
 pub use delete::*;
@@ -52,6 +53,7 @@ pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use top_n::*;
 pub use trace::*;
+pub use update::*;
 pub use values::*;
 
 use crate::executor::ExecutorBuilder;

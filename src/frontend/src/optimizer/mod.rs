@@ -143,6 +143,26 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
+        // Merge inner joins into multijoin
+        plan = {
+            let rules = vec![MultiJoinJoinRule::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        // Reorder multijoin into left-deep join tree.
+        // Apply limited set of filter pushdown rules again since we pullup non eq-join
+        // conditions into a filter above the multijoin.
+        plan = {
+            let rules = vec![
+                ReorderMultiJoinRule::create(),
+                FilterProjectRule::create(),
+                FilterJoinRule::create(),
+            ];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
         // Prune Columns
         //
         // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
@@ -262,7 +282,6 @@ impl PlanRoot {
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 

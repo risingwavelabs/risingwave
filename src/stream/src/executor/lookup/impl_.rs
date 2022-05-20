@@ -332,7 +332,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder
-                                .append_row_with_limit(*op, &row, &matched_row)
+                                .append_row(*op, &row, &matched_row)
                                 .map_err(StreamExecutorError::eval_error)?
                             {
                                 yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));

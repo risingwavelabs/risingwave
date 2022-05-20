@@ -47,8 +47,8 @@ pub struct SSTableBuilderOptions {
 impl From<&StorageConfig> for SSTableBuilderOptions {
     fn from(options: &StorageConfig) -> SSTableBuilderOptions {
         SSTableBuilderOptions {
-            capacity: options.sstable_size as usize,
-            block_capacity: options.block_size as usize,
+            capacity: (options.sstable_size_mb as usize) * (1 << 20),
+            block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             // TODO: Make this configurable.
