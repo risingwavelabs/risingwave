@@ -22,6 +22,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
@@ -121,7 +122,7 @@ pub enum BeMessage<'a> {
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(Box<dyn std::error::Error + Send + Sync>),
+    ErrorResponse(BoxedError),
 }
 
 #[derive(Debug)]
