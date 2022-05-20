@@ -67,6 +67,7 @@ const S3_SPLIT_TYPE: &str = "s3";
 const KINESIS_SPLIT_TYPE: &str = "kinesis";
 const KAFKA_SPLIT_TYPE: &str = "kafka";
 const NEXMARK_SPLIT_TYPE: &str = "nexmark";
+const DATAGEN_SPLIT_TYPE: &str = "datagen";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
@@ -74,6 +75,7 @@ pub enum SplitImpl {
     Pulsar(PulsarSplit),
     Kinesis(KinesisSplit),
     Nexmark(NexmarkSplit),
+    Datagen(DatagenSplit),
 }
 
 pub enum SplitReaderImpl {
@@ -82,6 +84,7 @@ pub enum SplitReaderImpl {
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
+    Datagen(Box<DatagenSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -89,6 +92,7 @@ pub enum SplitEnumeratorImpl {
     Pulsar(PulsarSplitEnumerator),
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
+    Datagen(DatagenSplitEnumerator),
 }
 
 pub type DataType = risingwave_common::types::DataType;
@@ -140,7 +144,8 @@ impl_split_enumerator! {
             { Kafka, KafkaSplitEnumerator },
             { Pulsar, PulsarSplitEnumerator },
             { Kinesis, KinesisSplitEnumerator },
-            { Nexmark, NexmarkSplitEnumerator }
+            { Nexmark, NexmarkSplitEnumerator },
+            { Datagen, DatagenSplitEnumerator }
 }
 
 macro_rules! impl_split {
@@ -180,7 +185,8 @@ impl_split! {
             { Kafka, KAFKA_SPLIT_TYPE, KafkaSplit },
             { Pulsar, PULSAR_SPLIT_TYPE, PulsarSplit },
             { Kinesis, KINESIS_SPLIT_TYPE, KinesisSplit },
-            { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit }
+            { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit },  
+            { Datagen, DATAGEN_SPLIT_TYPE, DatagenSplit }
 }
 
 macro_rules! impl_split_reader {
@@ -220,7 +226,8 @@ impl_split_reader! {
             { Pulsar, PulsarSplitReader },
             { Kinesis, KinesisMultiSplitReader },
             { Nexmark, NexmarkSplitReader },
-            { Dummy, DummySplitReader }
+            { Dummy, DummySplitReader },
+            { Datagen,DatagenSplitReader}
 }
 
 /// The persistent state of the connector.

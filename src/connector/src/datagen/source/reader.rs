@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::{anyhow,Result};
 use async_trait::async_trait;
 
 use super::generator::DatagenEventGenerator;
@@ -26,16 +26,12 @@ pub struct DatagenSplitReader {
 
 #[async_trait]
 impl SplitReader for DatagenSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generator.next().await
-    }
-}
+    type Properties = DatagenProperties;
 
-impl DatagenSplitReader {
-    pub async fn new(
+    async fn new(
         properties: DatagenProperties,
         state: ConnectorStateV2,
-        columns: Vec<Column>,
+        columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
         Self: Sized,
@@ -44,8 +40,21 @@ impl DatagenSplitReader {
         let batch_chunk_size = properties.max_chunk_size.parse::<u64>()?;
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
 
-        Ok(DatagenSplitReader {
-            generator: DatagenEventGenerator::new(columns, 0, batch_chunk_size, rows_per_second)?,
-        })
+        if let Some(columns) = columns && columns.is_empty(){
+            Ok(DatagenSplitReader {
+                generator: DatagenEventGenerator::new(columns, 0, batch_chunk_size, rows_per_second)?,
+            })
+        } else{
+            Err(anyhow!("datagen table's columns is empty or none"))
+        }
+
     }
+
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+        self.generator.next().await
+    }
+}
+
+impl DatagenSplitReader {
+
 }

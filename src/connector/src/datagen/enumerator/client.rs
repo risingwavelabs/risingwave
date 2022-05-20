@@ -21,16 +21,15 @@ use crate::DatagenProperties;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct DatagenSplitEnumerator {}
 
-impl DatagenSplitEnumerator {
-    pub fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
+#[async_trait]
+impl SplitEnumerator for DatagenSplitEnumerator {
+    type Properties = DatagenProperties;
+    type Split = DatagenSplit;
+
+    async fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
         let _ = properties;
         Ok(DatagenSplitEnumerator {})
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for DatagenSplitEnumerator {
-    type Split = DatagenSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {
         let split = vec![DatagenSplit {
