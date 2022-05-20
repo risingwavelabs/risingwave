@@ -147,32 +147,38 @@ where
     }
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
-        tracing::trace!("receive query: {}", query.get_sql());
-        let session = self.session.clone().unwrap();
-
-        // execute query
-        let process_res = session.run_statement(query.get_sql()).await;
-        match process_res {
-            Ok(res) => {
-                if res.is_empty() {
-                    self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
-                } else if res.is_query() {
-                    self.process_query_with_results(res).await?;
-                } else {
-                    self.write_message_no_flush(&BeMessage::CommandComplete(
-                        BeCommandCompleteMessage {
-                            stmt_type: res.get_stmt_type(),
-                            notice: res.get_notice(),
-                            rows_cnt: res.get_effected_rows_cnt(),
-                        },
-                    ))?;
+        match query.get_sql() {
+            Ok(sql) => {
+                tracing::trace!("receive query: {}", sql);
+                let session = self.session.clone().unwrap();
+                // execute query
+                let process_res = session.run_statement(sql).await;
+                match process_res {
+                    Ok(res) => {
+                        if res.is_empty() {
+                            self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
+                        } else if res.is_query() {
+                            self.process_query_with_results(res).await?;
+                        } else {
+                            self.write_message_no_flush(&BeMessage::CommandComplete(
+                                BeCommandCompleteMessage {
+                                    stmt_type: res.get_stmt_type(),
+                                    notice: res.get_notice(),
+                                    rows_cnt: res.get_effected_rows_cnt(),
+                                },
+                            ))?;
+                        }
+                    }
+                    Err(e) => {
+                        self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+                    }
                 }
             }
-
-            Err(e) => {
-                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+            Err(err) => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
             }
-        }
+        };
+
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }

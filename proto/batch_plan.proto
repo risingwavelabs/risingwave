@@ -43,6 +43,11 @@ message DeleteNode {
   plan_common.TableRefId table_source_ref_id = 1;
 }
 
+message UpdateNode {
+  plan_common.TableRefId table_source_ref_id = 1;
+  repeated expr.ExprNode exprs = 2;
+}
+
 message ValuesNode {
   message ExprTuple {
     repeated expr.ExprNode cells = 1;
@@ -143,7 +148,8 @@ message PlanNode {
   oneof node_body {
     InsertNode insert = 2;
     DeleteNode delete = 3;
-    ProjectNode project = 4;
+    UpdateNode update = 4;
+    ProjectNode project = 5;
     HashAggNode hash_agg = 7;
     FilterNode filter = 8;
     ExchangeNode exchange = 9;

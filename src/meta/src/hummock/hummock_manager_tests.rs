@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionRefId,
@@ -111,9 +111,20 @@ async fn test_hummock_pin_unpin() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
+    let sst_num = 2usize;
+
+    // Construct vnode mappings for generating compaction tasks.
+    let parallel_units = cluster_manager
+        .list_parallel_units(Some(ParallelUnitType::Hash))
+        .await;
+    env.hash_mapping_manager()
+        .build_fragment_hash_mapping(1, &parallel_units);
+    for table_id in 1..sst_num + 2 {
+        env.hash_mapping_manager()
+            .set_fragment_state_table(1, table_id as u32);
+    }
 
     // No compaction task available.
     let task = hummock_manager.get_compact_task().await.unwrap();
