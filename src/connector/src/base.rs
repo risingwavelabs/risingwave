@@ -21,17 +21,116 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::dummy_connector::DummySplitReader;
+use crate::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::source::KafkaSplitReader;
-use crate::kafka::KafkaSplit;
+use crate::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::kinesis::source::reader::KinesisMultiSplitReader;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::nexmark::source::reader::NexmarkSplitReader;
-use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
+use crate::nexmark::{NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR};
 use crate::pulsar::source::reader::PulsarSplitReader;
-use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
-use crate::{kafka, kinesis, nexmark, pulsar, ConnectorProperties};
+use crate::pulsar::{
+    PulsarEnumeratorOffset, PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
+};
+use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
+
+/// [`SplitEnumerator`] fetches the split metadata from the external source service.
+/// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
+#[async_trait]
+pub trait SplitEnumerator: Sized {
+    type Split: SplitMetaData + Send + Sync;
+    type Properties;
+
+    async fn new(properties: Self::Properties) -> Result<Self>;
+    async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+}
+
+/// [`SplitReader`] is an abstraction of the external connector read interface,
+/// used to read messages from the outside and transform them into source-oriented
+/// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
+/// messages at a time, [`Option`] is used to be compatible with the Stream API, but the stream of a
+/// Streaming system should not end
+#[async_trait]
+pub trait SplitReader: Sized {
+    type Properties;
+
+    async fn new(
+        properties: Self::Properties,
+        state: ConnectorStateV2,
+        columns: Option<Vec<Column>>,
+    ) -> Result<Self>;
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SplitImpl {
+    Kafka(KafkaSplit),
+    Pulsar(PulsarSplit),
+    Kinesis(KinesisSplit),
+    Nexmark(NexmarkSplit),
+}
+
+pub enum SplitReaderImpl {
+    Kinesis(Box<KinesisMultiSplitReader>),
+    Kafka(Box<KafkaSplitReader>),
+    Dummy(Box<DummySplitReader>),
+    Nexmark(Box<NexmarkSplitReader>),
+    Pulsar(Box<PulsarSplitReader>),
+}
+
+pub enum SplitEnumeratorImpl {
+    Kafka(KafkaSplitEnumerator),
+    Pulsar(PulsarSplitEnumerator),
+    Kinesis(KinesisSplitEnumerator),
+    Nexmark(NexmarkSplitEnumerator),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub enum ConnectorProperties {
+    Kafka(KafkaProperties),
+    Pulsar(PulsarProperties),
+    Kinesis(KinesisProperties),
+    Nexmark(Box<NexmarkProperties>),
+    S3(S3Properties),
+    Dummy(()),
+}
+
+impl_connector_properties! {
+    [ ] ,
+    { Kafka, KAFKA_CONNECTOR },
+    { Pulsar, PULSAR_CONNECTOR },
+    { Kinesis, KINESIS_CONNECTOR },
+    { Nexmark, NEXMARK_CONNECTOR },
+    { S3, S3_CONNECTOR }
+}
+
+impl_split_enumerator! {
+    [ ] ,
+    { Kafka, KafkaSplitEnumerator },
+    { Pulsar, PulsarSplitEnumerator },
+    { Kinesis, KinesisSplitEnumerator },
+    { Nexmark, NexmarkSplitEnumerator }
+}
+
+impl_split! {
+    [ ] ,
+    { Kafka, KAFKA_CONNECTOR, KafkaSplit },
+    { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
+    { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
+    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit }
+}
+
+impl_split_reader! {
+    [ ] ,
+    { Kafka, KafkaSplitReader },
+    { Pulsar, PulsarSplitReader },
+    { Kinesis, KinesisMultiSplitReader },
+    { Nexmark, NexmarkSplitReader },
+    { Dummy, DummySplitReader }
+}
 
 pub type DataType = risingwave_common::types::DataType;
 
@@ -40,11 +139,6 @@ pub struct Column {
     pub name: String,
     pub data_type: DataType,
 }
-
-const KAFKA_SOURCE: &str = "kafka";
-const KINESIS_SOURCE: &str = "kinesis";
-const PULSAR_SOURCE: &str = "pulsar";
-const NEXMARK_SOURCE: &str = "nexmark";
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
@@ -58,7 +152,7 @@ pub struct SourceMessage {
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
-    fn to_json_bytes(&self) -> Bytes;
+    fn encode_to_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
@@ -85,6 +179,7 @@ impl ConnectorState {
     }
 }
 
+// TODO: use macro and trait to simplify the code here
 impl From<SplitImpl> for ConnectorState {
     fn from(split: SplitImpl) -> Self {
         match split {
@@ -133,7 +228,7 @@ impl SplitMetaData for ConnectorState {
         String::from_utf8(self.identifier.to_vec()).unwrap()
     }
 
-    fn to_json_bytes(&self) -> Bytes {
+    fn encode_to_bytes(&self) -> Bytes {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
@@ -149,168 +244,4 @@ pub enum ConnectorStateV2 {
     State(ConnectorState),
     Splits(Vec<SplitImpl>),
     None,
-}
-
-#[async_trait]
-pub trait SplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
-}
-
-pub enum SplitReaderImpl {
-    Kinesis(Box<KinesisMultiSplitReader>),
-    Kafka(Box<KafkaSplitReader>),
-    Dummy(DummySplitReader),
-    Nexmark(Box<NexmarkSplitReader>),
-    Pulsar(PulsarSplitReader),
-}
-
-impl SplitReaderImpl {
-    pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        match self {
-            Self::Kafka(r) => r.next().await,
-            Self::Kinesis(r) => r.next().await,
-            Self::Dummy(r) => r.next().await,
-            Self::Nexmark(r) => r.next().await,
-            Self::Pulsar(r) => r.next().await,
-        }
-    }
-
-    pub async fn create(
-        config: ConnectorProperties,
-        state: ConnectorStateV2,
-        _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
-        if let ConnectorStateV2::Splits(s) = &state {
-            if s.is_empty() {
-                return Ok(Self::Dummy(DummySplitReader {}));
-            }
-        }
-
-        let connector = match config {
-            ConnectorProperties::Kafka(props) => {
-                Self::Kafka(Box::new(KafkaSplitReader::new(props, state).await?))
-            }
-            ConnectorProperties::Kinesis(props) => {
-                Self::Kinesis(Box::new(KinesisMultiSplitReader::new(props, state).await?))
-            }
-            ConnectorProperties::Nexmark(props) => {
-                Self::Nexmark(Box::new(NexmarkSplitReader::new(*props, state).await?))
-            }
-            ConnectorProperties::Pulsar(props) => {
-                Self::Pulsar(PulsarSplitReader::new(props, state).await?)
-            }
-            _other => {
-                todo!()
-            }
-        };
-        Ok(connector)
-    }
-}
-
-/// `SplitEnumerator` fetches the split metadata from the external source service.
-/// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
-#[async_trait]
-pub trait SplitEnumerator {
-    type Split: SplitMetaData + Send + Sync;
-    async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
-}
-
-pub enum SplitEnumeratorImpl {
-    Kafka(kafka::enumerator::KafkaSplitEnumerator),
-    Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
-    Kinesis(kinesis::enumerator::client::KinesisSplitEnumerator),
-    Nexmark(nexmark::enumerator::NexmarkSplitEnumerator),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SplitImpl {
-    Kafka(kafka::KafkaSplit),
-    Pulsar(pulsar::PulsarSplit),
-    Kinesis(kinesis::split::KinesisSplit),
-    Nexmark(nexmark::NexmarkSplit),
-}
-
-const PULSAR_SPLIT_TYPE: &str = "pulsar";
-const S3_SPLIT_TYPE: &str = "s3";
-const KINESIS_SPLIT_TYPE: &str = "kinesis";
-const KAFKA_SPLIT_TYPE: &str = "kafka";
-const NEXMARK_SPLIT_TYPE: &str = "nexmark";
-
-impl SplitImpl {
-    pub fn id(&self) -> String {
-        match self {
-            SplitImpl::Kafka(k) => k.id(),
-            SplitImpl::Pulsar(p) => p.id(),
-            SplitImpl::Kinesis(k) => k.id(),
-            SplitImpl::Nexmark(n) => n.id(),
-        }
-    }
-
-    pub fn to_json_bytes(&self) -> Bytes {
-        match self {
-            SplitImpl::Kafka(k) => k.to_json_bytes(),
-            SplitImpl::Pulsar(p) => p.to_json_bytes(),
-            SplitImpl::Kinesis(k) => k.to_json_bytes(),
-            SplitImpl::Nexmark(n) => n.to_json_bytes(),
-        }
-    }
-
-    pub fn get_type(&self) -> String {
-        match self {
-            SplitImpl::Kafka(_) => KAFKA_SPLIT_TYPE,
-            SplitImpl::Pulsar(_) => PULSAR_SPLIT_TYPE,
-            SplitImpl::Kinesis(_) => KINESIS_SPLIT_TYPE,
-            SplitImpl::Nexmark(_) => NEXMARK_SPLIT_TYPE,
-        }
-        .to_string()
-    }
-
-    pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
-        match split_type.as_str() {
-            KAFKA_SPLIT_TYPE => KafkaSplit::restore_from_bytes(bytes).map(SplitImpl::Kafka),
-            PULSAR_SPLIT_TYPE => PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar),
-            KINESIS_SPLIT_TYPE => KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis),
-            NEXMARK_SPLIT_TYPE => NexmarkSplit::restore_from_bytes(bytes).map(SplitImpl::Nexmark),
-            other => Err(anyhow!("split type {} not supported", other)),
-        }
-    }
-}
-
-impl SplitEnumeratorImpl {
-    pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
-        match self {
-            SplitEnumeratorImpl::Kafka(k) => k
-                .list_splits()
-                .await
-                .map(|ss| ss.into_iter().map(SplitImpl::Kafka).collect_vec()),
-            SplitEnumeratorImpl::Pulsar(p) => p
-                .list_splits()
-                .await
-                .map(|ss| ss.into_iter().map(SplitImpl::Pulsar).collect_vec()),
-            SplitEnumeratorImpl::Kinesis(k) => k
-                .list_splits()
-                .await
-                .map(|ss| ss.into_iter().map(SplitImpl::Kinesis).collect_vec()),
-            SplitEnumeratorImpl::Nexmark(k) => k
-                .list_splits()
-                .await
-                .map(|ss| ss.into_iter().map(SplitImpl::Nexmark).collect_vec()),
-        }
-    }
-
-    pub async fn create(properties: ConnectorProperties) -> Result<Self> {
-        match properties {
-            ConnectorProperties::Kafka(props) => KafkaSplitEnumerator::new(props).map(Self::Kafka),
-            ConnectorProperties::Pulsar(props) => {
-                PulsarSplitEnumerator::new(props).map(Self::Pulsar)
-            }
-            ConnectorProperties::Kinesis(props) => {
-                KinesisSplitEnumerator::new(props).await.map(Self::Kinesis)
-            }
-            ConnectorProperties::Nexmark(props) => {
-                NexmarkSplitEnumerator::new(props.as_ref()).map(Self::Nexmark)
-            }
-            ConnectorProperties::S3(_) => todo!(),
-        }
-    }
 }

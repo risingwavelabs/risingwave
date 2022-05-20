@@ -21,7 +21,7 @@ use crate::base::SplitEnumerator;
 use crate::pulsar::admin::PulsarAdminClient;
 use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::topic::{parse_topic, Topic};
-use crate::PulsarProperties;
+use crate::pulsar::PulsarProperties;
 
 pub struct PulsarSplitEnumerator {
     admin_client: PulsarAdminClient,
@@ -37,8 +37,14 @@ pub enum PulsarEnumeratorOffset {
     Timestamp(i64),
 }
 
-impl PulsarSplitEnumerator {
-    pub(crate) fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
+impl PulsarSplitEnumerator {}
+
+#[async_trait]
+impl SplitEnumerator for PulsarSplitEnumerator {
+    type Properties = PulsarProperties;
+    type Split = PulsarSplit;
+
+    async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
         let topic = properties.topic;
         let admin_url = properties.admin_url;
         let parsed_topic = parse_topic(&topic)?;
@@ -69,11 +75,6 @@ impl PulsarSplitEnumerator {
             start_offset: scan_start_offset,
         })
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for PulsarSplitEnumerator {
-    type Split = PulsarSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
         let offset = self.start_offset.clone();
@@ -125,8 +126,8 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 mod test {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplitEnumerator};
-    use crate::{PulsarProperties, SplitEnumerator};
+    use crate::pulsar::{PulsarEnumeratorOffset, PulsarProperties, PulsarSplitEnumerator};
+    use crate::SplitEnumerator;
 
     async fn mock_server(web_path: &str, body: &str) -> MockServer {
         let mock_server = MockServer::start().await;
@@ -160,7 +161,7 @@ mod test {
             scan_startup_mode: Some("earliest".to_string()),
             time_offset: None,
         };
-        let mut enumerator = PulsarSplitEnumerator::new(prop).unwrap();
+        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
         let splits = enumerator.list_splits().await.unwrap();
         assert_eq!(splits.len(), 3);

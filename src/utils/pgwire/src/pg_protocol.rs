@@ -28,9 +28,9 @@ use crate::pg_server::{Session, SessionManager};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S>
+pub struct PgProtocol<S, SM>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    SM: SessionManager,
 {
     /// Used for write/read message in tcp connection.
     stream: S,
@@ -41,8 +41,8 @@ where
     /// Whether the connection is terminated.
     is_terminate: bool,
 
-    session_mgr: Arc<dyn SessionManager>,
-    session: Option<Arc<dyn Session>>,
+    session_mgr: Arc<SM>,
+    session: Option<Arc<SM::Session>>,
 }
 
 /// States flow happened from top to down.
@@ -51,11 +51,12 @@ enum PgProtocolState {
     Regular,
 }
 
-impl<S> PgProtocol<S>
+impl<S, SM> PgProtocol<S, SM>
 where
     S: AsyncWrite + AsyncRead + Unpin,
+    SM: SessionManager,
 {
-    pub fn new(stream: S, session_mgr: Arc<dyn SessionManager>) -> Self {
+    pub fn new(stream: S, session_mgr: Arc<SM>) -> Self {
         Self {
             stream,
             is_terminate: false,
@@ -147,32 +148,38 @@ where
     }
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
-        tracing::trace!("receive query: {}", query.get_sql());
-        let session = self.session.clone().unwrap();
-
-        // execute query
-        let process_res = session.run_statement(query.get_sql()).await;
-        match process_res {
-            Ok(res) => {
-                if res.is_empty() {
-                    self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
-                } else if res.is_query() {
-                    self.process_query_with_results(res).await?;
-                } else {
-                    self.write_message_no_flush(&BeMessage::CommandComplete(
-                        BeCommandCompleteMessage {
-                            stmt_type: res.get_stmt_type(),
-                            notice: res.get_notice(),
-                            rows_cnt: res.get_effected_rows_cnt(),
-                        },
-                    ))?;
+        match query.get_sql() {
+            Ok(sql) => {
+                tracing::trace!("receive query: {}", sql);
+                let session = self.session.clone().unwrap();
+                // execute query
+                let process_res = session.run_statement(sql).await;
+                match process_res {
+                    Ok(res) => {
+                        if res.is_empty() {
+                            self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
+                        } else if res.is_query() {
+                            self.process_query_with_results(res).await?;
+                        } else {
+                            self.write_message_no_flush(&BeMessage::CommandComplete(
+                                BeCommandCompleteMessage {
+                                    stmt_type: res.get_stmt_type(),
+                                    notice: res.get_notice(),
+                                    rows_cnt: res.get_effected_rows_cnt(),
+                                },
+                            ))?;
+                        }
+                    }
+                    Err(e) => {
+                        self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+                    }
                 }
             }
-
-            Err(e) => {
-                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+            Err(err) => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
             }
-        }
+        };
+
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }

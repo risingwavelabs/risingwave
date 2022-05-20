@@ -35,6 +35,18 @@
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
+    /* bind is distinct from */
+    SELECT 1 IS DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind is not distinct from */
+    SELECT 1 IS NOT DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [Not(IsDistinctFrom(1:Int32, 2:Int32))] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
     /* in-list with aligned types */
     SELECT 1::real in (3, 1.0, 2);
   batch_plan: |
@@ -141,9 +153,9 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     /* case searched form without else */
     create table t (v1 int);
@@ -178,9 +190,9 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1, 2) from t;
@@ -197,9 +209,9 @@
       BatchProject { exprs: [Coalesce($0, 1:Int32)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [Coalesce($0, 1:Int32), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1.2) from t;
@@ -223,9 +235,9 @@
       BatchProject { exprs: [ConcatWs($0, 1:Int32::Varchar)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id#0(hidden)], pk_columns: [_row_id#0] }
+    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
       StreamProject { exprs: [ConcatWs($0, 1:Int32::Varchar), $1] }
-        StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1.2) from t;

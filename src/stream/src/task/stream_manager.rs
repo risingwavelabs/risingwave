@@ -20,6 +20,7 @@ use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use madsim::task::JoinHandle;
 use parking_lot::Mutex;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -77,6 +78,9 @@ pub struct LocalStreamManagerCore {
     /// TODO: currently the client pool won't be cleared. Should remove compute clients when
     /// disconnected.
     compute_client_pool: ComputeClientPool,
+
+    /// Config of streaming engine
+    pub(crate) config: StreamingConfig,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -132,11 +136,13 @@ impl LocalStreamManager {
         addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
+        config: StreamingConfig,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
             state_store,
             streaming_metrics,
+            config,
         ))
     }
 
@@ -318,15 +324,17 @@ impl LocalStreamManagerCore {
         addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
+        config: StreamingConfig,
     ) -> Self {
         let context = SharedContext::new(addr);
-        Self::with_store_and_context(state_store, context, streaming_metrics)
+        Self::with_store_and_context(state_store, context, streaming_metrics, config)
     }
 
     fn with_store_and_context(
         state_store: StateStoreImpl,
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
+        config: StreamingConfig,
     ) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
@@ -339,6 +347,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             compute_client_pool: ComputeClientPool::new(1024),
+            config,
         }
     }
 
@@ -352,6 +361,7 @@ impl LocalStreamManagerCore {
             StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
+            StreamingConfig::default(),
         )
     }
 
@@ -508,11 +518,7 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> BoxedExecutor {
-        if cfg!(debug_assertions) {
-            DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
-        } else {
-            executor
-        }
+        DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
     }
 
     pub(crate) fn get_receive_message(

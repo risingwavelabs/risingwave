@@ -32,8 +32,9 @@ type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
 type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
-/// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
-/// entries.
+/// We manages a `BTreeMap` in memory for all entries belonging to a join key,
+/// since each `WriteBatch` is an ordered list of key-value pairs.
+/// When evicted, `BTreeMap` does not hold any entries.
 pub struct JoinEntryState<S: StateStore> {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: Option<BTreeMap<PkType, StateValueType>>,

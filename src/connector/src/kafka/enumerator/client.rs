@@ -22,8 +22,7 @@ use rdkafka::{Offset, TopicPartitionList};
 
 use crate::base::SplitEnumerator;
 use crate::kafka::split::KafkaSplit;
-use crate::kafka::KAFKA_SYNC_CALL_TIMEOUT;
-use crate::KafkaProperties;
+use crate::kafka::{KafkaProperties, KAFKA_SYNC_CALL_TIMEOUT};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -44,8 +43,14 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 }
 
-impl KafkaSplitEnumerator {
-    pub fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
+impl KafkaSplitEnumerator {}
+
+#[async_trait]
+impl SplitEnumerator for KafkaSplitEnumerator {
+    type Properties = KafkaProperties;
+    type Split = KafkaSplit;
+
+    async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
         let broker_address = properties.brokers;
         let topic = properties.topic;
 
@@ -82,11 +87,6 @@ impl KafkaSplitEnumerator {
             stop_offset: KafkaEnumeratorOffset::None,
         })
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for KafkaSplitEnumerator {
-    type Split = KafkaSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition()?;

@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Greater, Less};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
 
@@ -34,18 +37,24 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     tables: Vec<SstableInfo>,
 
     sstable_store: SstableStoreRef,
+    read_options: Arc<ReadOptions>,
 }
 
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new(tables: Vec<SstableInfo>, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        tables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<ReadOptions>,
+    ) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
             tables,
             sstable_store,
+            read_options,
         }
     }
 
@@ -55,7 +64,8 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
             self.sstable_iter = None;
         } else {
             let table = self.sstable_store.sstable(self.tables[idx].id).await?;
-            let mut sstable_iter = TI::new(table, self.sstable_store.clone());
+            let mut sstable_iter =
+                TI::new(table, self.sstable_store.clone(), self.read_options.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {

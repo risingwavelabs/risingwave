@@ -82,6 +82,8 @@ pub enum ErrorCode {
     MemoryError { layout: Layout },
     #[error("internal error: {0}")]
     InternalError(String),
+    #[error("connector error: {0}")]
+    ConnectorError(String),
     #[error(transparent)]
     ProstError(prost::DecodeError),
     #[error("Feature is not yet implemented: {0}, {1}")]
@@ -301,6 +303,7 @@ impl ErrorCode {
             ErrorCode::Eof => 22,
             ErrorCode::BindError(_) => 23,
             ErrorCode::UnknownWorker => 24,
+            ErrorCode::ConnectorError(_) => 25,
             ErrorCode::UnknownError(_) => 101,
         }
     }

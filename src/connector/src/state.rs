@@ -17,8 +17,6 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result as RwResult, RwError};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
@@ -68,7 +66,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
-                let value = state.to_json_bytes();
+                let value = state.encode_to_bytes();
                 // TODO(Yuanxin): Implement value meta
                 local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
@@ -106,22 +104,23 @@ impl<S: StateStore> SourceStateHandler<S> {
         &self,
         stream_source_splits: &SplitImpl,
         epoch: u64,
-    ) -> RwResult<ConnectorState> {
+    ) -> Result<ConnectorState> {
         match self.restore_states(stream_source_splits.id(), epoch).await {
-            Ok(Some(s)) => ConnectorState::restore_from_bytes(&s)
-                .map_err(|e| RwError::from(InternalError(e.to_string()))),
-            Ok(None) => Err(RwError::from(InternalError(format!(
+            Ok(Some(s)) => {
+                ConnectorState::restore_from_bytes(&s).map_err(|e| anyhow!(e.to_string()))
+            }
+            Ok(None) => Err(anyhow!(
                 "cannot found state for {:?}, epoch: {:?}",
-                stream_source_splits, epoch
-            )))),
-            Err(e) => Err(RwError::from(InternalError(e.to_string()))),
+                stream_source_splits,
+                epoch
+            )),
+            Err(e) => Err(anyhow!(e.to_string())),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -147,7 +146,7 @@ mod tests {
             self.partition.clone()
         }
 
-        fn to_json_bytes(&self) -> Bytes {
+        fn encode_to_bytes(&self) -> Bytes {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
@@ -164,7 +163,7 @@ mod tests {
         assert_eq!(offset, state_instance.offset);
         assert_eq!(partition, state_instance.partition);
         println!("TestSourceState = {:?}", state_instance);
-        let encode_value = state_instance.to_json_bytes();
+        let encode_value = state_instance.encode_to_bytes();
         let decode_value = TestSourceState::restore_from_bytes(&encode_value)?;
         println!("decode from Bytes instance = {:?}", decode_value);
         assert_eq!(offset, decode_value.offset);

@@ -12,4 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 mod file_common;
-mod s3;
+pub mod s3;
