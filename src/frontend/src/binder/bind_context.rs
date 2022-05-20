@@ -76,7 +76,7 @@ impl BindContext {
         }
     }
 
-    fn get_index(&self, column_name: &String) -> Result<usize> {
+    pub fn get_index(&self, column_name: &String) -> Result<usize> {
         let columns = self
             .indexs_of
             .get(column_name)

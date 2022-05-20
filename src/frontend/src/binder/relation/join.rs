@@ -54,7 +54,6 @@ impl Binder {
     }
 
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
-        let root_table_name = get_table_name(&table.relation);
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right_table_name = get_table_name(&join.relation);
@@ -68,7 +67,7 @@ impl Binder {
                 JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
             };
             let cond =
-                self.bind_join_constraint(constraint, &root_table_name, &right_table_name)?;
+                self.bind_join_constraint(constraint, &right_table_name)?;
             let join = BoundJoin {
                 join_type,
                 left: root,
@@ -84,7 +83,6 @@ impl Binder {
     fn bind_join_constraint(
         &mut self,
         constraint: JoinConstraint,
-        left_table: &Option<Ident>,
         right_table: &Option<Ident>,
     ) -> Result<ExprImpl> {
         Ok(match constraint {
@@ -106,9 +104,11 @@ impl Binder {
             JoinConstraint::Using(columns) => {
                 let mut columns_iter = columns.into_iter();
                 let first_column = columns_iter.next().unwrap();
+                let column_index = self.context.get_index(&first_column.value)?;
+                let mut left_table = self.context.columns[column_index].table_name.clone();
                 let mut binary_expr = Expr::BinaryOp {
                     left: Box::new(Expr::CompoundIdentifier(vec![
-                        left_table.clone().unwrap(),
+                        Ident::new(left_table.clone()),
                         first_column.clone(),
                     ])),
                     op: BinaryOperator::Eq,
@@ -118,15 +118,16 @@ impl Binder {
                     ])),
                 };
                 for column in columns_iter {
+                    left_table = self.context.columns[self.context.get_index(&column.value)?].table_name.clone();
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
                         op: BinaryOperator::Eq,
                         right: Box::new(Expr::BinaryOp {
                             left: Box::new(Expr::CompoundIdentifier(vec![
-                                left_table.clone().unwrap(),
+                                Ident::new(left_table.clone()),
                                 column.clone(),
                             ])),
-                            op: BinaryOperator::Eq,
+                            op: BinaryOperator::And,
                             right: Box::new(Expr::CompoundIdentifier(vec![
                                 right_table.clone().unwrap(),
                                 column.clone(),
@@ -144,13 +145,11 @@ fn get_table_name(table_factor: &TableFactor) -> Option<Ident> {
     match table_factor {
         TableFactor::Table {
             name,
-            alias: _,
-            args: _,
+            ..
         } => Some(name.0[0].clone()),
         TableFactor::Derived {
-            lateral: _,
-            subquery: _,
             alias,
+            ..
         } => alias.as_ref().map(|table_alias| table_alias.name.clone()),
         TableFactor::TableFunction { expr: _, alias } => {
             alias.as_ref().map(|table_alias| table_alias.name.clone())
