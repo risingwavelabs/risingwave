@@ -20,8 +20,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    gen_filter_above, ColPrunable, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    StreamSource, ToBatch, ToStream,
+    gen_filter, ColPrunable, LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamSource,
+    ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::session::OptimizerContextRef;
@@ -91,7 +91,7 @@ impl ColPrunable for LogicalSource {
 
 impl PredicatePushdown for LogicalSource {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_above(self.clone().into(), predicate)
+        gen_filter(self.clone().into(), predicate)
     }
 }
 

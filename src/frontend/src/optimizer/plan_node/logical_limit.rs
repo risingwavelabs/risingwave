@@ -17,8 +17,8 @@ use std::fmt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    gen_new_node, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -97,7 +97,7 @@ impl ColPrunable for LogicalLimit {
 
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_new_node(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

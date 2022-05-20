@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
 use super::{
-    gen_new_node, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -243,7 +243,7 @@ impl PredicatePushdown for LogicalProject {
         };
         let predicate = predicate.rewrite_expr(&mut subst);
 
-        gen_new_node(self, Condition::true_cond(), predicate)
+        gen_filter_and_pushdown(self, Condition::true_cond(), predicate)
     }
 }
 

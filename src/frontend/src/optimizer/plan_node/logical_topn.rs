@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    gen_new_node, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
@@ -164,7 +164,7 @@ impl ColPrunable for LogicalTopN {
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_new_node(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

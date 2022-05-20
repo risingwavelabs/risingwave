@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{
-    gen_filter_above, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan, ToBatch,
+    gen_filter, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan, ToBatch,
     ToStream,
 };
 use crate::optimizer::plan_node::BatchSeqScan;
@@ -210,7 +210,7 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_above(self.clone().into(), predicate)
+        gen_filter(self.clone().into(), predicate)
     }
 }
 

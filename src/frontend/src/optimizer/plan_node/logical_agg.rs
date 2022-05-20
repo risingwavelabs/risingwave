@@ -28,7 +28,7 @@ use super::{
     PredicatePushdown, StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{gen_new_node, LogicalProject};
+use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
@@ -547,7 +547,7 @@ impl PredicatePushdown for LogicalAgg {
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
         // returns 1 row.
         if num_group_keys == 0 {
-            return gen_new_node(self, predicate, Condition::true_cond());
+            return gen_filter_and_pushdown(self, predicate, Condition::true_cond());
         }
 
         // If the filter references agg_calls, we can not push it.
@@ -568,7 +568,7 @@ impl PredicatePushdown for LogicalAgg {
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
 
-        gen_new_node(self, agg_call_pred, pushed_predicate)
+        gen_filter_and_pushdown(self, agg_call_pred, pushed_predicate)
     }
 }
 

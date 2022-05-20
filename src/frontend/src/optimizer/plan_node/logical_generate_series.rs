@@ -17,9 +17,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
-use super::{
-    gen_filter_above, ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
-};
+use super::{gen_filter, ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::BatchGenerateSeries;
 use crate::session::OptimizerContextRef;
@@ -91,7 +89,7 @@ impl ColPrunable for LogicalGenerateSeries {
 
 impl PredicatePushdown for LogicalGenerateSeries {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_above(self.clone().into(), predicate)
+        gen_filter(self.clone().into(), predicate)
     }
 }
 

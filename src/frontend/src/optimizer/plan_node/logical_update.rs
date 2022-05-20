@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_new_node, BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    gen_filter_and_pushdown, BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
@@ -122,7 +122,7 @@ impl ColPrunable for LogicalUpdate {
 
 impl PredicatePushdown for LogicalUpdate {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_new_node(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

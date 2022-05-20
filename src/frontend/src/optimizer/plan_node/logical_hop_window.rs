@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    gen_new_node, BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef,
+    gen_filter_and_pushdown, BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
@@ -211,7 +211,7 @@ impl ColPrunable for LogicalHopWindow {
 
 impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_new_node(self, predicate, Condition::true_cond())
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

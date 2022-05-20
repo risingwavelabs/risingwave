@@ -22,8 +22,15 @@ use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 pub trait PredicatePushdown {
     /// Push predicate down for every logical plan node.
     ///
-    /// If you don't know how to implement this trait, you can just use [`gen_new_node`] or
-    /// [`gen_filter_above`] depending on whether the plan node has ONLY one input or not.
+    /// Sometimes, you will find it hard or just want to delay the implementation of predicate
+    /// pushdown, then you can use [`gen_filter_and_pushdown`] to generate a `LogicalFilter` above
+    /// current node and do predicate pushdown for its input.
+    ///
+    /// Also, if current logcial plan node doesn't have any input(e.g. `LogicalScan`), you can use
+    /// [`gen_filter`] to generate a `LogicalFilter` above it.
+    ///
+    /// Please note that `LogicalFilter::create` will NOT create a `LogicalFilter` if `predicate`
+    /// is always true, so feel free to use these two helper functions.
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
 }
 
@@ -41,7 +48,8 @@ macro_rules! impl_predicate_pushdown {
 for_batch_plan_nodes! {impl_predicate_pushdown}
 for_stream_plan_nodes! {impl_predicate_pushdown}
 
-pub fn gen_new_node<T: PlanTreeNodeUnary + PlanNode>(
+#[inline]
+pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
     node: &T,
     filter_predicate: Condition,
     pushed_predicate: Condition,
@@ -51,6 +59,7 @@ pub fn gen_new_node<T: PlanTreeNodeUnary + PlanNode>(
     LogicalFilter::create(Rc::new(new_node), filter_predicate)
 }
 
-pub fn gen_filter_above(node: PlanRef, predicate: Condition) -> PlanRef {
+#[inline]
+pub fn gen_filter(node: PlanRef, predicate: Condition) -> PlanRef {
     LogicalFilter::create(node, predicate)
 }
