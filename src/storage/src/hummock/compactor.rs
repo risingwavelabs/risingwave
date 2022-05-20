@@ -522,8 +522,18 @@ impl Compactor {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
+            let process_task = |compact_task,
+                                vacuum_task,
+                                compactor_context,
+                                sstable_store,
+                                hummock_meta_client| async {
+                if let Some(compact_task) = compact_task {
+                    Compactor::compact(compactor_context, compact_task).await;
+                }
+
+                Compactor::try_vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
+            };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
-            let mut max_succ_compaction_task_id = None;
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -572,28 +582,13 @@ impl Compactor {
                             compact_task,
                             vacuum_task,
                         })) => {
-                            if let Some(compact_task) = compact_task {
-                                // TODO: temporarily deduplicate compaction task. Remove after https://github.com/singularity-data/risingwave/pull/2375
-                                let task_id = compact_task.task_id;
-                                if let Some(max_succ_compaction_task_id) =
-                                    max_succ_compaction_task_id.as_ref()
-                                {
-                                    if *max_succ_compaction_task_id >= task_id {
-                                        continue;
-                                    }
-                                }
-                                if Compactor::compact(compactor_context.clone(), compact_task).await
-                                {
-                                    max_succ_compaction_task_id = Some(task_id);
-                                }
-                            }
-
-                            Compactor::try_vacuum(
+                            tokio::spawn(process_task(
+                                compact_task,
                                 vacuum_task,
+                                compactor_context.clone(),
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),
-                            )
-                            .await;
+                            ));
                         }
                         Err(e) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());
