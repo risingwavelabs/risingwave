@@ -107,6 +107,7 @@ impl From<&ProstDataType> for DataType {
                 }
             }
             TypeName::List => DataType::List {
+                // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
         }
@@ -140,7 +141,7 @@ impl DataType {
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
-                    datatype: datatype.to_owned(),
+                    datatype: datatype.clone(),
                 },
             )?
             .into(),
@@ -168,16 +169,10 @@ impl DataType {
     }
 
     pub fn to_protobuf(&self) -> ProstDataType {
-        let field_type = {
-            match self {
-                DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
-                DataType::List { datatype } => {
-                    vec![datatype.to_protobuf()]
-                }
-                _ => {
-                    vec![]
-                }
-            }
+        let field_type = match self {
+            DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
+            DataType::List { datatype } => vec![datatype.to_protobuf()],
+            _ => vec![],
         };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
@@ -603,6 +598,13 @@ impl Display for ScalarRefImpl<'_> {
             }
         }
         for_all_scalar_variants! { impl_display_fmt }
+    }
+}
+
+pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
+    match d {
+        Some(s) => format!("{}", s),
+        None => "NULL".to_string(),
     }
 }
 

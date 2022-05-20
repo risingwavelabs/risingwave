@@ -39,7 +39,6 @@ mod tests {
             block_size_kb: 1,
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
-            async_checkpoint_enabled: true,
             write_conflict_detection_enabled: true,
             ..Default::default()
         });

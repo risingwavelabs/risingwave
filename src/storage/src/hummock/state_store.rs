@@ -354,12 +354,6 @@ impl StateStore for HummockStorage {
                 .local_version_manager
                 .write_shared_buffer(epoch, kv_pairs, false)
                 .await?;
-
-            if !self.options.async_checkpoint_enabled {
-                self.local_version_manager()
-                    .sync_shared_buffer(Some(epoch))
-                    .await?;
-            }
             Ok(size)
         }
     }

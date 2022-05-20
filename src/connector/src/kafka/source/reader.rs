@@ -28,7 +28,7 @@ use risingwave_common::error::RwError;
 use crate::base::{SourceMessage, SplitReader};
 use crate::kafka::split::KafkaSplit;
 use crate::properties::KafkaProperties;
-use crate::{ConnectorStateV2, SplitImpl};
+use crate::{Column, ConnectorStateV2, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -41,7 +41,11 @@ pub struct KafkaSplitReader {
 impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
 
-    async fn new(properties: KafkaProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        properties: KafkaProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {

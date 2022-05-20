@@ -61,10 +61,6 @@ pub(crate) struct Opts {
     compact_level_after_write: u32,
 
     #[clap(long)]
-    // since we want to enable async checkpoint as the default
-    async_checkpoint_disabled: bool,
-
-    #[clap(long)]
     write_conflict_detection_enabled: bool,
 
     // ----- benchmarks -----
@@ -151,7 +147,6 @@ async fn main() {
         block_size_kb: opts.block_size_kb,
         share_buffers_sync_parallelism: opts.share_buffers_sync_parallelism,
         data_directory: "hummock_001".to_string(),
-        async_checkpoint_enabled: !opts.async_checkpoint_disabled,
         write_conflict_detection_enabled: opts.write_conflict_detection_enabled,
         block_cache_capacity_mb: opts.block_cache_capacity_mb as usize,
         meta_cache_capacity_mb: opts.meta_cache_capacity_mb as usize,
