@@ -32,7 +32,7 @@ use crate::base::{SourceMessage, SplitReader};
 use crate::kinesis::build_client;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::{ConnectorStateV2, KinesisProperties, SplitImpl};
+use crate::{Column, ConnectorStateV2, KinesisProperties, SplitImpl};
 
 pub struct KinesisMultiSplitReader {
     /// splits are not allowed to be empty, otherwise connector source should create
@@ -176,6 +176,36 @@ async fn split_reader_into_stream(mut reader: KinesisSplitReader) {
 
 #[async_trait]
 impl SplitReader for KinesisMultiSplitReader {
+    type Properties = KinesisProperties;
+
+    async fn new(
+        properties: KinesisProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let splits = match state {
+            ConnectorStateV2::Splits(s) => s,
+            ConnectorStateV2::State(_) => todo!("ConnectorStateV2::State is to be removed later"),
+            ConnectorStateV2::None => unreachable!(),
+        };
+
+        Ok(Self {
+            splits: splits
+                .iter()
+                .map(|split| match split {
+                    SplitImpl::Kinesis(ks) => Ok(ks.to_owned()),
+                    _ => Err(anyhow!(format!("expect KinesisSplit, got {:?}", split))),
+                })
+                .collect::<Result<Vec<KinesisSplit>>>()?,
+            properties,
+            message_cache: Arc::new(Mutex::new(Vec::new())),
+            consumer_handler: None,
+        })
+    }
+
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         if self.consumer_handler.is_none() {
             let split_readers = join_all(
@@ -228,31 +258,7 @@ impl SplitReader for KinesisMultiSplitReader {
     }
 }
 
-impl KinesisMultiSplitReader {
-    pub async fn new(properties: KinesisProperties, state: ConnectorStateV2) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let splits = match state {
-            ConnectorStateV2::Splits(s) => s,
-            ConnectorStateV2::State(_) => todo!("ConnectorStateV2::State is to be removed later"),
-            ConnectorStateV2::None => unreachable!(),
-        };
-
-        Ok(Self {
-            splits: splits
-                .iter()
-                .map(|split| match split {
-                    SplitImpl::Kinesis(ks) => Ok(ks.to_owned()),
-                    _ => Err(anyhow!(format!("expect KinesisSplit, got {:?}", split))),
-                })
-                .collect::<Result<Vec<KinesisSplit>>>()?,
-            properties,
-            message_cache: Arc::new(Mutex::new(Vec::new())),
-            consumer_handler: None,
-        })
-    }
-}
+impl KinesisMultiSplitReader {}
 #[cfg(test)]
 mod tests {
 
@@ -340,7 +346,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut reader =
-            KinesisMultiSplitReader::new(properties, ConnectorStateV2::Splits(splits)).await?;
+            KinesisMultiSplitReader::new(properties, ConnectorStateV2::Splits(splits), None)
+                .await?;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         println!("1: {:?}", reader.next().await);
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;

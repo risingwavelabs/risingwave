@@ -25,7 +25,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::SstableStore;
 use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
-use risingwave_storage::object::parse_object_store;
+use risingwave_storage::object::{parse_object_store, ObjectStoreImpl};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -67,27 +67,28 @@ pub async fn compactor_serve(
     ));
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let object_store = Arc::new(
+    let object_store = Arc::new(ObjectStoreImpl::new(
         parse_object_store(
             opts.state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
-            object_metrics,
+            false,
         )
         .await,
-    );
+        object_metrics,
+    ));
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
         storage_config.data_directory.to_string(),
         state_store_stats.clone(),
-        storage_config.block_cache_capacity,
-        storage_config.meta_cache_capacity,
+        storage_config.block_cache_capacity_mb * (1 << 20),
+        storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             storage_config,

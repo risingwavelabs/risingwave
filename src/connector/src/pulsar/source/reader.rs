@@ -30,7 +30,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::PulsarEnumeratorOffset;
-use crate::{ConnectorStateV2, PulsarProperties, SplitImpl};
+use crate::{Column, ConnectorStateV2, PulsarProperties, SplitImpl};
 
 struct PulsarSingleSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -166,25 +166,13 @@ const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
 
 #[async_trait]
 impl SplitReader for PulsarSplitReader {
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .messages
-            .borrow_mut()
-            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+    type Properties = PulsarProperties;
 
-        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        let ret = chunk.into_iter().map(SourceMessage::from).collect();
-
-        Ok(Some(ret))
-    }
-}
-
-impl PulsarSplitReader {
-    pub async fn new(props: PulsarProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        props: PulsarProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -222,7 +210,25 @@ impl PulsarSplitReader {
             messages: rx,
         })
     }
+
+    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
+        let mut stream = self
+            .messages
+            .borrow_mut()
+            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+
+        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
+            None => return Ok(None),
+            Some(chunk) => chunk,
+        };
+
+        let ret = chunk.into_iter().map(SourceMessage::from).collect();
+
+        Ok(Some(ret))
+    }
 }
+
+impl PulsarSplitReader {}
 
 impl Drop for PulsarSplitReader {
     fn drop(&mut self) {

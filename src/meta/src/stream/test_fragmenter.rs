@@ -258,7 +258,7 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);

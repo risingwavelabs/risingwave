@@ -13,19 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use futures::stream::{self, StreamExt};
-use futures::Future;
+use futures::future::{try_join_all, BoxFuture};
+use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{
     CompactTask, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
 };
@@ -39,13 +40,31 @@ use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
 };
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use super::sstable_store::SstableStoreRef;
-use super::{
-    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
-};
+use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use crate::hummock::iterator::ReadOptions;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
+use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::StateStoreMetrics;
+
+pub type SstableIdGenerator =
+    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSSTableId>> + Send + Sync>;
+
+pub fn get_remote_sstable_id_generator(
+    meta_client: Arc<dyn HummockMetaClient>,
+) -> SstableIdGenerator {
+    Arc::new(move || {
+        let meta_client = meta_client.clone();
+        async move {
+            meta_client
+                .get_new_table_id()
+                .await
+                .map_err(HummockError::meta_error)
+        }
+        .boxed()
+    })
+}
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
@@ -64,6 +83,8 @@ pub struct CompactorContext {
 
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
+
+    pub sstable_id_generator: SstableIdGenerator,
 }
 
 #[derive(Clone)]
@@ -240,6 +261,24 @@ impl Compactor {
                 })
                 .collect(),
         );
+        let tables = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.id)
+            .collect_vec();
+        if let Err(e) = compactor
+            .context
+            .sstable_store
+            .prefetch_sstables(tables)
+            .await
+        {
+            tracing::warn!(
+                "Compaction task {} prefetch failed with error: {}",
+                compact_task.task_id,
+                e
+            );
+        }
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
@@ -325,6 +364,7 @@ impl Compactor {
     }
 
     /// Compact the given key range and merge iterator.
+    /// Upon a successful return, the built SSTs are already uploaded to object store.
     async fn compact_key_range(
         &self,
         split_index: usize,
@@ -341,13 +381,8 @@ impl Compactor {
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
             || async {
-                let table_id = self
-                    .context
-                    .hummock_meta_client
-                    .get_new_table_id()
-                    .await
-                    .map_err(HummockError::meta_error)?;
-                let builder = HummockStorage::get_builder(&self.context.options);
+                let table_id = (self.context.sstable_id_generator)().await?;
+                let builder = SSTableBuilder::new(self.context.options.as_ref().into());
                 Ok((table_id, builder))
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
@@ -367,22 +402,23 @@ impl Compactor {
             self.compact_task.watermark,
         )
         .await?;
-        timer.observe_duration();
 
         // Seal.
         builder.seal_current();
 
         let mut ssts = Vec::new();
         ssts.reserve(builder.len());
-        // TODO: decide upload concurrency
+        // TODO: decide upload concurrency. Maybe we shall create a upload task channel for multiple
+        // compaction tasks.
+        let mut pending_requests = vec![];
         for (table_id, data, meta, vnode_bitmaps) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
-            let len = self
-                .context
-                .sstable_store
-                .put(&sst, data, super::CachePolicy::Fill)
-                .await?;
-
+            let len = data.len();
+            ssts.push((sst.clone(), vnode_bitmaps));
+            let sstable_store = self.context.sstable_store.clone();
+            let ret =
+                tokio::spawn(async move { sstable_store.put(sst, data, CachePolicy::Fill).await });
+            pending_requests.push(ret);
             if self.context.is_share_buffer_compact {
                 self.context
                     .stats
@@ -391,16 +427,21 @@ impl Compactor {
             } else {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
-
-            ssts.push((sst, vnode_bitmaps));
         }
-
+        timer.observe_duration();
+        for ret in try_join_all(pending_requests)
+            .await
+            .map_err(HummockError::other)?
+        {
+            ret?;
+        }
         Ok((split_index, ssts))
     }
 
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
+        let read_options = Arc::new(ReadOptions { prefetch: true });
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -421,6 +462,7 @@ impl Compactor {
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
+                    read_options.clone(),
                 )));
             } else {
                 for table_info in &level.table_infos {
@@ -428,6 +470,7 @@ impl Compactor {
                     table_iters.push(Box::new(SSTableIterator::new(
                         table,
                         self.context.sstable_store.clone(),
+                        read_options.clone(),
                     )));
                 }
             }
@@ -474,12 +517,23 @@ impl Compactor {
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
+            let process_task = |compact_task,
+                                vacuum_task,
+                                compactor_context,
+                                sstable_store,
+                                hummock_meta_client| async {
+                if let Some(compact_task) = compact_task {
+                    Compactor::compact(compactor_context, compact_task).await;
+                }
+
+                Compactor::try_vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
+            };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
-            let mut max_succ_compaction_task_id = None;
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -528,28 +582,13 @@ impl Compactor {
                             compact_task,
                             vacuum_task,
                         })) => {
-                            if let Some(compact_task) = compact_task {
-                                // TODO: temporarily deduplicate compaction task. Remove after https://github.com/singularity-data/risingwave/pull/2375
-                                let task_id = compact_task.task_id;
-                                if let Some(max_succ_compaction_task_id) =
-                                    max_succ_compaction_task_id.as_ref()
-                                {
-                                    if *max_succ_compaction_task_id >= task_id {
-                                        continue;
-                                    }
-                                }
-                                if Compactor::compact(compactor_context.clone(), compact_task).await
-                                {
-                                    max_succ_compaction_task_id = Some(task_id);
-                                }
-                            }
-
-                            Compactor::try_vacuum(
+                            tokio::spawn(process_task(
+                                compact_task,
                                 vacuum_task,
+                                compactor_context.clone(),
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),
-                            )
-                            .await;
+                            ));
                         }
                         Err(e) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());

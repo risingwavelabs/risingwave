@@ -26,6 +26,7 @@ pub enum ConnectorProperties {
     Nexmark(Box<NexmarkProperties>),
     S3(S3Properties),
     Datagen(DatagenProperties),
+    Dummy(()),
 }
 
 impl ConnectorProperties {

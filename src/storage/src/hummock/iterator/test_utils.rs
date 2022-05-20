@@ -22,14 +22,15 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use crate::hummock::iterator::BoxedForwardHummockIterator;
+use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
+use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{
-    HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable, SstableStore, SstableStoreRef,
+    HummockValue, SSTableBuilderOptions, SSTableIterator, Sstable, SstableStoreRef,
 };
-use crate::monitor::StateStoreMetrics;
-use crate::object::{ObjectStoreImpl, ObjectStoreRef};
+use crate::monitor::{ObjectStoreMetrics, StateStoreMetrics};
+use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -46,14 +47,16 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let object_store = Arc::new(ObjectStoreImpl::new_mem());
-    mock_sstable_store_with_object_store(object_store)
+    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::new(
+        Box::new(InMemObjectStore::new(false)),
+        Arc::new(ObjectStoreMetrics::unused()),
+    )))
 }
 
-pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
+pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
     Arc::new(SstableStore::new(
-        object_store,
+        store,
         path,
         Arc::new(StateStoreMetrics::unused()),
         64 << 20,
@@ -133,8 +136,11 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
                 key_count,
             ));
             let handle = cache.insert(table.id, table.id, 1, Box::new(table));
-            Box::new(SSTableIterator::new(handle, sstable_store.clone()))
-                as BoxedForwardHummockIterator
+            Box::new(SSTableIterator::new(
+                handle,
+                sstable_store.clone(),
+                Arc::new(ReadOptions::default()),
+            )) as BoxedForwardHummockIterator
         })
         .collect_vec()
 }

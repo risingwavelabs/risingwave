@@ -146,6 +146,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         "SourceExecutor".to_string(),
         Arc::new(StreamingMetrics::unused()),
         vec![],
+        u64::MAX,
     )?;
 
     // Create a `Materialize` to write the changes to storage

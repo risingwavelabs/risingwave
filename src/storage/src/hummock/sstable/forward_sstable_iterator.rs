@@ -13,18 +13,23 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 
 pub trait SSTableIteratorType {
     type SSTableIterator: HummockIterator;
 
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
+    fn new(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<ReadOptions>,
+    ) -> Self::SSTableIterator;
 }
 
 /// Iterates on a table.
@@ -39,15 +44,22 @@ pub struct SSTableIterator {
     pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
+
+    options: Arc<ReadOptions>,
 }
 
 impl SSTableIterator {
-    pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        options: Arc<ReadOptions>,
+    ) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
             sst: table,
             sstable_store,
+            options,
         }
     }
 
@@ -62,14 +74,19 @@ impl SSTableIterator {
         if idx >= self.sst.value().block_count() {
             self.block_iter = None;
         } else {
-            let block = self
-                .sstable_store
-                .get(
-                    self.sst.value(),
-                    idx as u64,
-                    crate::hummock::CachePolicy::Fill,
-                )
-                .await?;
+            let block = if self.options.prefetch {
+                self.sstable_store
+                    .get_with_prefetch(self.sst.value(), idx as u64)
+                    .await?
+            } else {
+                self.sstable_store
+                    .get(
+                        self.sst.value(),
+                        idx as u64,
+                        crate::hummock::CachePolicy::Fill,
+                    )
+                    .await?
+            };
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key);
@@ -147,13 +164,18 @@ impl HummockIterator for SSTableIterator {
 impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
 
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
-        SSTableIterator::new(table, sstable_store)
+    fn new(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<ReadOptions>,
+    ) -> Self::SSTableIterator {
+        SSTableIterator::new(table, sstable_store, read_options)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::executor::block_on;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_hummock_sdk::key::key_with_epoch;
@@ -163,8 +185,9 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        test_key_of, test_value_of, TEST_KEYS_COUNT,
+        gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
+    use crate::hummock::{CachePolicy, Sstable};
 
     #[tokio::test]
     async fn test_table_iterator() {
@@ -180,7 +203,8 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
-        let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
+        let mut sstable_iter =
+            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -208,7 +232,8 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
-        let mut sstable_iter = SSTableIterator::new(handle, sstable_store);
+        let mut sstable_iter =
+            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
@@ -263,5 +288,36 @@ mod tests {
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_prefetch_table_read() {
+        let sstable_store = mock_sstable_store();
+        // when upload data is successful, but upload meta is fail and delete is fail
+        let kv_iter =
+            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
+        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
+        let table = Sstable { id: 0, meta };
+        sstable_store
+            .put(table.clone(), data, CachePolicy::NotFill)
+            .await
+            .unwrap();
+
+        let mut sstable_iter = SSTableIterator::new(
+            block_on(sstable_store.sstable(table.id)).unwrap(),
+            sstable_store,
+            Arc::new(ReadOptions { prefetch: true }),
+        );
+        let mut cnt = 0;
+        sstable_iter.rewind().await.unwrap();
+        while sstable_iter.is_valid() {
+            let key = sstable_iter.key();
+            let value = sstable_iter.value();
+            assert_bytes_eq!(key, test_key_of(cnt));
+            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
+            cnt += 1;
+            sstable_iter.next().await.unwrap();
+        }
+        assert_eq!(cnt, TEST_KEYS_COUNT);
     }
 }
