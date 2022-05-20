@@ -27,8 +27,14 @@ pub struct KinesisSplitEnumerator {
     client: kinesis_client,
 }
 
-impl KinesisSplitEnumerator {
-    pub async fn new(properties: KinesisProperties) -> Result<Self> {
+impl KinesisSplitEnumerator {}
+
+#[async_trait]
+impl SplitEnumerator for KinesisSplitEnumerator {
+    type Properties = KinesisProperties;
+    type Split = KinesisSplit;
+
+    async fn new(properties: KinesisProperties) -> Result<Self> {
         let client = build_client(properties.clone()).await?;
         let stream_name = properties.stream_name.clone();
         Ok(Self {
@@ -36,11 +42,6 @@ impl KinesisSplitEnumerator {
             client,
         })
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for KinesisSplitEnumerator {
-    type Split = KinesisSplit;
 
     async fn list_splits(&mut self) -> Result<Vec<KinesisSplit>> {
         let mut next_token: Option<String> = None;

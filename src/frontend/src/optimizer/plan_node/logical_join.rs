@@ -313,7 +313,6 @@ impl ColPrunable for LogicalJoin {
 
         let mut left_required_cols = Vec::new();
         let mut right_required_cols = Vec::new();
-        FixedBitSet::with_capacity(self.right.schema().fields().len());
         left_right_required_cols.iter().for_each(|&i| {
             if i < left_len {
                 left_required_cols.push(i);

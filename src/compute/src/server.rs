@@ -133,6 +133,7 @@ pub async fn compute_node_serve(
         client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
+        config.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(worker_id));
 
