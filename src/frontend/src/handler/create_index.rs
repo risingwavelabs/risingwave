@@ -94,6 +94,13 @@ pub(crate) fn gen_create_index_plan(
 
     // Manually assemble the materialization plan for the index MV.
     let materialize = {
+        let mut required_cols = FixedBitSet::with_capacity(table_desc.columns.len());
+        required_cols.toggle_range(..);
+        required_cols.toggle(0);
+        let mut out_names: Vec<String> =
+            table_desc.columns.iter().map(|c| c.name.clone()).collect();
+        out_names.remove(0);
+
         let scan_node = StreamTableScan::new(LogicalScan::new(
             table_name,
             (0..table_desc.columns.len()).into_iter().collect(),
@@ -102,11 +109,6 @@ pub(crate) fn gen_create_index_plan(
             vec![],
             context,
         ));
-        let mut required_cols = FixedBitSet::with_capacity(scan_node.schema().len());
-        required_cols.toggle_range(..);
-        required_cols.toggle(0);
-        let mut out_names = scan_node.schema().names();
-        out_names.remove(0);
 
         PlanRoot::new(
             scan_node.into(),
