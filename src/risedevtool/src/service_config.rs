@@ -59,7 +59,6 @@ pub struct MetaNodeConfig {
 
     pub enable_dashboard_v2: bool,
     pub unsafe_disable_recovery: bool,
-    pub checkpoint_interval: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -168,6 +167,7 @@ pub struct GrafanaConfig {
     phantom_use: Option<String>,
     pub id: String,
     pub address: String,
+    pub listen_address: String,
     pub port: u16,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }

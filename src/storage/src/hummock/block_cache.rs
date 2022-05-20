@@ -73,6 +73,9 @@ pub struct BlockCache {
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
+        if capacity == 0 {
+            panic!("block cache capacity == 0");
+        }
         let cache = LruCache::new(CACHE_SHARD_BITS, capacity, DEFAULT_OBJECT_POOL_SIZE);
         Self {
             inner: Arc::new(cache),
@@ -85,13 +88,18 @@ impl BlockCache {
             .map(BlockHolder::from_cached_block)
     }
 
-    pub fn insert(&self, sst_id: HummockSSTableId, block_idx: u64, block: Box<Block>) {
-        self.inner.insert(
+    pub fn insert(
+        &self,
+        sst_id: HummockSSTableId,
+        block_idx: u64,
+        block: Box<Block>,
+    ) -> BlockHolder {
+        BlockHolder::from_cached_block(self.inner.insert(
             (sst_id, block_idx),
             Self::hash(sst_id, block_idx),
             block.len(),
             block,
-        );
+        ))
     }
 
     pub async fn get_or_insert_with<F>(

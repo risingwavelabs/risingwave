@@ -31,7 +31,7 @@
 use std::f64::consts::PI;
 
 use super::NEXMARK_BASE_TIME;
-use crate::NexmarkProperties;
+use crate::nexmark::NexmarkProperties;
 
 #[derive(PartialEq)]
 enum RateShape {

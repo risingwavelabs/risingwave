@@ -16,7 +16,7 @@ use async_trait::async_trait;
 
 use crate::base::SplitEnumerator;
 use crate::nexmark::split::NexmarkSplit;
-use crate::NexmarkProperties;
+use crate::nexmark::NexmarkProperties;
 
 pub struct NexmarkSplitEnumerator {
     split_num: i32,

@@ -33,6 +33,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         // Get table id and used as keyspace prefix.
+        let append_only = node.get_append_only();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let source_r = params.input.remove(1);
         let source_l = params.input.remove(0);
@@ -113,6 +114,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             key_indices,
             keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
             keyspace_r: Keyspace::table_root(store, &right_table_id),
+            append_only,
         };
 
         for_all_join_types! { impl_create_hash_join_executor };
@@ -135,6 +137,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     key_indices: Vec<usize>,
     keyspace_l: Keyspace<S>,
     keyspace_r: Keyspace<S>,
+    append_only: bool,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
@@ -156,6 +159,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.key_indices,
             args.keyspace_l,
             args.keyspace_r,
+            args.append_only,
         )))
     }
 }

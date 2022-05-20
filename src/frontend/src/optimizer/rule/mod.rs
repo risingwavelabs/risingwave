@@ -47,3 +47,5 @@ mod index_delta_join;
 pub use index_delta_join::*;
 mod multijoin_join;
 pub use multijoin_join::*;
+mod reorder_multijoin;
+pub use reorder_multijoin::*;

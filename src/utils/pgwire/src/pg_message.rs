@@ -22,6 +22,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
@@ -46,12 +47,12 @@ impl FeQueryMessage {
             Ok(cstr) => cstr.to_str().map_err(|err| {
                 Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Cannot transform cstr to str: {}", err),
+                    format!("Invalid UTF-8 sequence: {}", err),
                 )
             }),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Invalid UTF-8 sequence: {}", err),
+                format!("Input end error: {}", err),
             )),
         }
     }
@@ -121,7 +122,7 @@ pub enum BeMessage<'a> {
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(Box<dyn std::error::Error + Send + Sync>),
+    ErrorResponse(BoxedError),
 }
 
 #[derive(Debug)]
@@ -386,11 +387,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_sql() {
-        let bytes: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let fe = FeQueryMessage {
-            sql_bytes: Bytes::from(bytes),
+            sql_bytes: Bytes::from(vec![255, 255, 255, 255, 255, 255, 0]),
         };
-        let sql = fe.get_sql();
-        assert!(sql.is_err(), "{}", true);
+        assert!(fe.get_sql().is_err(), "{}", true);
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        };
+        assert!(fe.get_sql().is_err(), "{}", true);
     }
 }
