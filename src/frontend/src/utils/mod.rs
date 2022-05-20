@@ -16,6 +16,8 @@ mod column_index_mapping;
 pub use column_index_mapping::*;
 mod condition;
 pub use condition::*;
+mod connected_components;
+pub(crate) use connected_components::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
