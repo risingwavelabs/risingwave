@@ -225,7 +225,7 @@ impl RearrangedChainExecutor {
             #[for_await]
             for msg in rearranged {
                 let msg: RearrangedMessage = msg?;
-                let Some(msg) = msg.phantom_into() else {continue};
+                let Some(msg) = msg.phantom_into() else { continue };
 
                 let is_barrier = msg.as_barrier().is_some();
                 yield msg;
