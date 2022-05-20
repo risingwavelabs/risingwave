@@ -25,8 +25,7 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     type Properties = DatagenProperties;
     type Split = DatagenSplit;
 
-    async fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
-        let _ = properties;
+    async fn new(_properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
         Ok(DatagenSplitEnumerator {})
     }
 
