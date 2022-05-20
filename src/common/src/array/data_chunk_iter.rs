@@ -20,14 +20,14 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
+use crate::error::Result as RwResult;
 use crate::hash::HashCode;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
-use crate::util::value_encoding::{serialize_datum, deserialize_datum};
-use crate::error::Result as RwResult;
+use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {
     /// Get an iterator for visible rows.

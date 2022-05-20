@@ -151,9 +151,7 @@ fn deserialize_bool(mut data: impl Buf) -> Result<bool> {
     match data.get_u8() {
         1 => Ok(true),
         0 => Ok(false),
-        value => Err(ValueEncodingError::InvalidBoolEncoding(
-            value,
-        ).into()),
+        value => Err(ValueEncodingError::InvalidBoolEncoding(value).into()),
     }
 }
 

@@ -96,9 +96,9 @@ impl<S: StateStore> JoinEntryState<S> {
         let mut cached = BTreeMap::new();
         for (raw_key, raw_value) in data {
             let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
-            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
+            let key = pk_deserializer.value_decode(raw_key)?;
             let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(&raw_value)?;
+            let value = deserializer.deserialize(raw_value)?;
             cached.insert(key, value);
         }
         Ok(cached)
@@ -132,7 +132,8 @@ impl<S: StateStore> JoinEntryState<S> {
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
-            let key_encoded = pk.serialize_not_null()?;
+            // pk here does not to be memcomparable.
+            let key_encoded = pk.value_encode()?;
 
             match v.into_option() {
                 Some(v) => {
