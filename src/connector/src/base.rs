@@ -232,10 +232,7 @@ impl From<SplitImpl> for ConnectorState {
             },
             SplitImpl::Datagen(dategen) => Self {
                 identifier: Bytes::from(dategen.id()),
-                start_offset: match dategen.start_offset {
-                    Some(s) => s.to_string(),
-                    _ => "".to_string(),
-                },
+                start_offset: "".to_string(),
                 end_offset: "".to_string(),
             },
         }

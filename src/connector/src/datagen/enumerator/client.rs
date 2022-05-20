@@ -30,12 +30,7 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {
-        let split = vec![DatagenSplit {
-            topic: "Mock Topic".to_string(),
-            partition: 0,
-            start_offset: Some(0),
-            stop_offset: None,
-        }];
+        let split = vec![DatagenSplit::default()];
         Ok(split)
     }
 }

@@ -18,17 +18,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SplitMetaData;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct DatagenSplit {
-    pub(crate) topic: String,
-    pub(crate) partition: i32,
-    pub(crate) start_offset: Option<i64>,
-    pub(crate) stop_offset: Option<i64>,
-}
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct DatagenSplit {}
 
 impl SplitMetaData for DatagenSplit {
     fn id(&self) -> String {
-        format!("{}", self.partition)
+        format!("{}", 0)
     }
 
     fn encode_to_bytes(&self) -> Bytes {
@@ -41,17 +36,7 @@ impl SplitMetaData for DatagenSplit {
 }
 
 impl DatagenSplit {
-    pub fn new(
-        partition: i32,
-        start_offset: Option<i64>,
-        stop_offset: Option<i64>,
-        topic: String,
-    ) -> DatagenSplit {
-        DatagenSplit {
-            topic,
-            partition,
-            start_offset,
-            stop_offset,
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 }
