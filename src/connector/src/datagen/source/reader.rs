@@ -54,5 +54,3 @@ impl SplitReader for DatagenSplitReader {
         self.generator.next().await
     }
 }
-
-impl DatagenSplitReader {}
