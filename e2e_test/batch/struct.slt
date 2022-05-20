@@ -49,7 +49,7 @@ insert into st values(1,(1,(1,null)));
 query II
 select * from st;
 ----
-1 (1, (1,  ))
+1 (1, (1, NULL))
 
 statement ok
 drop table st;
