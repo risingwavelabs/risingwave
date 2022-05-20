@@ -21,3 +21,9 @@
   logical_plan: |
     LogicalProject { exprs: [Array(1:Int32, $1)] }
       LogicalScan { table: t, columns: [_row_id, v1] }
+
+- sql: |
+    select ARRAY[null];
+  logical_plan: |
+    LogicalProject { exprs: [Array(null:Varchar)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }

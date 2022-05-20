@@ -15,7 +15,7 @@
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
 use risingwave_expr::vector_op::cast::str_parse;
-use risingwave_sqlparser::ast::{DateTimeField, Value};
+use risingwave_sqlparser::ast::{DateTimeField, Expr, Value};
 
 use crate::binder::Binder;
 use crate::expr::{align_types, ExprImpl, ExprType, FunctionCall, Literal};
@@ -115,10 +115,7 @@ impl Binder {
     }
 
     /// `ARRAY[...]` is represented as an function call at the binder stage.
-    pub(super) fn bind_array(
-        &mut self,
-        exprs: Vec<risingwave_sqlparser::ast::Expr>,
-    ) -> Result<ExprImpl> {
+    pub(super) fn bind_array(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
         let mut exprs = exprs
             .into_iter()
             .map(|e| self.bind_expr(e))

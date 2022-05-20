@@ -11,6 +11,14 @@ select ARRAY[1,2+3,4*5+1];
 ----
 {1,5,21}
 
+query T
+select ARRAY[null];
+----
+{NULL}
+
+statement error
+select ARRAY[];
+
 statement ok
 create table t (v1 int);
 

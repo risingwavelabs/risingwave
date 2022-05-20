@@ -171,12 +171,8 @@ impl DataType {
     pub fn to_protobuf(&self) -> ProstDataType {
         let field_type = match self {
             DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
-            DataType::List { datatype } => {
-                vec![datatype.to_protobuf()]
-            }
-            _ => {
-                vec![]
-            }
+            DataType::List { datatype } => vec![datatype.to_protobuf()],
+            _ => vec![],
         };
         ProstDataType {
             type_name: self.prost_type_name() as i32,

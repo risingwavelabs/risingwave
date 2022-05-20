@@ -282,7 +282,7 @@ pub struct ListValue {
 
 impl fmt::Display for ListValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Example of ListValue display: ARRAY[1, 2]:Int32
+        // Example of ListValue display: ARRAY[1, 2]
         write!(
             f,
             "ARRAY[{}]",
