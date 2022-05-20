@@ -26,29 +26,35 @@ select v1, v2 from t order by v2;
 1919 30
 810 40
 
-# Delete
+# Update
 
 statement ok
-delete from t where v1 = 1919;
+update t set (v1, v2) = (v2 + 5, v1) where v1 >= 810;
 
 query RI
 select v1, v2 from t order by v2;
 ----
 114 10
 514 20
-810 40
+45 810
+35 1919
+
+# Delete
+
+statement ok
+delete from t where v2 = 810;
+
+query RI
+select v1, v2 from t order by v2;
+----
+114 10
+514 20
+35 1919
 
 query I
 select count(*) from t;
 ----
 3
-
-query I rowsort
-select count(*), v1 from t group by v1;
-----
-1 810
-1 514
-1 114
 
 statement ok
 delete from t;
