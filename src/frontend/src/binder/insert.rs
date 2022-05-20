@@ -171,9 +171,7 @@ impl Binder {
                 }
                 true
             }
-            (_, _) => {
-                false
-            }
+            (_, _) => false,
         }
     }
 }
