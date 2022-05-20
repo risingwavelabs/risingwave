@@ -26,4 +26,6 @@ pub enum ValueEncodingError {
     InvalidNaiveDateTimeEncoding(i64, u32),
     #[error("invalid NaiveTime value encoding: secs: {0} nano: {1}")]
     InvalidNaiveTimeEncoding(u32, u32),
+    #[error("Invalid null tag value encoding: {0}")]
+    InvalidTagEncoding(u8),
 }
