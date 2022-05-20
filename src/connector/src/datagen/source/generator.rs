@@ -15,7 +15,6 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use bytes::Bytes;
-use itertools::Itertools;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration};
 
@@ -39,7 +38,7 @@ impl DatagenEventGenerator {
         rows_per_second: u64,
     ) -> Result<Self> {
         // FIXME better way to throw out err
-        let fields_map: HashMap<String, FieldGeneratorImpl> = columns
+        let fields_map: HashMap<String, FieldGeneratorImpl> = columns[1..]
             .iter()
             .map(|column| {
                 (
@@ -55,7 +54,7 @@ impl DatagenEventGenerator {
             .map(|(s, field)| (s, Result::unwrap(field)))
             .collect();
         assert_eq!(
-            fields_map.len(),
+            fields_map.len() + 1 ,
             columns.len(),
             "parsing datagen table fail!"
         );
@@ -73,25 +72,25 @@ impl DatagenEventGenerator {
             self.batch_chunk_size / self.rows_per_second,
         ))
         .await;
-        // let mut res = vec![];
-        // for i in 0..self.batch_chunk_size {
-        //     let mut map = Map::new();
-        //     self.fields_map.iter().map(|(name,field_generator)|{
-        //         map.insert(name.to_string(),field_generator.generate());
+        let mut res = vec![];
+        for i in 0..self.batch_chunk_size {
 
-        //     });
-        //     let value:Value = map.into();
-        //     let a = serde_json::from_value(value)?;
-        //     let msg = SourceMessage {
-        //         payload: Some(Bytes::from(a)),
-        //         offset: (self.last_offset + i).to_string(),
-        //         split_id: 0.to_string(),
-        //     };
-        //     res.push(msg);
-        // }
+            let map:Map<String,Value> = 
+            self.fields_map.iter_mut().map(|(name,field_generator)|{
+            (name.to_string(),field_generator.generate())
+            }).collect();
+
+            let value = Value::Object(map);
+            let msg = SourceMessage {
+                payload: Some(Bytes::from(value.to_string())),
+                offset: (self.last_offset + i).to_string(),
+                split_id: 0.to_string(),
+            };
+
+            res.push(msg);
+        }
         self.last_offset += self.batch_chunk_size;
-        // Ok(Some(res))
-        todo!()
+        Ok(Some(res))
+
     }
 }
-

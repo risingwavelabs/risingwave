@@ -20,11 +20,11 @@ use serde_json::{json, Value};
 use super::{FieldGenerator, FieldKind};
 
 pub enum FieldGeneratorImpl {
+    I16(I16Field),
     I32(I32Field),
-    // I32(Box::new(I32Field)),
-    // I64(Box::new(I64Field)),
+    I64(I64Field),
     F32(F32Field),
-    // F64(Box::new(F64Field)),
+    F64(F64Field),
 }
 impl FieldGeneratorImpl {
     pub fn new(
@@ -34,36 +34,63 @@ impl FieldGeneratorImpl {
         max_or_end: Option<String>,
     ) -> Result<Self> {
         match kind {
+            //todo(d2lark) use macro to simplify the code later
             FieldKind::Random => match data_type {
+                DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_random(
+                    min_or_start,
+                    max_or_end,
+                )?)),
                 DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_random(
                     min_or_start,
                     max_or_end,
                 )?)),
+                DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_random(
+                    min_or_start,
+                    max_or_end,
+                )?)),
                 DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_random(
                     min_or_start,
                     max_or_end,
                 )?)),
-                _ => todo!(),
+                DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_random(
+                    min_or_start,
+                    max_or_end,
+                )?)),
+                _ => unimplemented!()
             },
             FieldKind::Sequence => match data_type {
+                DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_sequence(
+                    min_or_start,
+                    max_or_end,
+                )?)),
                 DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_sequence(
                     min_or_start,
                     max_or_end,
                 )?)),
-                DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_random(
+                DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_sequence(
                     min_or_start,
                     max_or_end,
                 )?)),
-                _ => todo!(),
+                DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_sequence(
+                    min_or_start,
+                    max_or_end,
+                )?)),
+                DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_sequence(
+                    min_or_start,
+                    max_or_end,
+                )?)),
+                _ => unimplemented!()
             },
         }
     }
 
     pub fn generate(&mut self) -> Value {
         match self {
+            FieldGeneratorImpl::I16(f) => f.generate(),
             FieldGeneratorImpl::I32(f) => f.generate(),
+            FieldGeneratorImpl::I64(f) => f.generate(),
             FieldGeneratorImpl::F32(f) => f.generate(),
-            _ => todo!(),
+            FieldGeneratorImpl::F64(f) => f.generate()
         }
     }
 }
@@ -170,44 +197,50 @@ mod tests {
     use super::*;
     #[test]
     fn test_field_generator_with_sequence() {
-        let mut i_seq =
+        let mut i16_field =
             I16Field::with_sequence(Some("5".to_string()), Some("10".to_string())).unwrap();
         for i in 5..=10 {
-            assert_eq!(i_seq.generate(), json!(i));
+            assert_eq!(i16_field.generate(), json!(i));
         }
     }
     #[test]
     fn test_field_generator_with_random() {
-        let mut i_seq =
+        let mut i64_field =
             I64Field::with_random(Some("5".to_string()), Some("10".to_string())).unwrap();
         for _ in 0..100 {
-            let res = i_seq.generate();
+            let res = i64_field.generate();
             assert!(res.is_number());
             let res = res.as_i64().unwrap();
             assert!((5..=10).contains(&res));
         }
     }
     #[test]
-    fn test_macro() {
-        let i32_field = FieldGeneratorImpl::new(
+    fn test_field_generator_impl() {
+        let mut i32_field = FieldGeneratorImpl::new(
             DataType::Int32,
             FieldKind::Sequence,
             Some("5".to_string()),
             Some("10".to_string()),
         )
         .unwrap();
-        let f32_field = FieldGeneratorImpl::new(
+        let mut f32_field = FieldGeneratorImpl::new(
             DataType::Float32,
             FieldKind::Random,
-            Some("5".to_string()),
-            Some("10".to_string()),
+            Some("0.1".to_string()),
+            Some("9.9".to_string()),
         )
         .unwrap();
-        let mut fields = vec![i32_field, f32_field];
+
         for _ in 0..10 {
-            for field in &mut fields{
-                dbg!(field.generate());
-            }
+            let value = i32_field.generate();
+            assert!(value.is_number());
+            let value = value.as_i64().unwrap();
+            assert!((5..=10).contains(&value));
+
+            let value = f32_field.generate();
+            assert!(value.is_number());
+            let value = value.as_f64().unwrap();
+            assert!((0.1..=9.9).contains(&value));
         }
     }
 }

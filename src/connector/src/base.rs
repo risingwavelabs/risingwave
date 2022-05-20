@@ -20,7 +20,9 @@ use bytes::Bytes;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::datagen::{DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader,DATAGEN_CONNECTOR};
+use crate::datagen::{
+    DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
+};
 use crate::dummy_connector::DummySplitReader;
 use crate::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::kafka::enumerator::KafkaSplitEnumerator;

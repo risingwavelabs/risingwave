@@ -15,8 +15,7 @@
 use async_trait::async_trait;
 
 use crate::base::SplitEnumerator;
-use crate::datagen::DatagenSplit;
-use crate::datagen::DatagenProperties;
+use crate::datagen::{DatagenProperties, DatagenSplit};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct DatagenSplitEnumerator {}

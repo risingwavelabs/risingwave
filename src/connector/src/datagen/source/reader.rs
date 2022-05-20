@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow,Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
 use super::generator::DatagenEventGenerator;
-use crate::{Column, ConnectorStateV2, SourceMessage, SplitReader};
 use crate::datagen::DatagenProperties;
+use crate::{Column, ConnectorStateV2, SourceMessage, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -48,7 +48,6 @@ impl SplitReader for DatagenSplitReader {
         } else{
             Err(anyhow!("datagen table's columns is empty or none"))
         }
-
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
@@ -56,6 +55,4 @@ impl SplitReader for DatagenSplitReader {
     }
 }
 
-impl DatagenSplitReader {
-
-}
+impl DatagenSplitReader {}
