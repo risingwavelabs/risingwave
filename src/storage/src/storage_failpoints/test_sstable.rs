@@ -23,7 +23,8 @@ use crate::hummock::test_utils::{
     TEST_KEYS_COUNT,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, SSTableIterator, Sstable};
+use crate::hummock::{CachePolicy, SSTableIterator, SSTableIteratorType, Sstable};
+use crate::monitor::StoreLocalStatistic;
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
@@ -42,8 +43,9 @@ async fn test_failpoint_table_read() {
         .await
         .unwrap();
 
+    let mut stats = StoreLocalStatistic::default();
     let mut sstable_iter = SSTableIterator::new(
-        block_on(sstable_store.sstable(table.id)).unwrap(),
+        block_on(sstable_store.sstable(table.id, &mut stats)).unwrap(),
         sstable_store,
     );
     sstable_iter.rewind().await.unwrap();
@@ -99,8 +101,10 @@ async fn test_failpoint_vacuum_and_metadata() {
         .await
         .unwrap();
 
+    let mut stats = StoreLocalStatistic::default();
+
     let mut sstable_iter = SSTableIterator::new(
-        block_on(sstable_store.sstable(table.id)).unwrap(),
+        block_on(sstable_store.sstable(table.id, &mut stats)).unwrap(),
         sstable_store,
     );
     let mut cnt = 0;

@@ -27,7 +27,7 @@ pub use my_stats::MyHistogram;
 mod local_metrics;
 mod object_metrics;
 mod process_linux;
-pub use local_metrics::StoreLocalMetrics;
+pub use local_metrics::StoreLocalStatistic;
 pub use object_metrics::ObjectStoreMetrics;
 
 pub use self::process_linux::monitor_process;

@@ -25,7 +25,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::{StateStoreMetrics, StoreLocalMetrics};
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub trait NodeExtraOrderInfo: Eq + Ord + Send + Sync {}
 
@@ -134,7 +134,7 @@ impl<D: HummockIteratorDirection> OrderedMergeIteratorInner<D> {
 }
 
 impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> MergeIteratorInner<D, NE> {
-    fn collect_local_statistic_impl(&self, stats: &mut StoreLocalMetrics) {
+    fn collect_local_statistic_impl(&self, stats: &mut StoreLocalStatistic) {
         for node in &self.heap {
             node.iter.collect_local_statistic(stats);
         }
@@ -311,14 +311,14 @@ where
         Ok(())
     }
 
-    fn collect_local_statistic(&self, stats: &mut StoreLocalMetrics) {
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.collect_local_statistic_impl(stats);
     }
 }
 
 impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<D, NE> {
     fn drop(&mut self) {
-        let mut stats = StoreLocalMetrics::default();
+        let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic_impl(&mut stats);
         stats.report(self.stats.as_ref());
     }

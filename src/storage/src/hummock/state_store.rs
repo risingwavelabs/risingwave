@@ -30,6 +30,7 @@ use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIte
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
 use crate::hummock::utils::prune_ssts;
+use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -77,9 +78,13 @@ impl HummockStorage {
 
         // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
         // `key_range`
+        let mut stats = StoreLocalStatistic::default();
         let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward, None);
         for table_info in table_infos.into_iter().rev() {
-            let table = self.sstable_store.sstable(table_info.id).await?;
+            let table = self
+                .sstable_store
+                .sstable(table_info.id, &mut stats)
+                .await?;
             if backward {
                 overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                     table,
@@ -134,7 +139,10 @@ impl HummockStorage {
                 };
             } else {
                 for table_info in table_infos.into_iter().rev() {
-                    let table = self.sstable_store.sstable(table_info.id).await?;
+                    let table = self
+                        .sstable_store
+                        .sstable(table_info.id, &mut stats)
+                        .await?;
                     if backward {
                         overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                             table,
@@ -204,6 +212,7 @@ impl HummockStorage {
         epoch: u64,
         vnode_set: Option<VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
+        let mut stats = StoreLocalStatistic::default();
         let (uncommitted_ssts, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
 
@@ -237,9 +246,15 @@ impl HummockStorage {
             vnode_set.as_ref(),
         );
         for table_info in table_infos.into_iter().rev() {
-            let table = self.sstable_store.sstable(table_info.id).await?;
+            let table = self
+                .sstable_store
+                .sstable(table_info.id, &mut stats)
+                .await?;
             table_counts += 1;
-            if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+            if let Some(v) = self
+                .get_from_table(table, &internal_key, key, &mut stats)
+                .await?
+            {
                 return Ok(Some(v));
             }
         }
@@ -256,9 +271,9 @@ impl HummockStorage {
                         vnode_set.as_ref(),
                     );
                     for table_info in table_infos.into_iter().rev() {
-                        let table = self.sstable_store.sstable(table_info.id).await?;
+                        let table = self.sstable_store.sstable(table_info.id, &mut stats).await?;
                         table_counts += 1;
-                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+                        if let Some(v) = self.get_from_table(table, &internal_key, key, &mut stats).await? {
                             return Ok(Some(v));
                         }
                     }
@@ -288,6 +303,7 @@ impl HummockStorage {
                 */
         }
 
+        stats.report(self.stats.as_ref());
         self.stats
             .iter_merge_sstable_counts
             .observe(table_counts as f64);

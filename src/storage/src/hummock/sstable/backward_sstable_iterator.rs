@@ -22,7 +22,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorType, SstableStoreRef, TableHolder,
 };
-use crate::monitor::StoreLocalMetrics;
+use crate::monitor::StoreLocalStatistic;
 
 /// Iterates backwards on a table.
 pub struct BackwardSSTableIterator {
@@ -37,7 +37,7 @@ pub struct BackwardSSTableIterator {
 
     sstable_store: SstableStoreRef,
 
-    metrics: StoreLocalMetrics,
+    stats: StoreLocalStatistic,
 }
 
 impl BackwardSSTableIterator {
@@ -52,7 +52,7 @@ impl BackwardSSTableIterator {
                     self.sst.value(),
                     idx as u64,
                     crate::hummock::CachePolicy::Fill,
-                    &mut self.metrics,
+                    &mut self.stats,
                 )
                 .await?;
             let mut block_iter = BlockIterator::new(block);
@@ -75,7 +75,7 @@ impl HummockIterator for BackwardSSTableIterator {
     type Direction = Backward;
 
     async fn next(&mut self) -> HummockResult<()> {
-        self.metrics.scan_key_count += 1;
+        self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.prev();
 
@@ -133,8 +133,8 @@ impl HummockIterator for BackwardSSTableIterator {
         Ok(())
     }
 
-    fn collect_local_statistic(&self, stats: &mut StoreLocalMetrics) {
-        stats.add(&self.metrics)
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats)
     }
 }
 
@@ -145,7 +145,7 @@ impl SSTableIteratorType for BackwardSSTableIterator {
             cur_idx: table.value().meta.block_metas.len() - 1,
             sst: table,
             sstable_store,
-            metrics: StoreLocalMetrics::default(),
+            stats: StoreLocalStatistic::default(),
         }
     }
 }

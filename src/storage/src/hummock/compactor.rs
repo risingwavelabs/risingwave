@@ -45,7 +45,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::HummockError;
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
     Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSSTableId>> + Send + Sync>;
@@ -417,6 +417,7 @@ impl Compactor {
     /// Build the merge iterator based on the given input ssts.
     async fn build_sst_iter(&self) -> HummockResult<MergeIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
+        let mut stats = StoreLocalStatistic::default();
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -440,7 +441,11 @@ impl Compactor {
                 )));
             } else {
                 for table_info in &level.table_infos {
-                    let table = self.context.sstable_store.sstable(table_info.id).await?;
+                    let table = self
+                        .context
+                        .sstable_store
+                        .sstable(table_info.id, &mut stats)
+                        .await?;
                     table_iters.push(Box::new(SSTableIterator::new(
                         table,
                         self.context.sstable_store.clone(),
@@ -448,7 +453,7 @@ impl Compactor {
                 }
             }
         }
-
+        stats.report(self.context.stats.as_ref());
         Ok(MergeIterator::new(table_iters, self.context.stats.clone()))
     }
 

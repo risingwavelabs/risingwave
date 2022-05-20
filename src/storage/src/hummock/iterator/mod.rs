@@ -34,7 +34,7 @@ pub(crate) mod test_utils;
 
 use async_trait::async_trait;
 
-use crate::monitor::StoreLocalMetrics;
+use crate::monitor::StoreLocalStatistic;
 
 /// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
@@ -107,7 +107,7 @@ pub trait HummockIterator: Send + Sync {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
 
     /// take local statistic info from iterator to report metrics.
-    fn collect_local_statistic(&self, _stats: &mut StoreLocalMetrics) {}
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 }
 
 pub trait ForwardHummockIterator = HummockIterator<Direction = Forward>;

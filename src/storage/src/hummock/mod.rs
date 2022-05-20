@@ -61,6 +61,7 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::monitor::StoreLocalStatistic;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -124,13 +125,14 @@ impl HummockStorage {
         table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Bytes>> {
         if table.value().surely_not_have_user_key(key) {
-            self.stats.bloom_filter_true_negative_counts.inc();
+            stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
         }
         // Might have the key, take it as might positive.
-        self.stats.bloom_filter_might_positive_counts.inc();
+        stats.bloom_filter_might_positive_count += 1;
         let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
@@ -144,6 +146,7 @@ impl HummockStorage {
             true => iter.value().into_user_value().map(Bytes::copy_from_slice),
             false => None,
         };
+        iter.collect_local_statistic(stats);
         Ok(value)
     }
 

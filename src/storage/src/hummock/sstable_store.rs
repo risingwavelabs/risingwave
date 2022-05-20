@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
-use crate::monitor::StoreLocalMetrics;
+use crate::monitor::StoreLocalStatistic;
 use crate::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
@@ -139,11 +139,11 @@ impl SstableStore {
         sst: &Sstable,
         block_index: u64,
         policy: CachePolicy,
-        metrics: &mut StoreLocalMetrics,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        metrics.cache_data_block_total += 1;
+        stats.cache_data_block_total += 1;
         let fetch_block = async {
-            metrics.cache_data_block_miss += 1;
+            stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
                 .block_metas
@@ -188,19 +188,25 @@ impl SstableStore {
         }
     }
 
-    pub async fn sstable(&self, sst_id: HummockSSTableId) -> HummockResult<TableHolder> {
+    pub async fn sstable(
+        &self,
+        sst_id: HummockSSTableId,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        stats.cache_meta_block_total += 1;
         let entry = self
             .meta_cache
             .lookup_with_request_dedup(sst_id, sst_id, || async {
+                stats.cache_meta_block_miss += 1;
                 let path = self.get_sst_meta_path(sst_id);
                 let buf = self
                     .store
                     .read(&path, None)
                     .await
                     .map_err(HummockError::object_io_error)?;
+                let size = buf.len();
                 let meta = SstableMeta::decode(&mut &buf[..])?;
                 let sst = Box::new(Sstable { id: sst_id, meta });
-                let size = sst.encoded_size();
                 Ok((sst, size))
             })
             .await?;

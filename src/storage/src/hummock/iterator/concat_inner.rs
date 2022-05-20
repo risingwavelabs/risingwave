@@ -21,7 +21,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
-use crate::monitor::StoreLocalMetrics;
+use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
@@ -36,7 +36,7 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
 
     sstable_store: SstableStoreRef,
 
-    metrics: StoreLocalMetrics,
+    stats: StoreLocalStatistic,
 }
 
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
@@ -49,7 +49,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
             cur_idx: 0,
             tables,
             sstable_store,
-            metrics: StoreLocalMetrics::default(),
+            stats: StoreLocalStatistic::default(),
         }
     }
 
@@ -57,10 +57,13 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.tables.len() {
             if let Some(old_iter) = self.sstable_iter.take() {
-                old_iter.collect_local_statistic(&mut self.metrics);
+                old_iter.collect_local_statistic(&mut self.stats);
             }
         } else {
-            let table = self.sstable_store.sstable(self.tables[idx].id).await?;
+            let table = self
+                .sstable_store
+                .sstable(self.tables[idx].id, &mut self.stats)
+                .await?;
             let mut sstable_iter = TI::new(table, self.sstable_store.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
@@ -69,7 +72,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
             }
 
             if let Some(old_iter) = self.sstable_iter.take() {
-                old_iter.collect_local_statistic(&mut self.metrics);
+                old_iter.collect_local_statistic(&mut self.stats);
             }
 
             self.sstable_iter = Some(sstable_iter);
@@ -140,7 +143,7 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         Ok(())
     }
 
-    fn collect_local_statistic(&self, stats: &mut StoreLocalMetrics) {
-        stats.add(&self.metrics)
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats)
     }
 }
