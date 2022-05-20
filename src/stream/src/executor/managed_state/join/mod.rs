@@ -71,6 +71,13 @@ impl JoinRow {
         Ok(self.degree)
     }
 
+    pub fn row_by_indices(&self, indices: &[usize]) -> Row {
+        Row(indices
+            .iter()
+            .map(|&idx| self.row.index(idx).to_owned())
+            .collect_vec())
+    }
+
     /// Serialize the `JoinRow` into a binary bytes. All values must not be null.
     pub fn serialize(&self) -> RwResult<Vec<u8>> {
         let mut vec = Vec::with_capacity(10);
