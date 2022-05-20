@@ -19,7 +19,6 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
-      checkpoint-interval: 100
     - use: compute-node
     - use: frontend
 
