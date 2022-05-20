@@ -156,10 +156,7 @@ impl<S: StateStore> Keyspace<S> {
         self.store.iter(range, epoch).await
     }
 
-    pub async fn iter(
-        &'_ self,
-        epoch: u64,
-    ) -> StorageResult<impl StateStoreIter<Item = (Bytes, Bytes)> + '_> {
+    pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
         let iter = self.iter_inner(epoch).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
@@ -174,7 +171,7 @@ impl<S: StateStore> Keyspace<S> {
     }
 }
 
-struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
+pub struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
     iter: I,
     prefix_len: usize,
 }
