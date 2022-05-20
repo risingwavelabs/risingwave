@@ -1053,11 +1053,6 @@ mod tests {
              + 1 4 4
              + 3 6 5",
         );
-        let chunk_r3 = StreamChunk::from_pretty(
-            "  I I I
-             + 1 4 6
-             + 3 6 7",
-        );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
             create_append_only_executor::<{ JoinType::Inner }>(false);
@@ -1110,17 +1105,6 @@ mod tests {
                 + 1 4 1 1 4 4
                 + 3 6 3 3 6 5"
             )
-        );
-
-        // push the 3rd right chunk
-        // since appen-only optimization is enabled in this case,
-        // previously matched rows have been removed, the rows in 3rd chunk
-        // will not match any row in left side.
-        tx_r.push_chunk(chunk_r3);
-        let chunk = hash_join.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk.into_chunk().unwrap(),
-            StreamChunk::from_pretty("I I I I I I")
         );
     }
 
