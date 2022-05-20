@@ -33,6 +33,7 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
+use crate::utils::Condition;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -132,16 +133,7 @@ impl PlanRoot {
         };
 
         // Predicate Push-down
-        plan = {
-            let rules = vec![
-                FilterJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterAggRule::create(),
-                FilterMergeRule::create(),
-            ];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-            heuristic_optimizer.optimize(plan)
-        };
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Merge inner joins into multijoin
         plan = {

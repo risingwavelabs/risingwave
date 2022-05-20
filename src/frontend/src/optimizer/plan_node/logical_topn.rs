@@ -18,10 +18,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    gen_new_node, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
+};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -156,6 +159,12 @@ impl ColPrunable for LogicalTopN {
             )
             .into()
         }
+    }
+}
+
+impl PredicatePushdown for LogicalTopN {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_new_node(self, predicate, Condition::true_cond())
     }
 }
 
