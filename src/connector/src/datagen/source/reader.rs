@@ -16,7 +16,8 @@ use anyhow::{anyhow,Result};
 use async_trait::async_trait;
 
 use super::generator::DatagenEventGenerator;
-use crate::{Column, ConnectorStateV2, DatagenProperties, SourceMessage, SplitReader};
+use crate::{Column, ConnectorStateV2, SourceMessage, SplitReader};
+use crate::datagen::DatagenProperties;
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
