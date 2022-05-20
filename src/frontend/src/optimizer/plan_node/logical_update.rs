@@ -18,7 +18,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream, PredicatePushdown, gen_new_node};
+use super::{
+    gen_new_node, BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
+};
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::utils::Condition;

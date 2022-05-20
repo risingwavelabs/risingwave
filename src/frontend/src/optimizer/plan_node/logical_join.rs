@@ -274,9 +274,7 @@ impl LogicalJoin {
         };
 
         let on = if push_on {
-            others
-                .conjunctions
-                .extend(std::mem::take(&mut cannot_push));
+            others.conjunctions.extend(std::mem::take(&mut cannot_push));
             others
         } else {
             cannot_push.extend(others);

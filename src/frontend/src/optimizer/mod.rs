@@ -146,9 +146,7 @@ impl PlanRoot {
         // Apply limited set of filter pushdown rules again since we pullup non eq-join
         // conditions into a filter above the multijoin.
         plan = {
-            let rules = vec![
-                ReorderMultiJoinRule::create(),
-            ];
+            let rules = vec![ReorderMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
