@@ -53,7 +53,11 @@ pub trait SplitEnumerator: Sized {
 pub trait SplitReader: Sized {
     type Properties;
 
-    async fn new(properties: Self::Properties, state: ConnectorStateV2) -> Result<Self>;
+    async fn new(
+        properties: Self::Properties,
+        state: ConnectorStateV2,
+        columns: Option<Vec<Column>>,
+    ) -> Result<Self>;
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
@@ -132,7 +136,7 @@ macro_rules! impl_split_enumerator {
 
 impl_split_enumerator! {
             [ ] ,
-            { Kafka, KafkaSplitEnumerator},
+            { Kafka, KafkaSplitEnumerator },
             { Pulsar, PulsarSplitEnumerator },
             { Kinesis, KinesisSplitEnumerator },
             { Nexmark, NexmarkSplitEnumerator }
@@ -190,7 +194,7 @@ macro_rules! impl_split_reader {
              pub async fn create(
                 config: ConnectorProperties,
                 state: ConnectorStateV2,
-                _columns: Option<Vec<Column>>,
+                columns: Option<Vec<Column>>,
             ) -> Result<Self> {
                 if let ConnectorStateV2::Splits(s) = &state {
                     if s.is_empty() {
@@ -199,7 +203,7 @@ macro_rules! impl_split_reader {
                 }
 
                 let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state).await?)), )*
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state, columns).await?)), )*
                     _ => todo!()
                 };
 
