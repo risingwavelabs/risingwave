@@ -158,7 +158,7 @@ impl RearrangedChainExecutor {
 
             // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
             let upstream = Arc::new(Mutex::new(Some(upstream)));
-            let rearranged_barrier = Box::pin(Self::rearrange_stream(
+            let rearranged_barrier = Box::pin(Self::rearrange_barrier(
                 upstream.clone(),
                 upstream_tx,
                 stop_rearrange_rx,
@@ -269,7 +269,7 @@ impl RearrangedChainExecutor {
     ///
     /// Check `execute_inner` for more details.
     #[try_stream(ok = RearrangedMessage, error = StreamExecutorError)]
-    async fn rearrange_stream<U>(
+    async fn rearrange_barrier<U>(
         upstream: Arc<Mutex<Option<U>>>,
         upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
         mut stop_rearrange_rx: oneshot::Receiver<()>,
@@ -290,6 +290,10 @@ impl RearrangedChainExecutor {
 
                 Either::Right((Some(msg), _)) => {
                     let msg = msg?;
+
+                    // If we polled a barrier, rearrange it by yielding and leave a phantom barrier
+                    // with `RearrangedMessage::phantom_from` in-place.
+                    // If we polled a chunk, simply put it to the `upstream_tx`.
                     if let Some(barrier) = msg.as_barrier().cloned() {
                         yield RearrangedMessage::RearrangedBarrier(barrier);
                     }
@@ -303,6 +307,7 @@ impl RearrangedChainExecutor {
             }
         }
 
+        // Put back the `upstream` so outer can consume the remainings.
         let _ = upstream.lock().await.insert(up);
     }
 }
