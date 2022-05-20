@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 use risingwave_pb::hummock::VNodeBitmap;
 
@@ -28,7 +29,6 @@ use crate::hummock::value::HummockValue;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
-pub const SST_BITMAP_LIMIT: usize = 10;
 
 #[derive(Clone, Debug)]
 pub struct SSTableBuilderOptions {
@@ -38,10 +38,23 @@ pub struct SSTableBuilderOptions {
     pub block_capacity: usize,
     /// Restart point interval.
     pub restart_interval: usize,
-    /// False prsitive probability of bloom filter.
+    /// False positive probability of bloom filter.
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
+}
+
+impl From<&StorageConfig> for SSTableBuilderOptions {
+    fn from(options: &StorageConfig) -> SSTableBuilderOptions {
+        SSTableBuilderOptions {
+            capacity: options.sstable_size as usize,
+            block_capacity: options.block_size as usize,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: options.bloom_false_positive,
+            // TODO: Make this configurable.
+            compression_algorithm: CompressionAlgorithm::None,
+        }
+    }
 }
 
 impl Default for SSTableBuilderOptions {
@@ -71,8 +84,6 @@ pub struct SSTableBuilder {
     vnode_bitmaps: BTreeMap<u32, [u8; VNODE_BITMAP_LEN]>,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
-    /// Bitmap of value meta.
-    bitmap: [u8; VNODE_BITMAP_LEN],
     /// Last added full key.
     last_full_key: Bytes,
     key_count: usize,
@@ -87,7 +98,6 @@ impl SSTableBuilder {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             vnode_bitmaps: BTreeMap::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            bitmap: [0; VNODE_BITMAP_LEN],
             last_full_key: Bytes::default(),
             key_count: 0,
         }
@@ -115,19 +125,20 @@ impl SSTableBuilder {
         // TODO: refine me
         let mut raw_value = BytesMut::default();
         let value_meta = value.encode(&mut raw_value) & ((1 << VNODE_BITS) - 1);
-        let table_id = get_table_id(full_key);
-        self.vnode_bitmaps
-            .entry(table_id)
-            .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
-            1 << (value_meta & 0b111);
+        if let Some(table_id) = get_table_id(full_key) {
+            // We use 8 bit of bitmap[x] to indicate existence of virtual node x*8..(x+1)*8,
+            // respectively
+            self.vnode_bitmaps
+                .entry(table_id)
+                .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
+                1 << (value_meta & 0b111);
+        }
         let raw_value = raw_value.freeze();
 
         block_builder.add(full_key, &raw_value);
 
         let user_key = user_key(full_key);
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));
-
-        self.bitmap[(value_meta >> 3) as usize] |= 1 << (value_meta & 0b111);
 
         if self.last_full_key.is_empty() {
             self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
@@ -169,7 +180,6 @@ impl SSTableBuilder {
             } else {
                 vec![]
             },
-            bitmap: self.bitmap.to_vec(),
             estimated_size: self.buf.len() as u32,
             key_count: self.key_count as u32,
             smallest_key,
@@ -180,18 +190,14 @@ impl SSTableBuilder {
         (
             self.buf.freeze(),
             meta,
-            if self.vnode_bitmaps.len() > SST_BITMAP_LIMIT {
-                vec![]
-            } else {
-                self.vnode_bitmaps
-                    .iter()
-                    .map(|(table_id, vnode_bitmap)| VNodeBitmap {
-                        table_id: *table_id,
-                        maplen: VNODE_BITMAP_LEN as u32,
-                        bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmap),
-                    })
-                    .collect()
-            },
+            self.vnode_bitmaps
+                .iter()
+                .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
+                    table_id: *table_id,
+                    maplen: VNODE_BITMAP_LEN as u32,
+                    bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
+                })
+                .collect(),
         )
     }
 

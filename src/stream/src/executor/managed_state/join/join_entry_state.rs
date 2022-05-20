@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use madsim::collections::{btree_map, BTreeMap};
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -72,7 +72,7 @@ impl<S: StateStore> JoinEntryState<S> {
         pk_data_types: Arc<[DataType]>,
         epoch: u64,
     ) -> Result<Option<Self>> {
-        let all_data = keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = keyspace.scan(None, epoch).await?;
         if !all_data.is_empty() {
             // Insert cached states.
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
@@ -152,7 +152,7 @@ impl<S: StateStore> JoinEntryState<S> {
     async fn populate_cache(&mut self, epoch: u64) -> Result<()> {
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
 
         // Insert cached states.
         let mut cached = Self::fill_cached(
@@ -219,7 +219,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);

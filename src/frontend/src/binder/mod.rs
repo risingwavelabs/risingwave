@@ -25,6 +25,7 @@ mod select;
 mod set_expr;
 mod statement;
 mod struct_field;
+mod update;
 mod values;
 
 pub use bind_context::BindContext;
@@ -32,12 +33,13 @@ pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundTableSource, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundTableSource,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
+pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -112,6 +114,6 @@ pub mod test_utils {
 }
 
 /// The column name stored in [`BindContext`] for a column without an alias.
-const UNNAMED_COLUMN: &str = "?column?";
+pub const UNNAMED_COLUMN: &str = "?column?";
 /// The table name stored in [`BindContext`] for a subquery without an alias.
 const UNNAMED_SUBQUERY: &str = "?subquery?";

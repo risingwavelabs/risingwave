@@ -32,16 +32,22 @@ pub enum StatementType {
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_SOURCE,
+    CREATE_DATABASE,
+    CREATE_SCHEMA,
     DESCRIBE_TABLE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
     DROP_SOURCE,
+    DROP_SCHEMA,
+    DROP_DATABASE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
     SHOW_COMMAND,
+    START_TRANSACTION,
+    ABORT,
     FLUSH,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
@@ -58,7 +64,7 @@ impl std::fmt::Display for StatementType {
 pub struct PgResponse {
     stmt_type: StatementType,
     row_cnt: i32,
-
+    notice: Option<String>,
     values: Vec<Row>,
     row_desc: Vec<PgFieldDescriptor>,
 }
@@ -90,6 +96,7 @@ impl PgResponse {
             row_cnt,
             values,
             row_desc,
+            notice: None,
         }
     }
 
@@ -97,8 +104,22 @@ impl PgResponse {
         Self::new(stmt_type, 0, vec![], vec![])
     }
 
+    pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
+        Self {
+            stmt_type,
+            row_cnt: 0,
+            values: vec![],
+            row_desc: vec![],
+            notice: Some(notice),
+        }
+    }
+
     pub fn get_stmt_type(&self) -> StatementType {
         self.stmt_type
+    }
+
+    pub fn get_notice(&self) -> Option<String> {
+        self.notice.clone()
     }
 
     pub fn get_effected_rows_cnt(&self) -> i32 {

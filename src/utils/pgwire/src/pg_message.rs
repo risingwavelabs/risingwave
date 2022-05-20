@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
@@ -40,11 +41,18 @@ pub struct FeQueryMessage {
 }
 
 impl FeQueryMessage {
-    pub fn get_sql(&self) -> &str {
-        // Why there is a \0..
-        match std::str::from_utf8(&self.sql_bytes[..]) {
-            Ok(v) => v.trim_end_matches('\0'),
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    pub fn get_sql(&self) -> Result<&str> {
+        match CStr::from_bytes_with_nul(&self.sql_bytes) {
+            Ok(cstr) => cstr.to_str().map_err(|err| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Cannot transform cstr to str: {}", err),
+                )
+            }),
+            Err(err) => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Invalid UTF-8 sequence: {}", err),
+            )),
         }
     }
 }
@@ -65,9 +73,10 @@ impl FeMessage {
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
             b'X' => Ok(FeMessage::Terminate),
-            _ => {
-                unimplemented!("Do not support other tags regular message yet")
-            }
+            _ => Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Unsupported tag of regular message: {}", val),
+            )),
         }
     }
 }
@@ -88,10 +97,13 @@ impl FeStartupMessage {
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => Ok(FeMessage::CancelQuery),
-            _ => unimplemented!(
-                "Unsupported protocol number in start up msg {:?}",
-                protocol_num
-            ),
+            _ => Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "Unsupported protocol number in start up msg {:?}",
+                    protocol_num
+                ),
+            )),
         }
     }
 }
@@ -114,13 +126,15 @@ pub enum BeMessage<'a> {
 
 #[derive(Debug)]
 pub enum BeParameterStatusMessage<'a> {
-    Encoding(&'a str),
+    ClientEncoding(&'a str),
     StandardConformingString(&'a str),
+    ServerVersion(&'a str),
 }
 
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
+    pub notice: Option<String>,
     pub rows_cnt: i32,
 }
 
@@ -161,10 +175,11 @@ impl<'a> BeMessage<'a> {
             BeMessage::ParameterStatus(param) => {
                 use BeParameterStatusMessage::*;
                 let [name, value] = match param {
-                    Encoding(val) => [b"client_encoding", val.as_bytes()],
+                    ClientEncoding(val) => [b"client_encoding", val.as_bytes()],
                     StandardConformingString(val) => {
                         [b"standard_conforming_strings", val.as_bytes()]
                     }
+                    ServerVersion(val) => [b"server_version", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings
@@ -188,6 +203,10 @@ impl<'a> BeMessage<'a> {
                 let rows_cnt = cmd.rows_cnt;
                 let stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                if let Some(notice) = &cmd.notice {
+                    tag.push_str(notice);
+                    tag.push('\n');
+                }
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");
@@ -357,4 +376,21 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::pg_message::FeQueryMessage;
+
+    #[tokio::test]
+    async fn test_get_sql() {
+        let bytes: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let fe = FeQueryMessage {
+            sql_bytes: Bytes::from(bytes),
+        };
+        let sql = fe.get_sql();
+        assert!(sql.is_err(), "{}", true);
+    }
 }

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod compaction;
-mod compaction_group;
 mod compaction_scheduler;
 mod compactor_manager;
 pub mod error;
@@ -43,7 +42,6 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
-use crate::hummock::compaction_group::CompactionGroupId;
 use crate::hummock::compaction_scheduler::CompactionSchedulerRef;
 use crate::hummock::utils::RetryableError;
 use crate::manager::{LocalNotification, NotificationManagerRef};
@@ -136,7 +134,7 @@ where
         let mut min_interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             min_interval.tick().await;
-            if request_sender.send(CompactionGroupId::new(0)).is_err() {
+            if request_sender.send(0.into()).is_err() {
                 tracing::info!("Stop periodic compaction trigger");
                 return;
             }

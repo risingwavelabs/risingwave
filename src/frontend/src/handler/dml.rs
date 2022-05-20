@@ -17,12 +17,16 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use super::query::IMPLICIT_FLUSH;
 use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
+
+/// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
+/// until the entire dataflow is refreshed. In other words, every related table & MV will
+/// be able to see the write.
+pub static IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
 
 pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
@@ -38,11 +42,9 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
 
     let (plan, pg_descs) = {
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-        let plan = Planner::new(context.into())
-            .plan(bound)?
-            .gen_batch_query_plan();
-
-        let pg_descs = plan.schema().fields().iter().map(to_pg_field).collect();
+        let root = Planner::new(context.into()).plan(bound)?;
+        let pg_descs = root.schema().fields().iter().map(to_pg_field).collect();
+        let plan = root.gen_batch_query_plan()?;
 
         (plan.to_batch_prost(), pg_descs)
     };

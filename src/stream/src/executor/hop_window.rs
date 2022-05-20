@@ -127,6 +127,46 @@ impl HopWindowExecutor {
             ),
             window_slide_expr,
         );
+        let mut window_start_exprs = Vec::with_capacity(units);
+        let mut window_end_exprs = Vec::with_capacity(units);
+        for i in 0..units {
+            let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
+                StreamExecutorError::invalid_argument(format!(
+                    "window_slide {} cannot be multiplied by {}",
+                    window_slide, i
+                ))
+            })?;
+            let window_start_offset_expr = LiteralExpression::new(
+                DataType::Interval,
+                Some(ScalarImpl::Interval(window_start_offset)),
+            )
+            .boxed();
+            let window_end_offset = window_slide.checked_mul_int(i + units).ok_or_else(|| {
+                StreamExecutorError::invalid_argument(format!(
+                    "window_slide {} cannot be multiplied by {}",
+                    window_slide, i
+                ))
+            })?;
+            let window_end_offset_expr = LiteralExpression::new(
+                DataType::Interval,
+                Some(ScalarImpl::Interval(window_end_offset)),
+            )
+            .boxed();
+            let window_start_expr = new_binary_expr(
+                expr_node::Type::Add,
+                DataType::Timestamp,
+                InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                window_start_offset_expr,
+            );
+            window_start_exprs.push(window_start_expr);
+            let window_end_expr = new_binary_expr(
+                expr_node::Type::Add,
+                DataType::Timestamp,
+                InputRefExpression::new(DataType::Timestamp, 0).boxed(),
+                window_end_offset_expr,
+            );
+            window_end_exprs.push(window_end_expr);
+        }
 
         #[for_await]
         for msg in input.execute() {
@@ -147,45 +187,10 @@ impl HopWindowExecutor {
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
-                let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                    StreamExecutorError::invalid_argument(format!(
-                        "window_slide {} cannot be multiplied by {}",
-                        window_slide, i
-                    ))
-                })?;
-                let window_start_offset_expr = LiteralExpression::new(
-                    DataType::Interval,
-                    Some(ScalarImpl::Interval(window_start_offset)),
-                )
-                .boxed();
-                let window_end_offset =
-                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                        StreamExecutorError::invalid_argument(format!(
-                            "window_slide {} cannot be multiplied by {}",
-                            window_slide, i
-                        ))
-                    })?;
-                let window_end_offset_expr = LiteralExpression::new(
-                    DataType::Interval,
-                    Some(ScalarImpl::Interval(window_end_offset)),
-                )
-                .boxed();
-                let window_start_expr = new_binary_expr(
-                    expr_node::Type::Add,
-                    DataType::Timestamp,
-                    InputRefExpression::new(DataType::Timestamp, 0).boxed(),
-                    window_start_offset_expr,
-                );
-                let window_start_col = window_start_expr
+                let window_start_col = window_start_exprs[i]
                     .eval(&hop_start_chunk)
                     .map_err(StreamExecutorError::eval_error)?;
-                let window_end_expr = new_binary_expr(
-                    expr_node::Type::Add,
-                    DataType::Timestamp,
-                    InputRefExpression::new(DataType::Timestamp, 0).boxed(),
-                    window_end_offset_expr,
-                );
-                let window_end_col = window_end_expr
+                let window_end_col = window_end_exprs[i]
                     .eval(&hop_start_chunk)
                     .map_err(StreamExecutorError::eval_error)?;
                 let mut new_cols = origin_cols.clone();
@@ -210,7 +215,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, ExecutorInfo, StreamChunk};
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_execute() {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);

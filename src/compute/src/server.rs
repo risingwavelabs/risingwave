@@ -29,8 +29,9 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
+use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
@@ -81,12 +82,11 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
+    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
         vec![MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval as u64),
         )];
-
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -96,18 +96,36 @@ pub async fn compute_node_serve(
     // Initialize state store.
     let storage_config = Arc::new(config.storage.clone());
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
-
+    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+    let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
+        meta_client.clone(),
+        hummock_metrics.clone(),
+    ));
     let state_store = StateStoreImpl::new(
         &opts.state_store,
-        storage_config,
-        Arc::new(MonitoredHummockMetaClient::new(
-            meta_client.clone(),
-            hummock_metrics.clone(),
-        )),
+        storage_config.clone(),
+        hummock_meta_client.clone(),
         state_store_metrics.clone(),
+        object_store_metrics,
     )
     .await
     .unwrap();
+    if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        if opts.state_store.starts_with("hummock+memory")
+            || opts.state_store.starts_with("hummock+disk")
+            || storage_config.disable_remote_compactor
+        {
+            tracing::info!("start a compactor for in-memory object store");
+            // todo: set shutdown_sender in HummockStorage.
+            let (handle, shutdown_sender) = Compactor::start_compactor(
+                storage_config,
+                hummock_meta_client,
+                storage.inner().sstable_store(),
+                state_store_metrics.clone(),
+            );
+            sub_tasks.push((handle, shutdown_sender));
+        }
+    }
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
@@ -115,6 +133,7 @@ pub async fn compute_node_serve(
         client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
+        config.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(worker_id));
 

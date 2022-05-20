@@ -4,8 +4,6 @@ package expr;
 
 import "data.proto";
 
-option java_multiple_files = true;
-option java_package = "com.risingwave.proto.expr";
 option optimize_for = SPEED;
 
 message ExprNode {
@@ -33,7 +31,6 @@ message ExprNode {
     IN = 24;
     // date functions
     EXTRACT = 101;
-    PG_SLEEP = 102;
     TUMBLE_START = 103;
     // other functions
     CAST = 201;
@@ -56,6 +53,9 @@ message ExprNode {
     ASCII = 215;
     TRANSLATE = 216;
     COALESCE = 217;
+    CONCAT_WS = 218;
+    ABS = 219;
+
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
@@ -70,7 +70,6 @@ message ExprNode {
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
-    STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;

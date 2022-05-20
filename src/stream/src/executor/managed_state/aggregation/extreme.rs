@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use async_trait::async_trait;
 use itertools::Itertools;
+use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
@@ -302,10 +301,7 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-            let all_data = self
-                .keyspace
-                .scan_strip_prefix(self.top_n_count, epoch)
-                .await?;
+            let all_data = self.keyspace.scan(self.top_n_count, epoch).await?;
 
             for (raw_key, mut raw_value) in all_data {
                 // let mut deserializer = value_encoding::Deserializer::new(raw_value);
@@ -398,7 +394,7 @@ where
     #[allow(dead_code)]
     pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
         let epoch = u64::MAX;
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan(None, epoch).await?;
         let mut result = vec![];
 
         for (raw_key, mut raw_value) in all_data {
@@ -486,10 +482,9 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashSet};
-
     use itertools::Itertools;
-    use rand::prelude::*;
+    use madsim::collections::{BTreeSet, HashSet};
+    use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
@@ -497,7 +492,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
@@ -662,22 +657,22 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_replicated_value_min() {
         test_replicated_value_not_null::<{ variants::EXTREME_MIN }>().await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_replicated_value_max() {
         test_replicated_value_not_null::<{ variants::EXTREME_MAX }>().await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_replicated_value_min_with_null() {
         test_replicated_value_with_null::<{ variants::EXTREME_MIN }>().await
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_replicated_value_max_with_null() {
         test_replicated_value_with_null::<{ variants::EXTREME_MAX }>().await
     }
@@ -870,7 +865,7 @@ mod tests {
         assert_eq!(managed_state.get_output(epoch).await.unwrap(), extreme);
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
@@ -936,12 +931,12 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn chaos_test_min() {
         chaos_test::<{ variants::EXTREME_MIN }>().await;
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn chaos_test_max() {
         chaos_test::<{ variants::EXTREME_MAX }>().await;
     }
@@ -1043,7 +1038,7 @@ mod tests {
         write_batch.ingest(epoch).await.unwrap();
     }
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_same_value_delete() {
         // In this test, we test this case:
         //

@@ -136,7 +136,7 @@ export class Group extends DrawElement {
   _appendText = () => {
     return (content) => new Text({
       ...this.basicSetting, ...{
-        canvasElement: new fabric.Text(content, { selectable: false, textAlign: "justify-center" })
+        canvasElement: new fabric.Text(content || "undefined", { selectable: false, textAlign: "justify-center" })
       }
     });
   }

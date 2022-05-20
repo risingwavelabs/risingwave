@@ -12,7 +12,7 @@
 
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
-mod ddl;
+pub(crate) mod ddl;
 mod operator;
 mod query;
 mod statement;
@@ -30,7 +30,7 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::data_type::DataType;
+pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, TableConstraint,
@@ -797,6 +797,8 @@ pub enum Statement {
     ShowVariable { variable: Vec<Ident> },
     /// `{ BEGIN [ TRANSACTION | WORK ] | START TRANSACTION } ...`
     StartTransaction { modes: Vec<TransactionMode> },
+    /// ABORT
+    Abort,
     /// `SET TRANSACTION ...`
     SetTransaction {
         modes: Vec<TransactionMode>,
@@ -992,7 +994,7 @@ impl fmt::Display for Statement {
                 location,
                 managed_location,
             } => {
-                write!(f, "CREATE")?;
+                write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
                     write!(f, " IF NOT EXISTS")?;
                 }
@@ -1136,6 +1138,10 @@ impl fmt::Display for Statement {
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::Abort => {
+                write!(f, "ABORT")?;
                 Ok(())
             }
             Statement::SetTransaction {
@@ -1492,6 +1498,7 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Database,
 }
 
 impl fmt::Display for ObjectType {
@@ -1504,6 +1511,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Database => "DATABASE",
         })
     }
 }
@@ -1524,6 +1532,8 @@ impl ParseTo for ObjectType {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
             ObjectType::Schema
+        } else if parser.parse_keyword(Keyword::DATABASE) {
+            ObjectType::Database
         } else {
             return parser.expected(
                 "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",

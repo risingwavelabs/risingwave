@@ -17,7 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
@@ -31,9 +31,9 @@ use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
-    CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
-    DropMaterializedViewRequest, DropMaterializedViewResponse, DropSourceRequest,
-    DropSourceResponse,
+    CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
+    DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
+    DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -45,7 +45,6 @@ use risingwave_pb::hummock::{
     SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
     UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
 };
-use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -56,7 +55,7 @@ use risingwave_pb::meta::{
     FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
     SubscribeRequest, SubscribeResponse,
 };
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
@@ -155,11 +154,11 @@ impl MetaClient {
     pub async fn create_materialized_view(
         &self,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
-            stream_node: Some(plan),
+            fragment_graph: Some(graph),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -188,11 +187,11 @@ impl MetaClient {
         &self,
         source: ProstSource,
         table: ProstTable,
-        plan: StreamNode,
+        graph: StreamFragmentGraph,
     ) -> Result<(TableId, u32, CatalogVersion)> {
         let request = CreateMaterializedSourceRequest {
             materialized_view: Some(table),
-            stream_node: Some(plan),
+            fragment_graph: Some(graph),
             source: Some(source),
         };
         let resp = self.inner.create_materialized_source(request).await?;
@@ -217,6 +216,18 @@ impl MetaClient {
     pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
         let request = DropSourceRequest { source_id };
         let resp = self.inner.drop_source(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
+        let request = DropDatabaseRequest { database_id };
+        let resp = self.inner.drop_database(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_schema(&self, schema_id: u32) -> Result<CatalogVersion> {
+        let request = DropSchemaRequest { schema_id };
+        let resp = self.inner.drop_schema(request).await?;
         Ok(resp.version)
     }
 
@@ -274,6 +285,12 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        if err
+                            .to_string()
+                            .contains(&ErrorCode::UnknownWorker.to_string())
+                        {
+                            panic!("Already removed by the meta node. Need to restart the worker");
+                        }
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -394,7 +411,6 @@ impl HummockMetaClient for MetaClient {
 pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
-    pub catalog_client: CatalogServiceClient<Channel>,
     pub ddl_client: DdlServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
@@ -412,7 +428,6 @@ impl GrpcMetaClient {
             .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let catalog_client = CatalogServiceClient::new(channel.clone());
         let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
@@ -420,7 +435,6 @@ impl GrpcMetaClient {
         Ok(Self {
             cluster_client,
             heartbeat_client,
-            catalog_client,
             ddl_client,
             hummock_client,
             notification_client,
@@ -465,6 +479,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
+            ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }

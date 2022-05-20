@@ -62,14 +62,13 @@ impl Binder {
                     inputs = Self::rewrite_nullif_to_case_when(inputs)?;
                     ExprType::Case
                 }
-                "coalesce" => {
-                    inputs = Self::check_coalesce_args(inputs)?;
-                    ExprType::Coalesce
-                }
+                "concat_ws" => ExprType::ConcatWs,
+                "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);
                     ExprType::RoundDigit
                 }
+                "abs" => ExprType::Abs,
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
@@ -103,29 +102,6 @@ impl Binder {
         }
     }
 
-    /// Make sure inputs have more than 1 value and check the args have same `data_type`.
-    fn check_coalesce_args(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
-        if inputs.is_empty() {
-            Err(ErrorCode::BindError(
-                "Coalesce function must contain at least 1 argument".to_string(),
-            )
-            .into())
-        } else {
-            let data_type = inputs[0].return_type();
-            for input in &inputs {
-                if data_type != input.return_type() {
-                    return Err(ErrorCode::BindError(format!(
-                        "Coalesce function cannot match types {:?} and {:?}",
-                        data_type,
-                        input.return_type()
-                    ))
-                    .into());
-                }
-            }
-            Ok(inputs)
-        }
-    }
-
     /// Rewrite the arguments to be consistent with the `round` signature:
     /// - round(Decimal, Int32) -> Decimal
     /// - round(Decimal) -> Decimal
@@ -133,11 +109,13 @@ impl Binder {
         if inputs.len() == 1 {
             // Rewrite round(Decimal) to round(Decimal, 0).
             let input = inputs.pop().unwrap();
-            if input.return_type() == DataType::Decimal {
-                vec![input, Literal::new(Some(0.into()), DataType::Int32).into()]
-            } else {
-                vec![input]
-            }
+            vec![
+                input
+                    .clone()
+                    .cast_implicit(DataType::Decimal)
+                    .unwrap_or(input),
+                Literal::new(Some(0.into()), DataType::Int32).into(),
+            ]
         } else if inputs.len() == 2 {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();

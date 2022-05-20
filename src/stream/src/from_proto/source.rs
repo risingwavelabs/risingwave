@@ -79,6 +79,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.op_info,
             params.executor_stats,
             stream_source_splits,
+            // TODO: move checkpoint interval to stream config
+            100,
         )?))
     }
 }

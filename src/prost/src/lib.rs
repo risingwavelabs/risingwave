@@ -24,6 +24,8 @@ pub mod stream_plan;
 pub mod stream_service;
 #[rustfmt::skip]
 pub mod hummock;
+#[rustfmt::skip]
+pub mod user;
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
@@ -61,6 +63,10 @@ pub mod stream_service_serde;
 #[rustfmt::skip]
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
+#[rustfmt::skip]
+#[path = "user.serde.rs"]
+pub mod user_serde;
+
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);

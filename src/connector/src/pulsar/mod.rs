@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod admin;
-pub(crate) mod enumerator;
+pub mod admin;
+pub mod enumerator;
 pub mod source;
 pub mod split;
-mod topic;
+pub mod topic;
 
 pub use enumerator::*;
 pub use split::*;
-
-const PULSAR_CONFIG_TOPIC_KEY: &str = "pulsar.topic";
-const PULSAR_CONFIG_ADMIN_URL_KEY: &str = "pulsar.admin.url";

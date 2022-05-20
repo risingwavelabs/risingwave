@@ -20,9 +20,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ObjectType;
-use crate::ast::{
-    display_comma_separated, ColumnDef, Ident, ObjectName, SqlOption, TableConstraint,
-};
+use crate::ast::{display_comma_separated, ColumnDef, ObjectName, SqlOption, TableConstraint};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -294,6 +292,15 @@ impl<T: fmt::Display> fmt::Display for AstOption<T> {
     }
 }
 
+impl<T> From<AstOption<T>> for Option<T> {
+    fn from(val: AstOption<T>) -> Self {
+        match val {
+            AstOption::Some(t) => Some(t),
+            AstOption::None => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropStatement {
@@ -302,7 +309,7 @@ pub struct DropStatement {
     /// An optional `IF EXISTS` clause. (Non-standard.)
     pub if_exists: bool,
     /// Object to drop.
-    pub name: Ident,
+    pub object_name: ObjectName,
     /// Whether `CASCADE` was specified. This will be `false` when
     /// `RESTRICT` or no drop behavior at all was specified.
     pub drop_mode: AstOption<DropMode>,
@@ -318,12 +325,12 @@ impl ParseTo for DropStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(object_type: ObjectType, p);
         impl_parse_to!(if_exists => [Keyword::IF, Keyword::EXISTS], p);
-        impl_parse_to!(name: Ident, p);
+        let object_name = p.parse_object_name()?;
         impl_parse_to!(drop_mode: AstOption<DropMode>, p);
         Ok(Self {
             object_type,
             if_exists,
-            name,
+            object_name,
             drop_mode,
         })
     }
@@ -334,7 +341,7 @@ impl fmt::Display for DropStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(object_type, v, self);
         impl_fmt_display!(if_exists => [Keyword::IF, Keyword::EXISTS], v, self);
-        impl_fmt_display!(name, v, self);
+        impl_fmt_display!(object_name, v, self);
         impl_fmt_display!(drop_mode, v, self);
         v.iter().join(" ").fmt(f)
     }

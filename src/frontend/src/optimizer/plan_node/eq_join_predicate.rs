@@ -15,7 +15,7 @@
 use std::fmt;
 
 use crate::expr::{ExprType, FunctionCall, InputRef};
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// The join predicate used in optimizer
 #[derive(Debug, Clone)]
@@ -38,10 +38,10 @@ impl fmt::Display for EqJoinPredicate {
             write!(f, "{} = {}", k1, k2)?;
         }
         for (k1, k2) in eq_keys {
-            write!(f, "AND {} = {}", k1, k2)?;
+            write!(f, " AND {} = {}", k1, k2)?;
         }
         if !self.other_cond.always_true() {
-            write!(f, "AND {}", self.other_cond)?;
+            write!(f, " AND {}", self.other_cond)?;
         }
 
         Ok(())
@@ -142,5 +142,18 @@ impl EqJoinPredicate {
             .iter()
             .map(|(_, right)| right.index() - self.left_cols_num)
             .collect()
+    }
+
+    /// return the eq columns index mapping from right inputs to left inputs
+    pub fn r2l_eq_columns_mapping(
+        &self,
+        left_cols_num: usize,
+        right_cols_num: usize,
+    ) -> ColIndexMapping {
+        let mut map = vec![None; right_cols_num];
+        for (left, right) in self.eq_keys() {
+            map[right.index - left_cols_num] = Some(left.index);
+        }
+        ColIndexMapping::new(map)
     }
 }

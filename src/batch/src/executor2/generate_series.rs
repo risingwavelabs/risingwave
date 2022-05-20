@@ -16,45 +16,52 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, I32ArrayBuilder};
+use risingwave_common::array::{
+    Array, ArrayBuilder, DataChunk, I32Array, IntervalArray, NaiveDateTimeArray,
+};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::{CheckedAdd, DataType, Scalar};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
+use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use super::{BoxedExecutor2, BoxedExecutor2Builder};
 use crate::executor::ExecutorBuilder;
-use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::executor2::{BoxedDataChunkStream, Executor2};
 
-pub struct GenerateSeriesI32Executor2 {
-    start: i32,
-    stop: i32,
-    step: i32,
-    cur: i32, // Current value in the series.
+pub struct GenerateSeriesExecutor2<T: Array, S: Array> {
+    start: T::OwnedItem,
+    stop: T::OwnedItem,
+    step: S::OwnedItem,
 
     schema: Schema,
     identity: String,
 }
 
-impl BoxedExecutor2Builder for GenerateSeriesI32Executor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
-        let node = try_match_expand!(
-            source.plan_node().get_node_body().unwrap(),
-            NodeBody::GenerateInt32Series
-        )?;
-
-        Ok(Box::new(Self {
-            start: node.start,
-            stop: node.stop,
-            step: node.step,
-            cur: node.start,
-            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+impl<T: Array, S: Array> GenerateSeriesExecutor2<T, S> {
+    pub fn new(
+        start: T::OwnedItem,
+        stop: T::OwnedItem,
+        step: S::OwnedItem,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
+        Self {
+            start,
+            stop,
+            step,
+            schema,
+            identity,
+        }
     }
 }
 
-impl Executor2 for GenerateSeriesI32Executor2 {
+impl<T: Array, S: Array> Executor2 for GenerateSeriesExecutor2<T, S>
+where
+    T::OwnedItem: PartialOrd<T::OwnedItem>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
+{
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -68,65 +75,137 @@ impl Executor2 for GenerateSeriesI32Executor2 {
     }
 }
 
-impl GenerateSeriesI32Executor2 {
+impl<T, S> GenerateSeriesExecutor2<T, S>
+where
+    T: Array,
+    S: Array,
+    T::OwnedItem: PartialOrd<T::OwnedItem>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
+{
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        let mut chunk_size = self.next_chunk_size();
+    async fn do_execute(self: Box<Self>) {
+        let Self {
+            start, stop, step, ..
+        } = *self;
 
-        while chunk_size != 0 {
-            let mut builder = I32ArrayBuilder::new(chunk_size).unwrap();
-            let mut current_value = self.cur;
+        // let mut rest_rows = ((stop - start) / step + 1) as usize;
+        let mut cur = start;
+
+        // Simulate a do-while loop.
+        while cur <= stop {
+            let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
+            let mut builder = T::Builder::new(chunk_size)?;
+
             for _ in 0..chunk_size {
-                builder.append(Some(current_value)).unwrap();
-                current_value += self.step;
+                if cur > stop {
+                    break;
+                }
+                builder.append(Some(cur.as_scalar_ref())).unwrap();
+                cur = cur.checked_add(step.as_scalar_ref())?;
             }
-            self.cur = current_value;
 
             let arr = builder.finish()?;
             let columns = vec![Column::new(Arc::new(arr.into()))];
             let chunk: DataChunk = DataChunk::builder().columns(columns).build();
 
             yield chunk;
-
-            chunk_size = self.next_chunk_size();
         }
     }
 }
 
-impl GenerateSeriesI32Executor2 {
-    fn next_chunk_size(&self) -> usize {
-        if self.cur > self.stop {
-            return 0;
+pub struct GenerateSeriesExecutor2Builder {}
+
+impl BoxedExecutor2Builder for GenerateSeriesExecutor2Builder {
+    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+        let node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::GenerateSeries
+        )?;
+
+        let identity = source.plan_node().get_identity().clone();
+
+        let dummy_chunk = DataChunk::new_dummy(1);
+        let start_expr = build_from_prost(node.get_start()?)?;
+        let stop_expr = build_from_prost(node.get_stop()?)?;
+        let step_expr = build_from_prost(node.get_step()?)?;
+
+        let start = start_expr.eval(&dummy_chunk)?;
+        let stop = stop_expr.eval(&dummy_chunk)?;
+        let step = step_expr.eval(&dummy_chunk)?;
+
+        match start_expr.return_type() {
+            DataType::Timestamp => {
+                let start = start.as_naivedatetime().value_at(0);
+                let stop = stop.as_naivedatetime().value_at(0);
+                let step = step.as_interval().value_at(0);
+
+                if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Timestamp)]);
+
+                    Ok(Box::new(GenerateSeriesExecutor2::<
+                        NaiveDateTimeArray,
+                        IntervalArray,
+                    >::new(
+                        start, stop, step, schema, identity
+                    )))
+                } else {
+                    Err(ErrorCode::InternalError(
+                        "the parameters of Generate SeriesFunction are incorrect".to_string(),
+                    )
+                    .into())
+                }
+            }
+            DataType::Int32 => {
+                let start = start.as_int32().value_at(0);
+                let stop = stop.as_int32().value_at(0);
+                let step = step.as_int32().value_at(0);
+
+                if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+
+                    Ok(Box::new(
+                        GenerateSeriesExecutor2::<I32Array, I32Array>::new(
+                            start, stop, step, schema, identity,
+                        ),
+                    ))
+                } else {
+                    Err(ErrorCode::InternalError(
+                        "the parameters of Generate Series Function are incorrect".to_string(),
+                    )
+                    .into())
+                }
+            }
+            _ => Err(ErrorCode::InternalError(
+                "the parameters of Generate Series Function are incorrect".to_string(),
+            )
+            .into()),
         }
-        let mut num: usize = ((self.stop - self.cur) / self.step + 1) as usize;
-        if num > DEFAULT_CHUNK_BUFFER_SIZE {
-            num = DEFAULT_CHUNK_BUFFER_SIZE;
-        }
-        num
     }
 }
 
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use risingwave_common::array::{Array, ArrayImpl};
+    use risingwave_common::array::{Array, ArrayImpl, I32Array};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::try_match_expand;
+    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper};
+    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
 
     #[tokio::test]
-    async fn test_generate_series() {
+    async fn test_generate_i32_series() {
         generate_series_test_case(2, 4, 1).await;
         generate_series_test_case(0, 9, 2).await;
         generate_series_test_case(0, (DEFAULT_CHUNK_BUFFER_SIZE * 2 + 3) as i32, 1).await;
     }
 
     async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
-        let executor = Box::new(GenerateSeriesI32Executor2 {
+        let executor = Box::new(GenerateSeriesExecutor2::<I32Array, I32Array> {
             start,
             stop,
             step,
-            cur: start,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesI32Executor2".to_string(),
         });
@@ -145,5 +224,43 @@ mod tests {
             remained_values -= arr.len();
         }
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_generate_time_series() {
+        let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
+        let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
+        let one_minute_step = IntervalUnit::from_minutes(1);
+        let one_hour_step = IntervalUnit::from_minutes(60);
+        let one_day_step = IntervalUnit::from_days(1);
+        generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1)
+            .await;
+        generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
+        generate_time_series_test_case(start_time, stop_time, one_day_step, 8 + 1).await;
+    }
+
+    async fn generate_time_series_test_case(
+        start: NaiveDateTimeWrapper,
+        stop: NaiveDateTimeWrapper,
+        step: IntervalUnit,
+        expected_rows_count: usize,
+    ) {
+        let executor = Box::new(
+            GenerateSeriesExecutor2::<NaiveDateTimeArray, IntervalArray>::new(
+                start,
+                stop,
+                step,
+                Schema::new(vec![Field::unnamed(DataType::Int32)]),
+                "GenerateSeriesTimestampExecutor2".to_string(),
+            ),
+        );
+
+        let mut result_count = 0;
+        let mut stream = executor.execute();
+        while let Some(data_chunk) = stream.next().await {
+            let data_chunk = data_chunk.unwrap();
+            result_count += data_chunk.cardinality();
+        }
+        assert_eq!(result_count, expected_rows_count)
     }
 }

@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionRefId,
@@ -57,7 +57,7 @@ async fn test_hummock_pin_unpin() {
             .await
             .unwrap();
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(2, hummock_version.levels.len());
+        assert_eq!(7, hummock_version.levels.len());
         assert_eq!(0, hummock_version.levels[0].table_infos.len());
         assert_eq!(0, hummock_version.levels[1].table_infos.len());
 
@@ -111,23 +111,35 @@ async fn test_hummock_pin_unpin() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
+    let sst_num = 2usize;
+
+    // Construct vnode mappings for generating compaction tasks.
+    let parallel_units = cluster_manager
+        .list_parallel_units(Some(ParallelUnitType::Hash))
+        .await;
+    env.hash_mapping_manager()
+        .build_fragment_hash_mapping(1, &parallel_units);
+    for table_id in 1..sst_num + 2 {
+        env.hash_mapping_manager()
+            .set_fragment_state_table(1, table_id as u32);
+    }
 
     // No compaction task available.
-    let task = hummock_manager.get_compact_task(context_id).await.unwrap();
+    let task = hummock_manager.get_compact_task().await.unwrap();
     assert_eq!(task, None);
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
         .unwrap();
 
     // No compaction task available. Uncommitted sst won't be compacted.
-    let task = hummock_manager.get_compact_task(context_id).await.unwrap();
+    let task = hummock_manager.get_compact_task().await.unwrap();
     assert_eq!(task, None);
 
     hummock_manager.commit_epoch(epoch).await.unwrap();
@@ -151,10 +163,10 @@ async fn test_hummock_compaction_task() {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager
-        .get_compact_task(context_id)
+    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(
         compact_task
@@ -165,6 +177,10 @@ async fn test_hummock_compaction_task() {
         0
     );
     assert_eq!(compact_task.get_task_id(), 1);
+    // In the test case, we assume that each SST contains data of 2 relational tables, and
+    // one of them overlaps with the previous SST. So there will be one more relational tables
+    // (for vnode mapping) than SSTs.
+    assert_eq!(compact_task.get_vnode_mappings().len(), sst_num + 1);
 
     // Cancel the task and succeed.
     compact_task.task_status = false;
@@ -198,10 +214,10 @@ async fn test_hummock_compaction_task() {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager
-        .get_compact_task(context_id)
+    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
@@ -712,7 +728,7 @@ async fn test_hummock_manager_basic() {
 
     // test delete_version
     hummock_manager
-        .delete_version(FIRST_VERSION_ID)
+        .delete_versions(&[FIRST_VERSION_ID])
         .await
         .unwrap();
     assert_eq!(
@@ -944,11 +960,7 @@ async fn test_print_compact_task() {
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // Get a compaction task.
-    let compact_task = hummock_manager
-        .get_compact_task(context_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -959,7 +971,7 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    assert!(s.contains("Compaction task id: 1, target level: 1"));
+    assert!(s.contains("Compaction task id: 1, target level: 6"));
 }
 
 #[tokio::test]

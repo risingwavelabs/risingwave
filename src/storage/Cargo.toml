@@ -1,18 +1,18 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-endpoint = { version = "0.10", default-features = false }
-aws-sdk-s3 = { version = "0.10", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.40"
-aws-smithy-types = "0.40"
-aws-types = { version = "0.10", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-endpoint = { version = "0.11", default-features = false }
+aws-sdk-s3 = { version = "0.11", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.41"
+aws-smithy-types = "0.41"
+aws-types = { version = "0.11", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -50,6 +50,7 @@ risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
+tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
@@ -63,7 +64,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = "0.7"
+tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
@@ -76,6 +77,7 @@ procfs = { version = "0.12", default-features = false }
 [dev-dependencies]
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
+tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [features]
@@ -95,4 +97,8 @@ harness = false
 
 [[bench]]
 name = "bench_merge_iter"
+harness = false
+
+[[bench]]
+name = "bench_fs_operation"
 harness = false

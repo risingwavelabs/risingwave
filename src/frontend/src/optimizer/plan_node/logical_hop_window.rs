@@ -15,11 +15,13 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::catalog::Field;
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
@@ -146,73 +148,154 @@ impl fmt::Display for LogicalHopWindow {
 }
 
 impl ColPrunable for LogicalHopWindow {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-        let require_win_start = required_cols.contains(self.window_start_col_idx());
-        let require_win_end = required_cols.contains(self.window_end_col_idx());
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let o2i = self.o2i_col_mapping();
         let input_required_cols = {
-            let mut tmp = o2i.rewrite_bitset(required_cols);
+            let mut tmp = FixedBitSet::with_capacity(self.schema().len());
+            tmp.extend(required_cols.iter().copied());
+            tmp = o2i.rewrite_bitset(&tmp);
             // LogicalHopWindow should keep all required cols from upstream,
             // as well as its own time_col.
             tmp.put(self.time_col.index());
-            tmp
+            tmp.ones().collect_vec()
         };
         let input = self.input.prune_col(&input_required_cols);
-        let input_change = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let input_change = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
         let (new_hop, _) = self.rewrite_with_input(input, input_change);
-        let required_output_cols: FixedBitSet = {
+        let output_cols = {
             // output cols = { cols required by upstream from input node } ∪ { additional window
             // cols }
-
-            // `required_output_cols` indicates whether a column is needed or not
-            let mut required_output_cols = FixedBitSet::with_capacity(new_hop.schema().len());
-
-            // get indices of columns which are required by upstream in `new_hop`
-            let input_cols_required_by_upstream_in_new_hop = {
-                // map the indices from output to input
-                let input_required_cols = o2i.rewrite_bitset(required_cols);
-                // this mapping will only keeps required input columns
-                let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
-                mapping.rewrite_bitset(&input_required_cols)
-            };
-            required_output_cols.union_with(&input_cols_required_by_upstream_in_new_hop);
-
             let win_start_index = new_hop.schema().len() - 2;
             let win_end_index = new_hop.schema().len() - 1;
-            if require_win_start {
-                required_output_cols.put(win_start_index);
+            #[derive(Copy, Clone, Debug)]
+            enum IndexType {
+                Input(usize),
+                WindowStart,
+                WindowEnd,
             }
-            if require_win_end {
-                required_output_cols.put(win_end_index);
-            }
-            required_output_cols
+            // map the indices from output to input
+            let input_required_cols = required_cols
+                .iter()
+                .map(|&idx| {
+                    if let Some(idx) = o2i.try_map(idx) {
+                        IndexType::Input(idx)
+                    } else if idx == self.window_start_col_idx() {
+                        IndexType::WindowStart
+                    } else {
+                        IndexType::WindowEnd
+                    }
+                })
+                .collect_vec();
+            // this mapping will only keeps required columns
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            input_required_cols
+                .iter()
+                .filter_map(|&idx| match idx {
+                    IndexType::Input(x) => mapping.try_map(x),
+                    IndexType::WindowStart => Some(win_start_index),
+                    IndexType::WindowEnd => Some(win_end_index),
+                })
+                .collect_vec()
         };
         LogicalProject::with_mapping(
             new_hop.into(),
-            ColIndexMapping::with_remaining_columns(&required_output_cols),
+            ColIndexMapping::with_remaining_columns(&output_cols, self.schema().len()),
         )
+        .into()
     }
 }
 
 impl ToBatch for LogicalHopWindow {
-    fn to_batch(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+    fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        BatchHopWindow::new(new_logical).into()
+        Ok(BatchHopWindow::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalHopWindow {
-    fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_stream();
+    fn to_stream(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
-        StreamHopWindow::new(new_logical).into()
+        Ok(StreamHopWindow::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (hop.into(), out_col_change)
+        Ok((hop.into(), out_col_change))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{assert_eq_input_ref, ExprImpl, InputRef};
+    use crate::optimizer::plan_node::LogicalValues;
+    use crate::session::OptimizerContext;
+    #[tokio::test]
+    /// Pruning
+    /// ```text
+    /// HopWindow(time_col: $0 slide: 1 day 00:00:00 size: 3 days 00:00:00)
+    ///   TableScan(date, v1, v2)
+    /// ```
+    /// with required columns [4, 2, 3] will result in
+    /// ```text
+    /// Project($3, $1, $2)
+    ///   HopWindow(time_col: $0 slide: 1 day 00:00:00 size: 3 days 00:00:00)
+    ///     TableScan(date, v3)
+    /// ```
+    async fn test_prune_hop_window_with_order_required() {
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Date, "date"),
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+        ];
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
+        let hop_window: PlanRef = LogicalHopWindow::new(
+            values.into(),
+            InputRef::new(0, DataType::Date),
+            IntervalUnit::new(0, 1, 0),
+            IntervalUnit::new(0, 3, 0),
+        )
+        .into();
+        // Perform the prune
+        let required_cols = vec![4, 2, 3];
+        let plan = hop_window.prune_col(&required_cols);
+        println!(
+            "{}\n{}",
+            hop_window.explain_to_string().unwrap(),
+            plan.explain_to_string().unwrap()
+        );
+        // Check the result
+        let project = plan.as_logical_project().unwrap();
+        assert_eq!(project.exprs().len(), 3);
+        assert_eq_input_ref!(&project.exprs()[0], 3);
+        assert_eq_input_ref!(&project.exprs()[1], 1);
+        assert_eq_input_ref!(&project.exprs()[2], 2);
+
+        let hop_window = project.input();
+        let hop_window = hop_window.as_logical_hop_window().unwrap();
+        assert_eq!(hop_window.schema().fields().len(), 4);
+
+        let values = hop_window.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[0]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 }

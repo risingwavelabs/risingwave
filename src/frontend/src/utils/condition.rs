@@ -45,13 +45,12 @@ impl fmt::Display for Condition {
             write!(f, "{:?}", expr)?;
         }
         if self.always_true() {
-            write!(f, "always")?;
+            write!(f, "true")?;
         } else {
             for expr in conjunctions {
                 write!(f, " AND {:?}", expr)?;
             }
         }
-
         Ok(())
     }
 }
@@ -89,8 +88,8 @@ impl Condition {
         ret.simplify()
     }
 
-    #[must_use]
     /// Split the condition expressions into 3 groups: left, right and others
+    #[must_use]
     pub fn split(self, left_col_num: usize, right_col_num: usize) -> (Self, Self, Self) {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
@@ -158,9 +157,9 @@ impl Condition {
         )
     }
 
-    #[must_use]
     /// Split the condition expressions into 2 groups: those referencing `columns` and others which
     /// are disjoint with columns.
+    #[must_use]
     pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
         self.group_by::<_, 2>(|expr| {
             let input_bits = expr.collect_input_refs(columns.len());
@@ -175,12 +174,12 @@ impl Condition {
         .unwrap()
     }
 
-    #[must_use]
     /// Split the condition expressions into `N` groups.
     /// An expression `expr` is in the `i`-th group if `f(expr)==i`.
     ///
     /// # Panics
     /// Panics if `f(expr)>=N`.
+    #[must_use]
     pub fn group_by<F, const N: usize>(self, f: F) -> [Self; N]
     where
         F: Fn(&ExprImpl) -> usize,
