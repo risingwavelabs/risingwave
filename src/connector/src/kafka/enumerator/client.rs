@@ -47,8 +47,8 @@ impl KafkaSplitEnumerator {}
 
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
-    type Split = KafkaSplit;
     type Properties = KafkaProperties;
+    type Split = KafkaSplit;
 
     async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
         let broker_address = properties.brokers;
