@@ -202,6 +202,7 @@ impl<S: StateStore> JoinEntryState<S> {
         self.cached.as_ref().unwrap().values()
     }
 
+    // TODO: The right semantics here should be to mark the modified join entries as dirty etc...
     pub async fn values_mut(&mut self, epoch: u64) -> JoinEntryStateValuesMut<'_> {
         if self.cached.is_none() {
             self.populate_cache(epoch).await.unwrap();
