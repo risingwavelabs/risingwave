@@ -253,9 +253,10 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
             // if the matched_row does not have any current matches
             // `StreamChunkBuilder` guarantees that `UpdateDelete` will never
             // issue an output chunk.
-            if let Some(_) = self
+            if self
                 .stream_chunk_builder
                 .append_row_matched(Op::UpdateDelete, &matched_row.row)?
+                .is_some()
             {
                 return Err(internal_error("`Op::UpdateDelete` should not yield chunk"));
             }
@@ -293,9 +294,10 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
         } else if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
             // if the matched_row does not have any current
             // matches
-            if let Some(_) = self
+            if self
                 .stream_chunk_builder
                 .append_row_matched(Op::UpdateDelete, &matched_row.row)?
+                .is_some()
             {
                 return Err(internal_error("`Op::UpdateDelete` should not yield chunk"));
             }
