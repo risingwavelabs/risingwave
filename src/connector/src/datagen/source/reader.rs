@@ -41,7 +41,7 @@ impl SplitReader for DatagenSplitReader {
         let batch_chunk_size = properties.max_chunk_size.parse::<u64>()?;
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
 
-        if let Some(columns) = columns && columns.is_empty(){
+        if let Some(columns) = columns && !columns.is_empty(){
             Ok(DatagenSplitReader {
                 generator: DatagenEventGenerator::new(columns, 0, batch_chunk_size, rows_per_second)?,
             })
