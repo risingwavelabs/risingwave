@@ -70,7 +70,7 @@ impl JoinRow {
         Ok(self.degree)
     }
 
-    /// Serialize the `JoinRow` into a binary bytes. All values must not be null.
+    /// Serialize the `JoinRow` into a binary bytes.
     pub fn serialize(&self) -> RwResult<Vec<u8>> {
         let mut vec = Vec::with_capacity(10);
 
