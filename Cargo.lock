@@ -195,6 +195,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-task"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30696a84d817107fc028e049980e09d5e140e8da8f1caeb17e8e950658a3cea9"
+
+[[package]]
 name = "async-trait"
 version = "0.1.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2264,16 +2270,21 @@ version = "0.2.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0388d0406d38a382335ee9c55d8277c43cb0a6a02b879f5705795ab373712fc8"
 dependencies = [
+ "ahash",
+ "async-task",
  "bincode",
  "bytes",
+ "downcast-rs",
  "env_logger",
  "futures",
  "log 0.4.17",
  "madsim-macros",
+ "naive-timer",
  "rand 0.8.5",
  "serde",
  "tokio",
  "tokio-util 0.7.1",
+ "toml",
 ]
 
 [[package]]
@@ -2460,6 +2471,12 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+
+[[package]]
+name = "naive-timer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "034a0ad7deebf0c2abcf2435950a6666c3c15ea9d8fad0c0f48efa8a7f843fed"
 
 [[package]]
 name = "native-tls"
@@ -3940,7 +3957,6 @@ dependencies = [
  "prost",
  "prost-helpers",
  "prost-types",
- "quote",
  "serde",
  "workspace-hack",
 ]
