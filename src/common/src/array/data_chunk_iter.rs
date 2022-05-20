@@ -263,7 +263,7 @@ impl Row {
     pub fn value_encode(&self) -> RwResult<Vec<u8>> {
         let mut vec = vec![];
         for v in &self.0 {
-            vec.extend_from_slice(&serialize_datum(v)?);
+            vec.extend(serialize_datum(v)?);
         }
         Ok(vec)
     }
@@ -303,8 +303,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a memcomparable bytes.
     pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
             values.push(deserialize_datum_from(ty, &mut deserializer)?);
@@ -314,8 +313,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a memcomparable bytes. All values are not null.
     pub fn deserialize_not_null(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
             values.push(deserialize_datum_not_null_from(
@@ -343,8 +341,7 @@ impl RowDeserializer {
 
     /// Deserialize the row from a value encoding bytes.
     pub fn value_decode(&self, mut data: impl Buf) -> RwResult<Row> {
-        let mut values = vec![];
-        values.reserve(self.data_types.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         for ty in &self.data_types {
             values.push(deserialize_datum(&mut data, ty)?);
         }
