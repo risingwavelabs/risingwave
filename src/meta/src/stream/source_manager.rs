@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{ConnectorError, InternalError};
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::catalog::source::Info;
@@ -70,7 +70,8 @@ where
             }
         };
 
-        let properties = ConnectorProperties::new(info.properties.clone())?;
+        let properties = ConnectorProperties::extract(info.properties.clone())
+            .map_err(|e| RwError::from(ConnectorError(e.to_string())))?;
         SplitEnumeratorImpl::create(properties)
             .await
             .to_rw_result()?
@@ -96,15 +97,15 @@ where
             } else {
                 let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
                 let source = catalog_guard.get_source(*source_id).await?.ok_or_else(|| {
-                        RwError::from(InternalError(format!(
-                            "could not find source catalog for {}",
-                            source_id
-                        )))
-                    })?;
+                    RwError::from(InternalError(format!(
+                        "could not find source catalog for {}",
+                        source_id
+                    )))
+                })?;
                 self.fetch_splits_for_source(&source).await
             }
         }))
-        .await?;
+            .await?;
         let mut result = HashMap::new();
 
         for (splits, fragments) in source_splits.into_iter().zip_eq(actors.into_values()) {

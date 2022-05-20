@@ -20,7 +20,6 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::kinesis::*;
-use crate::KinesisProperties;
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
