@@ -45,8 +45,8 @@ impl MinOverlappingPicker {
         MinOverlappingPicker {
             compact_task_id,
             overlap_strategy,
-            level,
             config,
+            level,
         }
     }
 }
