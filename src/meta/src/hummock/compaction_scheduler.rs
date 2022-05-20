@@ -106,19 +106,22 @@ where
                     break 'compaction_trigger;
                 }
             };
-            request_channel.unschedule(compaction_group);
-            if self.pick_and_assign(compaction_group).await {
-                // Reschedule it in case there are more tasks from this compaction group.
-                request_channel.try_send(compaction_group);
-            }
+            self.pick_and_assign(compaction_group, request_channel.clone())
+                .await;
         }
         tracing::info!("Compaction scheduler is stopped");
     }
 
-    async fn pick_and_assign(&self, _compaction_group: CompactionGroupId) -> bool {
+    async fn pick_and_assign(
+        &self,
+        compaction_group: CompactionGroupId,
+        request_channel: Arc<CompactionRequestChannel>,
+    ) -> bool {
         // 1. Pick a compaction task.
         // TODO: specify compaction_group in get_compact_task
-        let compact_task = match self.hummock_manager.get_compact_task().await {
+        let compact_task = self.hummock_manager.get_compact_task().await;
+        request_channel.unschedule(compaction_group);
+        let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -164,11 +167,14 @@ where
                 .await
             {
                 Ok(_) => {
-                    // TODO: timeout assigned compaction task
+                    // TODO: timeout assigned compaction task and move send_task after
+                    // assign_compaction_task
                     tracing::trace!(
                         "Assigned compaction task. {}",
                         compact_task_to_string(&compact_task)
                     );
+                    // Reschedule it in case there are more tasks from this compaction group.
+                    request_channel.try_send(compaction_group);
                     return true;
                 }
                 Err(err) => {
