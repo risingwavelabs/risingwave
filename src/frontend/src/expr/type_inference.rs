@@ -85,7 +85,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
         DataTypeName::Time => DataType::Time,
         DataTypeName::Interval => DataType::Interval,
         DataTypeName::Struct | DataTypeName::List => {
-            panic!("functions returning struct or list can not be inferred")
+            panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
         }
     })
 }
