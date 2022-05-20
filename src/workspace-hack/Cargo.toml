@@ -23,11 +23,9 @@ either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", features = ["alloc", "async-await", "executor", "futures-executor", "std"] }
-futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
 futures-executor = { version = "0.3", features = ["std"] }
 futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
-futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
 hashbrown = { version = "0.11", features = ["ahash", "inline-more", "raw"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
@@ -36,7 +34,7 @@ libc = { version = "0.2", features = ["std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
-num-integer = { version = "0.1", features = ["std"] }
+num-integer = { version = "0.1", features = ["i128", "std"] }
 num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
@@ -58,24 +56,23 @@ tracing = { version = "0.1", features = ["attributes", "log", "release_max_level
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
 url = { version = "2", default-features = false, features = ["serde"] }
-uuid = { version = "1", features = ["private_getrandom", "rng", "std", "v4"] }
+uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
+cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-utils = { version = "0.8", features = ["lazy_static", "std"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", features = ["alloc", "async-await", "executor", "futures-executor", "std"] }
-futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
 futures-executor = { version = "0.3", features = ["std"] }
 futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
-futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
 hashbrown = { version = "0.11", features = ["ahash", "inline-more", "raw"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
@@ -84,7 +81,7 @@ libc = { version = "0.2", features = ["std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
-num-integer = { version = "0.1", features = ["std"] }
+num-integer = { version = "0.1", features = ["i128", "std"] }
 num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
@@ -107,6 +104,6 @@ tracing = { version = "0.1", features = ["attributes", "log", "release_max_level
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
 url = { version = "2", default-features = false, features = ["serde"] }
-uuid = { version = "1", features = ["private_getrandom", "rng", "std", "v4"] }
+uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 
 ### END HAKARI SECTION

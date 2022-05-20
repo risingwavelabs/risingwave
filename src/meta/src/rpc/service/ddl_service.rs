@@ -23,7 +23,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
@@ -31,7 +31,7 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
+    ActorGraphBuilder, FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef,
 };
 
 #[derive(Clone)]
@@ -230,7 +230,7 @@ where
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
         let req = request.into_inner();
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
-        let stream_node = req.get_stream_node().map_err(tonic_err)?.clone();
+        let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
 
         // 0. Generate an id from mview.
         let id = self
@@ -264,8 +264,13 @@ where
             }
 
             let mut dependent_relations = Default::default();
-            resolve_dependent_relations(&stream_node, &mut dependent_relations)
+            for fragment in fragment_graph.fragments.values() {
+                resolve_dependent_relations(
+                    fragment.node.as_ref().unwrap(),
+                    &mut dependent_relations,
+                )
                 .map_err(tonic_err)?;
+            }
             assert!(
                 !dependent_relations.is_empty(),
                 "there should be at lease 1 dependent relation when creating materialized view"
@@ -281,7 +286,7 @@ where
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
         if let Err(e) = self
-            .create_mview_on_compute_node(stream_node, id, None)
+            .create_mview_on_compute_node(fragment_graph, id, None)
             .await
         {
             self.catalog_manager
@@ -338,10 +343,10 @@ where
         let request = request.into_inner();
         let source = request.source.unwrap();
         let mview = request.materialized_view.unwrap();
-        let stream_node = request.stream_node.unwrap();
+        let fragment_graph = request.fragment_graph.unwrap();
 
         let (source_id, table_id, version) = self
-            .create_materialized_source_inner(source, mview, stream_node)
+            .create_materialized_source_inner(source, mview, fragment_graph)
             .await
             .map_err(tonic_err)?;
 
@@ -379,7 +384,7 @@ where
 {
     async fn create_mview_on_compute_node(
         &self,
-        mut stream_node: StreamNode,
+        mut fragment_graph: StreamFragmentGraph,
         id: TableId,
         affiliated_source: Option<Source>,
     ) -> RwResult<()> {
@@ -402,29 +407,30 @@ where
         }
 
         let mview_id = TableId::new(id);
-        let mview_count = fill_mview_id(&mut stream_node, mview_id);
+        let mut mview_count = 0;
+        for fragment in fragment_graph.fragments.values_mut() {
+            mview_count += fill_mview_id(fragment.node.as_mut().unwrap(), mview_id);
+        }
+
         assert_eq!(
             mview_count, 1,
             "require exactly 1 materialize node when creating materialized view"
         );
 
         // Resolve fragments.
-        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let parallel_degree = self
             .cluster_manager
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))
             .await;
         let mut ctx = CreateMaterializedViewContext {
             affiliated_source,
-            hash_mapping,
             ..Default::default()
         };
-        let graph = StreamFragmenter::generate_graph(
+        let graph = ActorGraphBuilder::generate_graph(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             parallel_degree as u32,
-            false,
-            &stream_node,
+            &fragment_graph,
             &mut ctx,
         )
         .await?;
@@ -442,7 +448,7 @@ where
         &self,
         mut source: Source,
         mut mview: Table,
-        mut stream_node: StreamNode,
+        mut fragment_graph: StreamFragmentGraph,
     ) -> RwResult<(SourceId, TableId, CatalogVersion)> {
         // Generate source id.
         let source_id = self
@@ -479,7 +485,10 @@ where
             source_count
         }
 
-        let source_count = fill_source_id(&mut stream_node, source_id);
+        let mut source_count = 0;
+        for fragment in fragment_graph.fragments.values_mut() {
+            source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
+        }
         assert_eq!(
             source_count, 1,
             "require exactly 1 source node when creating materialized source"
@@ -500,7 +509,7 @@ where
         // Create mview on compute node.
         // Noted that this progress relies on the source just created, so we pass it here.
         if let Err(e) = self
-            .create_mview_on_compute_node(stream_node, mview_id, Some(source.clone()))
+            .create_mview_on_compute_node(fragment_graph, mview_id, Some(source.clone()))
             .await
         {
             self.catalog_manager

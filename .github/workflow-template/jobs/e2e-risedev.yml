@@ -3,7 +3,6 @@ jobs:
     name: e2e-test-risedev-$[<profile>]
     needs:
       - compute-node-build-$[<profile>]
-      - frontend-check
       - start-runner-$[<runner>] # The $[xx] will be replaced by scripts
     runs-on: ${{ needs.start-runner-$[<runner>].outputs.label }} # run the job on the newly created runner
     container:
@@ -15,12 +14,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-
-      - name: Set up JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
 
       - name: Install rust toolchain
         uses: actions-rs/toolchain@v1
@@ -45,12 +38,6 @@ jobs:
           # Even if we might download release binary, we place it under `debug` folder to make CI scripts easier to compose.
           name: risingwave-$[<profile>]
           path: ./target/debug
-
-      - uses: actions/download-artifact@v2
-        name: Download frontend binary
-        with:
-          name: risingwave-fe-runnable.jar
-          path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
         name: Download playground binary
@@ -101,7 +88,7 @@ jobs:
         timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -110,7 +97,7 @@ jobs:
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/streaming_delta_join/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/streaming_delta_join/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -119,26 +106,8 @@ jobs:
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
-          sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
-
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-
-      - name: e2e test streaming 3-node (legacy frontend)
-        timeout-minutes: 5
-        run: |
-          ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-
-      - name: e2e test batch 3-node (legacy frontend)
-        timeout-minutes: 3
-        run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/ddl/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill

@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::iter::once;
 
+use madsim::collections::HashSet;
 use tokio::sync::oneshot;
 
 use super::{CollectResult, FinishedCreateMview};

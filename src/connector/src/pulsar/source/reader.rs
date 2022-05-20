@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
@@ -30,8 +29,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::PulsarSplit;
-use crate::pulsar::{PulsarEnumeratorOffset, PULSAR_CONFIG_SERVICE_URL_KEY};
-use crate::{AnyhowProperties, ConnectorStateV2, Properties, SplitImpl};
+use crate::pulsar::PulsarEnumeratorOffset;
+use crate::{Column, ConnectorStateV2, PulsarProperties, SplitImpl};
 
 struct PulsarSingleSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -81,8 +80,8 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
 }
 
 impl PulsarSingleSplitReader {
-    async fn new(properties: &AnyhowProperties, split: PulsarSplit) -> anyhow::Result<Self> {
-        let service_url = properties.get(PULSAR_CONFIG_SERVICE_URL_KEY)?;
+    async fn new(properties: &PulsarProperties, split: PulsarSplit) -> anyhow::Result<Self> {
+        let service_url = &properties.service_url;
         let topic = split.topic.to_string();
 
         log::debug!("creating consumer for pulsar split topic {}", topic,);
@@ -167,23 +166,13 @@ const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
 
 #[async_trait]
 impl SplitReader for PulsarSplitReader {
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .messages
-            .borrow_mut()
-            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+    type Properties = PulsarProperties;
 
-        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        let ret = chunk.into_iter().map(SourceMessage::from).collect();
-
-        Ok(Some(ret))
-    }
-
-    async fn new(props: Properties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        props: PulsarProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -195,8 +184,6 @@ impl SplitReader for PulsarSplitReader {
             .into_iter()
             .map(|split| try_match_expand!(split, SplitImpl::Pulsar).map_err(|e| anyhow!(e)))
             .collect::<Result<Vec<PulsarSplit>>>()?;
-
-        let props = Arc::new(AnyhowProperties::new(props.0));
 
         let mut futures = vec![];
         let mut stop_chs = vec![];
@@ -223,7 +210,25 @@ impl SplitReader for PulsarSplitReader {
             messages: rx,
         })
     }
+
+    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
+        let mut stream = self
+            .messages
+            .borrow_mut()
+            .ready_chunks(PULSAR_MAX_FETCH_MESSAGES as usize);
+
+        let chunk: Vec<Message<Vec<u8>>> = match stream.next().await {
+            None => return Ok(None),
+            Some(chunk) => chunk,
+        };
+
+        let ret = chunk.into_iter().map(SourceMessage::from).collect();
+
+        Ok(Some(ret))
+    }
 }
+
+impl PulsarSplitReader {}
 
 impl Drop for PulsarSplitReader {
     fn drop(&mut self) {

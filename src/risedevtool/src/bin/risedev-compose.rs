@@ -90,9 +90,9 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
+
             ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::MetaNode(c) => (c.address.clone(), c.compose(&compose_config)?),
-            ServiceConfig::Frontend(_) => return Err(anyhow!("not supported")),
             ServiceConfig::FrontendV2(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::Compactor(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::Grafana(c) => {

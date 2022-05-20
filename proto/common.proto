@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package common;
 
-option java_multiple_files = true;
-option java_package = "com.risingwave.proto.common";
 option optimize_for = SPEED;
 
 message Status {
@@ -63,6 +61,7 @@ message Cluster {
   map<string, string> config = 3;
 }
 
+// Vnode mapping for stream fragments / relational state tables. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
   uint32 table_id = 1;
   repeated uint64 original_indices = 2;

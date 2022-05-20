@@ -27,6 +27,7 @@ impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
         let extra_order_exprs_len = query.extra_order_exprs.len();
+        let out_names = query.schema().names();
         let mut plan = self.plan_set_expr(query.body, query.extra_order_exprs)?;
         let order = Order {
             field_order: query.order,
@@ -45,7 +46,7 @@ impl Planner {
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        let root = PlanRoot::new(plan, dist, order, out_fields);
+        let root = PlanRoot::new(plan, dist, order, out_fields, out_names);
         Ok(root)
     }
 }

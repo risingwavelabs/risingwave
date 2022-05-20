@@ -31,6 +31,10 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
+const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD)";
+const PARSE_ERROR_STR_TO_TIME: &str =
+    "Can't cast string to time (expected format is HH:MM:SS[.MS] or HH:MM)";
+const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 
 #[inline(always)]
 pub fn num_up<T, R>(n: T) -> Result<R>
@@ -56,30 +60,34 @@ pub fn str_to_str(n: &str) -> Result<String> {
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(
-        NaiveDate::parse_from_str(elem, "%Y-%m-%d").map_err(|_| {
-            parse_error("Can't cast string to date (expected format is YYYY-MM-DD)")
-        })?,
+        NaiveDate::parse_from_str(elem, "%Y-%m-%d")
+            .map_err(|_| parse_error(PARSE_ERROR_STR_TO_DATE))?,
     ))
 }
 
 #[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
-    Ok(NaiveTimeWrapper::new(
-        NaiveTime::parse_from_str(elem, "%H:%M:%S%.f").map_err(|_| {
-            parse_error("Can't cast string to time (expected format is HH:MM:SS[.MS])")
-        })?,
-    ))
+    if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M:%S%.f") {
+        return Ok(NaiveTimeWrapper::new(time));
+    }
+    if let Ok(time) = NaiveTime::parse_from_str(elem, "%H:%M") {
+        return Ok(NaiveTimeWrapper::new(time));
+    }
+    Err(parse_error(PARSE_ERROR_STR_TO_TIME))
 }
 
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(
-        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f").map_err(|_| {
-            parse_error(
-                "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])",
-            )
-        })?,
-    ))
+    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S%.f") {
+        return Ok(NaiveDateTimeWrapper::new(timestamp));
+    }
+    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M") {
+        return Ok(NaiveDateTimeWrapper::new(timestamp));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(elem, "%Y-%m-%d") {
+        return Ok(NaiveDateTimeWrapper::new(date.and_hms(0, 0, 0)));
+    }
+    Err(parse_error(PARSE_ERROR_STR_TO_TIMESTAMP))
 }
 
 #[inline(always)]
@@ -205,33 +213,32 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     }
 }
 
-#[inline(always)]
-pub fn bool_to_str(input: bool) -> Result<String> {
-    match input {
-        true => Ok("true".into()),
-        false => Ok("false".into()),
-    }
-}
-
 pub fn int32_to_bool(input: i32) -> Result<bool> {
     Ok(input != 0)
 }
 
+pub fn general_to_string<T: std::fmt::Display>(elem: T) -> Result<String> {
+    Ok(elem.to_string())
+}
+
 #[cfg(test)]
 mod tests {
+    use num_traits::FromPrimitive;
+
     #[test]
     fn parse_str() {
         use super::*;
-
+        str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         str_to_date("1999-01-08").unwrap();
+        str_to_time("04:05").unwrap();
         str_to_time("04:05:06").unwrap();
 
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
                 .to_string(),
-            "Parse error: Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS])".to_string()
+            parse_error(PARSE_ERROR_STR_TO_TIMESTAMP).to_string()
         );
         assert_eq!(
             str_to_date("1999-01-08AA").unwrap_err().to_string(),
@@ -239,7 +246,7 @@ mod tests {
         );
         assert_eq!(
             str_to_time("AA04:05:06").unwrap_err().to_string(),
-            "Parse error: Can't cast string to time (expected format is HH:MM:SS[.MS])".to_string()
+            parse_error(PARSE_ERROR_STR_TO_TIME).to_string()
         );
     }
 
@@ -249,5 +256,37 @@ mod tests {
         assert!(int32_to_bool(32).unwrap());
         assert!(int32_to_bool(-32).unwrap());
         assert!(!int32_to_bool(0).unwrap());
+    }
+
+    #[test]
+    fn number_to_string() {
+        use super::*;
+
+        assert_eq!(general_to_string(true).unwrap(), "true");
+        assert_eq!(general_to_string(false).unwrap(), "false");
+
+        assert_eq!(general_to_string(32).unwrap(), "32");
+        assert_eq!(general_to_string(-32).unwrap(), "-32");
+        assert_eq!(general_to_string(i32::MIN).unwrap(), "-2147483648");
+        assert_eq!(general_to_string(i32::MAX).unwrap(), "2147483647");
+
+        assert_eq!(general_to_string(i16::MIN).unwrap(), "-32768");
+        assert_eq!(general_to_string(i16::MAX).unwrap(), "32767");
+
+        assert_eq!(general_to_string(i64::MIN).unwrap(), "-9223372036854775808");
+        assert_eq!(general_to_string(i64::MAX).unwrap(), "9223372036854775807");
+
+        assert_eq!(general_to_string(32.12).unwrap(), "32.12");
+        assert_eq!(general_to_string(-32.14).unwrap(), "-32.14");
+
+        assert_eq!(general_to_string(32.12_f32).unwrap(), "32.12");
+        assert_eq!(general_to_string(-32.14_f32).unwrap(), "-32.14");
+
+        assert_eq!(
+            general_to_string(Decimal::from_f64(1.222).unwrap()).unwrap(),
+            "1.222"
+        );
+
+        assert_eq!(general_to_string(Decimal::NaN).unwrap(), "NaN");
     }
 }

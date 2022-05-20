@@ -71,7 +71,11 @@ impl Task for EtcdService {
             .arg("--name")
             .arg("risedev-meta")
             .arg("--max-txn-ops")
-            .arg("999999");
+            .arg("999999")
+            .arg("--auto-compaction-mode")
+            .arg("revision")
+            .arg("--auto-compaction-retention")
+            .arg("100");
 
         if self.config.unsafe_no_fsync {
             cmd.arg("--unsafe-no-fsync");

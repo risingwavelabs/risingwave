@@ -16,12 +16,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
@@ -103,10 +102,9 @@ impl LogicalScan {
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
+        self.required_col_idx
             .iter()
-            .map(|f| f.name.clone())
+            .map(|i| self.table_desc.columns[*i].name.clone())
             .collect()
     }
 
@@ -190,11 +188,10 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let required_col_idx = required_cols
-            .ones()
-            .map(|i| self.required_col_idx[i])
+            .iter()
+            .map(|i| self.required_col_idx[*i])
             .collect();
 
         Self::new(

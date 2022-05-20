@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "hummock",
+        "user",
     ];
     let protos: Vec<String> = proto_files
         .iter()
@@ -39,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Build protobuf structs.
-    let out_dir: PathBuf = PathBuf::from("./src");
+    let out_dir = PathBuf::from("./src");
     let file_descriptor_set_path: PathBuf = out_dir.join("file_descriptor_set.bin");
     tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
@@ -69,6 +70,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("use crate::{}::*;\n{}", module_path_id, file_content),
         )?;
     }
-
     Ok(())
 }

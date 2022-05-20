@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
-use crate::{FrontendConfig, FrontendGen};
+use crate::FrontendConfig;
 
 pub struct FrontendService {
     config: FrontendConfig,
@@ -32,34 +32,40 @@ impl FrontendService {
 
     fn frontend(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        let prefix_config = env::var("PREFIX_CONFIG")?;
 
-        std::fs::write(
-            Path::new(&prefix_config).join("server.properties"),
-            &FrontendGen.gen_server_properties(&self.config),
-        )?;
-
-        let frontend_java_path = Path::new(&prefix_bin).join("risingwave-fe-runnable.jar");
-
-        if !frontend_java_path.exists() {
-            return Err(anyhow!("risingwave-fe-runnable.jar binary not found in {:?}\nDid you enable build java frontend feature in `./risedev configure`?", frontend_java_path));
+        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
+            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("frontend-node")))
+        } else {
+            Ok(Command::new(Path::new(&prefix_bin).join("frontend")))
         }
+    }
 
-        let mut cmd = Command::new("java");
-        cmd.arg("-cp")
-            .arg(frontend_java_path)
-            // Enable JRE remote debugging functionality
-            .arg("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:5005")
-            .arg(format!(
-                "-Dlogback.configurationFile={}",
-                Path::new(&prefix_config)
-                    .join("logback.xml")
-                    .to_string_lossy()
-            ))
-            .arg("com.risingwave.pgserver.FrontendServer")
-            .arg("-c")
-            .arg(Path::new(&prefix_config).join("server.properties"));
-        Ok(cmd)
+    /// Apply command args accroding to config
+    pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
+        cmd.arg("--host")
+            .arg(format!("{}:{}", config.listen_address, config.port));
+
+        let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
+        match provide_meta_node.len() {
+            0 => {
+                return Err(anyhow!(
+                    "Cannot configure node: no meta node found in this configuration."
+                ));
+            }
+            1 => {
+                let meta_node = &provide_meta_node[0];
+                cmd.arg("--meta-addr")
+                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
+            }
+            other_size => {
+                return Err(anyhow!(
+                    "Cannot configure node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    other_size
+                ));
+            }
+        };
+
+        Ok(())
     }
 }
 
@@ -68,7 +74,10 @@ impl Task for FrontendService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let cmd = self.frontend()?;
+        let mut cmd = self.frontend()?;
+
+        cmd.env("RUST_BACKTRACE", "1");
+        Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

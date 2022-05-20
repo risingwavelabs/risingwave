@@ -121,7 +121,7 @@ impl LocalVersionManager {
                 shared_buffer_uploader_tx,
             },
             buffer_tracker: BufferTracker {
-                capacity: options.shared_buffer_capacity as usize,
+                capacity: (options.shared_buffer_capacity_mb as usize) * (1 << 20),
                 upload_size: global_upload_batches_size,
                 replicate_size: global_replicate_batches_size,
             },
@@ -168,6 +168,9 @@ impl LocalVersionManager {
             return false;
         }
 
+        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
+        }
         guard.set_pinned_version(newly_pinned_version);
 
         self.worker_context
@@ -430,6 +433,7 @@ impl LocalVersionManager {
     ) {
         let min_execute_interval = Duration::from_millis(100);
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
+        min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             min_execute_interval_tick.tick().await;
             let local_version_manager = match local_version_manager_weak.upgrade() {
@@ -487,6 +491,7 @@ impl LocalVersionManager {
         };
         let mut retry_backoff = get_backoff_strategy();
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
+        min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut versions_to_unpin = vec![];
         // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {

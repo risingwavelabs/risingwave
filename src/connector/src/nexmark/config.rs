@@ -31,41 +31,7 @@
 use std::f64::consts::PI;
 
 use super::NEXMARK_BASE_TIME;
-use crate::Properties;
-
-const NEXMARK_CONFIG_ACTIVE_PEOPLE: &str = "nexmark.active.people";
-const NEXMARK_CONFIG_IN_FLIGHT_AUCTIONS: &str = "nexmark.in.flight.auctions";
-const NEXMARK_CONFIG_OUT_OF_ORDER_GROUP_SIZE: &str = "nexmark.out.of.order.group.size";
-const NEXMARK_CONFIG_HOT_SELLER_RATIO: &str = "nexmark.hot.seller.ratio";
-const NEXMARK_CONFIG_HOT_AUCTION_RATIO: &str = "nexmark.hot.auction.ratio";
-const NEXMARK_CONFIG_HOT_BIDDER_RATIO: &str = "nexmark.hot.bidder.ratio";
-const NEXMARK_CONFIG_FIRST_EVENT_ID: &str = "nexmark.first.event.id";
-const NEXMARK_CONFIG_FIRST_EVENT_NUMBER: &str = "nexmark.first.event.number";
-const NEXMARK_CONFIG_NUM_CATEGORIES: &str = "nexmark.num.categories";
-const NEXMARK_CONFIG_AUCTION_ID_LEAD: &str = "nexmark.auction.id.lead";
-const NEXMARK_CONFIG_HOT_SELLER_RATIO_2: &str = "nexmark.hot.seller.ratio.2";
-const NEXMARK_CONFIG_HOT_AUCTION_RATIO_2: &str = "nexmark.hot.auction.ratio.2";
-const NEXMARK_CONFIG_HOT_BIDDER_RATIO_2: &str = "nexmark.hot.bidder.ratio.2";
-const NEXMARK_CONFIG_PERSON_PROPORTION: &str = "nexmark.person.proportion";
-const NEXMARK_CONFIG_AUCTION_PROPORTION: &str = "nexmark.auction.proportion";
-const NEXMARK_CONFIG_BID_PROPORTION: &str = "nexmark.bid.proportion";
-const NEXMARK_CONFIG_FIRST_AUCTION_ID: &str = "nexmark.first.auction.id";
-const NEXMARK_CONFIG_FIRST_PERSON_ID: &str = "nexmark.first.person.id";
-const NEXMARK_CONFIG_FIRST_CATEGORY_ID: &str = "nexmark.first.category.id";
-const NEXMARK_CONFIG_PERSON_ID_LEAD: &str = "nexmark.person.id.lead";
-const NEXMARK_CONFIG_SINE_APPROX_STEPS: &str = "nexmark.sine.approx.steps";
-const NEXMARK_CONFIG_BASE_TIME: &str = "nexmark.base.time";
-const NEXMARK_CONFIG_US_STATES: &str = "nexmark.us.states";
-const NEXMARK_CONFIG_US_CITIES: &str = "nexmark.us.cities";
-const NEXMARK_CONFIG_FIRST_NAMES: &str = "nexmark.first.names";
-const NEXMARK_CONFIG_LAST_NAMES: &str = "nexmark.last.names";
-const NEXMARK_CONFIG_RATE_SHAPE: &str = "nexmark.rate.shape";
-const NEXMARK_CONFIG_RATE_PERIOD: &str = "nexmark.rate.period";
-const NEXMARK_CONFIG_FIRST_EVENT_RATE: &str = "nexmark.first.event.rate";
-const NEXMARK_CONFIG_EVENTS_PER_SECOND: &str = "nexmark.events.per.second";
-const NEXMARK_CONFIG_NEXT_EVENT_RATE: &str = "nexmark.next.event.rate";
-const NEXMARK_CONFIG_US_PER_UNIT: &str = "nexmark.us.per.unit";
-const NEXMARK_CONFIG_THREADS: &str = "nexmark.threads";
+use crate::NexmarkProperties;
 
 #[derive(PartialEq)]
 enum RateShape {
@@ -161,58 +127,55 @@ pub struct NexmarkConfig {
 }
 
 impl NexmarkConfig {
-    pub fn from(properties: &Properties) -> anyhow::Result<Self> {
-        let active_people = properties.get_as_or(NEXMARK_CONFIG_ACTIVE_PEOPLE, 1000)?;
-        let in_flight_auctions = properties.get_as_or(NEXMARK_CONFIG_IN_FLIGHT_AUCTIONS, 100)?;
-        let out_of_order_group_size =
-            properties.get_as_or(NEXMARK_CONFIG_OUT_OF_ORDER_GROUP_SIZE, 1)?;
-        let hot_seller_ratio = properties.get_as_or(NEXMARK_CONFIG_HOT_SELLER_RATIO, 4)?;
-        let hot_auction_ratio = properties.get_as_or(NEXMARK_CONFIG_HOT_AUCTION_RATIO, 2)?;
-        let hot_bidder_ratio = properties.get_as_or(NEXMARK_CONFIG_HOT_BIDDER_RATIO, 4)?;
-        let first_event_id = properties.get_as_or(NEXMARK_CONFIG_FIRST_EVENT_ID, 0)?;
-        let first_event_number = properties.get_as_or(NEXMARK_CONFIG_FIRST_EVENT_NUMBER, 0)?;
-        let num_categories = properties.get_as_or(NEXMARK_CONFIG_NUM_CATEGORIES, 5)?;
-        let auction_id_lead = properties.get_as_or(NEXMARK_CONFIG_AUCTION_ID_LEAD, 10)?;
-        let hot_seller_ratio_2 = properties.get_as_or(NEXMARK_CONFIG_HOT_SELLER_RATIO_2, 100)?;
-        let hot_auction_ratio_2 = properties.get_as_or(NEXMARK_CONFIG_HOT_AUCTION_RATIO_2, 100)?;
-        let hot_bidder_ratio_2 = properties.get_as_or(NEXMARK_CONFIG_HOT_BIDDER_RATIO_2, 100)?;
-        let person_proportion = properties.get_as_or(NEXMARK_CONFIG_PERSON_PROPORTION, 1)?;
-        let auction_proportion = properties.get_as_or(NEXMARK_CONFIG_AUCTION_PROPORTION, 3)?;
-        let bid_proportion = properties.get_as_or(NEXMARK_CONFIG_BID_PROPORTION, 46)?;
+    pub fn from(properties: NexmarkProperties) -> anyhow::Result<Self> {
+        let active_people = properties.active_people.unwrap_or(1000);
+        let in_flight_auctions = properties.in_flight_auctions.unwrap_or(100);
+        let out_of_order_group_size = properties.out_of_order_group_size.unwrap_or(1);
+        let hot_seller_ratio = properties.hot_seller_ratio.unwrap_or(4);
+        let hot_auction_ratio = properties.hot_auction_ratio.unwrap_or(2);
+        let hot_bidder_ratio = properties.hot_bidder_ratio.unwrap_or(4);
+        let first_event_id = properties.hot_first_event_id.unwrap_or(0);
+        let first_event_number = properties.first_event_number.unwrap_or(0);
+        let num_categories = properties.num_categories.unwrap_or(5);
+        let auction_id_lead = properties.auction_id_lead.unwrap_or(10);
+        let hot_seller_ratio_2 = properties.hot_seller_ratio_2.unwrap_or(100);
+        let hot_auction_ratio_2 = properties.hot_auction_ratio_2.unwrap_or(100);
+        let hot_bidder_ratio_2 = properties.hot_bidder_ratio_2.unwrap_or(100);
+        let person_proportion = properties.person_proportion.unwrap_or(1);
+        let auction_proportion = properties.auction_proportion.unwrap_or(3);
+        let bid_proportion = properties.bid_proportion.unwrap_or(46);
         let proportion_denominator = person_proportion + auction_proportion + bid_proportion;
-        let first_auction_id = properties.get_as_or(NEXMARK_CONFIG_FIRST_AUCTION_ID, 1000)?;
-        let first_person_id = properties.get_as_or(NEXMARK_CONFIG_FIRST_PERSON_ID, 1000)?;
-        let first_category_id = properties.get_as_or(NEXMARK_CONFIG_FIRST_CATEGORY_ID, 10)?;
-        let person_id_lead = properties.get_as_or(NEXMARK_CONFIG_PERSON_ID_LEAD, 10)?;
-        let sine_approx_steps = properties.get_as_or(NEXMARK_CONFIG_SINE_APPROX_STEPS, 10)?;
-        let base_time = properties.get_as_or(NEXMARK_CONFIG_BASE_TIME, NEXMARK_BASE_TIME)?;
-        let us_states =
-            split_string_arg(properties.get_or(NEXMARK_CONFIG_US_STATES, "az,ca,id,or,wa,wy"));
-        let us_cities = split_string_arg(properties.get_or(
-            NEXMARK_CONFIG_US_CITIES,
-            "phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne",
-        ));
-        let first_names = split_string_arg(properties.get_or(
-            NEXMARK_CONFIG_FIRST_NAMES,
-            "peter,paul,luke,john,saul,vicky,kate,julie,sarah,deiter,walter",
-        ));
-        let last_names = split_string_arg(properties.get_or(
-            NEXMARK_CONFIG_LAST_NAMES,
-            "shultz,abrams,spencer,white,bartels,walton,smith,jones,noris",
-        ));
-        let rate_shape = if properties.get_or(NEXMARK_CONFIG_RATE_SHAPE, "sine") == "sine" {
+        let first_auction_id = properties.first_auction_id.unwrap_or(1000);
+        let first_person_id = properties.first_person_id.unwrap_or(1000);
+        let first_category_id = properties.first_category_id.unwrap_or(10);
+        let person_id_lead = properties.person_id_lead.unwrap_or(10);
+        let sine_approx_steps = properties.sine_approx_steps.unwrap_or(10);
+        let base_time = properties.base_time.unwrap_or(NEXMARK_BASE_TIME);
+        let us_states = split_string_arg(
+            properties
+                .us_states
+                .unwrap_or_else(|| "az,ca,id,or,wa,wy".to_string()),
+        );
+        let us_cities = split_string_arg(properties.us_cities.unwrap_or_else(|| {
+            "phoenix,los angeles,san francisco,boise,portland,bend,redmond,seattle,kent,cheyenne"
+                .to_string()
+        }));
+        let first_names = split_string_arg(properties.first_names.unwrap_or_else(|| {
+            "peter,paul,luke,john,saul,vicky,kate,julie,sarah,deiter,walter".to_string()
+        }));
+        let last_names = split_string_arg(properties.last_names.unwrap_or_else(|| {
+            "shultz,abrams,spencer,white,bartels,walton,smith,jones,noris".to_string()
+        }));
+        let rate_shape = if properties.rate_shape.unwrap_or_else(|| "sine".to_string()) == "sine" {
             RateShape::Sine
         } else {
             RateShape::Square
         };
-        let rate_period = properties.get_as_or(NEXMARK_CONFIG_RATE_PERIOD, 600)?;
-        let first_rate = properties.get_as_or(
-            NEXMARK_CONFIG_FIRST_EVENT_RATE,
-            properties.get_as_or(NEXMARK_CONFIG_EVENTS_PER_SECOND, 10_000)?,
-        )?;
-        let next_rate = properties.get_as_or(NEXMARK_CONFIG_NEXT_EVENT_RATE, first_rate)?;
-        let us_per_unit = properties.get_as_or(NEXMARK_CONFIG_US_PER_UNIT, 1_000_000)?; // Rate is in μs
-        let generators = properties.get_as_or(NEXMARK_CONFIG_THREADS, 1)? as f32;
+        let rate_period = properties.rate_period.unwrap_or(600);
+        let first_rate = properties.first_event_rate.unwrap_or(10_000);
+        let next_rate = properties.next_event_rate.unwrap_or(first_rate);
+        let us_per_unit = properties.us_per_unit.unwrap_or(1_000_000); // Rate is in μs
+        let generators = properties.threads.unwrap_or(1) as f32;
 
         // Calculate inter event delays array.
         let mut inter_event_delays = Vec::new();
@@ -334,14 +297,12 @@ fn split_string_arg(string: String) -> Vec<String> {
 mod tests {
     use std::io::Result;
 
-    use maplit::hashmap;
-
     use super::*;
 
     #[test]
     fn test_config() -> Result<()> {
-        let properties = Properties::new(hashmap! {});
-        let res = NexmarkConfig::from(&properties);
+        let properties = NexmarkProperties::default();
+        let res = NexmarkConfig::from(properties);
         assert!(res.is_ok());
         let config = res.unwrap();
         println!("config {:?}", config);

@@ -21,10 +21,9 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
-use crate::vector_op::arithmetic_op::general_neg;
+use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
@@ -101,7 +100,14 @@ macro_rules! gen_cast {
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
 
-            { boolean, varchar, bool_to_str },
+            { boolean, varchar, general_to_string },
+            { int16, varchar, general_to_string },
+            { int32, varchar, general_to_string },
+            { int64, varchar, general_to_string },
+            { float32, varchar, general_to_string },
+            { float64, varchar, general_to_string },
+            { decimal, varchar, general_to_string },
+
             { boolean, int32, general_cast },
             { int32, boolean, int32_to_bool },
 
@@ -143,27 +149,30 @@ macro_rules! gen_cast {
     };
 }
 
-/// This macro helps to create neg expression.
-/// It receives all the types that impl `CheckedNeg` trait.
-/// * `$child`: child expression
-/// * `$ret`: return expression
-/// * `$input`: input type
-macro_rules! gen_neg_impl {
-    ($child:expr, $ret:expr, $($input:ident),*) => {
-        match $child.return_type() {
+/// This macro helps to create unary expression.
+/// In [], the parameters are for constructing new expression
+/// * $`expr_name`: expression name, used for print error message
+/// * $child: child expression
+/// * $ret: return array type
+/// In ()*, the parameters are for generating match cases
+/// * $input: child array type
+/// * $rt: The return type in that the operation will calculate
+/// * $func: The scalar function for expression
+macro_rules! gen_unary_impl {
+    ([$expr_name: literal, $child:expr, $ret:expr], $( { $input:ident, $rt: ident, $func:ident },)*) => {
+        match ($child.return_type()) {
             $(
-                $input! {type_match_pattern} => Box::new(
-                    UnaryExpression::<$input! {type_array}, $input! {type_array}, _>::new(
-                        $child,
-                        $ret.clone(),
-                        general_neg,
-                    )
+                $input! { type_match_pattern } => Box::new(
+                        UnaryExpression::<$input! { type_array}, $rt! {type_array}, _>::new(
+                            $child,
+                            $ret.clone(),
+                            $func,
+                        )
                 ),
             )*
             _ => {
                 return Err(ErrorCode::NotImplemented(format!(
-                    "Neg is not supported on {:?}",
-                    $child.return_type()
+                    "{:?} is not supported on ({:?}, {:?})", $expr_name, $child.return_type(), $ret,
                 ), 112.into())
                 .into());
             }
@@ -171,17 +180,26 @@ macro_rules! gen_neg_impl {
     };
 }
 
-macro_rules! gen_neg {
-    ($child:tt, $ret:tt) => {
-        gen_neg_impl! {
-            $child,
-            $ret,
-            int16,
-            int32,
-            int64,
-            float32,
-            float64,
-            decimal
+macro_rules! gen_unary_atm_expr  {
+    (
+        $expr_name: literal,
+        $child:expr,
+        $ret:expr,
+        $general_func:ident,
+        {
+            $( { $input:ident, $rt:ident, $func:ident }, )*
+        } $(,)?
+    ) => {
+        gen_unary_impl! {
+            [$expr_name, $child, $ret],
+            { int16, int16, $general_func },
+            { int32, int32, $general_func },
+            { int64, int64, $general_func },
+            { float32, float32, $general_func },
+            { float64, float64, $general_func },
+            $(
+                { $input, $rt, $func },
+            )*
         }
     };
 }
@@ -248,10 +266,19 @@ pub fn new_unary_expr(
             ascii,
         )),
         (ProstType::Neg, _, _) => {
-            gen_neg! { child_expr, return_type }
+            gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,
+                {
+                    { decimal, decimal, general_neg },
+                }
+            }
         }
-        (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
-
+        (ProstType::Abs, _, _) => {
+            gen_unary_atm_expr! { "Abs", child_expr, return_type, general_abs,
+                {
+                    {decimal, decimal, decimal_abs},
+                }
+            }
+        }
         (expr, ret, child) => {
             return Err(ErrorCode::NotImplemented(format!(
                 "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
@@ -437,7 +464,7 @@ mod tests {
             expr_type: Type::Cast as i32,
             return_type: Some(return_type),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_input_ref(0, TypeName::Char)],
+                children: vec![make_input_ref(0, TypeName::Varchar)],
             })),
         };
         let vec_executor = build_from_prost(&expr).unwrap();

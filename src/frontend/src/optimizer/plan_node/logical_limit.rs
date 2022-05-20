@@ -14,12 +14,9 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
-use super::{
-    BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
-};
+use super::{BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
@@ -89,9 +86,7 @@ impl fmt::Display for LogicalLimit {
 }
 
 impl ColPrunable for LogicalLimit {
-    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        self.must_contain_columns(required_cols);
-
+    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let new_input = self.input.prune_col(required_cols);
         self.clone_with_input(new_input).into()
     }

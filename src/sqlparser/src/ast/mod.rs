@@ -12,7 +12,7 @@
 
 //! SQL Abstract Syntax Tree (AST) types
 mod data_type;
-mod ddl;
+pub(crate) mod ddl;
 mod operator;
 mod query;
 mod statement;
@@ -30,7 +30,7 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use self::data_type::DataType;
+pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, TableConstraint,
@@ -301,8 +301,8 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces, e.g. {1, 2,
-    /// 3},
+    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
+    /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
 }
 
@@ -797,6 +797,8 @@ pub enum Statement {
     ShowVariable { variable: Vec<Ident> },
     /// `{ BEGIN [ TRANSACTION | WORK ] | START TRANSACTION } ...`
     StartTransaction { modes: Vec<TransactionMode> },
+    /// ABORT
+    Abort,
     /// `SET TRANSACTION ...`
     SetTransaction {
         modes: Vec<TransactionMode>,
@@ -1136,6 +1138,10 @@ impl fmt::Display for Statement {
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::Abort => {
+                write!(f, "ABORT")?;
                 Ok(())
             }
             Statement::SetTransaction {

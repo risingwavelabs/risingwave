@@ -174,7 +174,7 @@ mod tests {
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn test_materialize_executor() {
         // Prepare storage and memtable.
         let memory_state_store = MemoryStateStore::new();

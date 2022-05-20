@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use madsim::collections::{HashMap, HashSet};
 use risingwave_common::error::Result;
 use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview as ProstFinishedCreateMview;
 use tokio::sync::mpsc::UnboundedSender;

@@ -17,7 +17,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
     BoundBaseTable, BoundGenerateSeriesFunction, BoundJoin, BoundSource, BoundWindowTableFunction,
@@ -92,36 +92,13 @@ impl Planner {
         table_function: BoundGenerateSeriesFunction,
     ) -> Result<PlanRef> {
         let schema = Schema::new(vec![Field::with_name(
-            DataType::Timestamp,
+            table_function.data_type,
             "generate_series",
         )]);
+
         let mut args = table_function.args.into_iter();
-        let start;
-        let stop;
 
-        let Some((ExprImpl::Literal(start_time), ExprImpl::Literal(stop_time),ExprImpl::Literal(step_interval))) = args.next_tuple() else {
-            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
-        };
-
-        if let Some(ScalarImpl::Utf8(start_time)) = &*start_time.get_data() {
-            start = NaiveDateTimeWrapper::parse_from_str(start_time)?;
-        } else {
-            return Err(ErrorCode::BindError(
-                "Invalid arguments for Generate series function".to_string(),
-            )
-            .into());
-        };
-
-        if let Some(ScalarImpl::Utf8(stop_time)) = &*stop_time.get_data() {
-            stop = NaiveDateTimeWrapper::parse_from_str(stop_time)?;
-        } else {
-            return Err(ErrorCode::BindError(
-                "Invalid arguments for Generate series functionn".to_string(),
-            )
-            .into());
-        };
-
-        let Some(ScalarImpl::Interval(step)) = *step_interval.get_data() else {
+        let Some((start,stop,step)) = args.next_tuple() else {
             return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
         };
 
@@ -151,10 +128,8 @@ impl Planner {
         match (args.next(), args.next()) {
             (Some(window_size @ ExprImpl::Literal(_)), None) => {
                 let mut exprs = Vec::with_capacity(cols.len() + 2);
-                let mut expr_aliases = Vec::with_capacity(cols.len() + 2);
                 for (idx, col) in cols.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col.data_type().clone()).into());
-                    expr_aliases.push(None);
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
@@ -169,10 +144,8 @@ impl Planner {
                         .into();
                 exprs.push(window_start);
                 exprs.push(window_end);
-                expr_aliases.push(Some("window_start".to_string()));
-                expr_aliases.push(Some("window_end".to_string()));
                 let base = self.plan_relation(input)?;
-                let project = LogicalProject::create(base, exprs, expr_aliases);
+                let project = LogicalProject::create(base, exprs);
                 Ok(project)
             }
             _ => Err(ErrorCode::BindError(

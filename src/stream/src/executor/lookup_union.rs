@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockSource;
 
-    #[tokio::test]
+    #[madsim::test]
     async fn lookup_union() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],

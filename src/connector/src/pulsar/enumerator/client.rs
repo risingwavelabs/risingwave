@@ -21,11 +21,7 @@ use crate::base::SplitEnumerator;
 use crate::pulsar::admin::PulsarAdminClient;
 use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::topic::{parse_topic, Topic};
-use crate::pulsar::{
-    PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_SCAN_STARTUP_MODE, PULSAR_CONFIG_TIME_OFFSET,
-    PULSAR_CONFIG_TOPIC_KEY,
-};
-use crate::utils::AnyhowProperties;
+use crate::PulsarProperties;
 
 pub struct PulsarSplitEnumerator {
     admin_client: PulsarAdminClient,
@@ -41,15 +37,20 @@ pub enum PulsarEnumeratorOffset {
     Timestamp(i64),
 }
 
-impl PulsarSplitEnumerator {
-    pub(crate) fn new(properties: &AnyhowProperties) -> Result<PulsarSplitEnumerator> {
-        let topic = properties.get_pulsar(PULSAR_CONFIG_TOPIC_KEY)?;
-        let admin_url = properties.get_pulsar(PULSAR_CONFIG_ADMIN_URL_KEY)?;
+impl PulsarSplitEnumerator {}
+
+#[async_trait]
+impl SplitEnumerator for PulsarSplitEnumerator {
+    type Properties = PulsarProperties;
+    type Split = PulsarSplit;
+
+    async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
+        let topic = properties.topic;
+        let admin_url = properties.admin_url;
         let parsed_topic = parse_topic(&topic)?;
 
         let mut scan_start_offset = match properties
-            .0
-            .get(PULSAR_CONFIG_SCAN_STARTUP_MODE)
+            .scan_startup_mode
             .map(|s| s.to_lowercase())
             .as_deref()
         {
@@ -58,13 +59,12 @@ impl PulsarSplitEnumerator {
             None => PulsarEnumeratorOffset::Earliest,
             _ => {
                 return Err(anyhow!(
-                    "properties {} only support earliest and latest or leave it empty",
-                    PULSAR_CONFIG_SCAN_STARTUP_MODE
+                    "properties `startup_mode` only support earliest and latest or leave it empty"
                 ));
             }
         };
 
-        if let Some(s) = properties.0.get(PULSAR_CONFIG_TIME_OFFSET) {
+        if let Some(s) = properties.time_offset {
             let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
             scan_start_offset = PulsarEnumeratorOffset::Timestamp(time_offset)
         }
@@ -75,11 +75,6 @@ impl PulsarSplitEnumerator {
             start_offset: scan_start_offset,
         })
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for PulsarSplitEnumerator {
-    type Split = PulsarSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
         let offset = self.start_offset.clone();
@@ -129,15 +124,10 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::pulsar::{
-        PulsarEnumeratorOffset, PulsarSplitEnumerator, PULSAR_CONFIG_ADMIN_URL_KEY,
-        PULSAR_CONFIG_SCAN_STARTUP_MODE, PULSAR_CONFIG_TOPIC_KEY,
-    };
-    use crate::{AnyhowProperties, SplitEnumerator};
+    use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplitEnumerator};
+    use crate::{PulsarProperties, SplitEnumerator};
 
     async fn mock_server(web_path: &str, body: &str) -> MockServer {
         let mock_server = MockServer::start().await;
@@ -164,16 +154,14 @@ mod test {
         )
         .await;
 
-        let prop = AnyhowProperties::new(HashMap::from([
-            (PULSAR_CONFIG_TOPIC_KEY.to_string(), "t".to_string()),
-            (PULSAR_CONFIG_ADMIN_URL_KEY.to_string(), server.uri()),
-            (
-                PULSAR_CONFIG_SCAN_STARTUP_MODE.to_string(),
-                "earliest".to_string(),
-            ),
-        ]));
-
-        let mut enumerator = PulsarSplitEnumerator::new(&prop).unwrap();
+        let prop = PulsarProperties {
+            topic: "t".to_string(),
+            admin_url: server.uri(),
+            service_url: "".to_string(),
+            scan_startup_mode: Some("earliest".to_string()),
+            time_offset: None,
+        };
+        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
         let splits = enumerator.list_splits().await.unwrap();
         assert_eq!(splits.len(), 3);

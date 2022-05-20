@@ -355,7 +355,7 @@ mod tests {
         let mut g0_builder = I32ArrayBuilder::new(0)?;
         let mut g1 = GeneralSortedGrouper::<I32Array>::new(false, None);
         let mut g1_builder = I32ArrayBuilder::new(0)?;
-        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum);
+        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum, None);
         let mut a_builder = I64ArrayBuilder::new(0)?;
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
+use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Distribution, Order};
 
@@ -45,9 +45,11 @@ impl StreamMaterialize {
     fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
         let ctx = input.ctx();
 
-        let schema = Self::derive_schema(input.schema())?;
+        let schema = input.schema().clone();
         let pk_indices = input.pk_indices();
 
+        // Materialize executor won't change the append-only behavior of the stream, so it depends
+        // on input's `append_only`.
         Ok(PlanBase::new_stream(
             ctx,
             schema,
@@ -55,41 +57,6 @@ impl StreamMaterialize {
             input.distribution().clone(),
             input.append_only(),
         ))
-    }
-
-    fn derive_schema(schema: &Schema) -> Result<Schema> {
-        let mut col_names = HashSet::new();
-        for field in schema.fields() {
-            if is_row_id_column_name(&field.name) {
-                continue;
-            }
-            if !col_names.insert(field.name.clone()) {
-                return Err(InternalError(format!(
-                    "column {} specified more than once",
-                    field.name
-                ))
-                .into());
-            }
-        }
-        let mut row_id_count = 0;
-        let fields = schema
-            .fields()
-            .iter()
-            .map(|field| match is_row_id_column_name(&field.name) {
-                true => {
-                    let field = Field::with_struct(
-                        field.data_type.clone(),
-                        gen_row_id_column_name(row_id_count),
-                        field.sub_fields.clone(),
-                        field.type_name.clone(),
-                    );
-                    row_id_count += 1;
-                    field
-                }
-                false => field.clone(),
-            })
-            .collect();
-        Ok(Schema { fields })
     }
 
     #[must_use]
@@ -107,6 +74,7 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        out_names: Vec<String>,
         is_index_on: Option<TableId>,
     ) -> Result<Self> {
         // ensure the same pk will not shuffle to different node
@@ -123,15 +91,38 @@ impl StreamMaterialize {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
+
+        let mut col_names = HashMap::new();
+        for name in &out_names {
+            if col_names.try_insert(name.clone(), 0).is_err() {
+                return Err(
+                    InternalError(format!("column {} specified more than once", name)).into(),
+                );
+            }
+        }
+        let mut out_name_iter = out_names.into_iter();
         let mut columns = schema
             .fields()
             .iter()
             .enumerate()
-            .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc::from_field_without_column_id(field),
-                is_hidden: !user_cols.contains(i),
+            .map(|(i, field)| {
+                let mut c = ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    is_hidden: !user_cols.contains(i),
+                };
+                c.column_desc.name = if !c.is_hidden {
+                    out_name_iter.next().unwrap()
+                } else {
+                    match col_names.try_insert(field.name.clone(), 0) {
+                        Ok(_) => field.name.clone(),
+                        Err(mut err) => {
+                            let cnt = err.entry.get_mut();
+                            *cnt += 1;
+                            field.name.clone() + "#" + &cnt.to_string()
+                        }
+                    }
+                };
+                c
             })
             .collect_vec();
 
