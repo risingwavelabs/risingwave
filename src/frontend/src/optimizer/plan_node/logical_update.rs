@@ -18,9 +18,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchUpdate, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream, PredicatePushdown, gen_new_node};
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::utils::Condition;
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
 /// specified table.
@@ -113,6 +114,12 @@ impl ColPrunable for LogicalUpdate {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols))
             .into()
+    }
+}
+
+impl PredicatePushdown for LogicalUpdate {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_new_node(self, predicate, Condition::true_cond())
     }
 }
 
