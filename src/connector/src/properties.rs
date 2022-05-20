@@ -25,6 +25,7 @@ pub enum ConnectorProperties {
     Kinesis(KinesisProperties),
     Nexmark(Box<NexmarkProperties>),
     S3(S3Properties),
+    Dummy(()),
 }
 
 impl ConnectorProperties {

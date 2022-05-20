@@ -126,10 +126,10 @@ impl FilterJoinRule {
         let (mut left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
 
-        let mut cannot_pushed = vec![];
+        let mut cannot_push = vec![];
 
         if !push_left {
-            cannot_pushed.extend(left);
+            cannot_push.extend(left);
             left = Condition::true_cond();
         };
 
@@ -140,21 +140,19 @@ impl FilterJoinRule {
             );
             right.rewrite_expr(&mut mapping)
         } else {
-            cannot_pushed.extend(right);
+            cannot_push.extend(right);
             Condition::true_cond()
         };
 
         let on = if push_on {
-            others
-                .conjunctions
-                .extend(std::mem::take(&mut cannot_pushed));
+            others.conjunctions.extend(std::mem::take(&mut cannot_push));
             others
         } else {
-            cannot_pushed.extend(others);
+            cannot_push.extend(others);
             Condition::true_cond()
         };
 
-        predicate.conjunctions = cannot_pushed;
+        predicate.conjunctions = cannot_push;
 
         (left, right, on)
     }

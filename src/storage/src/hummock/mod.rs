@@ -39,7 +39,7 @@ pub mod local_version_manager;
 pub mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
-mod sstable_store;
+pub mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
@@ -60,6 +60,7 @@ pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -116,17 +117,6 @@ impl HummockStorage {
             stats,
         };
         Ok(instance)
-    }
-
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            capacity: options.sstable_size as usize,
-            block_capacity: options.block_size as usize,
-            restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: options.bloom_false_positive,
-            // TODO: Make this configurable.
-            compression_algorithm: CompressionAlgorithm::None,
-        })
     }
 
     async fn get_from_table(

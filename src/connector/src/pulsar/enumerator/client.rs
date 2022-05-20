@@ -37,8 +37,14 @@ pub enum PulsarEnumeratorOffset {
     Timestamp(i64),
 }
 
-impl PulsarSplitEnumerator {
-    pub(crate) fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
+impl PulsarSplitEnumerator {}
+
+#[async_trait]
+impl SplitEnumerator for PulsarSplitEnumerator {
+    type Properties = PulsarProperties;
+    type Split = PulsarSplit;
+
+    async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
         let topic = properties.topic;
         let admin_url = properties.admin_url;
         let parsed_topic = parse_topic(&topic)?;
@@ -69,11 +75,6 @@ impl PulsarSplitEnumerator {
             start_offset: scan_start_offset,
         })
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for PulsarSplitEnumerator {
-    type Split = PulsarSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
         let offset = self.start_offset.clone();
@@ -160,7 +161,7 @@ mod test {
             scan_startup_mode: Some("earliest".to_string()),
             time_offset: None,
         };
-        let mut enumerator = PulsarSplitEnumerator::new(prop).unwrap();
+        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
         let splits = enumerator.list_splits().await.unwrap();
         assert_eq!(splits.len(), 3);

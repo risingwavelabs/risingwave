@@ -31,21 +31,14 @@ pub struct NexmarkSplitReader {
 
 #[async_trait]
 impl SplitReader for NexmarkSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let chunk = match self.generator.next().await {
-            Err(e) => return Err(anyhow!(e)),
-            Ok(chunk) => chunk,
-        };
+    type Properties = Box<NexmarkProperties>;
 
-        Ok(Some(chunk))
-    }
-}
-
-impl NexmarkSplitReader {
-    pub async fn new(properties: NexmarkProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(properties: Box<NexmarkProperties>, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
+        let properties = *properties;
+
         let wall_clock_base_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -116,7 +109,18 @@ impl NexmarkSplitReader {
             assigned_split: Some(assigned_split),
         })
     }
+
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+        let chunk = match self.generator.next().await {
+            Err(e) => return Err(anyhow!(e)),
+            Ok(chunk) => chunk,
+        };
+
+        Ok(Some(chunk))
+    }
 }
+
+impl NexmarkSplitReader {}
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -135,7 +139,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut enumerator = NexmarkSplitEnumerator::new(&props)?;
+        let mut enumerator = NexmarkSplitEnumerator::new(Box::new(props.clone())).await?;
         let list_splits_resp = enumerator
             .list_splits()
             .await?
@@ -144,7 +148,7 @@ mod tests {
             .collect();
 
         let state = ConnectorStateV2::Splits(list_splits_resp);
-        let mut reader = NexmarkSplitReader::new(props, state).await?;
+        let mut reader = NexmarkSplitReader::new(Box::new(props), state).await?;
         let chunk = reader.next().await?.unwrap();
         assert_eq!(chunk.len(), 5);
 

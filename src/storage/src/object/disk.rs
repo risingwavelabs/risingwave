@@ -25,7 +25,9 @@ use futures::future::try_join_all;
 use tokio::io::AsyncWriteExt;
 
 use crate::hummock::{CachableEntry, HummockError, LruCache};
-use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
+use crate::object::{
+    strip_path_local, BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+};
 
 pub(super) mod utils {
     use std::fs::Metadata;
@@ -88,6 +90,7 @@ pub(super) mod utils {
 pub type OpenReadFileHolder = Arc<CachableEntry<PathBuf, File>>;
 
 pub struct LocalDiskObjectStore {
+    is_local: bool,
     path_prefix: String,
     opened_read_file_cache: Arc<LruCache<PathBuf, File>>,
 }
@@ -96,8 +99,9 @@ const OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS: usize = 2;
 const OPENED_FILE_CACHE_DEFAULT_CAPACITY: usize = 64;
 
 impl LocalDiskObjectStore {
-    pub fn new(path_prefix: &str) -> LocalDiskObjectStore {
+    pub fn new(path_prefix: &str, is_local: bool) -> LocalDiskObjectStore {
         LocalDiskObjectStore {
+            is_local,
             path_prefix: path_prefix.to_string(),
             opened_read_file_cache: Arc::new(LruCache::new(
                 OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS,
@@ -153,6 +157,7 @@ impl LocalDiskObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for LocalDiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        let path = strip_path_local(path, self.is_local);
         let mut file =
             utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
         file.write_all(&obj)
@@ -165,6 +170,7 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        let path = strip_path_local(path, self.is_local);
         match block_loc {
             Some(block_loc) => Ok(self.readv(path, &[block_loc]).await?.pop().unwrap()),
             None => {
@@ -190,6 +196,7 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+        let path = strip_path_local(path, self.is_local);
         let file_holder = self.get_read_file(path).await?;
         let metadata = utils::get_metadata(file_holder.clone()).await?;
         for block_loc in block_locs {
@@ -235,6 +242,7 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        let path = strip_path_local(path, self.is_local);
         let file_holder = self.get_read_file(path).await?;
         let metadata = utils::get_metadata(file_holder).await?;
         Ok(ObjectMetadata {
@@ -243,6 +251,7 @@ impl ObjectStore for LocalDiskObjectStore {
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
+        let path = strip_path_local(path, self.is_local);
         tokio::fs::remove_file(self.new_file_path(path)?.as_path())
             .await
             .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
@@ -283,7 +292,7 @@ mod tests {
     async fn test_simple_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -301,7 +310,7 @@ mod tests {
     async fn test_multi_level_dir_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("1/2/test.obj", Bytes::from(payload.clone()))
@@ -319,7 +328,7 @@ mod tests {
     async fn test_read_all() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -335,7 +344,7 @@ mod tests {
     async fn test_read_partial() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -360,7 +369,7 @@ mod tests {
     async fn test_read_multi_block() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -392,7 +401,7 @@ mod tests {
     async fn test_delete() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -409,7 +418,7 @@ mod tests {
     async fn test_read_not_exists() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
 
         assert!(store.read("non-exist.obj", None).await.is_err());
     }
@@ -418,7 +427,7 @@ mod tests {
     async fn test_read_out_of_range() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -467,7 +476,7 @@ mod tests {
     async fn test_invalid_path() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
-        let store = LocalDiskObjectStore::new(test_root_path);
+        let store = LocalDiskObjectStore::new(test_root_path, false);
         let payload = gen_test_payload();
         // path is not allowed to be started with '/'
         assert!(store

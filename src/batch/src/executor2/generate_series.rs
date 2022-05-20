@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::AddAssign;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
@@ -22,7 +21,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::types::{CheckedAdd, DataType, Scalar};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -61,7 +60,7 @@ impl<T: Array, S: Array> GenerateSeriesExecutor2<T, S> {
 impl<T: Array, S: Array> Executor2 for GenerateSeriesExecutor2<T, S>
 where
     T::OwnedItem: PartialOrd<T::OwnedItem>,
-    T::OwnedItem: for<'a> AddAssign<S::RefItem<'a>>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
 {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -81,7 +80,7 @@ where
     T: Array,
     S: Array,
     T::OwnedItem: PartialOrd<T::OwnedItem>,
-    T::OwnedItem: for<'a> AddAssign<S::RefItem<'a>>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>>,
 {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
@@ -102,7 +101,7 @@ where
                     break;
                 }
                 builder.append(Some(cur.as_scalar_ref())).unwrap();
-                cur += step.as_scalar_ref();
+                cur = cur.checked_add(step.as_scalar_ref())?;
             }
 
             let arr = builder.finish()?;
@@ -208,7 +207,7 @@ mod tests {
             stop,
             step,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-            identity: "GenerateSeriesExecutor2".to_string(),
+            identity: "GenerateSeriesI32Executor2".to_string(),
         });
         let mut remained_values = ((stop - start) / step + 1) as usize;
         let mut stream = executor.execute();
@@ -234,15 +233,17 @@ mod tests {
         let one_minute_step = IntervalUnit::from_minutes(1);
         let one_hour_step = IntervalUnit::from_minutes(60);
         let one_day_step = IntervalUnit::from_days(1);
-        generate_time_series_test_case(start_time, stop_time, one_minute_step).await;
-        generate_time_series_test_case(start_time, stop_time, one_hour_step).await;
-        generate_time_series_test_case(start_time, stop_time, one_day_step).await;
+        generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1)
+            .await;
+        generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
+        generate_time_series_test_case(start_time, stop_time, one_day_step, 8 + 1).await;
     }
 
     async fn generate_time_series_test_case(
         start: NaiveDateTimeWrapper,
         stop: NaiveDateTimeWrapper,
         step: IntervalUnit,
+        expected_rows_count: usize,
     ) {
         let executor = Box::new(
             GenerateSeriesExecutor2::<NaiveDateTimeArray, IntervalArray>::new(
@@ -253,22 +254,13 @@ mod tests {
                 "GenerateSeriesTimestampExecutor2".to_string(),
             ),
         );
-        let interval_ms = step.get_total_ms();
-        let start_stop_spread_ms = stop.sub(start).num_milliseconds();
-        let mut remained_values = (start_stop_spread_ms / interval_ms + 1) as usize;
-        let mut stream = executor.execute();
-        while remained_values > 0 {
-            let chunk = stream.next().await.unwrap().unwrap();
-            let col = chunk.column_at(0);
-            let arr = try_match_expand!(col.array_ref(), ArrayImpl::NaiveDateTime).unwrap();
 
-            if remained_values > DEFAULT_CHUNK_BUFFER_SIZE {
-                assert_eq!(arr.len(), DEFAULT_CHUNK_BUFFER_SIZE);
-            } else {
-                assert_eq!(arr.len(), remained_values);
-            }
-            remained_values -= arr.len();
+        let mut result_count = 0;
+        let mut stream = executor.execute();
+        while let Some(data_chunk) = stream.next().await {
+            let data_chunk = data_chunk.unwrap();
+            result_count += data_chunk.cardinality();
         }
-        assert!(stream.next().await.is_none());
+        assert_eq!(result_count, expected_rows_count)
     }
 }
