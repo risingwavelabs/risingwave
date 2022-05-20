@@ -207,9 +207,6 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             map.insert(FuncSign::new(e, vec![t]), T::Boolean);
         }
     }
-    for e in [E::BoolNe, E::BoolEq] {
-        map.insert(FuncSign::new(e, vec![T::Boolean, T::Boolean]), T::Boolean);
-    }
     let cmp_exprs = &[
         E::Equal,
         E::NotEqual,
