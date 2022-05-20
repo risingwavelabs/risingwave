@@ -40,6 +40,12 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn source_manager_ref(&self) -> Option<SourceManagerRef>;
 
+    fn try_get_source_manager_ref(&self) -> Result<SourceManagerRef> {
+        Ok(self
+            .source_manager_ref()
+            .ok_or_else(|| InternalError("Source manager not found".to_string()))?)
+    }
+
     fn state_store(&self) -> Option<StateStoreImpl>;
 
     fn try_get_state_store(&self) -> Result<StateStoreImpl> {

@@ -23,7 +23,7 @@ use crate::executor2::{
     HashJoinExecutor2Builder, HopWindowExecutor2, InsertExecutor2, LimitExecutor2,
     MergeSortExchangeExecutor2Builder, NestedLoopJoinExecutor2, OrderByExecutor2, ProjectExecutor2,
     RowSeqScanExecutor2Builder, SortAggExecutor2, SortMergeJoinExecutor2, TopNExecutor2,
-    TraceExecutor2, ValuesExecutor2,
+    TraceExecutor2, UpdateExecutor, ValuesExecutor2,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -101,7 +101,6 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Delete => DeleteExecutor2,
             NodeBody::Exchange => GenericExchangeExecutor2Builder,
             NodeBody::Update => UpdateExecutor,
-            NodeBody::Exchange => ExchangeExecutor2,
             NodeBody::Filter => FilterExecutor2,
             NodeBody::Project => ProjectExecutor2,
             NodeBody::SortAgg => SortAggExecutor2,
