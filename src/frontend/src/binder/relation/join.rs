@@ -15,7 +15,9 @@
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_sqlparser::ast::{JoinConstraint, JoinOperator, TableWithJoins};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins,
+};
 
 use crate::binder::{Binder, Relation};
 use crate::expr::{Expr as _, ExprImpl};
@@ -52,8 +54,10 @@ impl Binder {
     }
 
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
+        let root_table_name = get_table_name(&table.relation);
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
+            let right_table_name = get_table_name(&join.relation);
             let right = self.bind_table_factor(join.relation)?;
             let (constraint, join_type) = match join.join_operator {
                 JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
@@ -63,7 +67,8 @@ impl Binder {
                 // Cross join equals to inner join with with no constraint.
                 JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
             };
-            let cond = self.bind_join_constraint(constraint)?;
+            let cond =
+                self.bind_join_constraint(constraint, &root_table_name, &right_table_name)?;
             let join = BoundJoin {
                 join_type,
                 left: root,
@@ -76,7 +81,12 @@ impl Binder {
         Ok(root)
     }
 
-    fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<ExprImpl> {
+    fn bind_join_constraint(
+        &mut self,
+        constraint: JoinConstraint,
+        left_table: &Option<Ident>,
+        right_table: &Option<Ident>,
+    ) -> Result<ExprImpl> {
         Ok(match constraint {
             JoinConstraint::None => ExprImpl::literal_bool(true),
             JoinConstraint::Natural => {
@@ -93,9 +103,58 @@ impl Binder {
                 }
                 bound_expr
             }
-            JoinConstraint::Using(_columns) => {
-                return Err(ErrorCode::NotImplemented("USING".into(), 1636.into()).into())
+            JoinConstraint::Using(columns) => {
+                let mut columns_iter = columns.into_iter();
+                let first_column = columns_iter.next().unwrap();
+                let mut binary_expr = Expr::BinaryOp {
+                    left: Box::new(Expr::CompoundIdentifier(vec![
+                        left_table.clone().unwrap(),
+                        first_column.clone(),
+                    ])),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(Expr::CompoundIdentifier(vec![
+                        right_table.clone().unwrap(),
+                        first_column,
+                    ])),
+                };
+                for column in columns_iter {
+                    binary_expr = Expr::BinaryOp {
+                        left: Box::new(binary_expr),
+                        op: BinaryOperator::Eq,
+                        right: Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::CompoundIdentifier(vec![
+                                left_table.clone().unwrap(),
+                                column.clone(),
+                            ])),
+                            op: BinaryOperator::Eq,
+                            right: Box::new(Expr::CompoundIdentifier(vec![
+                                right_table.clone().unwrap(),
+                                column.clone(),
+                            ])),
+                        }),
+                    }
+                }
+                self.bind_expr(binary_expr)?
             }
         })
+    }
+}
+
+fn get_table_name(table_factor: &TableFactor) -> Option<Ident> {
+    match table_factor {
+        TableFactor::Table {
+            name,
+            alias: _,
+            args: _,
+        } => Some(name.0[0].clone()),
+        TableFactor::Derived {
+            lateral: _,
+            subquery: _,
+            alias,
+        } => alias.as_ref().map(|table_alias| table_alias.name.clone()),
+        TableFactor::TableFunction { expr: _, alias } => {
+            alias.as_ref().map(|table_alias| table_alias.name.clone())
+        }
+        TableFactor::NestedJoin(table_with_joins) => get_table_name(&table_with_joins.relation),
     }
 }
