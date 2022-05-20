@@ -39,27 +39,9 @@ pub struct KafkaSplitReader {
 
 #[async_trait]
 impl SplitReader for KafkaSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .consumer
-            .stream()
-            .ready_chunks(KAFKA_MAX_FETCH_MESSAGES);
+    type Properties = KafkaProperties;
 
-        let chunk = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        chunk
-            .into_iter()
-            .map(|msg| msg.map_err(|e| anyhow!(e)).map(SourceMessage::from))
-            .collect::<Result<Vec<SourceMessage>>>()
-            .map(Some)
-    }
-}
-
-impl KafkaSplitReader {
-    pub async fn new(properties: KafkaProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(properties: KafkaProperties, state: ConnectorStateV2) -> Result<Self>
     where
         Self: Sized,
     {
@@ -117,5 +99,23 @@ impl KafkaSplitReader {
             consumer: Arc::new(consumer),
             assigned_splits: HashMap::new(),
         })
+    }
+
+    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+        let mut stream = self
+            .consumer
+            .stream()
+            .ready_chunks(KAFKA_MAX_FETCH_MESSAGES);
+
+        let chunk = match stream.next().await {
+            None => return Ok(None),
+            Some(chunk) => chunk,
+        };
+
+        chunk
+            .into_iter()
+            .map(|msg| msg.map_err(|e| anyhow!(e)).map(SourceMessage::from))
+            .collect::<Result<Vec<SourceMessage>>>()
+            .map(Some)
     }
 }
