@@ -19,7 +19,6 @@ risedev:
     - use: meta-node
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
-      checkpoint-interval: 100
     - use: compute-node
     - use: frontend
 
@@ -33,20 +32,12 @@ risedev:
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
 
-    # If you want to use the legacy frontend, uncomment the following line.
-    # - use: frontend-legacy
-
     # If you want to create source from Kafka, uncomment the following lines
     # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
     # - use: zookeeper
     #   persist-data: true
     # - use: kafka
     #   persist-data: true
-
-  legacy:
-    - use: meta-node
-    - use: compute-node
-    - use: frontend-legacy
 
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
@@ -66,21 +57,6 @@ risedev:
       user-managed: true
     - use: compute-node
     - use: frontend
-
-  # TODO: Remove all legacy configs after java removed.
-  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
-  dev-frontend-legacy:
-    - use: meta-node
-    - use: compute-node
-    - use: frontend-legacy
-      user-managed: true
-
-  # `dev-meta-node` have the same settings as default except the the meta node will be started by user.
-  dev-meta-node-legacy:
-    - use: meta-node
-      user-managed: true
-    - use: compute-node
-    - use: frontend-legacy
 
   full:
     - use: minio
@@ -233,34 +209,6 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend
-    - use: compactor
-
-  ci-3node:
-    - use: minio
-    - use: etcd
-      unsafe-no-fsync: true
-    - use: meta-node
-      unsafe-disable-recovery: true
-    - use: compute-node
-      port: 5687
-      exporter-port: 1222
-    - use: compute-node
-      port: 5688
-      exporter-port: 1223
-    - use: compute-node
-      port: 5689
-      exporter-port: 1224
-    - use: frontend-legacy
-    - use: compactor
-
-  ci-1node:
-    - use: minio
-    - use: etcd
-      unsafe-no-fsync: true
-    - use: meta-node
-      unsafe-disable-recovery: true
-    - use: compute-node
-    - use: frontend-legacy
     - use: compactor
 
   ci-kafka:
@@ -435,25 +383,6 @@ template:
 
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
-
-  frontend-legacy:
-    # Listen address of frontend-legacy
-    address: "127.0.0.1"
-
-    # Listen port of frontend-legacy
-    port: 4567
-
-    # Listen address
-    listen-address: ${address}
-
-    # Id of this instance
-    id: frontend-legacy-${port}
-
-    # Meta-nodes used by this frontend-legacy instance
-    provide-meta-node: "meta-node*"
-
-    # If `user-managed` is true, this service will be started by user with the above config
-    user-managed: false
 
   frontend:
     # Advertise address of frontend

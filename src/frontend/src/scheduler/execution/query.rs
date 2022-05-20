@@ -59,8 +59,8 @@ enum QueryState {
 
     /// Running
     Running {
-        msg_sender: Sender<QueryMessage>,
-        task_handle: JoinHandle<Result<()>>,
+        _msg_sender: Sender<QueryMessage>,
+        _task_handle: JoinHandle<Result<()>>,
     },
 
     /// Failed
@@ -73,7 +73,7 @@ enum QueryState {
 pub struct QueryExecution {
     query: Arc<Query>,
     state: Arc<RwLock<QueryState>>,
-    stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+    _stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
 }
 
 struct QueryRunner {
@@ -149,7 +149,7 @@ impl QueryExecution {
         Self {
             query,
             state: Arc::new(RwLock::new(state)),
-            stage_executions,
+            _stage_executions: stage_executions,
         }
     }
 
@@ -183,8 +183,8 @@ impl QueryExecution {
                 );
 
                 *state = QueryState::Running {
-                    msg_sender,
-                    task_handle,
+                    _msg_sender: msg_sender,
+                    _task_handle: task_handle,
                 };
 
                 Ok(root_stage)
@@ -198,6 +198,7 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
+    #[allow(unused)]
     pub async fn abort(&mut self) -> Result<()> {
         todo!()
     }

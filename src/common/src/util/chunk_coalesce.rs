@@ -216,6 +216,7 @@ impl DataChunkBuilder {
     fn build_data_chunk(&mut self) -> Result<DataChunk> {
         let mut new_array_builders = vec![];
         swap(&mut new_array_builders, &mut self.array_builders);
+        let cardinality = self.buffered_count;
         self.buffered_count = 0;
 
         let columns = new_array_builders.into_iter().try_fold(
@@ -227,8 +228,10 @@ impl DataChunkBuilder {
                 Ok(vec)
             },
         )?;
-
-        DataChunk::try_from(columns)
+        match columns.is_empty() {
+            true => Ok(DataChunk::new_dummy(cardinality)),
+            false => DataChunk::try_from(columns),
+        }
     }
 
     pub fn buffered_count(&self) -> usize {

@@ -64,7 +64,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/apache/avro.git?branch=branch-1.11#36126feb661484f4c33e2091b9145b236a77e572"
+source = "git+https://github.com/singularity-data/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
 dependencies = [
  "byteorder 1.4.3",
  "bzip2",
@@ -1623,6 +1623,17 @@ checksum = "c3083ce4b914124575708913bca19bfe887522d6e2e6d0952943f5eac4a74010"
 dependencies = [
  "futures-core",
  "futures-sink",
+]
+
+[[package]]
+name = "futures-concurrency"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48e98b7b5aedee7c34a5cfb1ee1681af8faf46e2f30c0b8af5ea08eba517d61c"
+dependencies = [
+ "async-trait",
+ "futures-core",
+ "pin-project",
 ]
 
 [[package]]
@@ -3403,7 +3414,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3426,7 +3437,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3503,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "clap 3.1.17",
  "log 0.4.17",
@@ -3521,7 +3532,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "clap 3.1.17",
@@ -3541,7 +3552,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3603,7 +3614,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3617,6 +3628,7 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "futures-async-stream",
  "hyper",
  "itertools",
  "lazy_static",
@@ -3655,7 +3667,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3674,6 +3686,8 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "futures-async-stream",
+ "futures-concurrency",
  "globset",
  "http",
  "http-serde",
@@ -3712,12 +3726,13 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bytes",
  "clap 3.1.17",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
@@ -3727,7 +3742,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3761,15 +3776,17 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "arc-swap",
  "assert-impl",
+ "assert_matches",
  "async-trait",
  "byteorder 1.4.3",
  "bytes",
  "clap 3.1.17",
+ "derivative",
  "downcast-rs",
  "dyn-clone",
  "enum-as-inner",
@@ -3855,7 +3872,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3889,6 +3906,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -3941,7 +3959,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "futures",
@@ -3958,7 +3976,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -4012,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "itertools",
  "log 0.4.17",
@@ -4038,7 +4056,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4087,6 +4105,7 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.3",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-retry",
@@ -4100,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "assert_matches",

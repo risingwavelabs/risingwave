@@ -17,17 +17,22 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{internal_error, Result};
-use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
+use risingwave_common::util::compress::compress_data;
+use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
+use super::set_table_vnode_mappings;
 use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
+use crate::manager::HashMappingManagerRef;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
 pub struct Scheduler<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
+    /// Maintains vnode mappings of all scheduled fragments.
+    hash_mapping_manager: HashMappingManagerRef,
     /// Round robin counter for singleton fragments
     single_rr: AtomicUsize,
 }
@@ -124,9 +129,13 @@ impl<S> Scheduler<S>
 where
     S: MetaStore,
 {
-    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
+    pub fn new(
+        cluster_manager: ClusterManagerRef<S>,
+        hash_mapping_manager: HashMappingManagerRef,
+    ) -> Self {
         Self {
             cluster_manager,
+            hash_mapping_manager,
             single_rr: AtomicUsize::new(0),
         }
     }
@@ -139,7 +148,7 @@ where
     /// turns.
     pub async fn schedule(
         &self,
-        fragment: Fragment,
+        fragment: &mut Fragment,
         locations: &mut ScheduledLocations,
     ) -> Result<()> {
         if fragment.actors.is_empty() {
@@ -147,7 +156,7 @@ where
         }
 
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
-            // singleton fragment
+            // Singleton fragment
             let actor = &fragment.actors[0];
 
             if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
@@ -172,9 +181,13 @@ where
                     fragment.actors[0].actor_id,
                     single_parallel_units[single_idx].clone(),
                 );
+                self.set_fragment_vnode_mapping(
+                    fragment,
+                    &[single_parallel_units[single_idx].clone()],
+                )?;
             }
         } else {
-            // normal fragment
+            // Normal fragment
             let parallel_units = self
                 .cluster_manager
                 .list_parallel_units(Some(ParallelUnitType::Hash))
@@ -193,8 +206,35 @@ where
                     );
                 }
             }
+            self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
         }
 
+        Ok(())
+    }
+
+    fn set_fragment_vnode_mapping(
+        &self,
+        fragment: &mut Fragment,
+        parallel_units: &[ParallelUnit],
+    ) -> Result<()> {
+        let vnode_mapping = self
+            .hash_mapping_manager
+            .build_fragment_hash_mapping(fragment.fragment_id, parallel_units);
+        let (original_indices, data) = compress_data(&vnode_mapping);
+        fragment.vnode_mapping = Some(ParallelUnitMapping {
+            original_indices,
+            data,
+            ..Default::default()
+        });
+        // Looking at the first actor is enough, since all actors in one fragment have identical
+        // state table id.
+        let actor = fragment.actors.first().unwrap();
+        let stream_node = actor.get_nodes()?;
+        set_table_vnode_mappings(
+            &self.hash_mapping_manager,
+            stream_node,
+            fragment.fragment_id,
+        )?;
         Ok(())
     }
 }
@@ -207,7 +247,9 @@ mod test {
     use itertools::Itertools;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-    use risingwave_pb::stream_plan::StreamActor;
+    use risingwave_pb::plan_common::TableRefId;
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
 
     use super::*;
     use crate::cluster::ClusterManager;
@@ -231,11 +273,11 @@ mod test {
             cluster_manager.activate_worker_node(host).await?;
         }
 
-        let scheduler = Scheduler::new(cluster_manager);
+        let scheduler = Scheduler::new(cluster_manager, env.hash_mapping_manager_ref());
         let mut locations = ScheduledLocations::new();
 
         let mut actor_id = 1u32;
-        let single_fragments = (1..6u32)
+        let mut single_fragments = (1..6u32)
             .map(|id| {
                 let fragment = Fragment {
                     fragment_id: id,
@@ -244,24 +286,39 @@ mod test {
                     actors: vec![StreamActor {
                         actor_id,
                         fragment_id: id,
-                        nodes: None,
+                        nodes: Some(StreamNode {
+                            node_body: Some(NodeBody::TopN(TopNNode {
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        }),
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                     }],
+                    vnode_mapping: None,
                 };
                 actor_id += 1;
                 fragment
             })
             .collect_vec();
 
-        let normal_fragments = (6..8u32)
+        let mut normal_fragments = (6..8u32)
             .map(|fragment_id| {
                 let actors = (actor_id..actor_id + node_count * 7)
                     .map(|id| StreamActor {
                         actor_id: id,
                         fragment_id,
-                        nodes: None,
+                        nodes: Some(StreamNode {
+                            node_body: Some(NodeBody::Materialize(MaterializeNode {
+                                table_ref_id: Some(TableRefId {
+                                    table_id: fragment_id as i32,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        }),
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
@@ -273,12 +330,13 @@ mod test {
                     fragment_type: 0,
                     distribution_type: FragmentDistributionType::Hash as i32,
                     actors,
+                    vnode_mapping: None,
                 }
             })
             .collect_vec();
 
         // Test round robin schedule for singleton fragments
-        for fragment in single_fragments {
+        for fragment in &mut single_fragments {
             scheduler.schedule(fragment, &mut locations).await.unwrap();
         }
         assert_eq!(locations.actor_locations.get(&1).unwrap().id, 0);
@@ -286,13 +344,23 @@ mod test {
             locations.actor_locations.get(&1),
             locations.actor_locations.get(&5)
         );
+        for fragment in single_fragments {
+            assert_ne!(
+                env.hash_mapping_manager()
+                    .get_fragment_hash_mapping(&fragment.fragment_id),
+                None
+            );
+            // We use fragment id as table id here.
+            assert_eq!(
+                env.hash_mapping_manager()
+                    .get_table_hash_mapping(&fragment.fragment_id),
+                None
+            );
+        }
 
         // Test normal schedule for other fragments
-        for fragment in &normal_fragments {
-            scheduler
-                .schedule(fragment.clone(), &mut locations)
-                .await
-                .unwrap();
+        for fragment in &mut normal_fragments {
+            scheduler.schedule(fragment, &mut locations).await.unwrap();
         }
         assert_eq!(
             locations
@@ -308,6 +376,19 @@ mod test {
                 .count(),
             (node_count * 7) as usize
         );
+        for fragment in normal_fragments {
+            assert_ne!(
+                env.hash_mapping_manager()
+                    .get_fragment_hash_mapping(&fragment.fragment_id),
+                None
+            );
+            // We use fragment id as table id here.
+            assert_ne!(
+                env.hash_mapping_manager()
+                    .get_table_hash_mapping(&fragment.fragment_id),
+                None
+            );
+        }
 
         Ok(())
     }

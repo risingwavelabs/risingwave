@@ -15,11 +15,13 @@
 mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
+mod expr_array;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
+mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;
@@ -27,7 +29,6 @@ mod expr_is_null;
 mod expr_literal;
 mod expr_ternary_bytes;
 pub mod expr_unary;
-mod pg_sleep;
 mod template;
 
 use std::convert::TryFrom;
@@ -44,7 +45,9 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::build_expr_from_prost::*;
+use crate::expr::expr_array::ArrayExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
+use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
 
 pub type ExpressionRef = Arc<dyn Expression>;
@@ -74,12 +77,12 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type()? {
-        Cast | Upper | Lower | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse
-        | IsNull | IsNotNull | Neg | Ascii => build_unary_expr_prost(prost),
+        Cast | Upper | Lower | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
+        | IsNotNull | Neg | Ascii | Abs => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position => build_binary_expr_prost(prost),
-        StreamNullByRowCount | And | Or => build_nullable_binary_expr_prost(prost),
+        And | Or => build_nullable_binary_expr_prost(prost),
         Coalesce => CoalesceExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
@@ -88,12 +91,14 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        ConcatWs => ConcatWsExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
         Translate => build_translate_expr(prost),
         In => build_in_expr(prost),
         Field => FieldExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        Array => ArrayExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

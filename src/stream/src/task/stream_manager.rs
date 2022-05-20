@@ -20,6 +20,7 @@ use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use madsim::task::JoinHandle;
 use parking_lot::Mutex;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -77,6 +78,9 @@ pub struct LocalStreamManagerCore {
     /// TODO: currently the client pool won't be cleared. Should remove compute clients when
     /// disconnected.
     compute_client_pool: ComputeClientPool,
+
+    /// Config of streaming engine
+    pub(crate) config: StreamingConfig,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -132,11 +136,13 @@ impl LocalStreamManager {
         addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
+        config: StreamingConfig,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
             state_store,
             streaming_metrics,
+            config,
         ))
     }
 
@@ -167,6 +173,7 @@ impl LocalStreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
+        need_sync: bool,
     ) -> Result<CollectResult> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
@@ -174,17 +181,19 @@ impl LocalStreamManager {
         let collect_result = rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
-        dispatch_state_store!(self.state_store(), store, {
-            match store.sync(Some(barrier.epoch.prev)).await {
-                Ok(_) => {}
-                // TODO: Handle sync failure by propagating it
-                // back to global barrier manager
-                Err(e) => panic!(
-                    "Failed to sync state store after receiving barrier {:?} due to {}",
-                    barrier, e
-                ),
-            }
-        });
+        if need_sync {
+            dispatch_state_store!(self.state_store(), store, {
+                match store.sync(Some(barrier.epoch.prev)).await {
+                    Ok(_) => {}
+                    // TODO: Handle sync failure by propagating it
+                    // back to global barrier manager
+                    Err(e) => panic!(
+                        "Failed to sync state store after receiving barrier {:?} due to {}",
+                        barrier, e
+                    ),
+                }
+            });
+        }
 
         Ok(collect_result)
     }
@@ -228,7 +237,7 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect)
+        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, false)
             .await?;
         self.core.lock().drop_all_actors();
 
@@ -315,15 +324,17 @@ impl LocalStreamManagerCore {
         addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
+        config: StreamingConfig,
     ) -> Self {
         let context = SharedContext::new(addr);
-        Self::with_store_and_context(state_store, context, streaming_metrics)
+        Self::with_store_and_context(state_store, context, streaming_metrics, config)
     }
 
     fn with_store_and_context(
         state_store: StateStoreImpl,
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
+        config: StreamingConfig,
     ) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
@@ -336,6 +347,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             compute_client_pool: ComputeClientPool::new(1024),
+            config,
         }
     }
 
@@ -349,6 +361,7 @@ impl LocalStreamManagerCore {
             StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
+            StreamingConfig::default(),
         )
     }
 
@@ -505,11 +518,7 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> BoxedExecutor {
-        if cfg!(debug_assertions) {
-            DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
-        } else {
-            executor
-        }
+        DebugExecutor::new(executor, input_pos, actor_id, streaming_metrics).boxed()
     }
 
     pub(crate) fn get_receive_message(

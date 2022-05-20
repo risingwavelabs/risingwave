@@ -15,7 +15,6 @@
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::vec;
 
 use itertools::{iproduct, Itertools};
@@ -85,12 +84,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
         DataTypeName::Timestampz => DataType::Timestampz,
         DataTypeName::Time => DataType::Time,
         DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct => DataType::Struct {
-            fields: Arc::new([]),
-        },
-        DataTypeName::List => DataType::List {
-            datatype: Box::new(DataType::Int32),
-        },
+        DataTypeName::Struct | DataTypeName::List => {
+            panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+        }
     })
 }
 
@@ -142,6 +138,16 @@ fn build_binary_atm_funcs(
                 map.insert(FuncSign::new(*e, vec![*lt, *rt]), *ret);
             }
         }
+    }
+}
+
+fn build_unary_atm_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    args: &[DataTypeName],
+) {
+    for (e, arg) in iproduct!(exprs, args) {
+        map.insert(FuncSign::new(*e, vec![*arg]), *arg);
     }
 }
 
@@ -215,10 +221,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         }
     }
 
-    // arithmetic expressions
-    for t in num_types {
-        map.insert(FuncSign::new(E::Neg, vec![t]), t);
-    }
+    let unary_atm_exprs = &[E::Abs, E::Neg];
+
+    build_unary_atm_funcs(&mut map, unary_atm_exprs, &num_types);
     build_binary_atm_funcs(
         &mut map,
         &[E::Add, E::Subtract, E::Multiply, E::Divide],

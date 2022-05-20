@@ -18,22 +18,22 @@ use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Mutex;
 
 use super::{ObjectError, ObjectResult};
-use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
+use crate::object::{strip_path_local, BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
 #[derive(Default)]
 pub struct InMemObjectStore {
+    is_local: bool,
     objects: Mutex<HashMap<String, Bytes>>,
-    compactor_shutdown_sender: parking_lot::Mutex<Option<UnboundedSender<()>>>,
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        let path = strip_path_local(path, self.is_local);
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"
         )));
@@ -46,6 +46,7 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        let path = strip_path_local(path, self.is_local);
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
         )));
@@ -56,20 +57,23 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+        let path = strip_path_local(path, self.is_local);
         let futures = block_locs
-            .into_iter()
-            .map(|block_loc| self.read(path, Some(block_loc)))
+            .iter()
+            .map(|block_loc| self.read(path, Some(*block_loc)))
             .collect_vec();
         try_join_all(futures).await
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        let path = strip_path_local(path, self.is_local);
         let total_size = self.get_object(path, |v| v.len()).await?;
         Ok(ObjectMetadata { total_size })
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
+        let path = strip_path_local(path, self.is_local);
         fail_point!("mem_delete_err", |_| Err(ObjectError::internal(
             "mem delete error"
         )));
@@ -79,10 +83,10 @@ impl ObjectStore for InMemObjectStore {
 }
 
 impl InMemObjectStore {
-    pub fn new() -> Self {
+    pub fn new(is_local: bool) -> Self {
         Self {
+            is_local,
             objects: Mutex::new(HashMap::new()),
-            compactor_shutdown_sender: parking_lot::Mutex::new(None),
         }
     }
 
@@ -96,10 +100,6 @@ impl InMemObjectStore {
             .get(path)
             .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
             .map(f)
-    }
-
-    pub fn set_compactor_shutdown_sender(&self, shutdown_sender: UnboundedSender<()>) {
-        *self.compactor_shutdown_sender.lock() = Some(shutdown_sender);
     }
 }
 
@@ -121,7 +121,7 @@ mod tests {
     async fn test_upload() {
         let block = Bytes::from("123456");
 
-        let s3 = InMemObjectStore::new();
+        let s3 = InMemObjectStore::new(false);
         s3.upload("/abc", block).await.unwrap();
 
         // No such object.
@@ -152,7 +152,7 @@ mod tests {
     async fn test_metadata() {
         let block = Bytes::from("123456");
 
-        let obj_store = InMemObjectStore::new();
+        let obj_store = InMemObjectStore::new(false);
         obj_store.upload("/abc", block).await.unwrap();
 
         let metadata = obj_store.metadata("/abc").await.unwrap();

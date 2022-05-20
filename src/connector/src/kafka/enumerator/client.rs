@@ -44,8 +44,14 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 }
 
-impl KafkaSplitEnumerator {
-    pub fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
+impl KafkaSplitEnumerator {}
+
+#[async_trait]
+impl SplitEnumerator for KafkaSplitEnumerator {
+    type Properties = KafkaProperties;
+    type Split = KafkaSplit;
+
+    async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
         let broker_address = properties.brokers;
         let topic = properties.topic;
 
@@ -82,11 +88,6 @@ impl KafkaSplitEnumerator {
             stop_offset: KafkaEnumeratorOffset::None,
         })
     }
-}
-
-#[async_trait]
-impl SplitEnumerator for KafkaSplitEnumerator {
-    type Split = KafkaSplit;
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition()?;
@@ -213,6 +214,10 @@ impl KafkaSplitEnumerator {
             [meta] => meta,
             _ => return Err(anyhow!("topic {} not found", self.topic)),
         };
+
+        if topic_meta.partitions().is_empty() {
+            return Err(anyhow!("topic {} not found", self.topic));
+        }
 
         Ok(topic_meta
             .partitions()

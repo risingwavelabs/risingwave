@@ -59,7 +59,6 @@ pub struct MetaNodeConfig {
 
     pub enable_dashboard_v2: bool,
     pub unsafe_disable_recovery: bool,
-    pub checkpoint_interval: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -244,7 +243,6 @@ pub struct RedPandaConfig {
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
-    Frontend(FrontendConfig),
     FrontendV2(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
@@ -263,7 +261,6 @@ impl ServiceConfig {
         match self {
             Self::ComputeNode(c) => &c.id,
             Self::MetaNode(c) => &c.id,
-            Self::Frontend(c) => &c.id,
             Self::FrontendV2(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,

@@ -4,7 +4,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3, $4] }
       LogicalProject { exprs: [$0, $1, $2, TumbleStart($2, '3 days 00:00:00':Interval), (TumbleStart($2, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
-        LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
+        LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1, TumbleStart($1, '3 days 00:00:00':Interval), (TumbleStart($1, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
@@ -41,49 +41,66 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3, $4] }
       LogicalHopWindow { time_col: $2 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-        LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
+        LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, _row_id#0(hidden), window_start, window_end], pk_columns: [_row_id#0, window_start] }
+    StreamMaterialize { columns: [id, created_at, _row_id(hidden), window_start, window_end], pk_columns: [_row_id, window_start] }
       StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-        StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
+        StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
     create table t1 (id int, created_at date);
     select id, created_at, window_start from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3] }
       LogicalHopWindow { time_col: $2 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-        LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
+        LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start, _row_id#0(hidden)], pk_columns: [_row_id#0, window_start] }
+    StreamMaterialize { columns: [id, created_at, window_start, _row_id(hidden)], pk_columns: [_row_id, window_start] }
       StreamProject { exprs: [$0, $1, $3, $2] }
         StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-          StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
+          StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
     create table t1 (id int, created_at date);
     select id, created_at, window_end from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $4] }
       LogicalHopWindow { time_col: $2 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-        LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
+        LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_end, _row_id#0(hidden), window_start(hidden)], pk_columns: [_row_id#0, window_start] }
+    StreamMaterialize { columns: [id, created_at, window_end, _row_id(hidden), window_start(hidden)], pk_columns: [_row_id, window_start] }
       StreamProject { exprs: [$0, $1, $4, $2, $3] }
         StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-          StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
+          StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
     create table t1 (id int, created_at date);
     select id, created_at from hop(t1, created_at, interval '1' day, interval '3' day);
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
       LogicalHopWindow { time_col: $2 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-        LogicalScan { table: t1, columns: [_row_id#0, id, created_at] }
+        LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1] }
         BatchHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
           BatchScan { table: t1, columns: [id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, _row_id#0(hidden), window_start(hidden)], pk_columns: [_row_id#0, window_start] }
+    StreamMaterialize { columns: [id, created_at, _row_id(hidden), window_start(hidden)], pk_columns: [_row_id, window_start] }
       StreamProject { exprs: [$0, $1, $2, $3] }
         StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
-          StreamTableScan { table: t1, columns: [id, created_at, _row_id#0], pk_indices: [2] }
+          StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
+- sql: |
+    create table t1 (id int, created_at date);
+    select t_hop.id, t_hop.created_at from hop(t1, created_at, interval '1' day, interval '3' day) as t_hop;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2] }
+      LogicalHopWindow { time_col: $2 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
+        LogicalScan { table: t1, columns: [_row_id, id, created_at] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1] }
+        BatchHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
+          BatchScan { table: t1, columns: [id, created_at] }
+  stream_plan: |
+    StreamMaterialize { columns: [id, created_at, _row_id(hidden), window_start(hidden)], pk_columns: [_row_id, window_start] }
+      StreamProject { exprs: [$0, $1, $2, $3] }
+        StreamHopWindow { time_col: $1 slide: 1 day 00:00:00 size: 3 days 00:00:00 }
+          StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }

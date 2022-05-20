@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::hash::VIRTUAL_NODE_COUNT;
-use risingwave_pb::stream_plan::ParallelUnitMapping;
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
@@ -100,7 +100,7 @@ fn generate_hash_filter(mapping: &ParallelUnitMapping, parallel_unit_id: u32) ->
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::stream_plan::ParallelUnitMapping;
+    use risingwave_pb::common::ParallelUnitMapping;
 
     use super::*;
 
@@ -109,6 +109,7 @@ mod tests {
         let mapping = ParallelUnitMapping {
             original_indices: vec![681, 1363, 2045, 2046, 2047],
             data: vec![1, 2, 3, 1, 2],
+            ..Default::default()
         };
         let hash_filter = generate_hash_filter(&mapping, 1);
         assert!(hash_filter.is_set(0).unwrap());

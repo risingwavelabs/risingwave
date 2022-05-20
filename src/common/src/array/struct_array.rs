@@ -239,7 +239,7 @@ impl StructArray {
         &self.children_type
     }
 
-    pub fn get_children_by_index(&self, index: usize) -> ArrayRef {
+    pub fn field_at(&self, index: usize) -> ArrayRef {
         self.children[index].clone()
     }
 
@@ -279,7 +279,15 @@ impl fmt::Display for StructValue {
         write!(
             f,
             "{{{}}}",
-            self.fields.iter().map(|f| format!("{:?}", f)).join(", ")
+            self.fields
+                .iter()
+                .map(|f| {
+                    match f {
+                        Some(f) => format!("{}", f),
+                        None => "None".to_string(),
+                    }
+                })
+                .join(", ")
         )
     }
 }

@@ -1,29 +1,72 @@
 #![allow(clippy::all)]
 
-macro_rules! define_module {
-    ($name:ident) => {
-        define_module!($name, stringify!($name));
-    };
-    ($name:ident, $str:expr) => {
 #[rustfmt::skip]
-        pub mod $name {
-            tonic::include_proto!($str);
-            include!(concat!(env!("OUT_DIR"), concat!("/", $str, ".serde.rs")));
-        }
-    };
-}
-define_module!(catalog);
-define_module!(common);
-define_module!(data);
-define_module!(ddl_service);
-define_module!(expr);
-define_module!(meta);
-define_module!(plan_common);
-define_module!(batch_plan);
-define_module!(task_service);
-define_module!(stream_plan);
-define_module!(stream_service);
-define_module!(hummock);
+pub mod catalog;
+#[rustfmt::skip]
+pub mod common;
+#[rustfmt::skip]
+pub mod data;
+#[rustfmt::skip]
+pub mod ddl_service;
+#[rustfmt::skip]
+pub mod expr;
+#[rustfmt::skip]
+pub mod meta;
+#[rustfmt::skip]
+pub mod plan_common;
+#[rustfmt::skip]
+pub mod batch_plan;
+#[rustfmt::skip]
+pub mod task_service;
+#[rustfmt::skip]
+pub mod stream_plan;
+#[rustfmt::skip]
+pub mod stream_service;
+#[rustfmt::skip]
+pub mod hummock;
+#[rustfmt::skip]
+pub mod user;
+
+#[rustfmt::skip]
+#[path = "catalog.serde.rs"]
+pub mod catalog_serde;
+#[rustfmt::skip]
+#[path = "common.serde.rs"]
+pub mod common_serde;
+#[rustfmt::skip]
+#[path = "data.serde.rs"]
+pub mod data_serde;
+#[rustfmt::skip]
+#[path = "ddl_service.serde.rs"]
+pub mod ddl_service_serde;
+#[rustfmt::skip]
+#[path = "expr.serde.rs"]
+pub mod expr_serde;
+#[rustfmt::skip]
+#[path = "meta.serde.rs"]
+pub mod meta_serde;
+#[rustfmt::skip]
+#[path = "plan_common.serde.rs"]
+pub mod plan_common_serde;
+#[rustfmt::skip]
+#[path = "batch_plan.serde.rs"]
+pub mod batch_plan_serde;
+#[rustfmt::skip]
+#[path = "task_service.serde.rs"]
+pub mod task_service_serde;
+#[rustfmt::skip]
+#[path = "stream_plan.serde.rs"]
+pub mod stream_plan_serde;
+#[rustfmt::skip]
+#[path = "stream_service.serde.rs"]
+pub mod stream_service_serde;
+#[rustfmt::skip]
+#[path = "hummock.serde.rs"]
+pub mod hummock_serde;
+#[rustfmt::skip]
+#[path = "user.serde.rs"]
+pub mod user_serde;
+
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);

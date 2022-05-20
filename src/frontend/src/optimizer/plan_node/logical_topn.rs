@@ -124,7 +124,7 @@ impl ColPrunable for LogicalTopN {
         };
 
         let input_required_cols = {
-            let mut tmp = order_required_cols.clone();
+            let mut tmp = order_required_cols;
             tmp.union_with(&input_required_bitset);
             tmp.ones().collect_vec()
         };
@@ -146,7 +146,7 @@ impl ColPrunable for LogicalTopN {
         let new_input = self.input.prune_col(&input_required_cols);
         let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
 
-        if order_required_cols.is_subset(&input_required_bitset) {
+        if input_required_cols == required_cols {
             top_n
         } else {
             let src_size = top_n.schema().len();
@@ -154,6 +154,7 @@ impl ColPrunable for LogicalTopN {
                 top_n,
                 ColIndexMapping::with_remaining_columns(required_cols, src_size),
             )
+            .into()
         }
     }
 }

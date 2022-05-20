@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package user;
+
+import "common.proto";
+
+option optimize_for = SPEED;
+
+/// AuthInfo is the information required to login to a server.
+message AuthInfo {
+  enum EncryptionType {
+    UNKNOWN = 0;
+    PLAINTEXT = 1;
+    SHA256 = 2;
+    MD5 = 3;
+  }
+  EncryptionType encryption_type = 1;
+  bytes encrypted_value = 2;
+}
+
+/// User defines a user in the system.
+message UserInfo {
+  uint32 id = 1;
+  string name = 2;
+  bool is_supper = 3;
+  bool can_create_db = 4;
+  bool can_login = 5;
+  AuthInfo auth_info = 6;
+
+  /// Granted privileges will be only updated through the command of GRANT/REVOKE.
+  repeated GrantPrivilege privileges = 7;
+}
+
+/// GrantPrivilege defines a privilege granted to a user.
+message GrantPrivilege {
+  message GrantDatabase {
+    uint32 database_id = 1;
+  }
+
+  message GrantSchema {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+  }
+
+  message GrantTable {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+    uint32 table_id = 3;
+  }
+
+  /// To support grant privilege on ALL TABLES IN SCHEMA schema_name.
+  message GrantAllTables {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+  }
+
+  enum Privilege {
+    UNKNOWN = 0;
+    SELECT = 1;
+    INSERT = 2;
+    UPDATE = 3;
+    DELETE = 4;
+    CREATE = 5;
+    CONNECT = 6;
+    ALL = 20;
+  }
+  oneof target {
+    GrantDatabase grant_database = 1;
+    GrantSchema grant_schema = 2;
+    GrantTable grant_table = 3;
+    GrantAllTables grant_all_tables = 4;
+  }
+  repeated Privilege privileges = 5;
+  bool with_grant_option = 6;
+}
+
+message CreateUserRequest {
+  UserInfo user = 1;
+}
+
+message CreateUserResponse {
+  common.Status status = 1;
+  uint32 user_id = 2;
+  uint64 version = 3;
+}
+
+message DropUserRequest {
+  uint32 user_id = 1;
+}
+
+message DropUserResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message GrantPrivilegeRequest {
+  uint32 user_id = 1;
+  GrantPrivilege privilege = 2;
+}
+
+message GrantPrivilegeResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message RevokePrivilegeRequest {
+  uint32 user_id = 1;
+  GrantPrivilege privilege = 2;
+}
+
+message RevokePrivilegeResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+service UserService {
+  // TODO: add UpdateUser method to support `ALTER USER`, need more investigation. The FieldMask may be helpful:
+  // https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/FieldMask.html.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc DropUser(DropUserRequest) returns (DropUserResponse);
+
+  /// GrantPrivilege grants a privilege to a user.
+  rpc GrantPrivilege(GrantPrivilegeRequest) returns (GrantPrivilegeResponse);
+  /// RevokePrivilege revokes a privilege from a user.
+  rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
+}

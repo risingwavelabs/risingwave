@@ -19,16 +19,19 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
+use madsim::time::Instant;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::Notify;
 
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
@@ -59,8 +62,13 @@ pub struct SourceExecutor<S: StateStore> {
     source_identify: String,
 
     split_state_store: SourceStateHandler<S>,
-    // store latest split to offset mapping
+
+    // store latest split to offset mapping.
+    // None if there is no update on source state since the previsouly seen barrier.
     state_cache: Option<Vec<ConnectorState>>,
+
+    /// Expected barrier latency
+    expected_barrier_latency_ms: u64,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -78,6 +86,7 @@ impl<S: StateStore> SourceExecutor<S> {
         _op_info: String,
         streaming_metrics: Arc<StreamingMetrics>,
         stream_source_splits: Vec<SplitImpl>,
+        expected_barrier_latency_ms: u64,
     ) -> Result<Self> {
         Ok(Self {
             source_id,
@@ -92,17 +101,17 @@ impl<S: StateStore> SourceExecutor<S> {
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             split_state_store: SourceStateHandler::new(keyspace),
             state_cache: None,
+            expected_barrier_latency_ms,
         })
     }
 
     /// Generate a row ID column.
     fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len).unwrap();
+        let row_ids = self.source_desc.next_row_id_batch(len);
 
-        for _ in 0..len {
-            builder
-                .append(Some(self.source_desc.next_row_id()))
-                .unwrap();
+        for row_id in row_ids {
+            builder.append(Some(row_id)).unwrap();
         }
 
         Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
@@ -126,37 +135,58 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 struct SourceReader {
-    /// The reader for stream source
+    /// The reader for stream source.
     stream_reader: Box<dyn StreamSourceReader>,
-    /// The reader for barrier
+    /// The reader for barrier.
     barrier_receiver: UnboundedReceiver<Barrier>,
+    /// Expected barrier latency in ms. If there are no barrier within the expected barrier
+    /// latency, source will stall.
+    expected_barrier_latency_ms: u64,
 }
 
 impl SourceReader {
     #[try_stream(ok = StreamChunkWithState, error = RwError)]
-    async fn stream_reader(mut stream_reader: Box<dyn StreamSourceReader>) {
-        loop {
-            match stream_reader.next().await {
-                Ok(chunk) => yield chunk,
-                Err(e) => {
-                    // TODO: report this error to meta service to mark the actors failed.
-                    error!("hang up stream reader due to polling error: {}", e);
+    async fn stream_reader(
+        mut stream_reader: Box<dyn StreamSourceReader>,
+        notifier: Arc<Notify>,
+        expected_barrier_latency_ms: u64,
+    ) {
+        'outer: loop {
+            let now = Instant::now();
 
-                    // Drop the reader, then the error might be caught by the writer side.
-                    drop(stream_reader);
-                    // Then hang up this stream by breaking the loop.
-                    break;
+            // We allow data to flow for `expected_barrier_latency_ms` milliseconds.
+            while now.elapsed().as_millis() < expected_barrier_latency_ms as u128 {
+                match stream_reader.next().await {
+                    Ok(chunk) => yield chunk,
+                    Err(e) => {
+                        // TODO: report this error to meta service to mark the actors failed.
+                        error!("hang up stream reader due to polling error: {}", e);
+
+                        // Drop the reader, then the error might be caught by the writer side.
+                        drop(stream_reader);
+                        // Then hang up this stream by breaking the loop.
+                        break 'outer;
+                    }
                 }
             }
+
+            // Here we consider two cases:
+            //
+            // 1. Barrier arrived before waiting for notified. In this case, this await will
+            // complete instantly, and we will continue to produce new data.
+            // 2. Barrier arrived after waiting for notified. Then source will be stalled.
+
+            notifier.notified().await;
         }
 
         futures::future::pending().await
     }
 
     #[try_stream(ok = Message, error = RwError)]
-    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
+    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>, notifier: Arc<Notify>) {
         while let Some(barrier) = rx.recv().await {
             yield Message::Barrier(barrier);
+            notifier.notify_one();
         }
         return Err(RwError::from(InternalError(
             "barrier reader closed unexpectedly".to_string(),
@@ -166,8 +196,14 @@ impl SourceReader {
     fn into_stream(
         self,
     ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
-        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
-        let stream_reader = Self::stream_reader(self.stream_reader);
+        let notifier = Arc::new(Notify::new());
+
+        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver, notifier.clone());
+        let stream_reader = Self::stream_reader(
+            self.stream_reader,
+            notifier,
+            self.expected_barrier_latency_ms,
+        );
         select_with_strategy(
             barrier_receiver.map(Either::Left),
             stream_reader.map(Either::Right),
@@ -201,16 +237,20 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
-            SourceImpl::Connector(c) => c
-                .stream_reader(recover_state, self.column_ids.clone())
-                .await
-                .map(SourceStreamReaderImpl::Connector),
+            SourceImpl::Connector(c) => {
+                let splits = try_match_expand!(recover_state, ConnectorStateV2::Splits)
+                    .expect("Parallel Connector Source only support Vec<Split> as state");
+                c.stream_reader(splits, self.column_ids.clone())
+                    .await
+                    .map(SourceStreamReaderImpl::Connector)
+            }
         }
         .map_err(StreamExecutorError::source_error)?;
 
         let reader = SourceReader {
             stream_reader: Box::new(stream_reader),
             barrier_receiver,
+            expected_barrier_latency_ms: self.expected_barrier_latency_ms,
         };
         yield Message::Barrier(barrier);
 
@@ -231,6 +271,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                             InternalError(e.to_string()),
                                         ))
                                     })?;
+                                self.state_cache = None;
                             }
                             yield Message::Barrier(barrier)
                         }
@@ -251,51 +292,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         chunk = self.refill_row_id_column(chunk);
                     }
 
-                    let (data, ops) = chunk.into_parts();
-                    let mut chunks = DataChunk::rechunk(&[data], PROCESSING_WINDOW_SIZE)
-                        .unwrap()
-                        .into_iter();
-                    let mut ops_batch = ops.chunks(PROCESSING_WINDOW_SIZE);
-                    let mut next_chunk = None;
-                    let mut next_ops: Option<Vec<Op>> = None;
-                    loop {
-                        let (mut chunk, mut ops) = {
-                            if let Some(chunk) = std::mem::take(&mut next_chunk) {
-                                let ops = std::mem::take(&mut next_ops).unwrap();
-                                (chunk, ops.to_vec())
-                            } else if let Some(chunk) = chunks.next() {
-                                (chunk, ops_batch.next().unwrap().to_vec())
-                            } else {
-                                break;
-                            }
-                        };
-
-                        // There is paired `UpdateDelete` and `UpdateInsert` split by border, we
-                        // should re-chunk current stream chunk with next stream chunk
-                        if ops[ops.len() - 1] == Op::UpdateDelete {
-                            let pair_chunk = chunks.next().unwrap();
-                            let pair_ops = ops_batch.next().unwrap();
-                            assert!(pair_ops[0] == Op::UpdateInsert);
-
-                            let head_chunk_size = chunk.capacity() + 1;
-                            let mut new_chunks =
-                                DataChunk::rechunk_head(vec![chunk, pair_chunk], head_chunk_size)
-                                    .map_err(StreamExecutorError::eval_error)?;
-                            assert_eq!(new_chunks.len(), 2);
-
-                            chunk = std::mem::take(&mut new_chunks[0]);
-                            ops.push(pair_ops[0]);
-                            next_chunk = Some(std::mem::take(&mut new_chunks[1]));
-                            next_ops = Some(pair_ops[1..].to_vec());
-                        }
-
-                        let stream_chunk = StreamChunk::from_parts(ops, chunk);
-                        self.metrics
-                            .source_output_row_count
-                            .with_label_values(&[self.source_identify.as_str()])
-                            .inc_by(stream_chunk.cardinality() as u64);
-                        yield Message::Chunk(stream_chunk);
-                    }
+                    self.metrics
+                        .source_output_row_count
+                        .with_label_values(&[self.source_identify.as_str()])
+                        .inc_by(chunk.cardinality() as u64);
+                    yield Message::Chunk(chunk);
                 }
             }
         }
@@ -422,6 +423,7 @@ mod tests {
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
             vec![],
+            u64::MAX,
         )
         .unwrap();
         let mut executor = Box::new(executor).execute();
@@ -544,6 +546,7 @@ mod tests {
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::unused()),
             vec![],
+            u64::MAX,
         )
         .unwrap();
         let mut executor = Box::new(executor).execute();
