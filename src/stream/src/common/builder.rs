@@ -67,14 +67,15 @@ impl StreamChunkBuilder {
     ) -> Result<Self> {
         // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
         // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
-        // until `UpdateInsert` comes.
-        let capacity = capacity - 1;
-        assert!(capacity > 0);
+        // until `UpdateInsert` comes. This means that the effective output message size will indeed
+        // be at most the original `capacity`
+        let reduced_capacity = capacity - 1;
+        assert!(reduced_capacity > 0);
 
-        let ops = Vec::with_capacity(capacity);
+        let ops = Vec::with_capacity(reduced_capacity);
         let column_builders = data_types
             .iter()
-            .map(|datatype| datatype.create_array_builder(capacity))
+            .map(|datatype| datatype.create_array_builder(reduced_capacity))
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             ops,
@@ -82,7 +83,7 @@ impl StreamChunkBuilder {
             data_types: data_types.to_owned(),
             update_start_pos,
             matched_start_pos,
-            capacity,
+            capacity: reduced_capacity,
             size: 0,
         })
     }
