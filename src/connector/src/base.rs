@@ -21,17 +21,21 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::dummy_connector::DummySplitReader;
+use crate::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::source::KafkaSplitReader;
-use crate::kafka::KafkaSplit;
+use crate::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::kinesis::source::reader::KinesisMultiSplitReader;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::nexmark::source::reader::NexmarkSplitReader;
-use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
+use crate::nexmark::{NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR};
 use crate::pulsar::source::reader::PulsarSplitReader;
-use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
-use crate::{ConnectorProperties, impl_split, impl_split_enumerator, impl_split_reader};
+use crate::pulsar::{
+    PulsarEnumeratorOffset, PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
+};
+use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
@@ -61,12 +65,6 @@ pub trait SplitReader: Sized {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
-const PULSAR_SPLIT_TYPE: &str = "pulsar";
-const S3_SPLIT_TYPE: &str = "s3";
-const KINESIS_SPLIT_TYPE: &str = "kinesis";
-const KAFKA_SPLIT_TYPE: &str = "kafka";
-const NEXMARK_SPLIT_TYPE: &str = "nexmark";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
@@ -90,6 +88,25 @@ pub enum SplitEnumeratorImpl {
     Nexmark(NexmarkSplitEnumerator),
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub enum ConnectorProperties {
+    Kafka(KafkaProperties),
+    Pulsar(PulsarProperties),
+    Kinesis(KinesisProperties),
+    Nexmark(Box<NexmarkProperties>),
+    S3(S3Properties),
+    Dummy(()),
+}
+
+impl_connector_properties! {
+    [ ] ,
+    { Kafka, KAFKA_CONNECTOR },
+    { Pulsar, PULSAR_CONNECTOR },
+    { Kinesis, KINESIS_CONNECTOR },
+    { Nexmark, NEXMARK_CONNECTOR },
+    { S3, S3_CONNECTOR }
+}
+
 impl_split_enumerator! {
     [ ] ,
     { Kafka, KafkaSplitEnumerator },
@@ -100,10 +117,10 @@ impl_split_enumerator! {
 
 impl_split! {
     [ ] ,
-    { Kafka, KAFKA_SPLIT_TYPE, KafkaSplit },
-    { Pulsar, PULSAR_SPLIT_TYPE, PulsarSplit },
-    { Kinesis, KINESIS_SPLIT_TYPE, KinesisSplit },
-    { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit }
+    { Kafka, KAFKA_CONNECTOR, KafkaSplit },
+    { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
+    { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
+    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit }
 }
 
 impl_split_reader! {
@@ -138,8 +155,6 @@ pub trait SplitMetaData: Sized {
     fn encode_to_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
-
-
 
 /// The persistent state of the connector.
 #[derive(Debug, Clone, Serialize, Deserialize)]

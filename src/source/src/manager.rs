@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
@@ -151,8 +151,11 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = info.row_id_index as usize;
 
+        let config = ConnectorProperties::extract(info.properties)
+            .map_err(|e| RwError::from(ConnectorError(e.to_string())))?;
+
         let source = SourceImpl::Connector(ConnectorSource {
-            config: ConnectorProperties::new(info.properties)?,
+            config,
             columns: columns.clone(),
             parser,
         });

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #[macro_export]
 macro_rules! impl_split_enumerator {
     ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
@@ -36,7 +35,7 @@ macro_rules! impl_split_enumerator {
 
 #[macro_export]
 macro_rules! impl_split {
-    ([], $({ $variant_name:ident, $split_name:ident, $split:ty} ),*) => {
+    ([], $({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
         impl SplitImpl {
             pub fn id(&self) -> String {
                 match self {
@@ -52,14 +51,14 @@ macro_rules! impl_split {
 
             pub fn get_type(&self) -> String {
                 match self {
-                    $( Self::$variant_name(_) => $split_name, )*
+                    $( Self::$variant_name(_) => $connector_name, )*
                 }
                     .to_string()
             }
 
             pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
                 match split_type.to_lowercase().as_str() {
-                    $( $split_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*
+                    $( $connector_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*
                     other => Err(anyhow!("split type {} not supported", other)),
                 }
             }
@@ -94,6 +93,25 @@ macro_rules! impl_split_reader {
                 };
 
                 Ok(connector)
+            }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! impl_connector_properties {
+    ([], $({ $variant_name:ident, $connector_name:ident } ),*) => {
+        impl ConnectorProperties {
+            pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
+                const UPSTREAM_SOURCE_KEY: &str = "connector";
+                let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+                let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
+                match connector.to_lowercase().as_str() {
+                    $( $connector_name => { serde_json::from_value(json_value).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name) } ,)*
+                    _ => {
+                        Err(anyhow!("connector '{}' is not supported", connector,))
+                    }
+                }
             }
         }
     }
