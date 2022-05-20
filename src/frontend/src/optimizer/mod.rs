@@ -148,12 +148,13 @@ impl PlanRoot {
         plan = {
             let rules = vec![
                 ReorderMultiJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterJoinRule::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
+
+        // Predicate Push-down
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Prune Columns
         //
