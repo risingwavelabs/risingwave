@@ -26,7 +26,7 @@ use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
 };
 use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
-use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
+use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::BoxedBackwardHummockIterator;
 use crate::hummock::utils::prune_ssts;

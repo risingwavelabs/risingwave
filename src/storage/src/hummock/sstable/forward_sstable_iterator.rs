@@ -22,10 +22,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalMetrics;
 
-pub trait SSTableIteratorType {
-    type SSTableIterator: HummockIterator;
-
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
+pub trait SSTableIteratorType: HummockIterator {
+    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self;
 }
 
 /// Iterates on a table.
@@ -44,16 +42,6 @@ pub struct SSTableIterator {
 }
 
 impl SSTableIterator {
-    pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
-        Self {
-            block_iter: None,
-            cur_idx: 0,
-            sst: table,
-            sstable_store,
-            metrics: StoreLocalMetrics::default(),
-        }
-    }
-
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         tracing::trace!(
@@ -94,6 +82,7 @@ impl HummockIterator for SSTableIterator {
     type Direction = Forward;
 
     async fn next(&mut self) -> HummockResult<()> {
+        self.metrics.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
 
@@ -146,13 +135,21 @@ impl HummockIterator for SSTableIterator {
 
         Ok(())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalMetrics) {
+        stats.add(&self.metrics);
+    }
 }
 
 impl SSTableIteratorType for SSTableIterator {
-    type SSTableIterator = SSTableIterator;
-
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
-        SSTableIterator::new(table, sstable_store)
+    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
+        Self {
+            block_iter: None,
+            cur_idx: 0,
+            sst: table,
+            sstable_store,
+            metrics: StoreLocalMetrics::default(),
+        }
     }
 }
 

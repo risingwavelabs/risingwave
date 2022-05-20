@@ -40,7 +40,7 @@ use super::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, ForwardHummockIterator, MergeIterator,
 };
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use super::{HummockResult, SSTableBuilder, SSTableIterator, Sstable};
+use super::{HummockResult, SSTableBuilder, SSTableIterator, SSTableIteratorType, Sstable};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;

@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
-use crate::monitor::{StateStoreMetrics, StoreLocalMetrics};
+use crate::monitor::StoreLocalMetrics;
 use crate::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
 const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;

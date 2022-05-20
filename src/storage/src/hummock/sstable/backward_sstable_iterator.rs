@@ -41,16 +41,6 @@ pub struct BackwardSSTableIterator {
 }
 
 impl BackwardSSTableIterator {
-    pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
-        Self {
-            block_iter: None,
-            cur_idx: table.value().meta.block_metas.len() - 1,
-            sst: table,
-            sstable_store,
-            metrics: StoreLocalMetrics::default(),
-        }
-    }
-
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.sst.value().block_count() as isize || idx < 0 {
@@ -85,6 +75,7 @@ impl HummockIterator for BackwardSSTableIterator {
     type Direction = Backward;
 
     async fn next(&mut self) -> HummockResult<()> {
+        self.metrics.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.prev();
 
@@ -141,13 +132,21 @@ impl HummockIterator for BackwardSSTableIterator {
 
         Ok(())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalMetrics) {
+        stats.add(&self.metrics)
+    }
 }
 
 impl SSTableIteratorType for BackwardSSTableIterator {
-    type SSTableIterator = BackwardSSTableIterator;
-
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
-        BackwardSSTableIterator::new(table, sstable_store)
+    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
+        Self {
+            block_iter: None,
+            cur_idx: table.value().meta.block_metas.len() - 1,
+            sst: table,
+            sstable_store,
+            metrics: StoreLocalMetrics::default(),
+        }
     }
 }
 
