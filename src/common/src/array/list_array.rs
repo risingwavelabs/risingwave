@@ -389,11 +389,7 @@ impl Debug for ListRef<'_> {
 impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let values = self
-            .values_ref()
-            .iter()
-            .map(|v| display_datum_ref(v))
-            .join(",");
+        let values = self.values_ref().iter().map(display_datum_ref).join(",");
         write!(f, "{{{}}}", values)
     }
 }

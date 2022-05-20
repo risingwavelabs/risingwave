@@ -54,7 +54,7 @@ impl Expression for ArrayExpression {
         let mut builder = ListArrayBuilder::with_meta(
             input.capacity(),
             ArrayMeta::List {
-                datatype: self.element_type.clone().into(),
+                datatype: self.element_type.clone(),
             },
         )?;
         chunk

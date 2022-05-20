@@ -605,7 +605,7 @@ impl Display for ScalarRefImpl<'_> {
     }
 }
 
-pub fn display_datum_ref<'a>(d: &DatumRef<'a>) -> String {
+pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
     match d {
         Some(s) => format!("{}", s),
         None => "NULL".to_string(),
