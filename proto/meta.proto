@@ -5,97 +5,9 @@ package meta;
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
-import "plan_common.proto";
 import "stream_plan.proto";
 
 option optimize_for = SPEED;
-
-// will be deprecated and replaced by catalog.Table and catalog.Source
-message Table {
-  plan_common.TableRefId table_ref_id = 1;
-  string table_name = 2;
-  repeated plan_common.ColumnDesc column_descs = 3;
-  uint64 version = 4;
-  oneof info {
-    plan_common.StreamSourceInfo stream_source = 5;
-    plan_common.TableSourceInfo table_source = 6;
-    plan_common.MaterializedViewInfo materialized_view = 7;
-  }
-}
-
-// will be deprecated and replaced by catalog.Database
-message Database {
-  plan_common.DatabaseRefId database_ref_id = 1;
-  string database_name = 2;
-  uint64 version = 3;
-}
-
-// will be deprecated and replaced by catalog.Schema
-message Schema {
-  plan_common.SchemaRefId schema_ref_id = 1;
-  string schema_name = 2;
-  uint64 version = 3;
-}
-
-// Below for catalog service.
-// will be deprecated and replaced by DdlService
-message CreateRequest {
-  uint32 node_id = 1;
-  oneof catalog_body {
-    Database database = 2;
-    Schema schema = 3;
-    Table table = 4;
-  }
-}
-
-// will be deprecated and replaced by DdlService
-message CreateResponse {
-  common.Status status = 1;
-  int32 id = 2;
-  uint64 version = 3;
-}
-
-// will be deprecated and replaced by DdlService
-message DropRequest {
-  uint32 node_id = 1;
-  oneof catalog_id {
-    plan_common.DatabaseRefId database_id = 2;
-    plan_common.SchemaRefId schema_id = 3;
-    plan_common.TableRefId table_id = 4;
-  }
-}
-
-// will be deprecated and replaced by DdlService
-message DropResponse {
-  common.Status status = 1;
-  uint64 version = 2;
-}
-
-// will be deprecated and replaced by NotificationService
-message GetCatalogRequest {}
-
-// will be deprecated and replaced by SubscribeFrontendSnapshot
-message Catalog {
-  uint64 version = 1;
-  repeated Database databases = 2;
-  repeated Schema schemas = 3;
-  repeated Table tables = 4;
-}
-
-// will be deprecated and replaced by DdlService
-message GetCatalogResponse {
-  common.Status status = 1;
-  Catalog catalog = 2;
-}
-
-// will be deprecated and replaced by DdlService
-service CatalogService {
-  rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
-  rpc Create(CreateRequest) returns (CreateResponse);
-  rpc Drop(DropRequest) returns (DropResponse);
-}
-
-// Below for heartbeat.
 
 message HeartbeatRequest {
   uint32 node_id = 1;
@@ -109,8 +21,6 @@ message HeartbeatResponse {
 service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
-
-// Below for stream manager.
 
 // Fragments of a Materialized View
 message TableFragments {
@@ -137,6 +47,8 @@ message TableFragments {
     stream_plan.FragmentType fragment_type = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
+    // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
+    common.ParallelUnitMapping vnode_mapping = 5;
   }
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
@@ -147,30 +59,6 @@ message TableFragments {
 message ActorLocation {
   common.WorkerNode node = 1;
   repeated stream_plan.StreamActor actors = 2;
-}
-
-// will be deprecated and replaced by DdlService
-message CreateMaterializedViewRequest {
-  uint32 node_id = 1;
-  // TODO: remove this, do catalog init in Meta and return in response.
-  plan_common.TableRefId table_ref_id = 2;
-  stream_plan.StreamFragmentGraph fragment_graph = 3;
-}
-
-// will be deprecated and replaced by DdlService
-message CreateMaterializedViewResponse {
-  common.Status status = 1;
-}
-
-// will be deprecated and replaced by DdlService
-message DropMaterializedViewRequest {
-  uint32 node_id = 1;
-  plan_common.TableRefId table_ref_id = 2;
-}
-
-// will be deprecated and replaced by DdlService
-message DropMaterializedViewResponse {
-  common.Status status = 1;
 }
 
 message FlushRequest {}

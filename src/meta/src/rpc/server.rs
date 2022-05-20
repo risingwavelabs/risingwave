@@ -112,7 +112,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let listener = TcpListener::bind(addr).await.unwrap();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
 
-    let fragment_manager = Arc::new(FragmentManager::new(meta_store.clone()).await.unwrap());
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 

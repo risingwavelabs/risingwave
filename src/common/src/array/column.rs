@@ -62,6 +62,12 @@ impl<A: Array> From<A> for Column {
     }
 }
 
+impl From<ArrayImpl> for Column {
+    fn from(a: ArrayImpl) -> Self {
+        Self::new(Arc::new(a))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

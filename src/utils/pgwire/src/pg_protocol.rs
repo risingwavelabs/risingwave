@@ -75,13 +75,31 @@ where
     }
 
     async fn do_process(&mut self) -> Result<bool> {
-        let msg = self.read_message().await?;
+        let msg = match self.read_message().await {
+            Ok(msg) => msg,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    return Err(e);
+                }
+                tracing::error!("unable to read message: {}", e);
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(e)))?;
+                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
+                return Ok(false);
+            }
+        };
         match msg {
             FeMessage::Ssl => {
-                self.write_message_no_flush(&BeMessage::EncryptionResponse)?;
+                self.write_message_no_flush(&BeMessage::EncryptionResponse)
+                    .map_err(|e| {
+                        tracing::error!("failed to handle ssl request: {}", e);
+                        e
+                    })?;
             }
             FeMessage::Startup(msg) => {
-                self.process_startup_msg(msg)?;
+                self.process_startup_msg(msg).map_err(|e| {
+                    tracing::error!("failed to set up pg session: {}", e);
+                    e
+                })?;
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
@@ -94,10 +112,6 @@ where
             }
             FeMessage::Terminate => {
                 self.process_terminate();
-            }
-            FeMessage::ReadError(err) => {
-                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
-                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
             }
         }
         self.flush().await?;
@@ -116,10 +130,13 @@ where
         self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::Encoding("utf8"),
+            BeParameterStatusMessage::ClientEncoding("utf8"),
         ))?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString("on"),
+        ))?;
+        self.write_message_no_flush(&BeMessage::ParameterStatus(
+            BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
@@ -130,32 +147,38 @@ where
     }
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
-        tracing::trace!("receive query: {}", query.get_sql());
-        let session = self.session.clone().unwrap();
-
-        // execute query
-        let process_res = session.run_statement(query.get_sql()).await;
-        match process_res {
-            Ok(res) => {
-                if res.is_empty() {
-                    self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
-                } else if res.is_query() {
-                    self.process_query_with_results(res).await?;
-                } else {
-                    self.write_message_no_flush(&BeMessage::CommandComplete(
-                        BeCommandCompleteMessage {
-                            stmt_type: res.get_stmt_type(),
-                            notice: res.get_notice(),
-                            rows_cnt: res.get_effected_rows_cnt(),
-                        },
-                    ))?;
+        match query.get_sql() {
+            Ok(sql) => {
+                tracing::trace!("receive query: {}", sql);
+                let session = self.session.clone().unwrap();
+                // execute query
+                let process_res = session.run_statement(sql).await;
+                match process_res {
+                    Ok(res) => {
+                        if res.is_empty() {
+                            self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
+                        } else if res.is_query() {
+                            self.process_query_with_results(res).await?;
+                        } else {
+                            self.write_message_no_flush(&BeMessage::CommandComplete(
+                                BeCommandCompleteMessage {
+                                    stmt_type: res.get_stmt_type(),
+                                    notice: res.get_notice(),
+                                    rows_cnt: res.get_effected_rows_cnt(),
+                                },
+                            ))?;
+                        }
+                    }
+                    Err(e) => {
+                        self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+                    }
                 }
             }
-
-            Err(e) => {
-                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+            Err(err) => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(err)))?;
             }
-        }
+        };
+
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }

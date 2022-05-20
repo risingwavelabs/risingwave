@@ -19,8 +19,8 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::*;
+use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::default_config_for_test;
-use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
 use crate::StateStore;
@@ -57,15 +57,7 @@ macro_rules! assert_count_backward_range_scan {
 }
 
 async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
-    let remote_dir = "hummock_001";
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = Arc::new(SstableStore::new(
-        object_store.clone(),
-        remote_dir.to_string(),
-        Arc::new(StateStoreMetrics::unused()),
-        64 << 20,
-        64 << 20,
-    ));
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -151,15 +143,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
 }
 
 async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let remote_dir = "hummock_001";
-    let sstable_store = Arc::new(SstableStore::new(
-        object_store.clone(),
-        remote_dir.to_string(),
-        Arc::new(StateStoreMetrics::unused()),
-        64 << 20,
-        64 << 20,
-    ));
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -213,15 +197,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
 }
 
 async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let remote_dir = "/test";
-    let sstable_store = Arc::new(SstableStore::new(
-        object_store.clone(),
-        remote_dir.to_string(),
-        Arc::new(StateStoreMetrics::unused()),
-        64 << 20,
-        64 << 20,
-    ));
+    let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
@@ -231,7 +207,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     ));
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options.clone(),
-        sstable_store.clone(),
+        sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )

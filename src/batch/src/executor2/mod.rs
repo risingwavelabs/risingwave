@@ -15,7 +15,6 @@
 mod delete;
 mod filter;
 mod generate_series;
-mod generate_time_series;
 mod generic_exchange;
 mod hash_agg;
 mod hop_window;
@@ -28,16 +27,15 @@ mod order_by;
 mod project;
 mod row_seq_scan;
 mod sort_agg;
-mod stream_scan;
 mod top_n;
 mod trace;
+mod update;
 mod values;
 
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generate_series::*;
-pub use generate_time_series::*;
 pub use generic_exchange::*;
 pub use hash_agg::*;
 pub use hop_window::*;
@@ -53,9 +51,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
-pub use stream_scan::*;
 pub use top_n::*;
 pub use trace::*;
+pub use update::*;
 pub use values::*;
 
 use crate::executor::ExecutorBuilder;

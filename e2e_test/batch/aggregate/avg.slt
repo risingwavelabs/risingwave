@@ -1,3 +1,7 @@
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 statement ok
 create table t(v1 smallint, v2 int, v3 bigint, v4 numeric, v5 real, v6 double precision)
 

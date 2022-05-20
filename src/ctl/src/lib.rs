@@ -38,7 +38,13 @@ enum HummockCommands {
     /// list latest Hummock version on meta node
     ListVersion,
     /// list all Hummock key-value pairs
-    ListKv,
+    ListKv {
+        #[clap(short, long = "epoch", default_value_t = u64::MAX)]
+        epoch: u64,
+
+        #[clap(short, long = "table-id", default_value_t = u32::MAX)]
+        tableid: u32,
+    },
 }
 
 pub async fn start(opts: CliOpts) {
@@ -46,6 +52,8 @@ pub async fn start(opts: CliOpts) {
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await.unwrap()
         }
-        Commands::Hummock(HummockCommands::ListKv) => cmd_impl::hummock::list_kv().await.unwrap(),
+        Commands::Hummock(HummockCommands::ListKv { epoch, tableid }) => {
+            cmd_impl::hummock::list_kv(*epoch, *tableid).await.unwrap()
+        }
     }
 }

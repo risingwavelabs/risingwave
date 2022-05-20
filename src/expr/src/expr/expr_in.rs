@@ -24,14 +24,14 @@ use crate::expr::{BoxedExpression, Expression};
 
 #[derive(Debug)]
 pub(crate) struct InExpression {
-    input_ref: BoxedExpression,
+    left: BoxedExpression,
     set: HashSet<Datum>,
     return_type: DataType,
 }
 
 impl InExpression {
     pub fn new(
-        input_ref: BoxedExpression,
+        left: BoxedExpression,
         data: impl Iterator<Item = Datum>,
         return_type: DataType,
     ) -> Self {
@@ -40,7 +40,7 @@ impl InExpression {
             sarg.insert(datum);
         }
         Self {
-            input_ref,
+            left,
             set: sarg,
             return_type,
         }
@@ -57,7 +57,7 @@ impl Expression for InExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> risingwave_common::error::Result<ArrayRef> {
-        let input_array = self.input_ref.eval(input)?;
+        let input_array = self.left.eval(input)?;
         let visibility = input.visibility();
         let mut output_array = BoolArrayBuilder::new(input.cardinality())?;
         match visibility {
