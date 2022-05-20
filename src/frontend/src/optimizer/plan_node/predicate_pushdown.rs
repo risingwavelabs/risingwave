@@ -22,11 +22,15 @@ use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 pub trait PredicatePushdown {
     /// Push predicate down for every logical plan node.
     ///
-    /// Sometimes, you will find it difficult or just want to delay the implementation of predicate
-    /// pushdown, then you can use [`gen_filter_and_pushdown`] to generate a `LogicalFilter` above
-    /// the node and do predicate pushdown for its input.
-    /// Please note that `LogicalFilter::create` will NOT create a `LogicalFilter` if `predicate`
-    /// is always true, so feel free to use the helper function.
+    /// There are three kinds of predicates:
+    ///
+    /// 1. those can't be pushed down. We just create a `LogicalFilter` for them above the current
+    /// `PlanNode`.
+    ///
+    /// 2. those can be merged with current `PlanNode`(e.g. `LogicalJoin`). We just merge
+    /// the predicates with the `Condition` of it.
+    ///
+    /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
 }
 
