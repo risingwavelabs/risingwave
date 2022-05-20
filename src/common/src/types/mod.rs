@@ -700,15 +700,8 @@ impl ScalarImpl {
         })
     }
 
-    pub fn to_protobuf(d: &Datum) -> Vec<u8> {
-        let d = match d {
-            None => {
-                return vec![];
-            }
-            Some(d) => d,
-        };
-
-        let body = match d {
+    pub fn to_protobuf(&self) -> Vec<u8> {
+        let body = match self {
             ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
             ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
             ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
@@ -725,35 +718,6 @@ impl ScalarImpl {
             ScalarImpl::List(_) => todo!(),
         };
         body
-    }
-
-    fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
-        // TODO: remove IntervalType later.
-        match ty {
-            // the unit is months
-            Year | YearToMonth | Month => {
-                let bytes = bytes.try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-                })?;
-                let mouths = i32::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_month(mouths))
-            }
-            // the unit is ms
-            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
-            | Minute | MinuteToSecond | Second => {
-                let bytes = bytes.try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
-                })?;
-                let ms = i64::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_millis(ms))
-            }
-            Invalid => {
-                // Invalid means the interval is from the new frontend.
-                // TODO: make this default path later.
-                let mut cursor = Cursor::new(bytes);
-                read_interval_unit(&mut cursor)
-            }
-        }
     }
 
     pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> Result<ScalarImpl> {
@@ -802,14 +766,14 @@ impl ScalarImpl {
                     |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
                 )?)
             }
-            TypeName::Interval => ScalarImpl::Interval(ScalarImpl::make_interval(
+            TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
                 data_type.get_interval_type()?,
             )?),
             TypeName::Struct => {
                 let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
                 let fields: Vec<Datum> = struct_value
-                    .body
+                    .fields
                     .iter()
                     .zip_eq(data_type.field_type.iter())
                     .map(|(b, d)| {

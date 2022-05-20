@@ -98,7 +98,7 @@ message ConstantValue {
 
 // For serializing struct value to vec<bytes>.
 message StructValue {
-  repeated bytes body = 1;
+  repeated bytes fields = 1;
 }
 
 message FunctionCall {

@@ -29,11 +29,10 @@ use super::{
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl};
-use crate::util::display_comma_separated;
+use crate::types::{
+    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+};
 
-/// This is a naive implementation of struct array.
-/// We will eventually move to a more efficient flatten implementation.
 #[derive(Debug)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
@@ -318,10 +317,15 @@ impl StructValue {
 
     pub fn to_protobuf_owned(&self) -> Vec<u8> {
         let value = ProstStructValue {
-            body: self
+            fields: self
                 .fields
                 .iter()
-                .map(ScalarImpl::to_protobuf)
+                .map(|f| match f {
+                    None => {
+                        vec![]
+                    }
+                    Some(s) => s.to_protobuf(),
+                })
                 .collect_vec(),
         };
         value.encode_to_vec()
@@ -407,18 +411,9 @@ impl Debug for StructRef<'_> {
 impl Display for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StructRef::Indexed { arr, idx } => {
-                let values: Vec<String> = arr
-                    .children
-                    .iter()
-                    .map(|a| match a.value_at(*idx) {
-                        None => "null".to_string(),
-                        Some(scalar) => {
-                            format!("{}", scalar.into_scalar_impl())
-                        }
-                    })
-                    .collect_vec();
-                write!(f, "({})", display_comma_separated(&values))
+            StructRef::Indexed { arr: _, idx: _ } => {
+                let v = self.fields_ref().iter().map(display_datum_ref).join(", ");
+                write!(f, "({})", v)
             }
             StructRef::ValueRef { val } => write!(f, "({})", val),
         }

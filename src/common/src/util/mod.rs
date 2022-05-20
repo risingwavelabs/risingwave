@@ -95,17 +95,3 @@ where
         Ok(())
     }
 }
-
-pub fn display_separated<'a, T>(slice: &'a [T], sep: &'static str) -> DisplaySeparated<'a, T>
-where
-    T: fmt::Display,
-{
-    DisplaySeparated { slice, sep }
-}
-
-pub fn display_comma_separated<T>(slice: &[T]) -> DisplaySeparated<'_, T>
-where
-    T: fmt::Display,
-{
-    DisplaySeparated { slice, sep: ", " }
-}

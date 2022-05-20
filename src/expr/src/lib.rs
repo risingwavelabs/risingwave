@@ -31,7 +31,5 @@
 #![feature(backtrace)]
 #![feature(fn_traits)]
 
-extern crate core;
-
 pub mod expr;
 pub mod vector_op;

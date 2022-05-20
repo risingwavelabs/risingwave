@@ -166,7 +166,7 @@ mod tests {
     fn test_struct_expr_literal_from() {
         let value = StructValue::new(vec![
             Some(ScalarImpl::Utf8("12222".to_string())),
-            Some(ScalarImpl::Int32(2)),
+            Some(2.into()),
             None,
         ]);
         let body = value.to_protobuf_owned();
