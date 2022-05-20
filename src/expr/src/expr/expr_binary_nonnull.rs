@@ -23,6 +23,7 @@ use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
+use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
@@ -166,39 +167,39 @@ macro_rules! gen_binary_expr_atm {
             { int16, int16, int16, $general_f },
             { int16, int32, int32, $general_f },
             { int16, int64, int64, $general_f },
-            { int16, float32, float64, $general_f },
-            { int16, float64, float64, $general_f },
+            //{ int16, float32, float64, $general_f },
+            //{ int16, float64, float64, $general_f },
             { int32, int16, int32, $general_f },
             { int32, int32, int32, $general_f },
             { int32, int64, int64, $general_f },
-            { int32, float32, float64, $general_f },
-            { int32, float64, float64, $general_f },
+            //{ int32, float32, float64, $general_f },
+            //{ int32, float64, float64, $general_f },
             { int64, int16,int64, $general_f },
             { int64, int32,int64, $general_f },
             { int64, int64, int64, $general_f },
-            { int64, float32, float64 , $general_f},
-            { int64, float64, float64, $general_f },
-            { float32, int16, float64, $general_f },
-            { float32, int32, float64, $general_f },
-            { float32, int64, float64 , $general_f},
-            { float32, float32, float32, $general_f },
-            { float32, float64, float64, $general_f },
-            { float64, int16, float64, $general_f },
-            { float64, int32, float64, $general_f },
-            { float64, int64, float64, $general_f },
-            { float64, float32, float64, $general_f },
-            { float64, float64, float64, $general_f },
-            { decimal, int16, decimal, $general_f },
-            { decimal, int32, decimal, $general_f },
-            { decimal, int64, decimal, $general_f },
-            { decimal, float32, decimal, $general_f },
-            { decimal, float64, decimal, $general_f },
-            { int16, decimal, decimal, $general_f },
-            { int32, decimal, decimal, $general_f },
-            { int64, decimal, decimal, $general_f },
-            { decimal, decimal, decimal, $general_f },
-            { float32, decimal, float64, $general_f },
-            { float64, decimal, float64, $general_f },
+            //{ int64, float32, float64 , $general_f},
+            //{ int64, float64, float64, $general_f },
+            //{ float32, int16, float64, $general_f },
+            //{ float32, int32, float64, $general_f },
+            //{ float32, int64, float64 , $general_f},
+            //{ float32, float32, float32, $general_f },
+            //{ float32, float64, float64, $general_f },
+            //{ float64, int16, float64, $general_f },
+            //{ float64, int32, float64, $general_f },
+            //{ float64, int64, float64, $general_f },
+            //{ float64, float32, float64, $general_f },
+            //{ float64, float64, float64, $general_f },
+            // { decimal, int16, decimal, $general_f },
+            // { decimal, int32, decimal, $general_f },
+            // { decimal, int64, decimal, $general_f },
+            //{ decimal, float32, decimal, $general_f },
+            //{ decimal, float64, decimal, $general_f },
+            // { int16, decimal, decimal, $general_f },
+            // { int32, decimal, decimal, $general_f },
+            // { int64, decimal, decimal, $general_f },
+            // { decimal, decimal, decimal, $general_f },
+            //{ float32, decimal, float64, $general_f },
+            //{ float64, decimal, float64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
             )*
@@ -315,6 +316,26 @@ pub fn new_binary_expr(
                 },
             }
         }
+        Type::PgBitwiseShiftLeft => {
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                l, r, ret,
+                general_shl,
+                {
+
+                },
+            }
+        }
+        Type::PgBitwiseShiftRight =>{
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                l, r, ret,
+                general_shr,
+                {
+
+                },
+            }
+        }
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
@@ -328,6 +349,7 @@ pub fn new_binary_expr(
             l, r, ret, position,
         )),
         Type::TumbleStart => new_tumble_start(l, r, ret),
+        
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",

@@ -43,12 +43,12 @@ impl Binder {
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
             BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
-            BinaryOperator::BitwiseOr => ExprType::BitwiseOr
-            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd
-            BinaryOperator::BitwiseXor => ExprType::BitwiseXor
-            BinaryOperator::PGBitwiseXor => ExprType::PGBitwiseXor,
-            BinaryOperator::PGBitwiseShiftLeft => ExprType::PGBitwiseShiftLeft,
-            BinaryOperator::PGBitwiseShiftRight => ExprType::PGBitwiseShiftRight,
+            BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
+            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
+            BinaryOperator::BitwiseXor => ExprType::BitwiseXor,
+            BinaryOperator::PGBitwiseXor => ExprType::PgBitwiseXor,
+            BinaryOperator::PGBitwiseShiftLeft => ExprType::PgBitwiseShiftLeft,
+            BinaryOperator::PGBitwiseShiftRight => ExprType::PgBitwiseShiftRight,
             _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
         Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())

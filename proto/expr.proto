@@ -29,6 +29,13 @@ message ExprNode {
     OR = 22;
     NOT = 23;
     IN = 24;
+    // bitwise operators
+    BitwiseAnd = 31;
+    BitwiseOr = 32;
+    BitwiseXor = 33;
+    PGBitwiseXor = 34;
+    PGBitwiseShiftLeft = 35;
+    PGBitwiseShiftRight = 36;
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;

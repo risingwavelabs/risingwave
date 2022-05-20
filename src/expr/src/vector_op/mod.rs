@@ -15,6 +15,7 @@
 pub mod agg;
 pub mod arithmetic_op;
 pub mod ascii;
+pub mod bitwise_op;
 pub mod cast;
 pub mod cmp;
 pub mod conjunction;

@@ -72,7 +72,8 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::GreaterThanOrEqual => debug_binary_op(f, ">=", &self.inputs),
                 ExprType::And => debug_binary_op(f, "AND", &self.inputs),
                 ExprType::Or => debug_binary_op(f, "OR", &self.inputs),
-                
+                ExprType::PgBitwiseShiftLeft => debug_binary_op(f, "<<", &self.inputs),
+                ExprType::PgBitwiseShiftRight => debug_binary_op(f,">>", &self.inputs),
                 _ => {
                     let func_name = format!("{:?}", self.func_type);
                     let mut builder = f.debug_tuple(&func_name);
