@@ -11,35 +11,92 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::collections::HashMap;
 
 use anyhow::Result;
+use bytes::Bytes;
+use itertools::Itertools;
+use serde_json::{Map, Value};
+use tokio::time::{sleep, Duration};
 
+use super::field_generator::FieldGeneratorImpl;
+use super::FieldGenerator;
 use crate::{Column, SourceMessage};
+pub type BoxedFieldGenerator = Box<dyn FieldGenerator>;
 
-#[derive(Clone, Debug)]
 pub struct DatagenEventGenerator {
-    pub columns: Vec<Column>,
+    pub fields_map: HashMap<String, FieldGeneratorImpl>,
     pub last_offset: u64,
     pub batch_chunk_size: u64,
     pub rows_per_second: u64,
 }
 
 impl DatagenEventGenerator {
+    pub fn new(
+        columns: Vec<Column>,
+        last_offset: u64,
+        batch_chunk_size: u64,
+        rows_per_second: u64,
+    ) -> Result<Self> {
+        // FIXME better way to throw out err
+        let fields_map: HashMap<String, FieldGeneratorImpl> = columns
+            .iter()
+            .map(|column| {
+                (
+                    column.name.clone(),
+                    FieldGeneratorImpl::new(
+                        column.data_type.clone(),
+                        super::FieldKind::Random,
+                        None,
+                        None,
+                    ),
+                )
+            })
+            .map(|(s, field)| (s, Result::unwrap(field)))
+            .collect();
+        assert_eq!(
+            fields_map.len(),
+            columns.len(),
+            "parsing datagen table fail!"
+        );
+
+        Ok(Self {
+            fields_map,
+            last_offset,
+            batch_chunk_size,
+            rows_per_second,
+        })
+    }
+
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        // sleep(Duration::from_secs(
-        //     self.batch_chunk_size / self.rows_per_second,
-        // ))
-        // .await;
+        sleep(Duration::from_secs(
+            self.batch_chunk_size / self.rows_per_second,
+        ))
+        .await;
         // let mut res = vec![];
         // for i in 0..self.batch_chunk_size {
-        //     res.push(SourceMessage {
-        //         payload: Some(Bytes::from(serde_json::to_string(&Event::new(i))?)),
+        //     let mut map = Map::new();
+        //     self.fields_map.iter().map(|(name,field_generator)|{
+        //         map.insert(name.to_string(),field_generator.generate());
+
+        //     });
+        //     let value:Value = map.into();
+        //     let a = serde_json::from_value(value)?;
+        //     let msg = SourceMessage {
+        //         payload: Some(Bytes::from(a)),
         //         offset: (self.last_offset + i).to_string(),
         //         split_id: 0.to_string(),
-        //     })
+        //     };
+        //     res.push(msg);
         // }
-        // self.last_offset += self.batch_chunk_size;
+        self.last_offset += self.batch_chunk_size;
         // Ok(Some(res))
         todo!()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn test_datagenerator() {}
 }

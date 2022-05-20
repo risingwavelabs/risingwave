@@ -45,12 +45,7 @@ impl DatagenSplitReader {
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
 
         Ok(DatagenSplitReader {
-            generator: DatagenEventGenerator {
-                columns,
-                last_offset: 0,
-                batch_chunk_size,
-                rows_per_second,
-            },
+            generator: DatagenEventGenerator::new(columns, 0, batch_chunk_size, rows_per_second)?,
         })
     }
 }

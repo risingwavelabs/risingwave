@@ -19,12 +19,13 @@ mod reader;
 use anyhow::Result;
 pub use reader::*;
 use serde_json::Value;
-pub trait FieldGenerator
-where
-    Self: Sized,
-{
-    fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>;
-    fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>;
+pub trait FieldGenerator {
+    fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
+    where
+        Self: Sized;
+    fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>
+    where
+        Self: Sized;
     fn generate(&mut self) -> Value;
 }
 

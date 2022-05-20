@@ -17,17 +17,5 @@ pub mod source;
 pub mod split;
 
 pub use enumerator::*;
-use serde_json::Value;
 pub use source::*;
 pub use split::*;
-pub trait FieldGenerator {
-    fn with_sequence(min: Option<String>, max: Option<String>) -> Self;
-    fn with_random(start: Option<String>, end: Option<String>) -> Self;
-    fn genrate() -> Value;
-}
-
-// Generator of this '#' field. Can be 'sequence' or 'random'.
-pub enum FieldKind {
-    Sequence,
-    Random,
-}
