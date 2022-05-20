@@ -13,14 +13,14 @@ include ../tpch/insert_supplier.slt.part
 include ../tpch/insert_region.slt.part
 
 include ./tpch/q1.slt.part
-include ./tpch/q2.join_reorder.workaround.slt.part
+include ./tpch/q2.slt.part
 include ./tpch/q3.slt.part
 include ./tpch/q4.slt.part
 include ./tpch/q5.slt.part
 include ./tpch/q6.slt.part
 include ./tpch/q7.slt.part
-include ./tpch/q8.join_reorder.workaround.slt.part
-include ./tpch/q9.join_reorder.workaround.slt.part
+include ./tpch/q8.slt.part
+include ./tpch/q9.slt.part
 include ./tpch/q10.slt.part
 include ./tpch/q11.slt.part
 include ./tpch/q12.slt.part
