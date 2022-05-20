@@ -95,7 +95,7 @@ impl JoinRowDeserializer {
         JoinRowDeserializer { data_types: schema }
     }
 
-    /// Deserialize the row from a memcomparable bytes.
+    /// Deserialize the [`JoinRow`] from a value encoding bytes.
     pub fn deserialize(&self, mut data: impl Buf) -> RwResult<JoinRow> {
         let deserializer = RowDeserializer::new(self.data_types.clone());
         let row = deserializer.value_decode(&mut data)?;
