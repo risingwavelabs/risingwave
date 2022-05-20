@@ -35,8 +35,8 @@ mod tests {
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageConfig {
-            sstable_size: 32,
-            block_size: 1 << 10,
+            sstable_size_mb: 1,
+            block_size_kb: 1,
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
             async_checkpoint_enabled: true,
@@ -81,7 +81,7 @@ mod tests {
 
         // 1. add sstables
         let key = Bytes::from(&b"same_key"[..]);
-        let val = Bytes::from(&b"value"[..]);
+        let val = Bytes::from(b"0"[..].repeat(4 << 20)); // 4MB value
         let kv_count = 128;
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
@@ -132,7 +132,7 @@ mod tests {
             .sstable(output_table_id)
             .await
             .unwrap();
-        let target_table_size = storage.options().sstable_size;
+        let target_table_size = storage.options().sstable_size_mb * (1 << 20);
         assert!(
             table.value().meta.estimated_size > target_table_size,
             "table.meta.estimated_size {} <= target_table_size {}",

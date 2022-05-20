@@ -250,8 +250,7 @@ async fn test_state_store_sync() {
     let sstable_store = mock_sstable_store();
 
     let mut config = default_config_for_test();
-    config.shared_buffer_capacity = 64;
-    config.shared_buffer_threshold = 64;
+    config.shared_buffer_capacity_mb = 64;
     config.write_conflict_detection_enabled = false;
 
     let hummock_options = Arc::new(config);
