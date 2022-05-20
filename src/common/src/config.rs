@@ -121,10 +121,6 @@ pub struct StorageConfig {
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
 
-    /// Whether to enable async checkpoint
-    #[serde(default = "default::async_checkpoint_enabled")]
-    pub async_checkpoint_enabled: bool,
-
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
@@ -225,10 +221,6 @@ mod default {
         "hummock_001".to_string()
     }
 
-    pub fn async_checkpoint_enabled() -> bool {
-        true
-    }
-
     pub fn write_conflict_detection_enabled() -> bool {
         cfg!(debug_assertions)
     }
@@ -281,7 +273,6 @@ mod tests {
         [storage]
         sstable_size = 1024
         data_directory = "test"
-        async_checkpoint_enabled = false
     "#;
         let cfg: ComputeNodeConfig = toml::from_str(partial_toml_str).unwrap();
         assert_eq!(cfg.server.heartbeat_interval, 10);
@@ -293,6 +284,5 @@ mod tests {
             default::bloom_false_positive()
         );
         assert_eq!(cfg.storage.data_directory, "test");
-        assert!(!cfg.storage.async_checkpoint_enabled);
     }
 }
