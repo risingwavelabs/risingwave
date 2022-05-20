@@ -88,13 +88,18 @@ impl BlockCache {
             .map(BlockHolder::from_cached_block)
     }
 
-    pub fn insert(&self, sst_id: HummockSSTableId, block_idx: u64, block: Box<Block>) {
-        self.inner.insert(
+    pub fn insert(
+        &self,
+        sst_id: HummockSSTableId,
+        block_idx: u64,
+        block: Box<Block>,
+    ) -> BlockHolder {
+        BlockHolder::from_cached_block(self.inner.insert(
             (sst_id, block_idx),
             Self::hash(sst_id, block_idx),
             block.len(),
             block,
-        );
+        ))
     }
 
     pub async fn get_or_insert_with<F>(

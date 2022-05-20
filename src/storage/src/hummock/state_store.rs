@@ -15,6 +15,7 @@
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -28,7 +29,7 @@ use super::iterator::{
 use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
 use crate::error::StorageResult;
-use crate::hummock::iterator::BoxedBackwardHummockIterator;
+use crate::hummock::iterator::{BoxedBackwardHummockIterator, ReadOptions};
 use crate::hummock::utils::prune_ssts;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -45,6 +46,7 @@ impl HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
+        let read_options = Arc::new(ReadOptions::default());
         // if `backward` is true, use `overlapped_backward_sstable_iters`, otherwise use
         // `overlapped_forward_sstable_iters`
         let mut overlapped_forward_iters = vec![];
@@ -86,9 +88,11 @@ impl HummockStorage {
                     self.sstable_store(),
                 )) as BoxedBackwardHummockIterator);
             } else {
-                overlapped_forward_iters
-                    .push(Box::new(SSTableIterator::new(table, self.sstable_store()))
-                        as BoxedForwardHummockIterator);
+                overlapped_forward_iters.push(Box::new(SSTableIterator::new(
+                    table,
+                    self.sstable_store(),
+                    read_options.clone(),
+                )) as BoxedForwardHummockIterator);
             };
         }
 
@@ -120,6 +124,7 @@ impl HummockStorage {
                             .map(|&info| info.clone())
                             .collect(),
                         self.sstable_store(),
+                        read_options.clone(),
                     ))
                         as BoxedBackwardHummockIterator);
                 } else {
@@ -129,6 +134,7 @@ impl HummockStorage {
                             .map(|&info| info.clone())
                             .collect_vec(),
                         self.sstable_store(),
+                        read_options.clone(),
                     ))
                         as BoxedForwardHummockIterator);
                 };
@@ -145,6 +151,7 @@ impl HummockStorage {
                         overlapped_forward_iters.push(Box::new(SSTableIterator::new(
                             table,
                             self.sstable_store(),
+                            read_options.clone(),
                         ))
                             as BoxedForwardHummockIterator);
                     };
@@ -236,10 +243,14 @@ impl HummockStorage {
             false,
             vnode_set.as_ref(),
         );
+        let read_options = Arc::new(ReadOptions::default());
         for table_info in table_infos.into_iter().rev() {
             let table = self.sstable_store.sstable(table_info.id).await?;
             table_counts += 1;
-            if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+            if let Some(v) = self
+                .get_from_table(table, &internal_key, key, read_options.clone())
+                .await?
+            {
                 return Ok(Some(v));
             }
         }
@@ -258,7 +269,7 @@ impl HummockStorage {
                     for table_info in table_infos.into_iter().rev() {
                         let table = self.sstable_store.sstable(table_info.id).await?;
                         table_counts += 1;
-                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+                        if let Some(v) = self.get_from_table(table, &internal_key, key, read_options.clone()).await? {
                             return Ok(Some(v));
                         }
                     }
