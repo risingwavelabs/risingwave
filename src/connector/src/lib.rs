@@ -36,12 +36,11 @@ mod filesystem;
 mod kafka;
 pub mod kinesis;
 mod nexmark;
-mod properties;
 mod pulsar;
 
 pub use base::*;
-pub use properties::*;
 
 pub mod aws_utils;
 pub mod dummy_connector;
+mod macros;
 pub mod state;

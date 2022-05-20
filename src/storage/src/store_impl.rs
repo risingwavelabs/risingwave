@@ -113,8 +113,8 @@ impl StateStoreImpl {
                     )),
                     config.data_directory.to_string(),
                     state_store_stats.clone(),
-                    config.block_cache_capacity,
-                    config.meta_cache_capacity,
+                    config.block_cache_capacity_mb * (1 << 20),
+                    config.meta_cache_capacity_mb * (1 << 20),
                 ));
                 let inner = HummockStorage::new(
                     config.clone(),

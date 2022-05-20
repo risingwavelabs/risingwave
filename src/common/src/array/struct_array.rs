@@ -239,7 +239,7 @@ impl StructArray {
         &self.children_type
     }
 
-    pub fn get_children_by_index(&self, index: usize) -> ArrayRef {
+    pub fn field_at(&self, index: usize) -> ArrayRef {
         self.children[index].clone()
     }
 

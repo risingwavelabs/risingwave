@@ -31,7 +31,7 @@ use crate::filesystem::file_common::{
     Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
 };
 use crate::filesystem::s3::s3_notification_event::{NotificationEvent, NotifyEventType};
-use crate::S3Properties;
+use crate::filesystem::s3::S3Properties;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AwsCredential {

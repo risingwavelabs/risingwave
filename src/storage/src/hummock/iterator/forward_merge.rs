@@ -31,7 +31,7 @@ mod test {
         gen_merge_iterator_interleave_test_sstable_iters, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedForwardHummockIterator, HummockIterator};
+    use crate::hummock::iterator::{BoxedForwardHummockIterator, HummockIterator, ReadOptions};
     use crate::hummock::sstable::SSTableIterator;
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
@@ -133,6 +133,7 @@ mod test {
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store();
+        let read_options = Arc::new(ReadOptions::default());
         let table0 = Box::new(
             gen_iterator_test_sstable_base(
                 0,
@@ -161,10 +162,12 @@ mod test {
                 Box::new(SSTableIterator::new(
                     cache.insert(table0.id, table0.id, 1, table0),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
                     cache.insert(table1.id, table1.id, 1, table1),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
@@ -174,10 +177,12 @@ mod test {
                 Box::new(SSTableIterator::new(
                     cache.lookup(0, &0).unwrap(),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
                     cache.lookup(1, &1).unwrap(),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
@@ -209,6 +214,7 @@ mod test {
     #[tokio::test]
     async fn test_ordered_merge_iter() {
         let sstable_store = mock_sstable_store();
+        let read_options = Arc::new(ReadOptions::default());
 
         let non_overlapped_sstable = Box::new(
             gen_test_sstable(
@@ -266,6 +272,7 @@ mod test {
                         non_overlapped_sstable,
                     ),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
                     cache.insert(
@@ -275,6 +282,7 @@ mod test {
                         overlapped_new_sstable,
                     ),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SSTableIterator::new(
                     cache.insert(
@@ -284,6 +292,7 @@ mod test {
                         overlapped_old_sstable,
                     ),
                     sstable_store.clone(),
+                    read_options.clone(),
                 )) as BoxedForwardHummockIterator,
             ],
             Arc::new(StateStoreMetrics::unused()),
