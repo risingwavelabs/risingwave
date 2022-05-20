@@ -82,10 +82,10 @@ impl JoinRow {
         let mut vec = Vec::with_capacity(10);
 
         // Serialize row.
-        vec.extend_from_slice(&self.row.value_encode()?);
+        vec.extend(self.row.value_encode()?);
 
         // Serialize degree.
-        vec.extend_from_slice(&self.degree.to_le_bytes());
+        vec.extend(self.degree.to_le_bytes());
 
         Ok(vec)
     }
