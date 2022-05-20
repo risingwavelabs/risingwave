@@ -22,15 +22,11 @@ use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 pub trait PredicatePushdown {
     /// Push predicate down for every logical plan node.
     ///
-    /// Sometimes, you will find it hard or just want to delay the implementation of predicate
+    /// Sometimes, you will find it difficult or just want to delay the implementation of predicate
     /// pushdown, then you can use [`gen_filter_and_pushdown`] to generate a `LogicalFilter` above
-    /// current node and do predicate pushdown for its input.
-    ///
-    /// Also, if current logcial plan node doesn't have any input(e.g. `LogicalScan`), you can use
-    /// [`gen_filter`] to generate a `LogicalFilter` above it.
-    ///
+    /// the node and do predicate pushdown for its input.
     /// Please note that `LogicalFilter::create` will NOT create a `LogicalFilter` if `predicate`
-    /// is always true, so feel free to use these two helper functions.
+    /// is always true, so feel free to use the helper function.
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
 }
 
@@ -57,9 +53,4 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
     let new_input = node.input().predicate_pushdown(pushed_predicate);
     let new_node = node.clone_with_input(new_input);
     LogicalFilter::create(Rc::new(new_node), filter_predicate)
-}
-
-#[inline]
-pub fn gen_filter(node: PlanRef, predicate: Condition) -> PlanRef {
-    LogicalFilter::create(node, predicate)
 }
