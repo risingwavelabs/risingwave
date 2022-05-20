@@ -37,7 +37,7 @@ impl DatagenEventGenerator {
         batch_chunk_size: u64,
         rows_per_second: u64,
     ) -> Result<Self> {
-        // FIXME better way to throw out err
+        // FIXME better way to throw out err in the map
         let fields_map: HashMap<String, FieldGeneratorImpl> = columns[1..]
             .iter()
             .map(|column| {
@@ -54,7 +54,7 @@ impl DatagenEventGenerator {
             .map(|(s, field)| (s, Result::unwrap(field)))
             .collect();
         assert_eq!(
-            fields_map.len() + 1 ,
+            fields_map.len() + 1,
             columns.len(),
             "parsing datagen table fail!"
         );
@@ -74,11 +74,11 @@ impl DatagenEventGenerator {
         .await;
         let mut res = vec![];
         for i in 0..self.batch_chunk_size {
-
-            let map:Map<String,Value> = 
-            self.fields_map.iter_mut().map(|(name,field_generator)|{
-            (name.to_string(),field_generator.generate())
-            }).collect();
+            let map: Map<String, Value> = self
+                .fields_map
+                .iter_mut()
+                .map(|(name, field_generator)| (name.to_string(), field_generator.generate()))
+                .collect();
 
             let value = Value::Object(map);
             let msg = SourceMessage {
@@ -91,6 +91,5 @@ impl DatagenEventGenerator {
         }
         self.last_offset += self.batch_chunk_size;
         Ok(Some(res))
-
     }
 }

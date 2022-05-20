@@ -34,7 +34,7 @@ impl FieldGeneratorImpl {
         max_or_end: Option<String>,
     ) -> Result<Self> {
         match kind {
-            //todo(d2lark) use macro to simplify the code later
+            // todo(d2lark) use macro to simplify the code later
             FieldKind::Random => match data_type {
                 DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_random(
                     min_or_start,
@@ -56,7 +56,7 @@ impl FieldGeneratorImpl {
                     min_or_start,
                     max_or_end,
                 )?)),
-                _ => unimplemented!()
+                _ => unimplemented!(),
             },
             FieldKind::Sequence => match data_type {
                 DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_sequence(
@@ -79,7 +79,7 @@ impl FieldGeneratorImpl {
                     min_or_start,
                     max_or_end,
                 )?)),
-                _ => unimplemented!()
+                _ => unimplemented!(),
             },
         }
     }
@@ -90,7 +90,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I32(f) => f.generate(),
             FieldGeneratorImpl::I64(f) => f.generate(),
             FieldGeneratorImpl::F32(f) => f.generate(),
-            FieldGeneratorImpl::F64(f) => f.generate()
+            FieldGeneratorImpl::F64(f) => f.generate(),
         }
     }
 }

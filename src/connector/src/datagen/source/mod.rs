@@ -14,7 +14,6 @@
 
 mod field_generator;
 mod generator;
-mod message;
 mod reader;
 use anyhow::Result;
 pub use reader::*;
