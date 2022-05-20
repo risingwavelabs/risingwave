@@ -18,12 +18,12 @@ use risingwave_common::array::{
 };
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::for_all_cmp_variants;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
+use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
