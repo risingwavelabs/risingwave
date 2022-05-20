@@ -629,19 +629,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             {
                                 yield Message::Chunk(chunk);
                             }
-                        } else {
-                            if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
-                            {
-                                yield Message::Chunk(chunk);
-                            }
-                        }
-                    } else {
-                        if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                        } else if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
                         {
                             yield Message::Chunk(chunk);
                         }
+                    } else if let Some(chunk) =
+                        hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                    {
+                        yield Message::Chunk(chunk);
                     }
                     entry_value.insert(pk, JoinRow::new(value, degree));
                 }
@@ -672,19 +668,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             {
                                 yield Message::Chunk(chunk);
                             }
-                        } else {
-                            if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
-                            {
-                                yield Message::Chunk(chunk);
-                            }
-                        }
-                    } else {
-                        if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                        } else if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
                         {
                             yield Message::Chunk(chunk);
                         }
+                    } else if let Some(chunk) =
+                        hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                    {
+                        yield Message::Chunk(chunk);
                     }
                 }
             }
