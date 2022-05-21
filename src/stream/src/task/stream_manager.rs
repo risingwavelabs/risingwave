@@ -20,7 +20,7 @@ use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use madsim::task::JoinHandle;
 use parking_lot::Mutex;
-use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -79,9 +79,8 @@ pub struct LocalStreamManagerCore {
     /// disconnected.
     compute_client_pool: ComputeClientPool,
 
-    /// Config of compute node
-    #[allow(dead_code)]
-    pub(crate) config: ComputeNodeConfig,
+    /// Config of streaming engine
+    pub(crate) config: StreamingConfig,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -137,7 +136,7 @@ impl LocalStreamManager {
         addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
-        config: ComputeNodeConfig,
+        config: StreamingConfig,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -325,7 +324,7 @@ impl LocalStreamManagerCore {
         addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
-        config: ComputeNodeConfig,
+        config: StreamingConfig,
     ) -> Self {
         let context = SharedContext::new(addr);
         Self::with_store_and_context(state_store, context, streaming_metrics, config)
@@ -335,7 +334,7 @@ impl LocalStreamManagerCore {
         state_store: StateStoreImpl,
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
-        config: ComputeNodeConfig,
+        config: StreamingConfig,
     ) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
@@ -362,7 +361,7 @@ impl LocalStreamManagerCore {
             StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
-            ComputeNodeConfig::default(),
+            StreamingConfig::default(),
         )
     }
 

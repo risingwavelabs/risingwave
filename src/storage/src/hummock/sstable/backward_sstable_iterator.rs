@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{Backward, HummockIterator};
+use crate::hummock::iterator::{Backward, HummockIterator, ReadOptions};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorType, SstableStoreRef, TableHolder,
@@ -139,7 +140,11 @@ impl HummockIterator for BackwardSSTableIterator {
 }
 
 impl SSTableIteratorType for BackwardSSTableIterator {
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
+    fn new(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        _: Arc<ReadOptions>,
+    ) -> Self {
         Self {
             block_iter: None,
             cur_idx: table.value().meta.block_metas.len() - 1,

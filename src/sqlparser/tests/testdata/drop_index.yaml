@@ -1,0 +1,4 @@
+- input: DROP INDEX idx_a
+  formatted_sql: DROP INDEX idx_a
+  formatted_ast: |
+    Drop(DropStatement { object_type: Index, if_exists: false, object_name: ObjectName([Ident { value: "idx_a", quote_style: None }]), drop_mode: None })

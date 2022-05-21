@@ -20,13 +20,14 @@ pub type ConcatIterator = ConcatIteratorInner<SSTableIterator>;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::ForwardHummockIterator;
+    use crate::hummock::iterator::{ForwardHummockIterator, ReadOptions};
 
     #[tokio::test]
     async fn test_concat_iterator() {
@@ -62,6 +63,7 @@ mod tests {
                 table2.get_sstable_info(),
             ],
             sstable_store,
+            Arc::new(ReadOptions::default()),
         );
         let mut i = 0;
         iter.rewind().await.unwrap();
@@ -126,6 +128,7 @@ mod tests {
                 table2.get_sstable_info(),
             ],
             sstable_store,
+            Arc::new(ReadOptions::default()),
         );
 
         iter.seek(iterator_test_key_of(TEST_KEYS_COUNT + 1).as_slice())
@@ -207,6 +210,7 @@ mod tests {
                 table2.get_sstable_info(),
             ],
             sstable_store,
+            Arc::new(ReadOptions::default()),
         );
 
         iter.seek(iterator_test_key_of(TEST_KEYS_COUNT + 1).as_slice())

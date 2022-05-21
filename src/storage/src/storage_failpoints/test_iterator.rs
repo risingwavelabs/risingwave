@@ -25,7 +25,7 @@ use crate::hummock::iterator::test_utils::{
 use crate::hummock::iterator::{
     Backward, BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
     BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
-    HummockIterator, MergeIterator, UserIterator,
+    HummockIterator, MergeIterator, ReadOptions, UserIterator,
 };
 use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::{BackwardSSTableIterator, SSTableIterator, SSTableIteratorType};
@@ -57,6 +57,7 @@ async fn test_failpoint_concat_read_err() {
     let mut iter = ConcatIterator::new(
         vec![table0.get_sstable_info(), table1.get_sstable_info()],
         sstable_store,
+        Arc::new(ReadOptions::default()),
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
@@ -117,6 +118,7 @@ async fn test_failpoint_backward_concat_read_err() {
     let mut iter = BackwardConcatIterator::new(
         vec![table1.get_sstable_info(), table0.get_sstable_info()],
         sstable_store.clone(),
+        Arc::new(ReadOptions::default()),
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
@@ -179,6 +181,7 @@ async fn test_failpoint_merge_invalid_key() {
                     block_on(sstable_store.sstable(table.id, &mut StoreLocalStatistic::default()))
                         .unwrap(),
                     sstable_store.clone(),
+                    Arc::new(ReadOptions::default()),
                 ))
             }),
         Arc::new(StateStoreMetrics::unused()),
@@ -275,10 +278,12 @@ async fn test_failpoint_user_read_err() {
         Box::new(SSTableIterator::new(
             block_on(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
             sstable_store.clone(),
+            Arc::new(ReadOptions::default()),
         )),
         Box::new(SSTableIterator::new(
             block_on(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
             sstable_store.clone(),
+            Arc::new(ReadOptions::default()),
         )),
     ];
 
@@ -306,6 +311,7 @@ async fn test_failpoint_user_read_err() {
     assert!(!ui.is_valid());
     fail::remove(mem_read_err);
 }
+
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_backward_user_read_err() {

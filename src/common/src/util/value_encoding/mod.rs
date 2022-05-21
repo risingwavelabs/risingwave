@@ -18,7 +18,7 @@
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl,
@@ -42,6 +42,28 @@ pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
         return Ok(None);
     }
     deserialize_value(ty, &mut data)
+}
+
+/// Serialize a datum into bytes (Not order guarantee, used in value encoding).
+pub fn serialize_datum(cell: &Datum) -> Result<Vec<u8>> {
+    let mut buf: Vec<u8> = vec![];
+    if let Some(datum) = cell {
+        buf.put_u8(1);
+        serialize_value(datum.as_scalar_ref_impl(), &mut buf)
+    } else {
+        buf.put_u8(0);
+    }
+    Ok(buf)
+}
+
+/// Deserialize bytes into a datum (Not order guarantee, used in value encoding).
+pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
+    let null_tag = data.get_u8();
+    match null_tag {
+        0 => Ok(None),
+        1 => deserialize_value(ty, data),
+        _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag).into()),
+    }
 }
 
 fn serialize_value(value: ScalarRefImpl, mut buf: impl BufMut) {
@@ -129,9 +151,7 @@ fn deserialize_bool(mut data: impl Buf) -> Result<bool> {
     match data.get_u8() {
         1 => Ok(true),
         0 => Ok(false),
-        value => Err(RwError::from(ValueEncodingError::InvalidBoolEncoding(
-            value,
-        ))),
+        value => Err(ValueEncodingError::InvalidBoolEncoding(value).into()),
     }
 }
 

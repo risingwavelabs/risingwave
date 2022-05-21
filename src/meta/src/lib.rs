@@ -48,6 +48,7 @@ pub mod test_utils;
 use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
+use risingwave_common::config::ComputeNodeConfig;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, MetaStoreBackend};
@@ -83,9 +84,9 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     dashboard_ui_path: Option<String>,
 
-    /// Checkpoint interval in ms.
-    #[clap(long, default_value = "100")]
-    checkpoint_interval: u32,
+    /// No given `config_path` means to use default config.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 
     /// Whether to enable fail-on-recovery. If not set, default to enable. Should only be used in
     /// e2e tests.
@@ -93,8 +94,13 @@ pub struct MetaNodeOpts {
     disable_recovery: bool,
 }
 
+fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
+    risingwave_common::config::load_config(&opts.config_path)
+}
+
 /// Start meta node
 pub async fn start(opts: MetaNodeOpts) {
+    let compute_config = load_config(&opts);
     let addr = opts.host.parse().unwrap();
     let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
     let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
@@ -109,7 +115,8 @@ pub async fn start(opts: MetaNodeOpts) {
         Backend::Mem => MetaStoreBackend::Mem,
     };
     let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
-    let checkpoint_interval = Duration::from_millis(opts.checkpoint_interval as u64);
+    let checkpoint_interval =
+        Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
 
     tracing::info!("Meta server listening at {}", addr);
     let (join_handle, _shutdown_send) = rpc_serve(
