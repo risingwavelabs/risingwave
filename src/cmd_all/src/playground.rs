@@ -113,6 +113,8 @@ pub async fn playground() -> Result<()> {
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move { risingwave_meta::start(opts).await });
+                // wait for the service to be ready
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
             RisingWaveService::Compute(mut opts) => {
                 opts.insert(0, "compute-node".into());
