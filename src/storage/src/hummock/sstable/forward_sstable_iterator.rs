@@ -24,7 +24,11 @@ use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SSTableIteratorType: HummockIterator {
-    fn new(table: TableHolder, sstable_store: SstableStoreRef, read_options: Arc<ReadOptions>) -> Self;
+    fn new(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<ReadOptions>,
+    ) -> Self;
 }
 
 /// Iterates on a table.
@@ -43,9 +47,7 @@ pub struct SSTableIterator {
     options: Arc<ReadOptions>,
 }
 
-
 impl SSTableIterator {
-
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         tracing::trace!(
@@ -67,7 +69,7 @@ impl SSTableIterator {
                         self.sst.value(),
                         idx as u64,
                         crate::hummock::CachePolicy::Fill,
-                         &mut self.stats,
+                        &mut self.stats,
                     )
                     .await?
             };
@@ -151,14 +153,14 @@ impl HummockIterator for SSTableIterator {
 }
 
 impl SSTableIteratorType for SSTableIterator {
-    fn new(table: TableHolder, sstable_store: SstableStoreRef, read_options: Arc<ReadOptions>) -> Self {
+    fn new(table: TableHolder, sstable_store: SstableStoreRef, options: Arc<ReadOptions>) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
             sst: table,
             sstable_store,
             stats: StoreLocalStatistic::default(),
-            read_options,
+            options,
         }
     }
 }

@@ -126,8 +126,8 @@ impl HummockStorage {
         table: TableHolder,
         internal_key: &[u8],
         key: &[u8],
-        stats: &mut StoreLocalStatistic,
         read_options: Arc<ReadOptions>,
+        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Bytes>> {
         if table.value().surely_not_have_user_key(key) {
             stats.bloom_filter_true_negative_count += 1;

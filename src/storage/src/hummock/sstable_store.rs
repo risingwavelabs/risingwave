@@ -83,12 +83,10 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            // TODO: use concurrent put object
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;
                 self.add_block_cache(sst.id, block_idx as u64, data.slice(offset..offset + len))
-                    .await
                     .unwrap();
             }
             self.meta_cache
@@ -103,7 +101,6 @@ impl SstableStore {
         sst: &Sstable,
         block_index: u64,
     ) -> HummockResult<BlockHolder> {
-        self.stats.sst_store_block_request_counts.inc();
         loop {
             if let Some(block) = self.block_cache.get(sst.id, block_index) {
                 return Ok(block);
@@ -163,7 +160,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn add_block_cache(
+    pub fn add_block_cache(
         &self,
         sst_id: HummockSSTableId,
         block_idx: u64,
@@ -273,11 +270,25 @@ impl SstableStore {
             CachePolicy::Disable => fetch_block.await.map(BlockHolder::from_owned_block),
         }
     }
-    
+
     pub async fn prefetch_sstables(&self, sst_ids: Vec<u64>) -> HummockResult<()> {
         let mut results = vec![];
-        for id in sst_ids {
-            let f = self.sstable(id);
+        for sst_id in sst_ids {
+            let id = sst_id;
+            let f = self
+                .meta_cache
+                .lookup_with_request_dedup(sst_id, sst_id, move || async move {
+                    let path = self.get_sst_meta_path(id);
+                    let buf = self
+                        .store
+                        .read(&path, None)
+                        .await
+                        .map_err(HummockError::object_io_error)?;
+                    let size = buf.len();
+                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let sst = Box::new(Sstable { id, meta });
+                    Ok((sst, size))
+                });
             results.push(f);
         }
         let _ = try_join_all(results).await?;

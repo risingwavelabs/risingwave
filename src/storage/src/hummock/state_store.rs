@@ -91,6 +91,7 @@ impl HummockStorage {
                 overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                     table,
                     self.sstable_store(),
+                    read_options.clone(),
                 )) as BoxedBackwardHummockIterator);
             } else {
                 overlapped_forward_iters.push(Box::new(SSTableIterator::new(
@@ -153,6 +154,7 @@ impl HummockStorage {
                         overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                             table,
                             self.sstable_store(),
+                            read_options.clone(),
                         ))
                             as BoxedBackwardHummockIterator);
                     } else {

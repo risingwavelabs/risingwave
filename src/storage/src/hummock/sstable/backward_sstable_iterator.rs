@@ -140,11 +140,7 @@ impl HummockIterator for BackwardSSTableIterator {
 }
 
 impl SSTableIteratorType for BackwardSSTableIterator {
-    fn new(
-        table: TableHolder,
-        sstable_store: SstableStoreRef,
-        _: Arc<ReadOptions>,
-    ) -> Self {
+    fn new(table: TableHolder, sstable_store: SstableStoreRef, _: Arc<ReadOptions>) -> Self {
         Self {
             block_iter: None,
             cur_idx: table.value().meta.block_metas.len() - 1,
