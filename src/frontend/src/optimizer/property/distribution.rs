@@ -12,6 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//!   "A -> B" represent A satisfies B
+//!                                 x
+//!  only as a required property    x  can used as both required
+//!                                 x  and provided property
+//!                                 x
+//!            ┌───┐                x┌──────┐  ┌─────────┐
+//!            │Any◄──────────┬──────┤single│  │broadcast│
+//!            └─▲─┘          │     x└──────┘  └┬────────┘
+//!              │            │     x           │
+//!              │            └─────────────────┘
+//!              │                  x
+//!          ┌───┴────┐             x┌──────────┐
+//!          │AnyShard◄──────────────┤SomeShard │
+//!          └───▲────┘             x└──────────┘
+//!              │                  x
+//!          ┌───┴───────────┐      x┌──────────────┐ ┌──────────────┐
+//!          │ShardByKey(a,b)◄───┬───┤HashShard(a,b)│ │HashShard(b,a)│
+//!          └───▲──▲────────┘   │  x└──────────────┘ └┬─────────────┘
+//!              │  │            │  x                  │
+//!              │  │            └─────────────────────┘
+//!              │  │               x
+//!              │ ┌┴────────────┐  x┌────────────┐  
+//!              │ │ShardByKey(a)◄───┤HashShard(a)│  
+//!              │ └─────────────┘  x└────────────┘  
+//!              │                  x
+//!             ┌┴────────────┐     x┌────────────┐  
+//!             │ShardByKey(b)◄──────┤HashShard(b)│  
+//!             └─────────────┘     x└────────────┘  
+//!                                 x
+//!                                 x                                   s
+use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -22,16 +53,37 @@ use super::super::plan_node::*;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
+/// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
-    Any,
+    /// there only one partition, and all records on it.
     Single,
+    /// every partition have all same records.
     Broadcast,
-    AnyShard,
+    /// records are shard on partitions, and satisfy the `AnyShard` but without any guarantee about
+    /// their placed rules. **Notice** that it is just for current Scan on StateStore because we do
+    /// not have a partition information in the table catalog and execution can not scan a table
+    /// parallel with any partitions. It will be **deprecated** some day.
+    SomeShard,
+    /// records are shard on partitions based on hash value of some keys, which means the records
+    /// with same hash values must be on the same partition.
     HashShard(Vec<usize>),
 }
 
-static ANY_DISTRIBUTION: Distribution = Distribution::Any;
+/// the distribution property requirement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RequiredDist {
+    /// with any distribution
+    Any,
+    /// records are shard on partitions, which means every record should belong to a partition
+    AnyShard,
+    /// records are shard on partitions based on some keys(order-irrelevance, ShardByKey({a,b}) is
+    /// equivalent with ShardByKey({b,a})), which means the records with same keys must be on
+    /// the same partition, as required property only.
+    ShardByKey(FixedBitSet),
+    /// must be the same with the physical distribution
+    PhysicalDist(Distribution),
+}
 
 impl Distribution {
     pub fn to_prost(&self, output_count: u32) -> ExchangeInfo {
@@ -40,8 +92,8 @@ impl Distribution {
                 Distribution::Single => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
                 Distribution::HashShard(_) => DistributionMode::Hash,
-                // TODO: Should panic if AnyShard or Any
-                _ => DistributionMode::Single,
+                // FIXME(st1pge): see Distribution::SomeShard for more information
+                Distribution::SomeShard => DistributionMode::Single,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -52,78 +104,27 @@ impl Distribution {
                     output_count,
                     keys: keys.iter().map(|num| *num as u32).collect(),
                 })),
-                // TODO: Should panic if AnyShard or Any
-                _ => None,
+                // FIXME(st1pge): see Distribution::SomeShard for more information
+                Distribution::SomeShard => None,
             },
         }
     }
 
-    pub fn enforce_if_not_satisfies(
-        &self,
-        plan: PlanRef,
-        required_order: &Order,
-    ) -> Result<PlanRef> {
-        if !plan.distribution().satisfies(self) {
-            Ok(self.enforce(plan, required_order))
-        } else {
-            Ok(plan)
-        }
-    }
-
-    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
-        match plan.convention() {
-            Convention::Batch => {
-                BatchExchange::new(plan, required_order.clone(), self.clone()).into()
+    /// check if the distribution satisfies other required distribution
+    pub fn satisfies(&self, required: &RequiredDist) -> bool {
+        match required {
+            RequiredDist::Any => true,
+            RequiredDist::AnyShard => {
+                matches!(self, Distribution::SomeShard | Distribution::HashShard(_))
             }
-            Convention::Stream => StreamExchange::new(plan, self.clone()).into(),
-            _ => unreachable!(),
-        }
-    }
-
-    // "A -> B" represent A satisfies B
-    //                   +---+
-    //                   |Any|
-    //                   +---+
-    //                     ^
-    //         +-----------------------+
-    //         |           |           |
-    //     +---+----+   +--+---+  +----+----+
-    //     |Anyshard|   |single|  |broadcast|
-    //     +---+----+   +------+  +---------+
-    //         ^
-    // +-------+-------+
-    // |hash_shard(a,b)|
-    // +---------------+
-    //         ^
-    //  +------+------+
-    //  |hash_shard(a)|
-    //  +------+------+
-    // HashShard(a,b) means no records with same (a,b) on the different shards.
-    // HashShard(a) means no records same (a) on the different shards.
-    // then HashShard(a) satisfy HashShard(a, b).
-    pub fn satisfies(&self, other: &Distribution) -> bool {
-        match self {
-            Distribution::Any => matches!(other, Distribution::Any),
-            Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),
-            Distribution::Broadcast => matches!(other, Distribution::Any | Distribution::Broadcast),
-            Distribution::AnyShard => matches!(other, Distribution::Any | Distribution::AnyShard),
-            Distribution::HashShard(keys) => match other {
-                Distribution::Any => true,
-                Distribution::AnyShard => true,
-                Distribution::HashShard(other_keys) => keys
+            RequiredDist::ShardByKey(required_keys) => match self {
+                Distribution::HashShard(hash_keys) => hash_keys
                     .iter()
-                    .all(|key| other_keys.iter().any(|other_key| key == other_key)),
+                    .all(|hash_key| required_keys.contains(*hash_key)),
                 _ => false,
             },
+            RequiredDist::PhysicalDist(other) => self == other,
         }
-    }
-
-    pub fn any() -> &'static Self {
-        &ANY_DISTRIBUTION
-    }
-
-    pub fn is_any(&self) -> bool {
-        matches!(self, Distribution::Any)
     }
 
     /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
@@ -137,32 +138,63 @@ impl Distribution {
     }
 }
 
+impl RequiredDist {
+    pub fn enforce_if_not_satisfies(
+        &self,
+        plan: PlanRef,
+        required_order: &Order,
+    ) -> Result<PlanRef> {
+        if !plan.distribution().satisfies(self) {
+            Ok(self.enforce(plan, required_order))
+        } else {
+            Ok(plan)
+        }
+    }
+
+    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+        let dist = match self {
+            RequiredDist::Any => unreachable!(),
+            // TODO: add round robin distributed type
+            RequiredDist::AnyShard => todo!(),
+            RequiredDist::ShardByKey(required_keys) => {
+                Distribution::HashShard(required_keys.ones().collect())
+            }
+            RequiredDist::PhysicalDist(dist) => dist.clone(),
+        };
+        match plan.convention() {
+            Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
+            Convention::Stream => StreamExchange::new(plan, dist).into(),
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Distribution;
+    // use super::Distribution;
 
-    fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
-        assert!(!uni.satisfies(sub));
-        assert!(sub.satisfies(uni));
-    }
+    // fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
+    //     assert!(!uni.satisfies(sub));
+    //     assert!(sub.satisfies(uni));
+    // }
 
-    fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
-        assert!(!d1.satisfies(d2));
-        assert!(!d2.satisfies(d1));
-    }
+    // fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
+    //     assert!(!d1.satisfies(d2));
+    //     assert!(!d2.satisfies(d1));
+    // }
 
-    #[test]
-    fn hash_shard_satisfy() {
-        let d1 = Distribution::HashShard(vec![0, 2, 4, 6, 8]);
-        let d2 = Distribution::HashShard(vec![2, 4]);
-        let d3 = Distribution::HashShard(vec![4, 6]);
-        let d4 = Distribution::HashShard(vec![6, 8]);
-        test_hash_shard_subset(&d1, &d2);
-        test_hash_shard_subset(&d1, &d3);
-        test_hash_shard_subset(&d1, &d4);
-        test_hash_shard_subset(&d1, &d2);
-        test_hash_shard_false(&d2, &d3);
-        test_hash_shard_false(&d2, &d4);
-        test_hash_shard_false(&d3, &d4);
-    }
+    // #[test]
+    // fn hash_shard_satisfy() {
+    //     let d1 = Distribution::HashShard(vec![0, 2, 4, 6, 8]);
+    //     let d2 = Distribution::HashShard(vec![2, 4]);
+    //     let d3 = Distribution::HashShard(vec![4, 6]);
+    //     let d4 = Distribution::HashShard(vec![6, 8]);
+    //     test_hash_shard_subset(&d1, &d2);
+    //     test_hash_shard_subset(&d1, &d3);
+    //     test_hash_shard_subset(&d1, &d4);
+    //     test_hash_shard_subset(&d1, &d2);
+    //     test_hash_shard_false(&d2, &d3);
+    //     test_hash_shard_false(&d2, &d4);
+    //     test_hash_shard_false(&d3, &d4);
+    // }
 }
