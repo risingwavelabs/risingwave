@@ -34,7 +34,7 @@ impl StreamSource {
             logical.ctx(),
             logical.schema().clone(),
             logical.pk_indices().to_vec(),
-            Distribution::any().clone(),
+            Distribution::SomeShard,
             false, // TODO: determine the `append-only` field of source
         );
         Self { base, logical }
