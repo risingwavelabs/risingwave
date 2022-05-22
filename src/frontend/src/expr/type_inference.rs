@@ -162,6 +162,17 @@ fn build_commutative_funcs(
     map.insert(FuncSign::new(expr, vec![arg1, arg0]), ret);
 }
 
+fn build_round_funcs(map: &mut HashMap<FuncSign, DataTypeName>, expr: ExprType) {
+    map.insert(
+        FuncSign::new(expr, vec![DataTypeName::Float64]),
+        DataTypeName::Float64,
+    );
+    map.insert(
+        FuncSign::new(expr, vec![DataTypeName::Decimal]),
+        DataTypeName::Decimal,
+    );
+}
+
 fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     use {DataTypeName as T, ExprType as E};
     let mut map = HashMap::new();
@@ -240,6 +251,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Decimal,
     );
 
+    build_round_funcs(&mut map, E::Round);
+    build_round_funcs(&mut map, E::Ceil);
+    build_round_funcs(&mut map, E::Floor);
     // temporal expressions
     for (base, delta) in [
         (T::Date, T::Int32),
