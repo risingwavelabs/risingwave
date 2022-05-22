@@ -19,14 +19,18 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
+use paste::paste;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
+use risingwave_connector::base::{
+    KAFKA_SPLIT_TYPE, KINESIS_SPLIT_TYPE, NEXMARK_SPLIT_TYPE, PULSAR_SPLIT_TYPE,
+};
 use risingwave_connector::state::SourceStateHandler;
-use risingwave_connector::{ConnectorState, ConnectorStateV2, SplitImpl};
+use risingwave_connector::{ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -63,9 +67,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     split_state_store: SourceStateHandler<S>,
 
-    // store latest split to offset mapping.
-    // None if there is no update on source state since the previsouly seen barrier.
-    state_cache: Option<Vec<ConnectorState>>,
+    state_cache: HashMap<String, SplitImpl>,
 
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
@@ -100,7 +102,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             split_state_store: SourceStateHandler::new(keyspace),
-            state_cache: None,
+            state_cache: HashMap::new(),
             expected_barrier_latency_ms,
         })
     }
@@ -212,7 +214,41 @@ impl SourceReader {
     }
 }
 
+macro_rules! impl_take_snapshot {
+    ([], $state_store: expr, $epoch: ident, $vec_split_impl: ident, $({$connector: ident, $connector_split_type: ident}), *) => {
+        paste! {
+            match $vec_split_impl[0].get_type().as_str() {
+                $(
+                    $connector_split_type => {
+                        let type_cache = $vec_split_impl.iter().map(|split_impl| split_impl.[<get_ $connector>]()).collect::<anyhow::Result<Vec<_>>>().to_rw_result()?;
+                        $state_store.take_snapshot(type_cache, $epoch).await.to_rw_result()?;
+                    },
+                )*
+                _ => todo!(),
+            }
+        }
+    };
+}
+
 impl<S: StateStore> SourceExecutor<S> {
+    async fn take_snapshot(&mut self, epoch: u64) -> Result<()> {
+        let cache = self
+            .state_cache
+            .iter()
+            .map(|(_, split_impl)| split_impl)
+            .collect::<Vec<_>>();
+        if !cache.is_empty() {
+            impl_take_snapshot!([], self.split_state_store, epoch, cache,
+                { kafka, KAFKA_SPLIT_TYPE },
+                { kinesis, KINESIS_SPLIT_TYPE },
+                { nexmark, NEXMARK_SPLIT_TYPE },
+                { pulsar, PULSAR_SPLIT_TYPE }
+            );
+            self.state_cache.clear();
+        }
+        Ok(())
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
@@ -220,16 +256,25 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let epoch = barrier.epoch.prev;
 
-        let mut recover_state = ConnectorStateV2::Splits(self.stream_source_splits.clone());
+        let mut boot_state = self.stream_source_splits.clone();
         if !self.stream_source_splits.is_empty() {
-            if let Ok(state) = self
-                .split_state_store
-                .try_recover_from_state_store(&self.stream_source_splits[0], epoch)
-                .await
-            {
-                recover_state = ConnectorStateV2::State(state);
+            for ele in &mut boot_state {
+                match self
+                    .split_state_store
+                    .try_recover_from_state_store(ele, epoch)
+                    .await
+                {
+                    Ok(recover_state) if recover_state.is_some() => {
+                        *ele = recover_state.unwrap();
+                    }
+                    Err(e) => {
+                        return Err(StreamExecutorError::source_error(e));
+                    }
+                    _ => {}
+                }
             }
         }
+        let recover_state = ConnectorStateV2::Splits(boot_state);
 
         // todo: use epoch from msg to restore state from state store
         let stream_reader = match self.source_desc.source.as_ref() {
@@ -262,17 +307,9 @@ impl<S: StateStore> SourceExecutor<S> {
                     match barrier.map_err(StreamExecutorError::source_error)? {
                         Message::Barrier(barrier) => {
                             let epoch = barrier.epoch.prev;
-                            if self.state_cache.is_some() {
-                                self.split_state_store
-                                    .take_snapshot(self.state_cache.clone().unwrap(), epoch)
-                                    .await
-                                    .map_err(|e| {
-                                        StreamExecutorError::source_error(RwError::from(
-                                            InternalError(e.to_string()),
-                                        ))
-                                    })?;
-                                self.state_cache = None;
-                            }
+                            self.take_snapshot(epoch)
+                                .await
+                                .map_err(StreamExecutorError::source_error)?;
                             yield Message::Barrier(barrier)
                         }
                         _ => unreachable!(),
@@ -282,9 +319,10 @@ impl<S: StateStore> SourceExecutor<S> {
                     let chunk_with_state =
                         chunk_with_state.map_err(StreamExecutorError::source_error)?;
                     if chunk_with_state.split_offset_mapping.is_some() {
-                        self.state_cache = Some(ConnectorState::from_hashmap(
-                            chunk_with_state.split_offset_mapping.unwrap(),
-                        ));
+                        // self.state_cache = Some(ConnectorState::from_hashmap(
+                        //     chunk_with_state.split_offset_mapping.unwrap(),
+                        // ));
+                        todo!("build split_impl records");
                     }
                     let mut chunk = chunk_with_state.chunk;
 

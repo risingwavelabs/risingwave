@@ -18,6 +18,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
+use paste::paste;
 use serde::{Deserialize, Serialize};
 
 use crate::datagen::{
@@ -67,6 +68,12 @@ pub trait SplitReader: Sized {
     ) -> Result<Self>;
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
+
+pub const PULSAR_SPLIT_TYPE: &str = "pulsar";
+pub const S3_SPLIT_TYPE: &str = "s3";
+pub const KINESIS_SPLIT_TYPE: &str = "kinesis";
+pub const KAFKA_SPLIT_TYPE: &str = "kafka";
+pub const NEXMARK_SPLIT_TYPE: &str = "nexmark";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
@@ -260,4 +267,20 @@ pub enum ConnectorStateV2 {
     State(ConnectorState),
     Splits(Vec<SplitImpl>),
     None,
+}
+
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn test_split_impl_get_fn() -> Result<()> {
+        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split_impl = SplitImpl::Kafka(split.clone());
+        let get_value = split_impl.get_kafka()?;
+        println!("{:?}", get_value);
+        assert_eq!(split.encode_to_bytes(), get_value.encode_to_bytes());
+
+        Ok(())
+    }
 }

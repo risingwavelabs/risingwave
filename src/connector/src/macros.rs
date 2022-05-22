@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[allow(unused_imports)]
+use paste::paste;
+
 #[macro_export]
 macro_rules! impl_split_enumerator {
     ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
@@ -62,6 +65,22 @@ macro_rules! impl_split {
                     other => Err(anyhow!("split type {} not supported", other)),
                 }
             }
+
+            $(
+                paste! {
+                pub fn [<get_ $variant_name:lower>](&self) -> Result<$split> {
+                    match self.get_type().as_str() {
+                        $connector_name => {
+                            match self {
+                                Self::$variant_name(ele) => Ok(ele.clone()),
+                                _ => unreachable!(),
+                            }
+                        },
+                        _ => unreachable!(),
+                    }
+                }
+                }
+            )*
         }
     }
 }
