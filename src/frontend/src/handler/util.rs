@@ -60,21 +60,22 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
 
 /// Convert column descs to rows which conclude name and type
 pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
-    let mut rows = vec![];
-    for col in columns {
-        rows.extend(col.flatten().into_iter().map(|c| {
-            let type_name = {
-                // If datatype is struct, use type name as struct name
-                if let DataType::Struct { fields: _f } = c.data_type {
-                    c.type_name.clone()
-                } else {
-                    format!("{:?}", &c.data_type)
-                }
-            };
-            Row::new(vec![Some(c.name), Some(type_name)])
-        }));
-    }
-    rows
+    columns
+        .iter()
+        .flat_map(|col| {
+            col.flatten()
+                .into_iter()
+                .map(|c| {
+                    let type_name = if let DataType::Struct { fields: _f } = c.data_type {
+                        c.type_name.clone()
+                    } else {
+                        format!("{:?}", &c.data_type)
+                    };
+                    Row::new(vec![Some(c.name), Some(type_name)])
+                })
+                .collect_vec()
+        })
+        .collect_vec()
 }
 
 /// Convert from [`Field`] to [`PgFieldDescriptor`].

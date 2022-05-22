@@ -70,23 +70,19 @@ pub async fn handle_describe(
     let mut rows = col_descs_to_rows(columns);
 
     // Convert all indexs to rows
-    rows.append(
-        &mut indexs
+    rows.extend(indexs.iter().map(|i| {
+        let s = i
+            .distribution_keys
             .iter()
-            .map(|i| {
-                let s = i
-                    .distribution_keys
-                    .iter()
-                    .map(|c| i.columns[*c].name().to_string())
-                    .collect_vec();
-                Row::new(vec![
-                    Some(i.name.clone()),
-                    Some(format!("index({})", display_comma_separated(&s))),
-                ])
-            })
-            .collect_vec(),
-    );
+            .map(|c| i.columns[*c].name().to_string())
+            .collect_vec();
+        Row::new(vec![
+            Some(i.name.clone()),
+            Some(format!("index({})", display_comma_separated(&s))),
+        ])
+    }));
 
+    // TODO: recover the original user statement
     Ok(PgResponse::new(
         StatementType::DESCRIBE_TABLE,
         rows.len() as i32,
