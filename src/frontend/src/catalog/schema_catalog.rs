@@ -77,6 +77,7 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    /// Iterate all materialized views, excluding the indexs.
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
@@ -84,6 +85,7 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    /// Iterate all indexs, excluding the materialized views.
     pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()

@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use crate::binder::Binder;
 use crate::catalog::table_catalog::TableCatalog;
@@ -69,16 +69,20 @@ pub async fn handle_describe(
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
+    // Convert all indexs to rows
     rows.append(
         &mut indexs
             .iter()
             .map(|i| {
-                let mut s = "".to_string();
-                i.distribution_keys.iter().for_each(|c| {
-                    s = s.clone() + i.columns[*c].name() + ",";
-                });
-                s = s[0..s.len() - 1].to_string();
-                Row::new(vec![Some(i.name.clone()), Some(format!("index({})", s))])
+                let s = i
+                    .distribution_keys
+                    .iter()
+                    .map(|c| i.columns[*c].name().to_string())
+                    .collect_vec();
+                Row::new(vec![
+                    Some(i.name.clone()),
+                    Some(format!("index({})", display_comma_separated(&s))),
+                ])
             })
             .collect_vec(),
     );
@@ -88,8 +92,8 @@ pub async fn handle_describe(
         rows.len() as i32,
         rows,
         vec![
-            PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar),
-            PgFieldDescriptor::new("type".to_owned(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
         ],
     ))
 }
