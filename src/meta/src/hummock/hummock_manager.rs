@@ -676,6 +676,7 @@ where
         Ok(true)
     }
 
+    /// Caller should ensure `epoch` > `max_committed_epoch`
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
@@ -691,12 +692,11 @@ where
         let mut new_hummock_version =
             hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
         new_hummock_version.id = current_version_id.id();
-        // TODO: return error instead of panic
         if epoch <= new_hummock_version.max_committed_epoch {
-            panic!(
+            return Err(Error::InternalError(format!(
                 "Epoch {} <= max_committed_epoch {}",
                 epoch, new_hummock_version.max_committed_epoch
-            );
+            )));
         }
 
         // Track SSTs in meta.
@@ -720,8 +720,10 @@ where
                         )));
                     }
                     if sst_id_info.meta_create_timestamp != INVALID_TIMESTAMP {
-                        // This is a duplicate request.
-                        return Ok(());
+                        return Err(Error::InternalError(format!(
+                            "SST id {} has been committed",
+                            sst_id
+                        )));
                     }
                     sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
                 }
