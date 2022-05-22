@@ -134,7 +134,7 @@ mod tests {
         let expected_columns = maplit::hashmap! {
             "v1" => "Int32",
             "v2" => "Int32",
-            "idx1" => "index(v1,v2)",
+            "idx1" => "index(v1, v2)",
         };
 
         assert_eq!(columns, expected_columns);
