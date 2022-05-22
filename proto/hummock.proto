@@ -56,7 +56,6 @@ message HummockVersionRefId {
 message HummockVersion {
   uint64 id = 1;
   repeated Level levels = 2;
-  repeated UncommittedEpoch uncommitted_epochs = 3;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
@@ -65,17 +64,6 @@ message HummockVersion {
 
 message HummockSnapshot {
   uint64 epoch = 1;
-}
-
-message AddTablesRequest {
-  uint32 context_id = 1;
-  repeated SstableInfo tables = 2;
-  uint64 epoch = 3;
-}
-
-message AddTablesResponse {
-  common.Status status = 1;
-  HummockVersion version = 2;
 }
 
 message PinVersionRequest {
@@ -223,22 +211,6 @@ message HummockStaleSstables {
   repeated uint64 id = 2;
 }
 
-message CommitEpochRequest {
-  uint64 epoch = 1;
-}
-
-message CommitEpochResponse {
-  common.Status status = 1;
-}
-
-message AbortEpochRequest {
-  uint64 epoch = 1;
-}
-
-message AbortEpochResponse {
-  common.Status status = 1;
-}
-
 message GetNewTableIdRequest {}
 
 message GetNewTableIdResponse {
@@ -270,12 +242,9 @@ message ReportVacuumTaskResponse {
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
-  rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
-  rpc CommitEpoch(CommitEpochRequest) returns (CommitEpochResponse);
-  rpc AbortEpoch(AbortEpochRequest) returns (AbortEpochResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);

@@ -43,11 +43,10 @@ where
     ];
     let test_tables = generate_test_tables(epoch, table_ids);
     hummock_manager
-        .add_tables(context_id, test_tables.clone(), epoch)
+        .commit_epoch(epoch, test_tables.clone())
         .await
         .unwrap();
-    hummock_manager.commit_epoch(epoch).await.unwrap();
-    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables]}
+    // Current state: {v0: [], v1: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
     let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
@@ -65,8 +64,7 @@ where
         .report_compact_task(&compact_task)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
-    // test_tables to_delete]}
+    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
 
     // Increase version by 1.
     epoch += 1;
@@ -75,11 +73,11 @@ where
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
     hummock_manager
-        .add_tables(context_id, test_tables_3.clone(), epoch)
+        .commit_epoch(epoch, test_tables_3.clone())
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
-    // to_delete:test_tables], v4: [test_tables_2, test_tables_3 uncommitted]}
+    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
+    // [test_tables_2, test_tables_3]}
     vec![test_tables, test_tables_2, test_tables_3]
 }
 

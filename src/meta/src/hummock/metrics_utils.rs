@@ -27,11 +27,6 @@ pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersi
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
-    let uncommitted_sst_num = current_version
-        .uncommitted_epochs
-        .iter()
-        .fold(0, |accum, elem| accum + elem.tables.len());
-    metrics.uncommitted_sst_num.set(uncommitted_sst_num as i64);
     metrics
         .version_size
         .set(current_version.encoded_len() as i64);

@@ -22,18 +22,8 @@ use risingwave_pb::hummock::{
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{HummockEpoch, HummockError, HummockSSTableId, HummockVersionId};
+use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
-
-#[derive(Default)]
-pub struct RetryableError {}
-
-impl tokio_retry::Condition<HummockError> for RetryableError {
-    fn should_retry(&mut self, _error: &HummockError) -> bool {
-        // TODO #2745 define retryable error here
-        false
-    }
-}
 
 pub struct MonitoredHummockMetaClient {
     meta_client: MetaClient,
@@ -89,18 +79,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn add_tables(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
-    ) -> Result<HummockVersion> {
-        self.stats.add_tables_counts.inc();
-        let timer = self.stats.add_tables_latency.start_timer();
-        let res = self.meta_client.add_tables(epoch, sstables).await;
-        timer.observe_duration();
-        res
-    }
-
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         self.stats.report_compaction_task_counts.inc();
         let timer = self.stats.report_compaction_task_latency.start_timer();
@@ -109,12 +87,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
         Err(ErrorCode::NotImplemented("commit_epoch unsupported".to_string(), None.into()).into())
-    }
-
-    async fn abort_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        Err(ErrorCode::NotImplemented("abort_epoch unsupported".to_string(), None.into()).into())
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {

@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_pb::hummock::SstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -229,6 +230,10 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
         }
+    }
+
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+        self.inner.get_uncommitted_ssts(epoch)
     }
 }
 

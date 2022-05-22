@@ -286,15 +286,15 @@ mod tests {
             .unwrap();
 
         add_test_tables(hummock_manager.as_ref(), context_id).await;
-        // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3:
-        // [test_tables_2, to_delete:test_tables], v4: [test_tables_2, test_tables_3 uncommitted]}
+        // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
+        // v3: [test_tables_2, test_tables_3]}
 
-        // Vacuum v0, v1, v2, v3
+        // Vacuum v0, v1, v2
         assert_eq!(
             VacuumTrigger::vacuum_version_metadata(&vacuum)
                 .await
                 .unwrap(),
-            4
+            3
         );
     }
 
@@ -362,15 +362,15 @@ mod tests {
         let _receiver = compactor_manager.add_compactor(0);
 
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3:
-        // [test_tables_2, to_delete:test_tables], v4: [test_tables_2, test_tables_3 uncommitted]}
+        // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
+        // v3: [test_tables_2, test_tables_3]}
 
-        // Vacuum v0, v1, v2, v3
+        // Vacuum v0, v1, v2
         assert_eq!(
             VacuumTrigger::vacuum_version_metadata(&vacuum)
                 .await
                 .unwrap(),
-            4
+            3
         );
 
         // Found test_table is marked for deletion.

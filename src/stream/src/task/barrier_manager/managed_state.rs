@@ -103,6 +103,8 @@ impl ManagedBarrierState {
                     // Notify about barrier finishing.
                     let result = CollectResult {
                         finished_create_mviews,
+
+                        synced_sstables: vec![],
                     };
                     if collect_notifier.send(result).is_err() {
                         warn!("failed to notify barrier collection with epoch {}", epoch)

@@ -140,7 +140,7 @@ mod tests {
 
     async fn add_compact_task<S>(
         hummock_manager_ref: &HummockManager<S>,
-        context_id: u32,
+        _context_id: u32,
         epoch: u64,
     ) where
         S: MetaStore,
@@ -150,10 +150,9 @@ mod tests {
             vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
         );
         hummock_manager_ref
-            .add_tables(context_id, original_tables.clone(), epoch)
+            .commit_epoch(epoch, original_tables)
             .await
             .unwrap();
-        hummock_manager_ref.commit_epoch(epoch).await.unwrap();
     }
 
     fn dummy_compact_task(task_id: u64) -> CompactTask {

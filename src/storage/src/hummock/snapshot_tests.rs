@@ -90,7 +90,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     if enable_sync {
         hummock_storage.sync(Some(epoch1)).await.unwrap();
         if enable_commit {
-            mock_hummock_meta_client.commit_epoch(epoch1).await.unwrap();
+            mock_hummock_meta_client
+                .commit_epoch(
+                    epoch1,
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch1),
+                )
+                .await
+                .unwrap();
             vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
         }
     }
@@ -111,7 +119,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     if enable_sync {
         hummock_storage.sync(Some(epoch2)).await.unwrap();
         if enable_commit {
-            mock_hummock_meta_client.commit_epoch(epoch2).await.unwrap();
+            mock_hummock_meta_client
+                .commit_epoch(
+                    epoch2,
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch2),
+                )
+                .await
+                .unwrap();
             vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
         }
     }
@@ -133,7 +149,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     if enable_sync {
         hummock_storage.sync(Some(epoch3)).await.unwrap();
         if enable_commit {
-            mock_hummock_meta_client.commit_epoch(epoch3).await.unwrap();
+            mock_hummock_meta_client
+                .commit_epoch(
+                    epoch3,
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch3),
+                )
+                .await
+                .unwrap();
             vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
         }
     }
@@ -178,7 +202,15 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     if enable_sync {
         hummock_storage.sync(Some(epoch)).await.unwrap();
         if enable_commit {
-            mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
+            mock_hummock_meta_client
+                .commit_epoch(
+                    epoch,
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch),
+                )
+                .await
+                .unwrap();
             vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
         }
     }
@@ -233,7 +265,15 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     if enable_sync {
         hummock_storage.sync(Some(epoch)).await.unwrap();
         if enable_commit {
-            mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
+            mock_hummock_meta_client
+                .commit_epoch(
+                    epoch,
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch),
+                )
+                .await
+                .unwrap();
             vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
         }
     }
@@ -253,7 +293,12 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         hummock_storage.sync(Some(epoch + 1)).await.unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch + 1)
+                .commit_epoch(
+                    epoch + 1,
+                    hummock_storage
+                        .local_version_manager
+                        .get_uncommitted_ssts(epoch + 1),
+                )
                 .await
                 .unwrap();
             vm.refresh_version(mock_hummock_meta_client.as_ref()).await;

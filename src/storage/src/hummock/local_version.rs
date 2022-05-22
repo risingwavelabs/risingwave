@@ -114,7 +114,6 @@ impl LocalVersion {
         }
     }
 
-    #[cfg(test)]
     pub fn get_uncommitted_ssts(&self) -> UncommittedSsts {
         self.uncommitted_ssts.clone()
     }
