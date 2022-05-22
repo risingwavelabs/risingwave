@@ -82,7 +82,7 @@ impl ToDistributedBatch for BatchHopWindow {
             .logical
             .o2i_col_mapping()
             .rewrite_required_distribution(required_dist)
-            .unwrap_or(Distribution::Any);
+            .unwrap_or(Distribution::SomeShard);
         let new_input = self
             .input()
             .to_distributed_with_required(required_order, &input_required)?;

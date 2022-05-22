@@ -24,7 +24,7 @@ use super::{
 };
 use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -65,14 +65,21 @@ impl BatchHashJoin {
         l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
-            (Distribution::Any, Distribution::Any) => Distribution::Any,
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
-                assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
+                assert!(
+                    left.satisfies(&RequiredDist::PhysicalDist(Distribution::HashShard(
+                        predicate.left_eq_indexes()
+                    )))
+                );
+                assert!(
+                    right.satisfies(&RequiredDist::PhysicalDist(Distribution::HashShard(
+                        predicate.right_eq_indexes()
+                    )))
+                );
                 l2o_mapping.rewrite_provided_distribution(left)
             }
-            (_, _) => panic!(),
+            (_, _) => unreachable!(),
         }
     }
 

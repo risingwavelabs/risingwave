@@ -37,13 +37,12 @@ impl BatchHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Any => Distribution::Any,
             Distribution::Single => Distribution::Single,
-            Distribution::Broadcast => panic!(),
-            Distribution::AnyShard => Distribution::AnyShard,
+            Distribution::Broadcast => unreachable!(),
             Distribution::HashShard(_) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),
+            Distribution::SomeShard => Distribution::SomeShard,
         };
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchHashAgg { base, logical }

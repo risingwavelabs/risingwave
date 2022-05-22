@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::InputRefDisplay;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, RequiredDist};
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
@@ -35,18 +35,17 @@ impl StreamHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Any => panic!(),
             Distribution::Single => Distribution::Single,
             Distribution::Broadcast => panic!(),
-            Distribution::AnyShard => panic!(),
             Distribution::HashShard(_) => {
-                assert!(
-                    input_dist.satisfies(&Distribution::HashShard(logical.group_keys().to_vec()))
-                );
+                assert!(input_dist.satisfies(&RequiredDist::PhysicalDist(
+                    Distribution::HashShard(logical.group_keys().to_vec())
+                )));
                 logical
                     .i2o_col_mapping()
                     .rewrite_provided_distribution(input_dist)
             }
+            Distribution::SomeShard => Distribution::SomeShard,
         };
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);

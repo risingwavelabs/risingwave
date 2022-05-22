@@ -87,7 +87,7 @@ impl ToDistributedBatch for BatchProject {
                 .rewrite_required_distribution(required_dist)
                 .unwrap_or(Distribution::AnyShard),
             Distribution::AnyShard => Distribution::AnyShard,
-            _ => Distribution::Any,
+            _ => Distribution::SomeShard,
         };
         let new_input = self
             .input()

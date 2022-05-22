@@ -38,7 +38,7 @@ impl BatchDelete {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            Distribution::any().clone(),
+            Distribution::Single,
             Order::any().clone(),
         );
         Self { base, logical }
