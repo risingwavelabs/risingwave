@@ -25,7 +25,7 @@ use risingwave_pb::batch_plan::{
     TaskId as TaskIdProst, TaskOutputId,
 };
 use risingwave_pb::common::HostAddress;
-use risingwave_rpc_client::ComputeClient;
+use risingwave_rpc_client::{ComputeClient, ComputeClientPoolRef};
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
@@ -99,6 +99,7 @@ pub struct StageExecution {
     ///
     /// We use `Vec` here since children's size is usually small.
     children: Vec<Arc<StageExecution>>,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 struct StageRunner {
@@ -111,6 +112,7 @@ struct StageRunner {
     // Send message to `QueryRunner` to notify stage state change.
     msg_sender: Sender<QueryMessage>,
     children: Vec<Arc<StageExecution>>,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl TaskStatusHolder {
@@ -137,6 +139,7 @@ impl StageExecution {
         worker_node_manager: WorkerNodeManagerRef,
         msg_sender: Sender<QueryMessage>,
         children: Vec<Arc<StageExecution>>,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         let tasks = (0..stage.parallelism)
             .into_iter()
@@ -150,6 +153,7 @@ impl StageExecution {
             state: Arc::new(RwLock::new(Pending)),
             msg_sender,
             children,
+            compute_client_pool,
         }
     }
 
@@ -168,6 +172,7 @@ impl StageExecution {
                     msg_sender: self.msg_sender.clone(),
                     children: self.children.clone(),
                     state: self.state.clone(),
+                    compute_client_pool: self.compute_client_pool.clone(),
                 };
                 let handle = spawn(async move {
                     if let Err(e) = runner.run().await {
@@ -307,7 +312,10 @@ impl StageRunner {
 
     async fn schedule_task(&self, task_id: TaskIdProst, plan_fragment: PlanFragment) -> Result<()> {
         let worker_node = self.worker_node_manager.next_random()?;
-        let compute_client = ComputeClient::new(worker_node.host.as_ref().unwrap().into()).await?;
+        let compute_client = self
+            .compute_client_pool
+            .get_client_for_addr(worker_node.host.as_ref().unwrap().into())
+            .await?;
 
         let t_id = task_id.task_id;
         compute_client
