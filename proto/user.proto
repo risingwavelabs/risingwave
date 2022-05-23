@@ -79,7 +79,7 @@ message GrantPrivilege {
     bool with_grant_option = 2;
   }
 
-   oneof target {
+  oneof target {
     GrantDatabase grant_database = 1;
     GrantSchema grant_schema = 2;
     GrantTable grant_table = 3;
