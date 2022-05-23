@@ -233,13 +233,15 @@ impl LogicalJoin {
     ) -> Vec<usize> {
         let l2o = Self::l2o_col_mapping_inner(left_len, right_len, join_type);
         let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
+        let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+        let i2o = ColIndexMapping::with_remaining_columns(output_indices, out_col_num).inverse();
         left_pk
             .iter()
             .map(|index| l2o.try_map(*index))
             .chain(right_pk.iter().map(|index| r2o.try_map(*index)))
-            .flatten()
-            .filter(|i| output_indices.contains(i))
-            .collect()
+            .map(|index| index.map(|i| i2o.try_map(i)).flatten())
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
     }
 
     /// Get a reference to the logical join's on.
@@ -656,7 +658,9 @@ impl ToBatch for LogicalJoin {
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
-        let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
+        let new_output_indices = logical_join.output_indices.clone();
+        let new_internal_column_num = logical_join.internal_column_num();
+        let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
         let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
 
         let plan = if predicate.has_eq() {
@@ -690,8 +694,8 @@ impl ToBatch for LogicalJoin {
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
-                    &self.output_indices,
-                    self.internal_column_num(),
+                    &new_output_indices,
+                    new_internal_column_num,
                 ),
             );
             Ok(BatchProject::new(logical_project).into())
@@ -724,7 +728,9 @@ impl ToStream for LogicalJoin {
             left = left_dist.enforce(left, Order::any());
         }
         let logical_join = self.clone_with_left_right(left, right);
-        let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
+        let new_output_indices = logical_join.output_indices.clone();
+        let new_internal_column_num = logical_join.internal_column_num();
+        let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
 
         let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
 
@@ -761,14 +767,13 @@ impl ToStream for LogicalJoin {
         if self.output_indices != default_indices {
             println!(
                 "OI: {:?}, COL NUM: {:?}",
-                &self.output_indices,
-                self.internal_column_num(),
+                &new_output_indices, new_internal_column_num,
             );
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
-                    &self.output_indices,
-                    self.internal_column_num(),
+                    &new_output_indices,
+                    new_internal_column_num,
                 ),
             );
             Ok(StreamProject::new(logical_project).into())
