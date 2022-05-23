@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::field_generator::{FieldKind,FieldGeneratorImpl};
+use super::field_generator::{FieldGeneratorImpl, FieldKind};
 use super::generator::DatagenEventGenerator;
 use crate::datagen::DatagenProperties;
 use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader};
@@ -55,8 +55,21 @@ impl SplitReader for DatagenSplitReader {
             let name = column.name.clone();
             let kind_key = format!("field.{}.kind", name);
             match column.data_type{
-                DataType::Varchar => {                                
-                    let length_key = format!("field.{}.length", name);
+                DataType::Timestamp => {
+                let max_past_key = format!("field.{}.max_past", name);
+                let max_past_key_option =
+                fields_option_map.get(&max_past_key).map(|s| s.to_string());
+                fields_map.insert(
+                    name,
+                    FieldGeneratorImpl::new(
+                        column.data_type.clone(),
+                            FieldKind::Random,
+                            max_past_key_option,
+                        None,
+                    )?,
+                );},
+                DataType::Varchar => {
+                let length_key = format!("field.{}.length", name);
                 let length_key_option =
                 fields_option_map.get(&length_key).map(|s| s.to_string());
                 fields_map.insert(

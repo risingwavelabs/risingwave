@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::FieldGenerator;
-use rand::{distributions::Alphanumeric, Rng};
-use serde_json::{json,Value};
 use anyhow::Result;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
+use serde_json::{json, Value};
+
+use super::FieldGenerator;
 pub struct VarcharField {
     length: usize,
 }

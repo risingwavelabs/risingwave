@@ -17,4 +17,3 @@ mod generator;
 mod reader;
 
 pub use reader::*;
-

@@ -15,14 +15,12 @@
 mod timestamp;
 mod varchar;
 
+use anyhow::Result;
+use rand::{thread_rng, Rng};
+use risingwave_common::types::DataType;
+use serde_json::{json, Value};
 pub use timestamp::*;
 pub use varchar::*;
-
-use risingwave_common::types::DataType;
-use serde_json::{json,Value};
-use rand::thread_rng;
-use rand::Rng;
-use anyhow::Result;
 
 pub trait FieldGenerator {
     fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
@@ -53,6 +51,7 @@ pub enum FieldGeneratorImpl {
     F32(F32Field),
     F64(F64Field),
     Varchar(VarcharField),
+    Timestamp(TimestampField),
 }
 impl FieldGeneratorImpl {
     pub fn new(
@@ -80,6 +79,9 @@ impl FieldGeneratorImpl {
                     first_arg, second_arg,
                 )?)),
                 DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(first_arg)?)),
+                DataType::Timestamp => Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+                    first_arg,
+                )?)),
                 _ => unimplemented!(),
             },
             FieldKind::Sequence => match data_type {
@@ -111,6 +113,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::F32(f) => f.generate(),
             FieldGeneratorImpl::F64(f) => f.generate(),
             FieldGeneratorImpl::Varchar(f) => f.generate(),
+            FieldGeneratorImpl::Timestamp(f) => f.generate(),
         }
     }
 }
