@@ -137,6 +137,12 @@ pub struct StateTableRowIter<'a, S: StateStore> {
 }
 type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
 
+enum NextOutcome {
+    MemTable,
+    Storage,
+    Both,
+    Neither,
+}
 impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
         keyspace: &Keyspace<S>,
@@ -160,20 +166,20 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let mut mem_table_iter_next_flag = false;
-        let mut cell_based_iter_next_flag = false;
+        let next_flag;
         let mut res = None;
         let cell_based_item = self.cell_based_item.take();
         match (cell_based_item, self.mem_table_iter.peek()) {
             (None, None) => {
+                next_flag = NextOutcome::Neither;
                 res = None;
             }
             (Some((_, row)), None) => {
                 res = Some(row);
-                cell_based_iter_next_flag = true;
+                next_flag = NextOutcome::Storage;
             }
             (None, Some((_, row_op))) => {
-                mem_table_iter_next_flag = true;
+                next_flag = NextOutcome::MemTable;
                 match row_op {
                     RowOp::Insert(row) => res = Some(row.clone()),
                     RowOp::Delete(_) => {}
@@ -187,31 +193,32 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     Ordering::Less => {
                         // cell_based_table_item will be return
                         res = Some(cell_based_row);
-                        cell_based_iter_next_flag = true;
+                        next_flag = NextOutcome::Storage;
                     }
                     Ordering::Equal => {
                         // mem_table_item will be return, while both cell_based_streaming_iter and
                         // mem_table_iter need to execute next() once.
 
-                        mem_table_iter_next_flag = true;
-                        cell_based_iter_next_flag = true;
+                        next_flag = NextOutcome::Both;
                         match mem_table_row_op {
                             RowOp::Insert(row) => {
                                 res = Some(row.clone());
                             }
                             RowOp::Delete(_) => {}
-                            RowOp::Update((_, new_row)) => res = Some(new_row.clone()),
+                            RowOp::Update((old_row, new_row)) => {
+                                debug_assert!(old_row == &cell_based_row);
+                                res = Some(new_row.clone());
+                            }
                         }
                     }
                     Ordering::Greater => {
                         // mem_table_item will be return
-                        mem_table_iter_next_flag = true;
+                        next_flag = NextOutcome::MemTable;
 
                         match mem_table_row_op {
                             RowOp::Insert(row) => res = Some(row.clone()),
                             RowOp::Delete(_) => {}
-                            RowOp::Update((old_row, new_row)) => {
-                                debug_assert!(old_row == &cell_based_row);
+                            RowOp::Update((_, new_row)) => {
                                 res = Some(new_row.clone());
                             }
                         }
@@ -220,12 +227,20 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 }
             }
         }
-        if mem_table_iter_next_flag {
-            self.mem_table_iter.next();
+        match next_flag {
+            NextOutcome::MemTable => {
+                self.mem_table_iter.next();
+            }
+            NextOutcome::Storage => {
+                self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?;
+            }
+            NextOutcome::Both => {
+                self.mem_table_iter.next();
+                self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?
+            }
+            NextOutcome::Neither => {}
         }
-        if cell_based_iter_next_flag {
-            self.cell_based_item = self.cell_based_streaming_iter.next().await.map_err(err)?
-        }
+
         Ok(res)
     }
 }
