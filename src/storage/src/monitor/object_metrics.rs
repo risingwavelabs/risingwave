@@ -73,10 +73,25 @@ impl ObjectStoreMetrics {
         );
         let operation_latency =
             register_histogram_vec_with_registry!(latency_opts, &["type"], registry).unwrap();
+        let mut buckets = vec![];
+        for i in 0..4 {
+            buckets.push((4096 << (i * 2)) as f64);
+        }
+        for i in 0..4 {
+            buckets.push((4096 << (i + 10)) as f64);
+        }
+        let mut step = *buckets.last().unwrap(); // 32MB
+        for _ in 0..4 {
+            let base = *buckets.last().unwrap() + step;
+            for i in 0..4 {
+                buckets.push(base + step * i as f64);
+            }
+            step *= 2.0;
+        }
         let bytes_opts = histogram_opts!(
             "object_store_operation_bytes",
             "size of operation result on object store",
-            exponential_buckets(1024.0, 2.0, 20).unwrap(), // max 1GB
+            buckets, // max 1952MB
         );
         let operation_size =
             register_histogram_vec_with_registry!(bytes_opts, &["type"], registry).unwrap();

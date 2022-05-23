@@ -27,8 +27,8 @@ use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, Lr
 use crate::monitor::StoreLocalStatistic;
 use crate::object::{get_local_path, BlockLocation, ObjectStoreRef};
 
-const DEFAULT_META_CACHE_SHARD_BITS: usize = 5;
-const DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY: usize = 16;
+const MAX_META_CACHE_SHARD_BITS: usize = 5;
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 64 * 1024 * 1024; // 64MB
 const PREFETCH_BLOCK_COUNT: usize = 20;
 
 pub type TableHolder = CachableEntry<HummockSSTableId, Box<Sstable>>;
@@ -59,11 +59,11 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache = Arc::new(LruCache::new(
-            DEFAULT_META_CACHE_SHARD_BITS,
-            meta_cache_capacity,
-            DEFAULT_META_CACHE_OBJECT_POOL_CAPACITY,
-        ));
+        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity));
         Self {
             path,
             store,
