@@ -61,9 +61,7 @@ pub enum Distribution {
     /// every partition have all same records.
     Broadcast,
     /// records are shard on partitions, and satisfy the `AnyShard` but without any guarantee about
-    /// their placed rules. **Notice** that it is just for current Scan on StateStore because we do
-    /// not have a partition information in the table catalog and execution can not scan a table
-    /// parallel with any partitions. It will be **deprecated** some day.
+    /// their placed rules.
     SomeShard,
     /// records are shard on partitions based on hash value of some keys, which means the records
     /// with same hash values must be on the same partition.
@@ -92,7 +90,7 @@ impl Distribution {
                 Distribution::Single => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
                 Distribution::HashShard(_) => DistributionMode::Hash,
-                // FIXME(st1pge): see Distribution::SomeShard for more information
+                // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
             } as i32,
             distribution: match self {
@@ -104,7 +102,7 @@ impl Distribution {
                     output_count,
                     keys: keys.iter().map(|num| *num as u32).collect(),
                 })),
-                // FIXME(st1pge): see Distribution::SomeShard for more information
+                // TODO: add round robin distribution
                 Distribution::SomeShard => None,
             },
         }
