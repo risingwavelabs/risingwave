@@ -236,8 +236,9 @@ impl RearrangedChainExecutor {
                 }
             }
 
-            // Now we take back the remaining upstream.
-            let mut remaining_upstream = upstream.lock().await;
+            // Now we take back the remaining upstream. There should be no contention since
+            // `rearranged` stream is already dropped.
+            let mut remaining_upstream = upstream.try_lock().unwrap();
 
             // Consume remaining upstream.
             tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
@@ -276,7 +277,8 @@ impl RearrangedChainExecutor {
     ) where
         U: MessageStream + std::marker::Unpin,
     {
-        let mut upstream = upstream.lock().await;
+        // There should be no contention since `upstream` is used only after this stream finishes.
+        let mut upstream = upstream.try_lock().unwrap();
 
         loop {
             use futures::future::{select, Either};
