@@ -35,8 +35,8 @@ pub async fn handle_describe(
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indexs): (Vec<ColumnDesc>, Vec<TableCatalog>) = {
-        let (catalogs, indexs) = match catalog_reader
+    let (columns, indices): (Vec<ColumnDesc>, Vec<TableCatalog>) = {
+        let (catalogs, indices) = match catalog_reader
             .get_schema_by_name(session.database(), &schema_name)?
             .get_table_by_name(&table_name)
         {
@@ -62,7 +62,7 @@ pub async fn handle_describe(
                 .filter(|c| !c.is_hidden)
                 .map(|c| c.column_desc.clone())
                 .collect(),
-            indexs,
+            indices,
         )
     };
 
@@ -70,7 +70,7 @@ pub async fn handle_describe(
     let mut rows = col_descs_to_rows(columns);
 
     // Convert all indexs to rows
-    rows.extend(indexs.iter().map(|i| {
+    rows.extend(indices.iter().map(|i| {
         let s = i
             .distribution_keys
             .iter()
