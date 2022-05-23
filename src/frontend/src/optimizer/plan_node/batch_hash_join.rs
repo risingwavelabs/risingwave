@@ -123,20 +123,20 @@ impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
         let right = self.right().to_distributed_with_required(
             Order::any(),
-            &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
+            &RequiredDist::shard_by_key(
+                self.right().schema().len(),
+                &self.eq_join_predicate().right_eq_indexes(),
+            ),
         )?;
         let r2l = self
             .eq_join_predicate()
             .r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-        let left_dist = r2l
-            .rewrite_required_distribution(right.distribution())
-            .unwrap();
+        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+            right.distribution().clone(),
+        ));
         let mut left = self
             .left()
             .to_distributed_with_required(Order::any(), &left_dist)?;
-        if left.distribution() != &left_dist {
-            left = left_dist.enforce(left, Order::any());
-        }
         Ok(self.clone_with_left_right(left, right).into())
     }
 }

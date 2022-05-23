@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::SortAggNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
 pub struct BatchSimpleAgg {
@@ -68,9 +68,10 @@ impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+        let new_input = self.input().to_distributed_with_required(
+            Order::any(),
+            &RequiredDist::PhysicalDist(Distribution::Single),
+        )?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

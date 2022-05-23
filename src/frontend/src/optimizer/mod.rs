@@ -30,6 +30,7 @@ use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
@@ -47,7 +48,7 @@ use crate::expr::InputRef;
 #[derive(Debug, Clone)]
 pub struct PlanRoot {
     plan: PlanRef,
-    required_dist: Distribution,
+    required_dist: RequiredDist,
     required_order: Order,
     out_fields: FixedBitSet,
     out_names: Vec<String>,
@@ -57,7 +58,7 @@ pub struct PlanRoot {
 impl PlanRoot {
     pub fn new(
         plan: PlanRef,
-        required_dist: Distribution,
+        required_dist: RequiredDist,
         required_order: Order,
         out_fields: FixedBitSet,
         out_names: Vec<String>,
@@ -84,14 +85,6 @@ impl PlanRoot {
             out_fields,
             out_names,
             schema,
-        }
-    }
-
-    /// Change the distribution of [`PlanRoot`].
-    pub fn with_distribution(&self, dist: Distribution) -> Self {
-        Self {
-            required_dist: dist,
-            ..self.clone()
         }
     }
 
@@ -218,9 +211,8 @@ impl PlanRoot {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
-                self.required_dist = out_col_change
-                    .rewrite_required_distribution(&self.required_dist)
-                    .unwrap();
+                self.required_dist =
+                    out_col_change.rewrite_required_distribution(&self.required_dist);
                 self.required_order = out_col_change
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
@@ -275,7 +267,7 @@ impl PlanRoot {
     }
 
     /// Set the plan root's required dist.
-    pub fn set_required_dist(&mut self, required_dist: Distribution) {
+    pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
 }
@@ -305,7 +297,7 @@ mod tests {
         let out_names = vec!["v1".into()];
         let root = PlanRoot::new(
             values,
-            Distribution::any().clone(),
+            RequiredDist::Any,
             Order::any().clone(),
             out_fields,
             out_names,

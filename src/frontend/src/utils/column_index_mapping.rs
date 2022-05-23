@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
+use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -291,7 +291,7 @@ impl ColIndexMapping {
     /// Rewrite the provided distribution's field index. It will try its best to give the most
     /// accurate distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
-    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `AnyShard`.
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(col_idxes) => {
@@ -310,16 +310,20 @@ impl ColIndexMapping {
 
     /// Rewrite the required distribution's field index. if it can't give a corresponding
     /// required distribution after the column index mapping, it will return None.
-    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
-    /// HashShard(0,1,2), with mapping(0->1,2->0) will return None.
-    pub fn rewrite_required_distribution(&self, dist: &Distribution) -> Option<Distribution> {
+    /// ShardByKey(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to ShardByKey(1,0,2).
+    /// ShardByKey(0,1,2), with mapping(0->1,2->0) will return ShardByKey(1,0).
+    /// ShardByKey(0,1), with mapping(2->0) will return `AnyShard`.
+    pub fn rewrite_required_distribution(&self, dist: &RequiredDist) -> RequiredDist {
         match dist {
-            Distribution::HashShard(col_idxes) => col_idxes
-                .iter()
-                .map(|col_idx| self.try_map(*col_idx))
-                .collect::<Option<Vec<_>>>()
-                .map(Distribution::HashShard),
-            _ => Some(dist.clone()),
+            RequiredDist::ShardByKey(keys) => {
+                let keys = self.rewrite_bitset(keys);
+                if keys.is_empty() {
+                    RequiredDist::Any
+                } else {
+                    RequiredDist::ShardByKey(keys)
+                }
+            }
+            _ => dist.clone(),
         }
     }
 

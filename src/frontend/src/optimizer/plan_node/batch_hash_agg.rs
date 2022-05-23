@@ -23,7 +23,7 @@ use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::InputRefDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
 pub struct BatchHashAgg {
@@ -88,7 +88,7 @@ impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             Order::any(),
-            &Distribution::HashShard(self.group_keys().to_vec()),
+            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }

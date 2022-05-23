@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::NestedLoopJoinNode;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
@@ -45,7 +45,7 @@ impl BatchNestedLoopJoin {
     fn derive_dist(left: &Distribution, right: &Distribution) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (_, _) => panic!(),
+            (_, _) => unreachable!(),
         }
     }
 }
@@ -79,12 +79,14 @@ impl_plan_tree_node_for_binary! { BatchNestedLoopJoin }
 
 impl ToDistributedBatch for BatchNestedLoopJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let left = self
-            .left()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
-        let right = self
-            .right()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+        let left = self.left().to_distributed_with_required(
+            Order::any(),
+            &RequiredDist::PhysicalDist(Distribution::Single),
+        )?;
+        let right = self.right().to_distributed_with_required(
+            Order::any(),
+            &RequiredDist::PhysicalDist(Distribution::Single),
+        )?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }

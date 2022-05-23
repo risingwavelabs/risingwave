@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call
@@ -550,16 +550,15 @@ impl ToStream for LogicalAgg {
     fn to_stream(&self) -> Result<PlanRef> {
         if self.group_keys().is_empty() {
             Ok(StreamSimpleAgg::new(
-                self.clone_with_input(
-                    self.input()
-                        .to_stream_with_dist_required(&Distribution::Single)?,
-                ),
+                self.clone_with_input(self.input().to_stream_with_dist_required(
+                    &RequiredDist::PhysicalDist(Distribution::Single),
+                )?),
             )
             .into())
         } else {
             Ok(StreamHashAgg::new(
                 self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &Distribution::HashShard(self.group_keys().to_vec()),
+                    &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
                 )?),
             )
             .into())
