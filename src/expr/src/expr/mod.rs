@@ -82,7 +82,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position => build_binary_expr_prost(prost),
-        And | Or => build_nullable_binary_expr_prost(prost),
+        And | Or | IsDistinctFrom => build_nullable_binary_expr_prost(prost),
         Coalesce => CoalesceExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),

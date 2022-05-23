@@ -19,7 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    ToBatch, ToStream,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
@@ -302,6 +302,15 @@ impl ToBatch for LogicalMultiJoin {
 
 impl ColPrunable for LogicalMultiJoin {
     fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
+impl PredicatePushdown for LogicalMultiJoin {
+    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

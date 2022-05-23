@@ -34,6 +34,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
+use crate::utils::Condition;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -125,16 +126,7 @@ impl PlanRoot {
         };
 
         // Predicate Push-down
-        plan = {
-            let rules = vec![
-                FilterJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterAggRule::create(),
-                FilterMergeRule::create(),
-            ];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-            heuristic_optimizer.optimize(plan)
-        };
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Merge inner joins into multijoin
         plan = {
@@ -147,14 +139,13 @@ impl PlanRoot {
         // Apply limited set of filter pushdown rules again since we pullup non eq-join
         // conditions into a filter above the multijoin.
         plan = {
-            let rules = vec![
-                ReorderMultiJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterJoinRule::create(),
-            ];
+            let rules = vec![ReorderMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
+
+        // Predicate Push-down
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Prune Columns
         //

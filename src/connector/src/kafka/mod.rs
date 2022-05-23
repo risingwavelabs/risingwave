@@ -14,11 +14,34 @@
 
 use std::time::Duration;
 
-pub(crate) mod enumerator;
+use serde::Deserialize;
+
+pub mod enumerator;
 pub mod source;
 pub mod split;
+
 pub use enumerator::*;
 pub use source::*;
 pub use split::*;
+
+pub const KAFKA_CONNECTOR: &str = "kafka";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct KafkaProperties {
+    #[serde(rename = "kafka.brokers")]
+    pub brokers: String,
+
+    #[serde(rename = "kafka.topic")]
+    pub topic: String,
+
+    #[serde(rename = "kafka.scan.startup.mode")]
+    pub scan_startup_mode: Option<String>,
+
+    #[serde(rename = "kafka.time.offset")]
+    pub time_offset: Option<String>,
+
+    #[serde(rename = "kafka.consumer.group")]
+    pub consumer_group: Option<String>,
+}
 
 const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);

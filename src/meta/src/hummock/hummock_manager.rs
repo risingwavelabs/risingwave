@@ -35,11 +35,11 @@ use risingwave_pb::hummock::{
     SstableInfo, UncommittedEpoch,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::{CompactStatus, CompactionConfig};
+use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
@@ -68,7 +68,7 @@ pub struct HummockManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     /// `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
-    compaction_scheduler: parking_lot::RwLock<Option<UnboundedSender<CompactionGroupId>>>,
+    compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     config: Arc<CompactionConfig>,
 }
 
@@ -607,7 +607,7 @@ where
                 }
 
                 commit_multi_var!(self, None, compact_status)?;
-                tracing::debug!(
+                tracing::trace!(
                     "pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
@@ -746,7 +746,7 @@ where
             )?;
         }
 
-        tracing::info!(
+        tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
             compact_task_to_string(compact_task),
             start_time.elapsed(),
@@ -760,6 +760,9 @@ where
         if let Some(ref compact_task_metrics) = compact_task.metrics {
             trigger_rw_stat(&self.metrics, compact_task_metrics);
         }
+
+        // TODO: use correct id after compaction group is supported.
+        self.try_send_compaction_request(0.into());
 
         #[cfg(test)]
         {
@@ -829,6 +832,9 @@ where
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot { epoch }),
             );
+
+        // TODO: use correct id after compaction group is supported.
+        self.try_send_compaction_request(0.into());
 
         #[cfg(test)]
         {
@@ -1283,7 +1289,7 @@ where
         self.versioning.read().await.current_version()
     }
 
-    pub fn set_compaction_scheduler(&self, sender: UnboundedSender<CompactionGroupId>) {
+    pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
         *self.compaction_scheduler.write() = Some(sender);
     }
 
@@ -1306,5 +1312,13 @@ where
             self.check_state_consistency().await;
         }
         Ok(())
+    }
+
+    /// Sends a compaction request to compaction scheduler.
+    fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+        if let Some(sender) = self.compaction_scheduler.read().as_ref() {
+            return sender.try_send(compaction_group);
+        }
+        false
     }
 }

@@ -222,7 +222,7 @@ mod default {
     }
 
     pub fn shared_buffer_capacity_mb() -> u32 {
-        256
+        1024
     }
 
     pub fn data_directory() -> String {

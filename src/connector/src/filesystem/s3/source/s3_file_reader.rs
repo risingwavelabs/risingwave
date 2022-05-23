@@ -39,7 +39,8 @@ use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::filesystem::s3::s3_dir::{
     AwsCustomConfig, S3SourceBasicConfig, S3SourceConfig, SqsReceiveMsgConfig,
 };
-use crate::{Column, ConnectorState, ConnectorStateV2, S3Properties, SplitMetaData};
+use crate::filesystem::s3::S3Properties;
+use crate::{Column, ConnectorState, ConnectorStateV2, SplitMetaData};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -398,7 +399,8 @@ mod test {
 
     use crate::base::SplitReader;
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
-    use crate::{ConnectorState, ConnectorStateV2, S3Properties};
+    use crate::filesystem::s3::S3Properties;
+    use crate::{ConnectorState, ConnectorStateV2};
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
