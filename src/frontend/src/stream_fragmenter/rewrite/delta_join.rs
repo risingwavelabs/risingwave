@@ -151,10 +151,7 @@ impl StreamFragmenter {
             column_descs,
         };
 
-        let distribution_keys = arrange_key_indexes
-            .iter()
-            .map(|idx| *idx as i32)
-            .collect_vec();
+        let distribution_keys = vec![];
         (
             arrangement_info.clone(),
             StreamNode {
