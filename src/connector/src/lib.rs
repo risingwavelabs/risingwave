@@ -50,5 +50,6 @@ pub mod state;
 
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
-pub use crate::pulsar::PULSAR_CONNECTOR;
 pub use nexmark::NEXMARK_CONNECTOR;
+
+pub use crate::pulsar::PULSAR_CONNECTOR;

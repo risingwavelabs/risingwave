@@ -26,9 +26,11 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::{KAFKA_CONNECTOR, KINESIS_CONNECTOR, PULSAR_CONNECTOR, NEXMARK_CONNECTOR};
 use risingwave_connector::state::SourceStateHandler;
-use risingwave_connector::{ConnectorStateV2, SplitImpl};
+use risingwave_connector::{
+    ConnectorStateV2, SplitImpl, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
+    PULSAR_CONNECTOR,
+};
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -320,7 +322,28 @@ impl<S: StateStore> SourceExecutor<S> {
                         // self.state_cache = Some(ConnectorState::from_hashmap(
                         //     chunk_with_state.split_offset_mapping.unwrap(),
                         // ));
-                        todo!("build split_impl records");
+                        let mapping: HashMap<String, String> =
+                            chunk_with_state.split_offset_mapping.unwrap();
+                        let state: HashMap<String, SplitImpl> = mapping
+                            .iter()
+                            .map(|(split, offset)| {
+                                let origin_split_impl = self
+                                    .stream_source_splits
+                                    .iter()
+                                    .filter(|origin_split| origin_split.id().as_str() == split)
+                                    .collect::<Vec<&SplitImpl>>();
+                                if origin_split_impl.is_empty() {
+                                    Err(RwError::from(InternalError(format!(
+                                        "cannot find split: {:?} in stream_source_splits: {:?}",
+                                        split, self.stream_source_splits
+                                    ))))
+                                } else {
+                                    Ok((split.clone(), origin_split_impl[0].update(offset.clone())))
+                                }
+                            })
+                            .collect::<Result<HashMap<String, SplitImpl>>>()
+                            .map_err(StreamExecutorError::source_error)?;
+                        self.state_cache.extend(state);
                     }
                     let mut chunk = chunk_with_state.chunk;
 

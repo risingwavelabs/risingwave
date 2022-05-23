@@ -54,4 +54,13 @@ impl KafkaSplit {
             stop_offset,
         }
     }
+
+    pub fn update(&self, start_offset: String) -> Self {
+        Self::new(
+            self.partition,
+            Some(start_offset.as_str().parse::<i64>().unwrap()),
+            self.stop_offset,
+            self.topic.clone(),
+        )
+    }
 }

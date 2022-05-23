@@ -59,6 +59,12 @@ macro_rules! impl_split {
                     .to_string()
             }
 
+            pub fn update(&self, start_offset: String) -> Self {
+                match self {
+                    $( Self::$variant_name(inner) => Self::$variant_name(inner.update(start_offset)), )*
+                }
+            }
+
             pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
                 match split_type.to_lowercase().as_str() {
                     $( $connector_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*

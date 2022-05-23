@@ -60,4 +60,17 @@ impl KinesisSplit {
             end_position,
         }
     }
+
+    pub fn update(&self, start_offset: String) -> Self {
+        let start_offset = if start_offset.is_empty() {
+            KinesisOffset::Earliest
+        } else {
+            KinesisOffset::SequenceNumber(start_offset)
+        };
+        Self::new(
+            self.shard_id.clone(),
+            start_offset,
+            self.end_position.clone(),
+        )
+    }
 }
