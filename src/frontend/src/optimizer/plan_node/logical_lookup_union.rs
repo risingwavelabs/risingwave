@@ -17,9 +17,9 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::PlanTreeNode;
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone)]
 pub struct LogicalLookupUnion {
@@ -85,6 +85,17 @@ impl ColPrunable for LogicalLookupUnion {
                 .map(|input| input.prune_col(required_cols))
                 .collect_vec(),
         )
+    }
+}
+
+impl PredicatePushdown for LogicalLookupUnion {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        let inputs = self
+            .inputs
+            .iter()
+            .map(|input| input.predicate_pushdown(predicate.clone()))
+            .collect_vec();
+        self.clone_with_inputs(&inputs)
     }
 }
 
