@@ -217,7 +217,10 @@ impl LogicalJoin {
             .map(|&i| match (o2l.try_map(i), o2r.try_map(i)) {
                 (Some(l_i), None) => left_schema.fields()[l_i].clone(),
                 (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
-                _ => panic!(),
+                _ => panic!(
+                    "left len {}, right len {}, i {}, lmap {:?}, rmap {:?}",
+                    left_len, right_len, i, o2l, o2r
+                ),
             })
             .collect();
         Schema { fields }
@@ -781,8 +784,12 @@ impl ToStream for LogicalJoin {
             .map(|i| i + left_len);
 
         let mut new_output_indices = join.output_indices.clone();
-        new_output_indices.extend(left_to_add);
-        new_output_indices.extend(right_to_add);
+        if !self.is_right_join() {
+            new_output_indices.extend(left_to_add);
+        }
+        if !self.is_left_join() {
+            new_output_indices.extend(right_to_add);
+        }
 
         let join_with_pk = join.clone_with_output_indices(new_output_indices);
         // the added columns is at the end, so it will not change the exists column index
