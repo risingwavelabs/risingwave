@@ -68,10 +68,9 @@ impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed_with_required(
-            Order::any(),
-            &RequiredDist::PhysicalDist(Distribution::Single),
-        )?;
+        let new_input = self
+            .input()
+            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -94,7 +93,7 @@ impl ToLocalBatch for BatchSimpleAgg {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
 
-        let new_input = Distribution::Single.enforce_if_not_satisfies(new_input, Order::any())?;
+        let new_input = RequiredDist::single().enforce_if_not_satisfies(new_input, Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }

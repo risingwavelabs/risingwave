@@ -588,9 +588,10 @@ impl ToStream for LogicalAgg {
     fn to_stream(&self) -> Result<PlanRef> {
         if self.group_keys().is_empty() {
             Ok(StreamSimpleAgg::new(
-                self.clone_with_input(self.input().to_stream_with_dist_required(
-                    &RequiredDist::PhysicalDist(Distribution::Single),
-                )?),
+                self.clone_with_input(
+                    self.input()
+                        .to_stream_with_dist_required(&RequiredDist::single())?,
+                ),
             )
             .into())
         } else {

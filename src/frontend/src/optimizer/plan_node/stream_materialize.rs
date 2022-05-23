@@ -78,9 +78,7 @@ impl StreamMaterialize {
         is_index_on: Option<TableId>,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
-            Distribution::Single | Distribution::Broadcast => {
-                RequiredDist::PhysicalDist(Distribution::Single)
-            }
+            Distribution::Single | Distribution::Broadcast => RequiredDist::single(),
             _ => {
                 if is_index_on.is_some() {
                     RequiredDist::PhysicalDist(Distribution::HashShard(

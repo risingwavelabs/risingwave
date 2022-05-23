@@ -137,6 +137,10 @@ impl Distribution {
 }
 
 impl RequiredDist {
+    pub fn single() -> Self {
+        Self::PhysicalDist(Distribution::Single)
+    }
+
     pub fn shard_by_key(tot_col_num: usize, keys: &[usize]) -> Self {
         let mut cols = FixedBitSet::with_capacity(tot_col_num);
         for i in keys {

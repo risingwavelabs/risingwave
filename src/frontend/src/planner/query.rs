@@ -43,7 +43,7 @@ impl Planner {
                 LogicalTopN::create(plan, limit, offset, order.clone())
             }
         }
-        let dist = RequiredDist::PhysicalDist(Distribution::Single);
+        let dist = RequiredDist::single();
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
         let root = PlanRoot::new(plan, dist, order, out_fields, out_names);

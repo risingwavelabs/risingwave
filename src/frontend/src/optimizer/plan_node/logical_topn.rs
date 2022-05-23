@@ -191,7 +191,7 @@ impl ToStream for LogicalTopN {
         // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()
-            .to_stream_with_dist_required(&RequiredDist::PhysicalDist(Distribution::Single))?;
+            .to_stream_with_dist_required(&RequiredDist::single())?;
         Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 

@@ -79,14 +79,12 @@ impl_plan_tree_node_for_binary! { BatchNestedLoopJoin }
 
 impl ToDistributedBatch for BatchNestedLoopJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let left = self.left().to_distributed_with_required(
-            Order::any(),
-            &RequiredDist::PhysicalDist(Distribution::Single),
-        )?;
-        let right = self.right().to_distributed_with_required(
-            Order::any(),
-            &RequiredDist::PhysicalDist(Distribution::Single),
-        )?;
+        let left = self
+            .left()
+            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+        let right = self
+            .right()
+            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
@@ -103,10 +101,10 @@ impl ToBatchProst for BatchNestedLoopJoin {
 
 impl ToLocalBatch for BatchNestedLoopJoin {
     fn to_local(&self) -> Result<PlanRef> {
-        let left =
-            Distribution::Single.enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
+        let left = RequiredDist::single()
+            .enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
 
-        let right = Distribution::Single
+        let right = RequiredDist::single()
             .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
