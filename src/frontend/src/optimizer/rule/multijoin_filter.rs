@@ -19,20 +19,20 @@ use crate::optimizer::rule::BoxedRule;
 /// Merges adjacent inner joins into a single `LogicalMultiJoin`.
 /// The `LogicalMultiJoin` is short-lived and will be immediately
 /// rewritten into a join tree of binary joins.
-pub struct MultiJoinJoinRule {}
+pub struct MultiJoinFilterRule {}
 
-impl Rule for MultiJoinJoinRule {
+impl Rule for MultiJoinFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let join = LogicalMultiJoin::from_join(&plan)?;
+        let join = LogicalMultiJoin::from_filter(&plan)?;
         Some(join.into())
     }
 }
 
-impl MultiJoinJoinRule {
+impl MultiJoinFilterRule {
     // TODO: remove #[allow(unused)] once used
     #[allow(unused)]
     pub fn create() -> BoxedRule {
-        Box::new(MultiJoinJoinRule {})
+        Box::new(MultiJoinFilterRule {})
     }
 }
 #[cfg(test)]
@@ -49,7 +49,7 @@ mod tests {
     use crate::utils::Condition;
 
     #[tokio::test]
-    async fn test_multijoin_join_merge() {
+    async fn test_multijoin_join_merge_through_filter() {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..10)
@@ -92,8 +92,11 @@ mod tests {
             left.clone().into(),
             right.clone().into(),
             join_type,
-            Condition::with_expr(on_0),
+            Condition::true_cond(),
         );
+        let multijoin_0 = LogicalMultiJoin::from_join(&join_0.into()).unwrap();
+
+        let filter_on_join = LogicalFilter::new(multijoin_0.into(), Condition::with_expr(on_0));
 
         let on_1: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -107,7 +110,9 @@ mod tests {
         ));
         let join_1 = LogicalJoin::new(
             mid.clone().into(),
-            LogicalMultiJoin::from_join(&join_0.into()).unwrap().into(),
+            LogicalMultiJoin::from_filter(&filter_on_join.into())
+                .unwrap()
+                .into(),
             join_type,
             Condition::with_expr(on_1.clone()),
         );

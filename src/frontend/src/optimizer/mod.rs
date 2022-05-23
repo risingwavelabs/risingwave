@@ -145,7 +145,10 @@ impl PlanRoot {
 
         // Merge inner joins into multijoin
         plan = {
-            let rules = vec![MultiJoinJoinRule::create()];
+            let rules = vec![
+                MultiJoinJoinRule::create(),
+                MultiJoinFilterRule::create()
+            ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
