@@ -206,9 +206,9 @@ mod tests {
         let d3 = Distribution::HashShard(vec![0]);
         let d4 = Distribution::HashShard(vec![1]);
 
-        let r1 = RequiredDist::shard_by_key(2, &vec![0, 1]);
-        let r3 = RequiredDist::shard_by_key(2, &vec![0]);
-        let r4 = RequiredDist::shard_by_key(2, &vec![1]);
+        let r1 = RequiredDist::shard_by_key(2, &[0, 1]);
+        let r3 = RequiredDist::shard_by_key(2, &[0]);
+        let r4 = RequiredDist::shard_by_key(2, &[1]);
         assert!(d1.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
         assert!(d2.satisfies(&RequiredDist::PhysicalDist(d2.clone())));
         assert!(d3.satisfies(&RequiredDist::PhysicalDist(d3.clone())));

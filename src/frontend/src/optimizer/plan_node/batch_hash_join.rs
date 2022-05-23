@@ -46,7 +46,6 @@ impl BatchHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &eq_join_predicate,
             &logical.l2o_col_mapping(),
         );
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
@@ -61,7 +60,6 @@ impl BatchHashJoin {
     fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        _predicate: &EqJoinPredicate,
         l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
