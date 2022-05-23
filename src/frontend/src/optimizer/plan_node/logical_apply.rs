@@ -56,13 +56,18 @@ impl LogicalApply {
             join_type
         );
         let ctx = left.ctx();
-        let schema = LogicalJoin::derive_schema(left.schema(), right.schema(), join_type);
+        let out_column_num =
+            LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
+        let output_indices = (0..out_column_num).collect::<Vec<_>>();
+        let schema =
+            LogicalJoin::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
         let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
             left.pk_indices(),
             right.pk_indices(),
             join_type,
+            &output_indices,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalApply {
