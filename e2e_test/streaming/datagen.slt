@@ -1,7 +1,7 @@
 statement ok
 create materialized source s1 (v1 int) with ( 'connector' = 'datagen' ,'field.v1.kind' = 'sequence','field.v1.start' = '1','field.v1.end'  = '20')  row format json;
 
-# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+# Wait enough time to ensure Datagen connector generate data
 sleep 6s
 
 query I
@@ -13,7 +13,7 @@ select v1 from s1;
 4
 5
 
-# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+# Wait enough time to ensure Datagen connector generate data
 sleep 6s
 
 query I
