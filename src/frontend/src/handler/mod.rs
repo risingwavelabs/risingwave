@@ -30,6 +30,7 @@ pub mod create_table;
 mod describe;
 pub mod dml;
 mod drop_database;
+mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
 pub mod drop_source;
@@ -66,8 +67,6 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ..
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::Describe { name } => describe::handle_describe(context, name).await,
-        // TODO: support complex sql for `show columns from <table>`
-        Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
         Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
         Statement::Drop(DropStatement {
             object_type,
@@ -77,6 +76,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         }) => match object_type {
             ObjectType::Table => drop_table::handle_drop_table(context, object_name).await,
             ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
+            ObjectType::Index => drop_index::handle_drop_index(context, object_name).await,
             ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
             ObjectType::Database => {
                 drop_database::handle_drop_database(

@@ -20,7 +20,7 @@ use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
 
-pub async fn handle_drop_mv(
+pub async fn handle_drop_index(
     context: OptimizerContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
@@ -42,10 +42,10 @@ pub async fn handle_drop_mv(
             )));
         }
 
-        // If is index on is `Some`, then it is a actually an index.
-        if table.is_index_on.is_some() {
+        // If is index on is `None`, then it is a actually a materialized view.
+        if table.is_index_on.is_none() {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
             )));
         }
         table.id()
@@ -54,9 +54,7 @@ pub async fn handle_drop_mv(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_materialized_view(table_id).await?;
 
-    Ok(PgResponse::empty_result(
-        StatementType::DROP_MATERIALIZED_VIEW,
-    ))
+    Ok(PgResponse::empty_result(StatementType::DROP_INDEX))
 }
 
 #[cfg(test)]
@@ -66,14 +64,14 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    async fn test_drop_mv_handler() {
+    async fn test_drop_index_handler() {
         let sql_create_table = "create table t (v1 smallint);";
-        let sql_create_mv = "create materialized view mv as select v1 from t;";
-        let sql_drop_mv = "drop materialized view mv;";
+        let sql_create_index = "create index idx on t(v1);";
+        let sql_drop_index = "drop index idx;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();
-        frontend.run_sql(sql_create_mv).await.unwrap();
-        frontend.run_sql(sql_drop_mv).await.unwrap();
+        frontend.run_sql(sql_create_index).await.unwrap();
+        frontend.run_sql(sql_drop_index).await.unwrap();
 
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
