@@ -102,11 +102,11 @@ impl ToBatchProst for BatchNestedLoopJoin {
 
 impl ToLocalBatch for BatchNestedLoopJoin {
     fn to_local(&self) -> Result<PlanRef> {
-        let left = Distribution::Single
-            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
+        let left =
+            Distribution::Single.enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
 
         let right = Distribution::Single
-            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
+            .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
