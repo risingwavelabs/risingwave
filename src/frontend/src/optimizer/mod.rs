@@ -33,6 +33,7 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
+use crate::utils::Condition;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -132,20 +133,11 @@ impl PlanRoot {
         };
 
         // Predicate Push-down
-        plan = {
-            let rules = vec![
-                FilterJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterAggRule::create(),
-                FilterMergeRule::create(),
-            ];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-            heuristic_optimizer.optimize(plan)
-        };
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Merge inner joins into multijoin
         plan = {
-            let rules = vec![MultiJoinJoinRule::create()];
+            let rules = vec![MultiJoinJoinRule::create(), MultiJoinFilterRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -154,14 +146,13 @@ impl PlanRoot {
         // Apply limited set of filter pushdown rules again since we pullup non eq-join
         // conditions into a filter above the multijoin.
         plan = {
-            let rules = vec![
-                ReorderMultiJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterJoinRule::create(),
-            ];
+            let rules = vec![ReorderMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
+
+        // Predicate Push-down
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Prune Columns
         //
@@ -185,9 +176,7 @@ impl PlanRoot {
         plan
     }
 
-    /// Optimize and generate a batch query plan.
-    /// Currently only used by test runner (Have distributed plan but not schedule yet).
-    /// Will be removed after dist execution.
+    /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
@@ -197,6 +186,31 @@ impl PlanRoot {
 
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            let exprs = self
+                .out_fields
+                .ones()
+                .zip_eq(self.schema.fields.clone())
+                .map(|(index, field)| InputRef::new(index, field.data_type).into())
+                .collect();
+            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
+        }
+
+        Ok(plan)
+    }
+
+    /// Optimize and generate a batch query plan for local execution.
+    pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
+        // Logical optimization
+        let mut plan = self.gen_optimized_logical_plan();
+
+        // Convert to physical plan node
+        plan = plan.to_batch_with_order_required(&self.required_order)?;
+
+        // Convert to physical plan node
+        plan = plan.to_local_with_order_required(&self.required_order)?;
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {

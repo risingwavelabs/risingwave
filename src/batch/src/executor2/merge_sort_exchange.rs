@@ -22,7 +22,6 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
@@ -32,17 +31,16 @@ use crate::executor2::{
     BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, CreateSource, DefaultCreateSource,
     Executor2, ExecutorBuilder,
 };
-use crate::task::{BatchEnvironment, TaskId};
+use crate::task::{BatchTaskContext, TaskId};
 
-pub type MergeSortExchangeExecutor2 = MergeSortExchangeExecutor2Impl<DefaultCreateSource>;
+pub type MergeSortExchangeExecutor2<C> = MergeSortExchangeExecutor2Impl<DefaultCreateSource, C>;
 
 /// `MergeSortExchangeExecutor2` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
 ///
 /// The size of the output is determined both by `K_PROCESSING_WINDOW_SIZE`.
-pub struct MergeSortExchangeExecutor2Impl<C> {
-    server_addr: HostAddr,
-    env: BatchEnvironment,
+pub struct MergeSortExchangeExecutor2Impl<CS, C> {
+    context: C,
     /// keeps one data chunk of each source if any
     source_inputs: Vec<Option<DataChunk>>,
     order_pairs: Arc<Vec<OrderPair>>,
@@ -50,14 +48,14 @@ pub struct MergeSortExchangeExecutor2Impl<C> {
     proto_sources: Vec<ProstExchangeSource>,
     sources: Vec<Box<dyn ExchangeSource>>,
     /// Mock-able CreateSource.
-    source_creator: PhantomData<C>,
+    source_creator: PhantomData<CS>,
     schema: Schema,
     first_execution: bool,
     task_id: TaskId,
     identity: String,
 }
 
-impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutor2Impl<CS, C> {
     /// We assume that the source would always send `Some(chunk)` with cardinality > 0
     /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
@@ -90,7 +88,9 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
     }
 }
 
-impl<CS: 'static + CreateSource> Executor2 for MergeSortExchangeExecutor2Impl<CS> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor2
+    for MergeSortExchangeExecutor2Impl<CS, C>
+{
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -106,7 +106,7 @@ impl<CS: 'static + CreateSource> Executor2 for MergeSortExchangeExecutor2Impl<CS
 /// Everytime `execute` is called, it tries to produce a chunk of size
 /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
 /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
-impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutor2Impl<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         // If this is the first time execution, we first get one chunk from each source
@@ -114,7 +114,7 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
         if self.first_execution {
             for source_idx in 0..self.proto_sources.len() {
                 let new_source = CS::create_source(
-                    self.env.clone(),
+                    self.context.clone(),
                     &self.proto_sources[source_idx],
                     self.task_id.clone(),
                 )
@@ -187,14 +187,16 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutor2Impl<CS> {
     }
 }
 
-impl<CS: 'static + CreateSource> BoxedExecutor2Builder for MergeSortExchangeExecutor2Impl<CS> {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+pub struct MergeSortExchangeExecutor2Builder {}
+
+impl BoxedExecutor2Builder for MergeSortExchangeExecutor2Builder {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let sort_merge_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::MergeSortExchange
         )?;
-
-        let server_addr = source.global_batch_env().server_address().clone();
 
         let order_pairs = sort_merge_node
             .column_orders
@@ -213,9 +215,8 @@ impl<CS: 'static + CreateSource> BoxedExecutor2Builder for MergeSortExchangeExec
             .collect::<Vec<Field>>();
 
         let num_sources = proto_sources.len();
-        Ok(Box::new(Self {
-            server_addr,
-            env: source.global_batch_env().clone(),
+        Ok(Box::new(MergeSortExchangeExecutor2::<C> {
+            context: source.batch_task_context().clone(),
             source_inputs: vec![None; num_sources],
             order_pairs,
             min_heap: BinaryHeap::new(),
@@ -243,6 +244,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
+    use crate::task::ComputeNodeContext;
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
@@ -265,7 +267,7 @@ mod tests {
         #[async_trait::async_trait]
         impl CreateSource for FakeCreateSource {
             async fn create_source(
-                _: BatchEnvironment,
+                _: impl BatchTaskContext,
                 _: &ProstExchangeSource,
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
@@ -288,9 +290,11 @@ mod tests {
             order_type: OrderType::Ascending,
         }]);
 
-        let executor = Box::new(MergeSortExchangeExecutor2Impl::<FakeCreateSource> {
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
-            env: BatchEnvironment::for_test(),
+        let executor = Box::new(MergeSortExchangeExecutor2Impl::<
+            FakeCreateSource,
+            ComputeNodeContext,
+        > {
+            context: ComputeNodeContext::new_for_test(),
             source_inputs: vec![None; proto_sources.len()],
             order_pairs,
             min_heap: BinaryHeap::new(),

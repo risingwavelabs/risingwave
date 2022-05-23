@@ -28,10 +28,11 @@ use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
 };
+use risingwave_rpc_client::StreamClient;
 
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId, StreamClient};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -143,7 +144,7 @@ where
         let all_stream_clients = try_join_all(
             all_compute_nodes
                 .iter()
-                .map(|worker| self.env.stream_clients().get(worker)),
+                .map(|worker| self.env.stream_client_pool().get(worker)),
         )
         .await?
         .into_iter();
