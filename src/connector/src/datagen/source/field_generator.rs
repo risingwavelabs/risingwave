@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Result;
+use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use risingwave_common::types::DataType;
 use serde_json::{json, Value};
@@ -25,59 +26,51 @@ pub enum FieldGeneratorImpl {
     I64(I64Field),
     F32(F32Field),
     F64(F64Field),
+    Varchar(VarcharField),
 }
 impl FieldGeneratorImpl {
     pub fn new(
         data_type: DataType,
         kind: FieldKind,
-        min_or_start: Option<String>,
-        max_or_end: Option<String>,
+        first_arg: Option<String>,
+        second_arg: Option<String>,
     ) -> Result<Self> {
         match kind {
             // todo(d2lark) use macro to simplify the code later
             FieldKind::Random => match data_type {
                 DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_random(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_random(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_random(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_random(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_random(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
+                DataType::Varchar => Ok(FieldGeneratorImpl::Varchar(VarcharField::new(first_arg)?)),
                 _ => unimplemented!(),
             },
             FieldKind::Sequence => match data_type {
                 DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_sequence(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_sequence(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_sequence(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_sequence(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_sequence(
-                    min_or_start,
-                    max_or_end,
+                    first_arg, second_arg,
                 )?)),
                 _ => unimplemented!(),
             },
@@ -91,6 +84,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64(f) => f.generate(),
             FieldGeneratorImpl::F32(f) => f.generate(),
             FieldGeneratorImpl::F64(f) => f.generate(),
+            FieldGeneratorImpl::Varchar(f) => f.generate(),
         }
     }
 }
@@ -192,6 +186,44 @@ macro_rules! impl_field_generator {
 }
 
 for_all_fields_variants! {impl_field_generator}
+
+pub struct VarcharField {
+    length: usize,
+}
+impl VarcharField {
+    pub fn new(length_option: Option<String>) -> Result<Self> {
+        let length = if let Some(length_option) = length_option {
+            length_option.parse::<usize>()?
+        } else {
+            100
+        };
+        Ok(Self { length })
+    }
+}
+impl FieldGenerator for VarcharField {
+    fn with_random(_start: Option<String>, _end: Option<String>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
+    fn with_sequence(_min: Option<String>, _max: Option<String>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
+    fn generate(&mut self) -> Value {
+        let s: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(self.length)
+            .map(char::from)
+            .collect();
+        json!(s)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

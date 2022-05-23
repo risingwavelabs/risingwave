@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::DatagenProperties;
-use crate::{Column, ConnectorStateV2, SourceMessage, SplitReader};
+use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -54,26 +54,22 @@ impl SplitReader for DatagenSplitReader {
         for column in columns {
             let name = column.name.clone();
             let kind_key = format!("field.{}.kind", name);
-            if let Some(kind) = fields_option_map.get(&kind_key) {
-                match kind.as_str() {
-                    "random" => {
-                        let min_key = format!("field.{}.min", name);
-                        let max_key = format!("field.{}.max", name);
-                        let min_value_option =
-                            fields_option_map.get(&min_key).map(|s| s.to_string());
-                        let max_value_option =
-                            fields_option_map.get(&max_key).map(|s| s.to_string());
-                        fields_map.insert(
-                            name,
-                            FieldGeneratorImpl::new(
-                                column.data_type.clone(),
-                                super::FieldKind::Random,
-                                min_value_option,
-                                max_value_option,
-                            )?,
-                        );
-                    }
-                    "sequence" => {
+            match column.data_type{
+                DataType::Varchar => {                                
+                    let length_key = format!("field.{}.length", name);
+                let length_key_option =
+                fields_option_map.get(&length_key).map(|s| s.to_string());
+                fields_map.insert(
+                    name,
+                    FieldGeneratorImpl::new(
+                        column.data_type.clone(),
+                        super::FieldKind::Random,
+                        length_key_option,
+                        None,
+                    )?,
+                );},
+                _ => {
+                    if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == "sequence"{
                         let start_key = format!("field.{}.start", name);
                         let end_key = format!("field.{}.end", name);
                         let start_key_option =
@@ -88,23 +84,22 @@ impl SplitReader for DatagenSplitReader {
                                 end_key_option,
                             )?,
                         );
+                    } else{
+                        let min_key = format!("field.{}.min", name);
+                        let max_key = format!("field.{}.max", name);
+                        let min_value_option = fields_option_map.get(&min_key).map(|s| s.to_string());
+                        let max_value_option = fields_option_map.get(&max_key).map(|s| s.to_string());
+                        fields_map.insert(
+                            name,
+                            FieldGeneratorImpl::new(
+                                column.data_type.clone(),
+                                super::FieldKind::Random,
+                                min_value_option,
+                                max_value_option,
+                            )?,
+                        );
                     }
-                    _ => unreachable!(),
                 }
-            } else {
-                let min_key = format!("field.{}.min", name);
-                let max_key = format!("field.{}.max", name);
-                let min_value_option = fields_option_map.get(&min_key).map(|s| s.to_string());
-                let max_value_option = fields_option_map.get(&max_key).map(|s| s.to_string());
-                fields_map.insert(
-                    name,
-                    FieldGeneratorImpl::new(
-                        column.data_type.clone(),
-                        super::FieldKind::Random,
-                        min_value_option,
-                        max_value_option,
-                    )?,
-                );
             }
         }
 
