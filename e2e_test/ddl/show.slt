@@ -35,6 +35,7 @@ drop index idx1;
 query T
 show databases;
 ----
+test
 dev
 
 query T
