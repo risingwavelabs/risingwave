@@ -95,6 +95,7 @@ impl LogicalMultiJoin {
             inputs.push(right.clone());
         }
 
+        // TODO: derive schema and pk
         Some(Self {
             base: logical_join.base.clone(),
             inputs,
@@ -107,6 +108,7 @@ impl LogicalMultiJoin {
         let input = logical_filter.input();
         let multijoin = input.as_logical_multi_join()?;
 
+        // TODO: derive schema and pk
         Some(Self {
             base: logical_filter.base.clone(),
             inputs: multijoin.inputs().to_vec(),
