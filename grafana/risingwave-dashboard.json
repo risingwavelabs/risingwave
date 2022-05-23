@@ -1707,7 +1707,7 @@
 						{
 							"datasource": {
 								"type": "prometheus",
-								"uid": "PEDE6B306CC9C0CD0"
+								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
 							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
@@ -1721,7 +1721,7 @@
 						{
 							"datasource": {
 								"type": "prometheus",
-								"uid": "PEDE6B306CC9C0CD0"
+								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
 							"expr": "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
