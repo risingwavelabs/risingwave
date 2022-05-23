@@ -19,8 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-
-        PlanTreeNodeUnary,PredicatePushdown, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
