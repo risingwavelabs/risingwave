@@ -18,6 +18,7 @@ pub mod heartbeat_service;
 pub mod hummock_service;
 pub mod notification_service;
 pub mod stream_service;
+pub mod user_service;
 
 use std::pin::Pin;
 use std::task::{Context, Poll};

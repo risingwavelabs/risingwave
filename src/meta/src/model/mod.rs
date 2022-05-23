@@ -16,6 +16,7 @@ mod barrier;
 mod catalog;
 mod cluster;
 mod stream;
+mod user;
 
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
@@ -27,6 +28,7 @@ pub use cluster::*;
 use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;
+pub use user::*;
 
 use crate::storage::{self, MetaStore, Transaction};
 
