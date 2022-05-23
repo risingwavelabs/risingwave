@@ -163,7 +163,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         let mut mem_table_iter_next_flag = false;
         let mut cell_based_iter_next_flag = false;
         let mut res = None;
-        let cell_based_item = std::mem::take(&mut self.cell_based_item);
+        let cell_based_item = self.cell_based_item.take();
         match (cell_based_item, self.mem_table_iter.peek()) {
             (None, None) => {
                 res = None;
