@@ -197,30 +197,52 @@ impl RequiredDist {
 
 #[cfg(test)]
 mod tests {
-    // use super::Distribution;
+    use super::{Distribution, RequiredDist};
 
-    // fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
-    //     assert!(!uni.satisfies(sub));
-    //     assert!(sub.satisfies(uni));
-    // }
+    #[test]
+    fn hash_shard_satisfy() {
+        let d1 = Distribution::HashShard(vec![0, 1]);
+        let d2 = Distribution::HashShard(vec![1, 0]);
+        let d3 = Distribution::HashShard(vec![0]);
+        let d4 = Distribution::HashShard(vec![1]);
 
-    // fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
-    //     assert!(!d1.satisfies(d2));
-    //     assert!(!d2.satisfies(d1));
-    // }
+        let r1 = RequiredDist::shard_by_key(2, &vec![0, 1]);
+        let r3 = RequiredDist::shard_by_key(2, &vec![0]);
+        let r4 = RequiredDist::shard_by_key(2, &vec![1]);
+        assert!(d1.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
+        assert!(d2.satisfies(&RequiredDist::PhysicalDist(d2.clone())));
+        assert!(d3.satisfies(&RequiredDist::PhysicalDist(d3.clone())));
+        assert!(d4.satisfies(&RequiredDist::PhysicalDist(d4.clone())));
 
-    // #[test]
-    // fn hash_shard_satisfy() {
-    //     let d1 = Distribution::HashShard(vec![0, 2, 4, 6, 8]);
-    //     let d2 = Distribution::HashShard(vec![2, 4]);
-    //     let d3 = Distribution::HashShard(vec![4, 6]);
-    //     let d4 = Distribution::HashShard(vec![6, 8]);
-    //     test_hash_shard_subset(&d1, &d2);
-    //     test_hash_shard_subset(&d1, &d3);
-    //     test_hash_shard_subset(&d1, &d4);
-    //     test_hash_shard_subset(&d1, &d2);
-    //     test_hash_shard_false(&d2, &d3);
-    //     test_hash_shard_false(&d2, &d4);
-    //     test_hash_shard_false(&d3, &d4);
-    // }
+        assert!(!d2.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
+        assert!(!d3.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
+        assert!(!d4.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
+
+        assert!(!d1.satisfies(&RequiredDist::PhysicalDist(d3.clone())));
+        assert!(!d2.satisfies(&RequiredDist::PhysicalDist(d3.clone())));
+        assert!(!d1.satisfies(&RequiredDist::PhysicalDist(d4.clone())));
+        assert!(!d2.satisfies(&RequiredDist::PhysicalDist(d4.clone())));
+
+        assert!(d1.satisfies(&r1));
+        assert!(d2.satisfies(&r1));
+        assert!(d3.satisfies(&r1));
+        assert!(d4.satisfies(&r1));
+
+        assert!(!d1.satisfies(&r3));
+        assert!(!d2.satisfies(&r3));
+        assert!(d3.satisfies(&r3));
+        assert!(!d4.satisfies(&r3));
+
+        assert!(!d1.satisfies(&r4));
+        assert!(!d2.satisfies(&r4));
+        assert!(!d3.satisfies(&r4));
+        assert!(d4.satisfies(&r4));
+
+        assert!(r3.satisfies(&r1));
+        assert!(r4.satisfies(&r1));
+        assert!(!r1.satisfies(&r3));
+        assert!(!r1.satisfies(&r4));
+        assert!(!r3.satisfies(&r4));
+        assert!(!r4.satisfies(&r3));
+    }
 }
