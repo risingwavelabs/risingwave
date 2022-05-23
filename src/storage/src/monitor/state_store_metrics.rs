@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, Histogram, Registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry, Histogram,
+    Registry,
 };
 
 use super::{monitor_process, Print};
@@ -47,7 +48,7 @@ macro_rules! for_all_metrics {
             iter_merge_sstable_counts: Histogram,
             iter_merge_seek_duration: Histogram,
 
-            sst_store_block_request_counts: GenericCounter<AtomicU64>,
+            sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
 
             shared_buffer_to_l0_duration: Histogram,
             shared_buffer_to_sstable_size: Histogram,
@@ -225,9 +226,10 @@ impl StateStoreMetrics {
         let iter_merge_seek_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- sst store -----
-        let sst_store_block_request_counts = register_int_counter_with_registry!(
+        let sst_store_block_request_counts = register_int_counter_vec_with_registry!(
             "state_store_sst_store_block_request_counts",
             "Total number of sst block requests that have been issued to sst store",
+            &["type"],
             registry
         )
         .unwrap();
