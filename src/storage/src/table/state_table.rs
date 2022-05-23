@@ -218,8 +218,10 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                         match mem_table_row_op {
                             RowOp::Insert(row) => res = Some(row.clone()),
                             RowOp::Delete(_) => {}
-                            RowOp::Update((_, new_row)) => {
-                                res = Some(new_row.clone());
+                            RowOp::Update(_) => {
+                                panic!(
+                                    "There must be a record in shared storage, so this case is unreachable.",
+                                );
                             }
                         }
                         self.cell_based_item = Some((cell_based_pk, cell_based_row));
