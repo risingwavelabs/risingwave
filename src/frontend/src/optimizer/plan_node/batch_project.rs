@@ -81,16 +81,20 @@ impl ToDistributedBatch for BatchProject {
         required_order: &Order,
         required_dist: &RequiredDist,
     ) -> Result<PlanRef> {
-        let input_required = self
-            .logical
-            .o2i_col_mapping()
-            .rewrite_required_distribution(required_dist);
-        let input_required = match input_required {
-            RequiredDist::PhysicalDist(dist) => match dist {
-                Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
-                _ => RequiredDist::PhysicalDist(dist),
-            },
-            _ => input_required,
+        let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
+            RequiredDist::Any
+        } else {
+            let input_required = self
+                .logical
+                .o2i_col_mapping()
+                .rewrite_required_distribution(required_dist);
+            match input_required {
+                RequiredDist::PhysicalDist(dist) => match dist {
+                    Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                    _ => RequiredDist::PhysicalDist(dist),
+                },
+                _ => input_required,
+            }
         };
         let new_input = self
             .input()

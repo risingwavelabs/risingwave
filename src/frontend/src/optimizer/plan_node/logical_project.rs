@@ -257,15 +257,19 @@ impl ToBatch for LogicalProject {
 
 impl ToStream for LogicalProject {
     fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
-        let input_required = self
-            .o2i_col_mapping()
-            .rewrite_required_distribution(required_dist);
-        let input_required = match input_required {
-            RequiredDist::PhysicalDist(dist) => match dist {
-                Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
-                _ => RequiredDist::PhysicalDist(dist),
-            },
-            _ => input_required,
+        let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
+            RequiredDist::Any
+        } else {
+            let input_required = self
+                .o2i_col_mapping()
+                .rewrite_required_distribution(required_dist);
+            match input_required {
+                RequiredDist::PhysicalDist(dist) => match dist {
+                    Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                    _ => RequiredDist::PhysicalDist(dist),
+                },
+                _ => input_required,
+            }
         };
         let new_input = self.input().to_stream_with_dist_required(&input_required)?;
         let new_logical = self.clone_with_input(new_input);
