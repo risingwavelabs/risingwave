@@ -21,7 +21,7 @@ use risingwave_pb::task_service::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::task::{BatchEnvironment, BatchManager};
+use crate::task::{BatchEnvironment, BatchManager, ComputeNodeContext};
 
 #[derive(Clone)]
 pub struct BatchServiceImpl {
@@ -45,10 +45,10 @@ impl TaskService for BatchServiceImpl {
         let req = request.into_inner();
 
         let res = self.mgr.fire_task(
-            self.env.clone(),
             req.get_task_id().expect("no task id found"),
             req.get_plan().expect("no plan found").clone(),
             req.epoch,
+            ComputeNodeContext::new(self.env.clone()),
         );
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
