@@ -88,7 +88,7 @@ jobs:
         timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/streaming/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -97,7 +97,7 @@ jobs:
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/streaming_delta_join/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/streaming_delta_join/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -106,8 +106,8 @@ jobs:
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/ddl/**/*.slt'
-          sqllogictest -p 4566 './e2e_test/batch/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill

@@ -11,7 +11,6 @@ env:
   RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
-  USER: dev
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG

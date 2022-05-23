@@ -19,7 +19,6 @@ env:
   RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.4/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
-  USER: dev
   RUSTFLAGS: -D warnings
   PROTOC_NO_VENDOR: true
   AWS_ROLE_TO_ASSUME: arn:aws:iam::639303875316:role/Create-IAM-Role-for-Configure-AWS-Credentials-Role-1NF1LWROB80QG
@@ -189,22 +188,22 @@ jobs:
         timeout-minutes: 5
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/streaming/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e, ci-3cn-1fe, delta join
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/streaming_delta_join/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/streaming_delta_join/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e, ci-3cn-1fe, batch distributed
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3cn-1fe
-          sqllogictest -p 4566 './e2e_test/ddl/**/*.slt'
-          sqllogictest -p 4566 './e2e_test/batch/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: Dump last 300 lines of logs on failure
@@ -309,7 +308,7 @@ jobs:
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-start ci-kafka
           ./scripts/source/prepare_ci_kafka.sh
-          sqllogictest -p 4566 './e2e_test/source/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/source/**/*.slt'
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
