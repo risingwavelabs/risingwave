@@ -33,7 +33,7 @@ message ExprNode {
     BitwiseAnd = 31;
     BitwiseOr = 32;
     BitwiseXor = 33;
-    PGBitwiseXor = 34;
+    BitwiseNot = 34;
     PGBitwiseShiftLeft = 35;
     PGBitwiseShiftRight = 36;
     // date functions

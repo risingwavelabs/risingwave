@@ -380,6 +380,33 @@ pub fn new_binary_expr(
                 },
             }
         },
+        Type::BitwiseOr => {
+            gen_binary_expr_shift! {
+                gen_atm_impl,
+                l, r, ret,
+                general_bitor,
+                {
+                },
+            }
+        },
+        Type::BitwiseXor => {
+            gen_binary_expr_shift! {
+                gen_atm_impl,
+                l, r, ret,
+                general_bitxor,
+                {
+                },
+            }
+        },
+        // Type::Bitwisenot => {
+        //     gen_binary_expr_shift! {
+        //         gen_atm_impl,
+        //         l, ret,
+        //         general_bitnot,
+        //         {
+        //         },
+        //     }
+        // },
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
