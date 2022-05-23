@@ -25,7 +25,6 @@ lazy_static = "1"
 log = "0.4"
 madsim = "0.2.0-alpha.1"
 memcomparable = { path = "../utils/memcomparable" }
-moka = { version = "0.8", features = ["future"] }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
