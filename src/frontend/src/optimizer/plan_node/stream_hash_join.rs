@@ -102,16 +102,6 @@ impl StreamHashJoin {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                assert!(
-                    left.satisfies(&RequiredDist::PhysicalDist(Distribution::HashShard(
-                        predicate.left_eq_indexes()
-                    )))
-                );
-                assert!(
-                    right.satisfies(&RequiredDist::PhysicalDist(Distribution::HashShard(
-                        predicate.right_eq_indexes()
-                    )))
-                );
                 l2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),
