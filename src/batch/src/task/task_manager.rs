@@ -22,14 +22,13 @@ use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
 
-use crate::task::env::BatchEnvironment;
-use crate::task::{BatchTaskExecution, TaskId, TaskOutput};
+use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
 pub struct BatchManager {
     /// Every task id has a corresponding task execution.
-    tasks: Arc<Mutex<HashMap<TaskId, Box<BatchTaskExecution>>>>,
+    tasks: Arc<Mutex<HashMap<TaskId, Box<BatchTaskExecution<ComputeNodeContext>>>>>,
 }
 
 impl BatchManager {
@@ -41,13 +40,13 @@ impl BatchManager {
 
     pub fn fire_task(
         &self,
-        env: BatchEnvironment,
         tid: &ProstTaskId,
         plan: PlanFragment,
         epoch: u64,
+        context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
-        let task = BatchTaskExecution::new(tid, plan, env, epoch)?;
+        let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
 
         task.async_execute()?;
@@ -63,7 +62,7 @@ impl BatchManager {
         }
     }
 
-    pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+    pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput<ComputeNodeContext>> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         debug!("Trying to take output of: {:?}", output_id);
         self.tasks
@@ -74,7 +73,10 @@ impl BatchManager {
     }
 
     #[cfg(test)]
-    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<BatchTaskExecution>>> {
+    pub fn remove_task(
+        &self,
+        sid: &ProstTaskId,
+    ) -> Result<Option<Box<BatchTaskExecution<ComputeNodeContext>>>> {
         let task_id = TaskId::from(sid);
         match self.tasks.lock().remove(&task_id) {
             Some(t) => Ok(Some(t)),
@@ -113,7 +115,7 @@ mod tests {
     use risingwave_pb::batch_plan::TaskOutputId as ProstTaskOutputId;
     use tonic::Code;
 
-    use crate::task::{BatchEnvironment, BatchManager, TaskId};
+    use crate::task::{BatchManager, ComputeNodeContext, TaskId};
 
     #[test]
     fn test_task_not_found() {
@@ -166,14 +168,14 @@ mod tests {
                 distribution: None,
             }),
         };
-        let env = BatchEnvironment::for_test();
+        let context = ComputeNodeContext::new_for_test();
         let task_id = TaskId {
             ..Default::default()
         };
         manager
-            .fire_task(env.clone(), &task_id, plan.clone(), 0)
+            .fire_task(&task_id, plan.clone(), 0, context.clone())
             .unwrap();
-        let err = manager.fire_task(env, &task_id, plan, 0).unwrap_err();
+        let err = manager.fire_task(&task_id, plan, 0, context).unwrap_err();
         assert!(err
             .to_string()
             .contains("can not create duplicate task with the same id"));

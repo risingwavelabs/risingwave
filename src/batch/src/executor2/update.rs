@@ -26,6 +26,7 @@ use risingwave_source::SourceManagerRef;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 /// [`UpdateExecutor`] implements table updation with values from its child executor and given
 /// expressions.
@@ -161,7 +162,9 @@ impl UpdateExecutor {
 }
 
 impl BoxedExecutor2Builder for UpdateExecutor {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let update_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Update
@@ -184,7 +187,7 @@ impl BoxedExecutor2Builder for UpdateExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source.global_batch_env().source_manager_ref(),
+            source.batch_task_context().try_get_source_manager_ref()?,
             child,
             exprs,
         )))

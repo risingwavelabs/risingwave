@@ -45,7 +45,7 @@ use crate::storage::{MetaStore, Transaction};
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 2GB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024;
 const DEFAULT_LEVEL0_MAX_FILE_NUMBER: usize = 32;
 
