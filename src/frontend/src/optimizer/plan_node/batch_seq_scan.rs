@@ -40,11 +40,11 @@ impl BatchSeqScan {
     }
 
     pub fn new(logical: LogicalScan) -> Self {
-        Self::new_inner(logical, Distribution::Any)
+        Self::new_inner(logical, Distribution::Single)
     }
 
     pub fn with_dist(logical: LogicalScan) -> Self {
-        Self::new_inner(logical, Distribution::AnyShard)
+        Self::new_inner(logical, Distribution::SomeShard)
     }
 
     /// Get a reference to the batch seq scan's logical.

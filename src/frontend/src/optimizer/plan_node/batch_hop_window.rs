@@ -22,7 +22,7 @@ use super::{
     LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows
@@ -76,13 +76,12 @@ impl ToDistributedBatch for BatchHopWindow {
     fn to_distributed_with_required(
         &self,
         required_order: &Order,
-        required_dist: &Distribution,
+        required_dist: &RequiredDist,
     ) -> Result<PlanRef> {
         let input_required = self
             .logical
             .o2i_col_mapping()
-            .rewrite_required_distribution(required_dist)
-            .unwrap_or(Distribution::Any);
+            .rewrite_required_distribution(required_dist);
         let new_input = self
             .input()
             .to_distributed_with_required(required_order, &input_required)?;

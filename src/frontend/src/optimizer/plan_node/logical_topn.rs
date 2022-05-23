@@ -23,7 +23,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -191,7 +191,7 @@ impl ToStream for LogicalTopN {
         // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()
-            .to_stream_with_dist_required(&Distribution::Single)?;
+            .to_stream_with_dist_required(&RequiredDist::single())?;
         Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 

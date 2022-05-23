@@ -68,8 +68,8 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, ($1 * ($2::Decimal / $3))] }
         BatchHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
-          BatchProject { exprs: [$2, $0, ($0 + $1)] }
-            BatchExchange { order: [], dist: HashShard([2]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$2, $0, ($0 + $1)] }
               BatchScan { table: t, columns: [v1, v2, v3] }
   batch_local_plan: |
     BatchProject { exprs: [$0, ($1 * ($2::Decimal / $3))] }
@@ -81,8 +81,8 @@
     StreamMaterialize { columns: [v3, agg], pk_columns: [v3] }
       StreamProject { exprs: [$0, ($2 * ($3::Decimal / $4))] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), sum($2), count($2)] }
-          StreamProject { exprs: [$2, $0, ($0 + $1), $3] }
-            StreamExchange { dist: HashShard([2]) }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$2, $0, ($0 + $1), $3] }
               StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     /* test logical_agg with complex group expression */
@@ -156,15 +156,15 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, (($1 / $2) + $3)] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1), max($0)] }
-          BatchProject { exprs: [$0, ($1 + $2)] }
-            BatchExchange { order: [], dist: HashShard([0]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$0, ($1 + $2)] }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
       StreamProject { exprs: [$0, (($2 / $3) + $4)] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1), max($0)] }
-          StreamProject { exprs: [$0, ($1 + $2), $3] }
-            StreamExchange { dist: HashShard([0]) }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$0, ($1 + $2), $3] }
               StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     create table t (v1 real not null);
