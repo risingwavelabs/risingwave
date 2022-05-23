@@ -46,6 +46,6 @@
 - input: SHOW COLUMNS FROM schema.t
   formatted_sql: SHOW COLUMNS FROM schema.t
   formatted_ast: |
-    ShowColumn { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }
+    ShowObjects(Columns { table: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) })
 
 

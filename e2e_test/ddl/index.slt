@@ -1,0 +1,26 @@
+# Create a table.
+statement ok
+create table ddl_t (v1 int not null);
+
+# Create a mview on top of it.
+statement ok
+create materialized view ddl_mv as select v1 from ddl_t;
+
+# Create an index on top of it.
+statement ok
+create index ddl_index on ddl_t(v1);
+
+statement error
+drop index ddl_mv;
+
+statement error
+drop materialized view ddl_index;
+
+statement ok
+drop index ddl_index;
+
+statement ok
+drop materialized view ddl_mv;
+
+statement ok
+drop table ddl_t;

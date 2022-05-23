@@ -112,7 +112,6 @@ impl StateStoreImpl {
                         object_store_metrics.clone(),
                     )),
                     config.data_directory.to_string(),
-                    state_store_stats.clone(),
                     config.block_cache_capacity_mb * (1 << 20),
                     config.meta_cache_capacity_mb * (1 << 20),
                 ));

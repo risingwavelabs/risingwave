@@ -30,7 +30,7 @@ use crate::executor::ExecutorBuilder;
 use crate::executor2::BoxedExecutor2;
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
-use crate::task::{BatchEnvironment, BatchManager};
+use crate::task::BatchTaskContext;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
@@ -103,17 +103,16 @@ impl TaskOutputId {
     }
 }
 
-pub struct TaskOutput {
-    task_manager: Arc<BatchManager>,
+pub struct TaskOutput<C> {
     receiver: ChanReceiverImpl,
     output_id: TaskOutputId,
+    context: C,
 }
 
-impl TaskOutput {
+impl<C: BatchTaskContext> TaskOutput<C> {
     /// Writes the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
         let task_id = self.output_id.task_id.clone();
-        self.task_manager.check_if_task_running(&task_id)?;
         loop {
             match self.receiver.recv().await {
                 // Received some data
@@ -137,7 +136,7 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.task_manager.get_error(&task_id)?;
+                    let possible_err = self.context.try_get_error(&task_id)?;
                     return if let Some(err) = possible_err {
                         // Task error
                         Err(err)
@@ -153,18 +152,18 @@ impl TaskOutput {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        let task_id = self.output_id.task_id.clone();
-        self.task_manager.check_if_task_running(&task_id)?;
         self.receiver.recv().await
     }
+}
 
+impl<C> TaskOutput<C> {
     pub fn id(&self) -> &TaskOutputId {
         &self.output_id
     }
 }
 
 /// `BatchTaskExecution` represents a single task execution.
-pub struct BatchTaskExecution {
+pub struct BatchTaskExecution<C> {
     /// Task id.
     task_id: TaskId,
 
@@ -177,8 +176,8 @@ pub struct BatchTaskExecution {
     /// Receivers data of the task.   
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
-    /// Global environment of task execution.
-    env: BatchEnvironment,
+    /// Context for task execution
+    context: C,
 
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
@@ -186,19 +185,19 @@ pub struct BatchTaskExecution {
     epoch: u64,
 }
 
-impl BatchTaskExecution {
+impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn new(
         prost_tid: &ProstTaskId,
         plan: PlanFragment,
-        env: BatchEnvironment,
+        context: C,
         epoch: u64,
     ) -> Result<Self> {
-        Ok(BatchTaskExecution {
+        Ok(Self {
             task_id: TaskId::from(prost_tid),
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
-            env,
+            context,
             failure: Arc::new(Mutex::new(None)),
             epoch,
         })
@@ -224,7 +223,7 @@ impl BatchTaskExecution {
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),
             &self.task_id.clone(),
-            self.env.clone(),
+            self.context.clone(),
             self.epoch,
         )
         .build2()?;
@@ -244,7 +243,7 @@ impl BatchTaskExecution {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = BatchTaskExecution::try_execute(exec, &mut sender)
+                if let Err(e) = try_execute(exec, &mut sender)
                     .instrument(tracing::trace_span!(
                         "batch_execute",
                         task_id = ?task_id.task_id,
@@ -266,19 +265,7 @@ impl BatchTaskExecution {
         Ok(())
     }
 
-    async fn try_execute(root: BoxedExecutor2, sender: &mut ChanSenderImpl) -> Result<()> {
-        #[for_await]
-        for chunk in root.execute() {
-            let chunk = chunk?;
-            if chunk.cardinality() > 0 {
-                sender.send(Some(chunk)).await?;
-            }
-        }
-        sender.send(None).await?;
-        Ok(())
-    }
-
-    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput<C>> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()
@@ -290,9 +277,9 @@ impl BatchTaskExecution {
                 ))
             })?;
         let task_output = TaskOutput {
-            task_manager: self.env.task_manager(),
             receiver,
             output_id: output_id.try_into()?,
+            context: self.context.clone(),
         };
         Ok(task_output)
     }
@@ -311,6 +298,18 @@ impl BatchTaskExecution {
         }
         Ok(())
     }
+}
+
+pub async fn try_execute(root: BoxedExecutor2, sender: &mut ChanSenderImpl) -> Result<()> {
+    #[for_await]
+    for chunk in root.execute() {
+        let chunk = chunk?;
+        if chunk.cardinality() > 0 {
+            sender.send(Some(chunk)).await?;
+        }
+    }
+    sender.send(None).await?;
+    Ok(())
 }
 
 #[cfg(test)]

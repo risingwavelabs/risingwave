@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::NestedLoopJoinNode;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
@@ -44,9 +44,8 @@ impl BatchNestedLoopJoin {
 
     fn derive_dist(left: &Distribution, right: &Distribution) -> Distribution {
         match (left, right) {
-            (Distribution::Any, Distribution::Any) => Distribution::Any,
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (_, _) => panic!(),
+            (_, _) => unreachable!(),
         }
     }
 }
@@ -82,10 +81,10 @@ impl ToDistributedBatch for BatchNestedLoopJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
         let left = self
             .left()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
         let right = self
             .right()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
@@ -102,8 +101,11 @@ impl ToBatchProst for BatchNestedLoopJoin {
 
 impl ToLocalBatch for BatchNestedLoopJoin {
     fn to_local(&self) -> Result<PlanRef> {
-        let left = self.left().to_local()?;
-        let right = self.right().to_local()?;
+        let left = RequiredDist::single()
+            .enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
+
+        let right = RequiredDist::single()
+            .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }

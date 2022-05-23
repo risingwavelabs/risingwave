@@ -131,8 +131,8 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, ($1 / $2)] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1)] }
-          BatchProject { exprs: [$1, $2] }
-            BatchExchange { order: [], dist: HashShard([1]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$1, $2] }
               BatchHashAgg { group_keys: [$0, $1], aggs: [max($2)] }
                 BatchProject { exprs: [$0, $3, $5] }
                   BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
@@ -145,8 +145,8 @@
     StreamMaterialize { columns: [category, avg], pk_columns: [category] }
       StreamProject { exprs: [$0, ($2 / $3)] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
-          StreamProject { exprs: [$1, $3, $0] }
-            StreamExchange { dist: HashShard([1]) }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$1, $3, $0] }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
                 StreamProject { exprs: [$0, $3, $6] }
                   StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }

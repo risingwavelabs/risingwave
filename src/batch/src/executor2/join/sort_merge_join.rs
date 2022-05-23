@@ -30,6 +30,7 @@ use crate::executor2::join::JoinType;
 use crate::executor2::{
     BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2, ExecutorBuilder,
 };
+use crate::task::BatchTaskContext;
 
 /// [`SortMergeJoinExecutor2`] will not sort the data. If the join key is not sorted, optimizer
 /// should insert a sort executor above the data source.
@@ -233,8 +234,8 @@ impl SortMergeJoinExecutor2 {
 }
 
 impl BoxedExecutor2Builder for SortMergeJoinExecutor2 {
-    fn new_boxed_executor2(
-        source: &ExecutorBuilder,
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
     ) -> risingwave_common::error::Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 2);
 

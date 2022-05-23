@@ -87,7 +87,7 @@ pub struct LruCacheImpl {
 impl LruCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(3, capacity, 1024)),
+            inner: Arc::new(LruCache::new(3, capacity)),
             fake_io_latency,
         }
     }

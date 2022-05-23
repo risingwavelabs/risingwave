@@ -15,7 +15,8 @@
 use moka::future::Cache;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_rpc_client::ComputeClient;
+
+use crate::ComputeClient;
 
 #[derive(Clone)]
 pub struct ComputeClientPool {

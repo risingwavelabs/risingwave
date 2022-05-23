@@ -30,7 +30,7 @@ use crate::executor::ExecutorBuilder;
 use crate::executor2::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor2::join::JoinType;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
-use crate::task::TaskId;
+use crate::task::{BatchTaskContext, TaskId};
 
 /// Parameters of equi-join.
 ///
@@ -281,7 +281,9 @@ impl HashKeyDispatcher for HashJoinExecutor2BuilderDispatcher {
 
 /// Hash join executor builder.
 impl BoxedExecutor2Builder for HashJoinExecutor2Builder {
-    fn new_boxed_executor2(context: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        context: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context

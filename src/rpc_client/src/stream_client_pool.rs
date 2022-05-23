@@ -23,23 +23,23 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::cluster::WorkerId;
-
 pub type StreamClient = StreamServiceClient<Channel>;
 
-/// [`StreamClients`] maintains stream service clients to known compute nodes.
-pub struct StreamClients {
+pub type WorkerId = u32;
+
+/// [`StreamClientPool`] maintains stream service clients to known compute nodes.
+pub struct StreamClientPool {
     /// Stores the [`StreamClient`] mapping: `node_id` => client.
     clients: Cache<WorkerId, StreamClient>,
 }
 
-impl Default for StreamClients {
+impl Default for StreamClientPool {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StreamClients {
+impl StreamClientPool {
     pub fn new() -> Self {
         Self {
             clients: Cache::new(u64::MAX),
@@ -70,4 +70,4 @@ impl StreamClients {
     }
 }
 
-pub type StreamClientsRef = Arc<StreamClients>;
+pub type StreamClientPoolRef = Arc<StreamClientPool>;

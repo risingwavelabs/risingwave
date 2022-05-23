@@ -24,7 +24,7 @@ use super::{
 };
 use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -46,7 +46,6 @@ impl BatchHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &eq_join_predicate,
             &logical.l2o_col_mapping(),
         );
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
@@ -61,18 +60,14 @@ impl BatchHashJoin {
     fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        predicate: &EqJoinPredicate,
         l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
-            (Distribution::Any, Distribution::Any) => Distribution::Any,
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
-                assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
                 l2o_mapping.rewrite_provided_distribution(left)
             }
-            (_, _) => panic!(),
+            (_, _) => unreachable!(),
         }
     }
 
@@ -116,20 +111,20 @@ impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
         let right = self.right().to_distributed_with_required(
             Order::any(),
-            &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
+            &RequiredDist::shard_by_key(
+                self.right().schema().len(),
+                &self.eq_join_predicate().right_eq_indexes(),
+            ),
         )?;
         let r2l = self
             .eq_join_predicate()
             .r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-        let left_dist = r2l
-            .rewrite_required_distribution(right.distribution())
-            .unwrap();
-        let mut left = self
+        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+            right.distribution().clone(),
+        ));
+        let left = self
             .left()
             .to_distributed_with_required(Order::any(), &left_dist)?;
-        if left.distribution() != &left_dist {
-            left = left_dist.enforce(left, Order::any());
-        }
         Ok(self.clone_with_left_right(left, right).into())
     }
 }
@@ -161,8 +156,10 @@ impl ToBatchProst for BatchHashJoin {
 
 impl ToLocalBatch for BatchHashJoin {
     fn to_local(&self) -> Result<PlanRef> {
-        let left = self.left().to_local()?;
-        let right = self.right().to_local()?;
+        let right = RequiredDist::single()
+            .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
+        let left = RequiredDist::single()
+            .enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }

@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchNestedLoopJoin, BatchProject, EqJoinPredicate, LogicalFilter,
     StreamFilter, StreamProject,
 };
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -687,21 +687,22 @@ impl ToStream for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
+
         let right = self
             .right()
-            .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()))?;
+            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                self.right().schema().len(),
+                &predicate.right_eq_indexes(),
+            ))?;
 
         let r2l =
             predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
 
-        let left_dist = r2l
-            .rewrite_required_distribution(right.distribution())
-            .unwrap();
+        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+            right.distribution().clone(),
+        ));
 
-        let mut left = self.left().to_stream_with_dist_required(&left_dist)?;
-        if left.distribution() != &left_dist {
-            left = left_dist.enforce(left, Order::any());
-        }
+        let left = self.left().to_stream_with_dist_required(&left_dist)?;
         let logical_join = self.clone_with_left_right(left, right);
         let new_output_indices = logical_join.output_indices.clone();
         let new_internal_column_num = logical_join.internal_column_num();

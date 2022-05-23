@@ -120,7 +120,7 @@ impl Binder {
         Ok(self
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
-            .iter_mv()
+            .iter_index()
             .filter(|x| x.is_index_on == Some(table_id))
             .map(|table| table.clone().into())
             .collect())

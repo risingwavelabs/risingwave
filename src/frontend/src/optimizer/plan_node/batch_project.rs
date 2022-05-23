@@ -24,7 +24,7 @@ use super::{
 };
 use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows
@@ -40,6 +40,7 @@ impl BatchProject {
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input().distribution());
+
         // TODO: Derive order from input
         let base = PlanBase::new_batch(
             ctx,
@@ -78,16 +79,22 @@ impl ToDistributedBatch for BatchProject {
     fn to_distributed_with_required(
         &self,
         required_order: &Order,
-        required_dist: &Distribution,
+        required_dist: &RequiredDist,
     ) -> Result<PlanRef> {
-        let input_required = match required_dist {
-            Distribution::HashShard(_) => self
+        let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
+            RequiredDist::Any
+        } else {
+            let input_required = self
                 .logical
                 .o2i_col_mapping()
-                .rewrite_required_distribution(required_dist)
-                .unwrap_or(Distribution::AnyShard),
-            Distribution::AnyShard => Distribution::AnyShard,
-            _ => Distribution::Any,
+                .rewrite_required_distribution(required_dist);
+            match input_required {
+                RequiredDist::PhysicalDist(dist) => match dist {
+                    Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                    _ => RequiredDist::PhysicalDist(dist),
+                },
+                _ => input_required,
+            }
         };
         let new_input = self
             .input()
@@ -113,7 +120,7 @@ impl ToBatchProst for BatchProject {
 
 impl ToLocalBatch for BatchProject {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
