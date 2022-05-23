@@ -190,7 +190,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    pub async fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut HashValueType<S>> {
+    pub async fn get_mut<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a mut HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
@@ -280,7 +280,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
-    pub async fn get_or_init_without_cache(&mut self, key: &K) -> RwResult<&mut JoinEntryState<S>> {
+    pub async fn get_or_init_without_cache<'a>(
+        &'a mut self,
+        key: &K,
+    ) -> RwResult<&'a mut JoinEntryState<S>> {
         // TODO: we should probably implement a entry function for `LruCache`
         let contains = self.inner.contains(key);
         if contains {
