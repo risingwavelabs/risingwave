@@ -34,7 +34,7 @@ use risingwave_pb::batch_plan::HashAggNode;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
-use crate::task::TaskId;
+use crate::task::{BatchTaskContext, TaskId};
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
@@ -113,7 +113,9 @@ impl HashAggExecutor2Builder {
 }
 
 impl BoxedExecutor2Builder for HashAggExecutor2Builder {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let proto_child = &source.plan_node().get_children()[0];

@@ -20,18 +20,25 @@ use bytes::Bytes;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+use crate::datagen::{
+    DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
+};
 use crate::dummy_connector::DummySplitReader;
+use crate::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::kafka::enumerator::KafkaSplitEnumerator;
 use crate::kafka::source::KafkaSplitReader;
-use crate::kafka::KafkaSplit;
+use crate::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::kinesis::source::reader::KinesisMultiSplitReader;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::nexmark::source::reader::NexmarkSplitReader;
-use crate::nexmark::{NexmarkSplit, NexmarkSplitEnumerator};
+use crate::nexmark::{NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR};
 use crate::pulsar::source::reader::PulsarSplitReader;
-use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplit, PulsarSplitEnumerator};
-use crate::ConnectorProperties;
+use crate::pulsar::{
+    PulsarEnumeratorOffset, PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
+};
+use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
@@ -61,18 +68,13 @@ pub trait SplitReader: Sized {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
-const PULSAR_SPLIT_TYPE: &str = "pulsar";
-const S3_SPLIT_TYPE: &str = "s3";
-const KINESIS_SPLIT_TYPE: &str = "kinesis";
-const KAFKA_SPLIT_TYPE: &str = "kafka";
-const NEXMARK_SPLIT_TYPE: &str = "nexmark";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
     Pulsar(PulsarSplit),
     Kinesis(KinesisSplit),
     Nexmark(NexmarkSplit),
+    Datagen(DatagenSplit),
 }
 
 pub enum SplitReaderImpl {
@@ -81,6 +83,7 @@ pub enum SplitReaderImpl {
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
+    Datagen(Box<DatagenSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -88,6 +91,56 @@ pub enum SplitEnumeratorImpl {
     Pulsar(PulsarSplitEnumerator),
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
+    Datagen(DatagenSplitEnumerator),
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub enum ConnectorProperties {
+    Kafka(KafkaProperties),
+    Pulsar(PulsarProperties),
+    Kinesis(KinesisProperties),
+    Nexmark(Box<NexmarkProperties>),
+    Datagen(DatagenProperties),
+    S3(S3Properties),
+    Dummy(()),
+}
+
+impl_connector_properties! {
+    [ ] ,
+    { Kafka, KAFKA_CONNECTOR },
+    { Pulsar, PULSAR_CONNECTOR },
+    { Kinesis, KINESIS_CONNECTOR },
+    { Nexmark, NEXMARK_CONNECTOR },
+    { Datagen, DATAGEN_CONNECTOR },
+    { S3, S3_CONNECTOR }
+}
+
+impl_split_enumerator! {
+    [ ] ,
+    { Kafka, KafkaSplitEnumerator },
+    { Pulsar, PulsarSplitEnumerator },
+    { Kinesis, KinesisSplitEnumerator },
+    { Nexmark, NexmarkSplitEnumerator },
+    { Datagen, DatagenSplitEnumerator }
+}
+
+impl_split! {
+    [ ] ,
+    { Kafka, KAFKA_CONNECTOR, KafkaSplit },
+    { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
+    { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
+    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
+    { Datagen, DATAGEN_CONNECTOR, DatagenSplit }
+}
+
+impl_split_reader! {
+    [ ] ,
+    { Kafka, KafkaSplitReader },
+    { Pulsar, PulsarSplitReader },
+    { Kinesis, KinesisMultiSplitReader },
+    { Nexmark, NexmarkSplitReader },
+    { Datagen, DatagenSplitReader },
+    { Dummy, DummySplitReader }
 }
 
 pub type DataType = risingwave_common::types::DataType;
@@ -112,114 +165,6 @@ pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
     fn encode_to_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
-}
-
-macro_rules! impl_split_enumerator {
-    ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
-        impl SplitEnumeratorImpl {
-
-             pub async fn create(properties: ConnectorProperties) -> Result<Self> {
-                match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name), )*
-                    other => Err(anyhow!("split enumerator type for config {:?} is not supported", other)),
-                }
-             }
-
-             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::$variant_name).collect_vec()), )*
-                }
-             }
-        }
-    }
-}
-
-impl_split_enumerator! {
-            [ ] ,
-            { Kafka, KafkaSplitEnumerator },
-            { Pulsar, PulsarSplitEnumerator },
-            { Kinesis, KinesisSplitEnumerator },
-            { Nexmark, NexmarkSplitEnumerator }
-}
-
-macro_rules! impl_split {
-    ([], $({ $variant_name:ident, $split_name:ident, $split:ty} ),*) => {
-        impl SplitImpl {
-            pub fn id(&self) -> String {
-                match self {
-                    $( Self::$variant_name(inner) => inner.id(), )*
-                }
-            }
-
-            pub fn to_json_bytes(&self) -> Bytes {
-                match self {
-                    $( Self::$variant_name(inner) => inner.encode_to_bytes(), )*
-                }
-            }
-
-            pub fn get_type(&self) -> String {
-                match self {
-                    $( Self::$variant_name(_) => $split_name, )*
-                }
-                    .to_string()
-            }
-
-            pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
-                match split_type.as_str() {
-                    $( $split_name => <$split>::restore_from_bytes(bytes).map(Self::$variant_name), )*
-                    other => Err(anyhow!("split type {} not supported", other)),
-                }
-            }
-        }
-    }
-}
-
-impl_split! {
-            [ ] ,
-            { Kafka, KAFKA_SPLIT_TYPE, KafkaSplit },
-            { Pulsar, PULSAR_SPLIT_TYPE, PulsarSplit },
-            { Kinesis, KINESIS_SPLIT_TYPE, KinesisSplit },
-            { Nexmark, NEXMARK_SPLIT_TYPE, NexmarkSplit }
-}
-
-macro_rules! impl_split_reader {
-    ([], $({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderImpl {
-            pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner.next().await, )*
-                }
-            }
-
-             pub async fn create(
-                config: ConnectorProperties,
-                state: ConnectorStateV2,
-                columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
-                if let ConnectorStateV2::Splits(s) = &state {
-                    if s.is_empty() {
-                        return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                    }
-                }
-
-                let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state, columns).await?)), )*
-                    _ => todo!()
-                };
-
-                Ok(connector)
-            }
-        }
-    }
-}
-
-impl_split_reader! {
-            [ ] ,
-            { Kafka, KafkaSplitReader },
-            { Pulsar, PulsarSplitReader },
-            { Kinesis, KinesisMultiSplitReader },
-            { Nexmark, NexmarkSplitReader },
-            { Dummy, DummySplitReader }
 }
 
 /// The persistent state of the connector.
@@ -283,6 +228,11 @@ impl From<SplitImpl> for ConnectorState {
                     Some(s) => s.to_string(),
                     _ => "".to_string(),
                 },
+                end_offset: "".to_string(),
+            },
+            SplitImpl::Datagen(dategen) => Self {
+                identifier: Bytes::from(dategen.id()),
+                start_offset: "".to_string(),
                 end_offset: "".to_string(),
             },
         }

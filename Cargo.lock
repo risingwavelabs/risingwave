@@ -4048,6 +4048,7 @@ dependencies = [
  "anyhow",
  "itertools",
  "risingwave_sqlparser",
+ "serde",
  "serde_yaml",
  "tempfile",
  "walkdir",

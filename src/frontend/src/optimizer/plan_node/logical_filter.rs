@@ -18,8 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
-    ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
@@ -140,6 +140,13 @@ impl ColPrunable for LogicalFilter {
             )
             .into()
         }
+    }
+}
+
+impl PredicatePushdown for LogicalFilter {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        self.input
+            .predicate_pushdown(predicate.and(self.predicate.clone()))
     }
 }
 

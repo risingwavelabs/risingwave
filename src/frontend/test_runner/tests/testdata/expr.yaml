@@ -35,6 +35,18 @@
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
+    /* bind is distinct from */
+    SELECT 1 IS DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind is not distinct from */
+    SELECT 1 IS NOT DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [Not(IsDistinctFrom(1:Int32, 2:Int32))] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
     /* in-list with aligned types */
     SELECT 1::real in (3, 1.0, 2);
   batch_plan: |

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Formatter;
 use std::marker::Sync;
 use std::path::PathBuf;
@@ -23,7 +22,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{Session, SessionManager};
+use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -338,14 +337,10 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(
-        &self,
-        database: &str,
-    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
-        Ok(Arc::new(SessionImpl::new(
-            self.env.clone(),
-            database.to_string(),
-        )))
+    type Session = SessionImpl;
+
+    fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
 }
 
@@ -373,7 +368,7 @@ impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
