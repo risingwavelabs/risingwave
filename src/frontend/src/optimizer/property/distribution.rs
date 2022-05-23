@@ -159,6 +159,22 @@ impl RequiredDist {
         }
     }
 
+    /// check if the distribution satisfies other required distribution
+    pub fn satisfies(&self, required: &RequiredDist) -> bool {
+        match self {
+            RequiredDist::Any => matches!(required, RequiredDist::Any),
+            RequiredDist::AnyShard => {
+                matches!(required, RequiredDist::Any | RequiredDist::AnyShard)
+            }
+            RequiredDist::ShardByKey(keys) => match required {
+                RequiredDist::Any | RequiredDist::AnyShard => true,
+                RequiredDist::ShardByKey(required_keys) => keys.is_subset(required_keys),
+                _ => false,
+            },
+            RequiredDist::PhysicalDist(dist) => dist.satisfies(required),
+        }
+    }
+
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = match self {
             RequiredDist::Any => unreachable!(),

@@ -312,7 +312,7 @@ impl ColIndexMapping {
     /// required distribution after the column index mapping, it will return None.
     /// ShardByKey(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to ShardByKey(1,0,2).
     /// ShardByKey(0,1,2), with mapping(0->1,2->0) will return ShardByKey(1,0).
-    /// ShardByKey(0,1), with mapping(2->0) will return `AnyShard`.
+    /// ShardByKey(0,1), with mapping(2->0) will return `Any`.
     pub fn rewrite_required_distribution(&self, dist: &RequiredDist) -> RequiredDist {
         match dist {
             RequiredDist::ShardByKey(keys) => {
@@ -323,9 +323,19 @@ impl ColIndexMapping {
                     RequiredDist::ShardByKey(keys)
                 }
             }
-            RequiredDist::PhysicalDist(dist) => {
-                RequiredDist::PhysicalDist(self.rewrite_provided_distribution(dist))
-            }
+            RequiredDist::PhysicalDist(dist) => match dist {
+                Distribution::HashShard(keys) => {
+                    let keys = keys
+                        .iter()
+                        .map(|key| self.try_map(*key))
+                        .collect::<Option<Vec<_>>>();
+                    match keys {
+                        Some(keys) => RequiredDist::PhysicalDist(Distribution::HashShard(keys)),
+                        None => RequiredDist::Any,
+                    }
+                }
+                _ => RequiredDist::PhysicalDist(dist.clone()),
+            },
             _ => dist.clone(),
         }
     }
