@@ -234,12 +234,13 @@ impl LogicalJoin {
         let l2o = Self::l2o_col_mapping_inner(left_len, right_len, join_type);
         let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
         let out_col_num = Self::out_column_num(left_len, right_len, join_type);
-        let i2o = ColIndexMapping::with_remaining_columns(output_indices, out_col_num).inverse();
+        let i2o = ColIndexMapping::with_remaining_columns(output_indices, out_col_num);
         left_pk
             .iter()
             .map(|index| l2o.try_map(*index))
             .chain(right_pk.iter().map(|index| r2o.try_map(*index)))
-            .map(|index| index.map(|i| i2o.try_map(i)).flatten())
+            .flatten()
+            .map(|index| i2o.try_map(index))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
     }
@@ -454,19 +455,6 @@ impl PlanTreeNodeBinary for LogicalJoin {
             map.append(&mut right_map);
             let mut mapping = ColIndexMapping::new(map);
 
-            println!(
-                "old schema: left: {:?} right: {:?}",
-                self.left.schema(),
-                self.right.schema()
-            );
-            println!("left: {:?} right: {:?}", left.schema(), right.schema());
-            println!(
-                "Mapping: {:?}, Parts: {:?}",
-                mapping,
-                mapping.clone().into_parts()
-            );
-            println!("Old output_indices {:?}", self.output_indices);
-
             let new_output_indices = self
                 .output_indices
                 .iter()
@@ -475,10 +463,6 @@ impl PlanTreeNodeBinary for LogicalJoin {
             let new_on = self.on().clone().rewrite_expr(&mut mapping);
             (new_on, new_output_indices)
         };
-        println!(
-            "REWRITING: {:?} AS {:?}",
-            self.output_indices, new_output_indices
-        );
 
         let join = Self::new_with_reordered_output(
             left,
@@ -511,7 +495,6 @@ impl PlanTreeNodeBinary for LogicalJoin {
         let out_col_change = old_o2l
             .composite(&new_l2o)
             .union(&old_o2r.composite(&new_r2o));
-        println!("OUT COL CHANGE: {:?}", out_col_change);
         (join, out_col_change)
     }
 }
@@ -570,9 +553,6 @@ impl ColPrunable for LogicalJoin {
                 .map(|&i| mapping.map(self.output_indices[i]))
                 .collect_vec()
         };
-
-        println!("OLD OUTPUT INDICES: {:?}", self.output_indices);
-        println!("NEW OUTPUT INDICES: {:?}", new_output_indices);
 
         LogicalJoin::new_with_reordered_output(
             self.left.prune_col(&left_required_cols),
@@ -686,11 +666,6 @@ impl ToBatch for LogicalJoin {
         };
 
         if self.output_indices != default_indices {
-            println!(
-                "OI: {:?}, COL NUM: {:?}",
-                &self.output_indices,
-                self.internal_column_num(),
-            );
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
@@ -734,12 +709,6 @@ impl ToStream for LogicalJoin {
 
         let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
 
-        println!(
-            "Old schema: {:?}, new schema: {:?}",
-            &self.schema(),
-            logical_join.schema(),
-        );
-
         let plan = if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
@@ -765,10 +734,6 @@ impl ToStream for LogicalJoin {
         };
 
         if self.output_indices != default_indices {
-            println!(
-                "OI: {:?}, COL NUM: {:?}",
-                &new_output_indices, new_internal_column_num,
-            );
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
@@ -784,10 +749,43 @@ impl ToStream for LogicalJoin {
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (left, left_col_change) = self.left.logical_rewrite_for_stream()?;
+        let left_len = left.schema().len();
         let (right, right_col_change) = self.right.logical_rewrite_for_stream()?;
-        let (join, out_col_change) =
-            self.rewrite_with_left_right(left, left_col_change, right, right_col_change);
-        Ok((join.into(), out_col_change))
+        let (join, out_col_change) = self.rewrite_with_left_right(
+            left.clone(),
+            left_col_change,
+            right.clone(),
+            right_col_change,
+        );
+
+        let mapping = ColIndexMapping::with_remaining_columns(
+            &join.output_indices,
+            join.internal_column_num(),
+        );
+
+        let l2o = join.l2o_col_mapping().composite(&mapping);
+        let r2o = join.r2o_col_mapping().composite(&mapping);
+
+        let left_to_add = left
+            .pk_indices()
+            .iter()
+            .cloned()
+            .filter(|i| l2o.try_map(*i) == None);
+
+        let right_to_add = right
+            .pk_indices()
+            .iter()
+            .cloned()
+            .filter(|i| r2o.try_map(*i) == None)
+            .map(|i| i + left_len);
+
+        let mut new_output_indices = join.output_indices.clone();
+        new_output_indices.extend(left_to_add);
+        new_output_indices.extend(right_to_add);
+
+        let join_with_pk = join.clone_with_output_indices(new_output_indices);
+        // the added columns is at the end, so it will not change the exists column index
+        Ok((join_with_pk.into(), out_col_change))
     }
 }
 
