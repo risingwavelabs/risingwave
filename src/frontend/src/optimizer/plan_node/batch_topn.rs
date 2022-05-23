@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::TopNNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]

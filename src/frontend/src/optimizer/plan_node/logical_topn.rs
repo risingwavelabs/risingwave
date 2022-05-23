@@ -23,7 +23,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`

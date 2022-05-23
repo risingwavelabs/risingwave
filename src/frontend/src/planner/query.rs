@@ -17,7 +17,7 @@ use risingwave_common::error::Result;
 
 use crate::binder::BoundQuery;
 use crate::optimizer::plan_node::{LogicalLimit, LogicalTopN};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 

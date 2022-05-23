@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
