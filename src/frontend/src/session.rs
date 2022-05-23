@@ -342,6 +342,12 @@ impl SessionManager for SessionManagerImpl {
     fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
+
+    fn check_db_name(&self, database: &str) -> bool {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        reader.get_database_by_name(database).is_ok()
+    }
 }
 
 impl SessionManagerImpl {

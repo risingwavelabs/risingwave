@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error as IoError, Result};
+use std::io::{Error as IoError, Error, ErrorKind, Result};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -126,9 +126,21 @@ where
         }
     }
 
-    fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
+    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> Result<()> {
         // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
-        self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
+        let db_name = {
+            match msg.config.get("database") {
+                None => "dev".to_string(),
+                Some(v) => v.to_string(),
+            }
+        };
+        if !self.session_mgr.check_db_name(&db_name) {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                format!("Not found database name: {}", db_name),
+            ));
+        }
+        self.session = Some(self.session_mgr.connect(&db_name).map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("utf8"),
