@@ -29,8 +29,6 @@ impl Rule for MultiJoinFilterRule {
 }
 
 impl MultiJoinFilterRule {
-    // TODO: remove #[allow(unused)] once used
-    #[allow(unused)]
     pub fn create() -> BoxedRule {
         Box::new(MultiJoinFilterRule {})
     }
