@@ -21,13 +21,13 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
 use super::{
-    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, Order};
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -232,6 +232,18 @@ impl ColPrunable for LogicalProject {
 
         // Reconstruct the LogicalProject.
         LogicalProject::new(new_input, exprs).into()
+    }
+}
+
+impl PredicatePushdown for LogicalProject {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // convert the predicate to one that references the child of the project
+        let mut subst = Substitute {
+            mapping: self.exprs.clone(),
+        };
+        let predicate = predicate.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, Condition::true_cond(), predicate)
     }
 }
 
