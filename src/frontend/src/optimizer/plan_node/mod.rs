@@ -57,6 +57,7 @@ pub trait PlanNode:
     + ToDistributedBatch
     + ToProst
     + ToLocalBatch
+    + PredicatePushdown
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -201,6 +202,8 @@ mod eq_join_predicate;
 pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
+mod predicate_pushdown;
+pub use predicate_pushdown::*;
 
 mod batch_delete;
 mod batch_exchange;

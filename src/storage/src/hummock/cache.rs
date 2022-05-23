@@ -543,16 +543,19 @@ pub struct LruCache<K: LruKey, T: LruValue> {
     shard_lru_usages: Vec<Arc<AtomicUsize>>,
 }
 
+// we only need a small object pool because when the cache reach the limit of capacity, it will
+// always release some object after insert a new block.
+const DEFAULT_OBJECT_POOL_SIZE: usize = 1024;
+
 impl<K: LruKey, T: LruValue> LruCache<K, T> {
-    pub fn new(num_shard_bits: usize, capacity: usize, object_cache: usize) -> Self {
+    pub fn new(num_shard_bits: usize, capacity: usize) -> Self {
         let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
-        let per_shard_object = object_cache / num_shards;
         let mut shard_usages = Vec::with_capacity(num_shards);
         let mut shard_lru_usages = Vec::with_capacity(num_shards);
         for _ in 0..num_shards {
-            let shard = LruCacheShard::new(per_shard, per_shard_object);
+            let shard = LruCacheShard::new(per_shard, DEFAULT_OBJECT_POOL_SIZE);
             shard_usages.push(shard.usage.clone());
             shard_lru_usages.push(shard.lru_usage.clone());
             shards.push(Mutex::new(shard));
@@ -769,7 +772,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 1);
         assert_eq!(cache.shard(10), 2);
@@ -777,7 +780,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 16));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256));
         let seed = 10244021u64;
         let mut rng = SmallRng::seed_from_u64(seed);
         for _ in 0..100000 {
@@ -1035,7 +1038,7 @@ mod tests {
 
     #[test]
     fn test_write_request_pending() {
-        let cache = Arc::new(LruCache::new(0, 5, 5));
+        let cache = Arc::new(LruCache::new(0, 5));
         {
             let mut shard = cache.shards[0].lock();
             insert(&mut *shard, "a", "v1");

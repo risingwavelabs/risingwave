@@ -96,7 +96,7 @@ pub struct LocalDiskObjectStore {
 }
 
 const OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS: usize = 2;
-const OPENED_FILE_CACHE_DEFAULT_CAPACITY: usize = 64;
+const OPENED_FILE_CACHE_DEFAULT_CAPACITY: usize = 1024;
 
 impl LocalDiskObjectStore {
     pub fn new(path_prefix: &str, is_local: bool) -> LocalDiskObjectStore {
@@ -105,7 +105,6 @@ impl LocalDiskObjectStore {
             path_prefix: path_prefix.to_string(),
             opened_read_file_cache: Arc::new(LruCache::new(
                 OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS,
-                OPENED_FILE_CACHE_DEFAULT_CAPACITY,
                 OPENED_FILE_CACHE_DEFAULT_CAPACITY,
             )),
         }

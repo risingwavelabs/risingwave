@@ -25,7 +25,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub trait NodeExtraOrderInfo: Eq + Ord + Send + Sync {}
 
@@ -133,6 +133,16 @@ impl<D: HummockIteratorDirection> OrderedMergeIteratorInner<D> {
     }
 }
 
+impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> MergeIteratorInner<D, NE> {
+    fn collect_local_statistic_impl(&self, stats: &mut StoreLocalStatistic) {
+        for node in &self.heap {
+            node.iter.collect_local_statistic(stats);
+        }
+        for node in &self.unused_iters {
+            node.iter.collect_local_statistic(stats);
+        }
+    }
+}
 pub type UnorderedMergeIteratorInner<D> = MergeIteratorInner<D, UnorderedNodeExtra>;
 
 impl<D: HummockIteratorDirection> UnorderedMergeIteratorInner<D> {
@@ -294,14 +304,22 @@ where
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        let timer = self.stats.iter_merge_seek_duration.start_timer();
-
         self.reset_heap();
         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
             .await?;
         self.build_heap();
-
-        timer.observe_duration();
         Ok(())
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.collect_local_statistic_impl(stats);
+    }
+}
+
+impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<D, NE> {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic_impl(&mut stats);
+        stats.report(self.stats.as_ref());
     }
 }

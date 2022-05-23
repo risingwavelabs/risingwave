@@ -56,7 +56,6 @@ impl StreamHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &eq_join_predicate,
             &logical.l2o_col_mapping(),
         );
 
@@ -96,14 +95,11 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        predicate: &EqJoinPredicate,
         l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
-                assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
                 l2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),

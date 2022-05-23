@@ -29,8 +29,6 @@ impl Rule for MultiJoinJoinRule {
 }
 
 impl MultiJoinJoinRule {
-    // TODO: remove #[allow(unused)] once used
-    #[allow(unused)]
     pub fn create() -> BoxedRule {
         Box::new(MultiJoinJoinRule {})
     }
@@ -49,7 +47,7 @@ mod tests {
     use crate::utils::Condition;
 
     #[tokio::test]
-    async fn test_joins_get_merged_into_multijoin() {
+    async fn test_multijoin_join_merge() {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..10)

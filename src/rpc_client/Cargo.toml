@@ -7,6 +7,7 @@ edition = "2021"
 async-trait = "0.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 log = "0.4"
+moka = { version = "0.8", features = ["future"] }
 paste = "1"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
