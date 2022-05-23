@@ -22,7 +22,7 @@ use super::{
     LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows

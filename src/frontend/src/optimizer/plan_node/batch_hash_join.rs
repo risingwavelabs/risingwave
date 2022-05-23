@@ -134,7 +134,7 @@ impl ToDistributedBatch for BatchHashJoin {
         let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
             right.distribution().clone(),
         ));
-        let mut left = self
+        let left = self
             .left()
             .to_distributed_with_required(Order::any(), &left_dist)?;
         Ok(self.clone_with_left_right(left, right).into())

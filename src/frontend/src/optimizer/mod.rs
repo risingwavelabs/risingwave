@@ -24,7 +24,7 @@ mod rule;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
-use property::{Distribution, Order};
+use property::Order;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 

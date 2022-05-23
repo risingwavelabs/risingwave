@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::batch_nested_loop_join::BatchNestedLoopJoin;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -605,7 +605,7 @@ impl ToStream for LogicalJoin {
             right.distribution().clone(),
         ));
 
-        let mut left = self.left().to_stream_with_dist_required(&left_dist)?;
+        let left = self.left().to_stream_with_dist_required(&left_dist)?;
         let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {

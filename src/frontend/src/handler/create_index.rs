@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;

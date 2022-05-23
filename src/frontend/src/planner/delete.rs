@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use super::Planner;
 use crate::binder::BoundDelete;
 use crate::optimizer::plan_node::{LogicalDelete, LogicalFilter};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {

@@ -19,7 +19,7 @@ use super::select::LogicalFilter;
 use super::Planner;
 use crate::binder::BoundUpdate;
 use crate::optimizer::plan_node::LogicalUpdate;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {

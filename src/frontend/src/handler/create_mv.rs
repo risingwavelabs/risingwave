@@ -18,7 +18,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};

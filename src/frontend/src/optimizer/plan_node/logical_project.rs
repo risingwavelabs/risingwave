@@ -26,7 +26,7 @@ use super::{
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
