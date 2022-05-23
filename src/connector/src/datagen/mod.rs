@@ -16,6 +16,8 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use std::collections::HashMap;
+
 pub use enumerator::*;
 use serde::Deserialize;
 pub use source::*;
@@ -34,6 +36,8 @@ pub struct DatagenProperties {
         default = "default_rows_per_second"
     )]
     pub rows_per_second: String,
+    #[serde(flatten)]
+    fields: HashMap<String, String>,
 }
 
 fn default_rows_per_second() -> String {

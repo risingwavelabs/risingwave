@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use std::collections::HashMap;
+
+use anyhow::Result;
 use async_trait::async_trait;
 
+use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::DatagenProperties;
 use crate::{Column, ConnectorStateV2, SourceMessage, SplitReader};
@@ -40,14 +43,79 @@ impl SplitReader for DatagenSplitReader {
         let _ = state;
         let batch_chunk_size = properties.max_chunk_size.parse::<u64>()?;
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
+        let fields_option_map = properties.fields;
+        let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
 
-        if let Some(columns) = columns && !columns.is_empty(){
-            Ok(DatagenSplitReader {
-                generator: DatagenEventGenerator::new(columns, 0, batch_chunk_size, rows_per_second)?,
-            })
-        } else{
-            Err(anyhow!("datagen table's columns is empty or none"))
+        assert!(columns.as_ref().is_some());
+        let columns = columns.unwrap();
+        assert!(columns.len() > 1);
+        let columns = &columns[1..];
+
+        for column in columns {
+            let name = column.name.clone();
+            let kind_key = format!("field.{}.kind", name);
+            if let Some(kind) = fields_option_map.get(&kind_key) {
+                match kind.as_str() {
+                    "random" => {
+                        let min_key = format!("field.{}.min", name);
+                        let max_key = format!("field.{}.max", name);
+                        let min_value_option =
+                            fields_option_map.get(&min_key).map(|s| s.to_string());
+                        let max_value_option =
+                            fields_option_map.get(&max_key).map(|s| s.to_string());
+                        fields_map.insert(
+                            name,
+                            FieldGeneratorImpl::new(
+                                column.data_type.clone(),
+                                super::FieldKind::Random,
+                                min_value_option,
+                                max_value_option,
+                            )?,
+                        );
+                    }
+                    "sequence" => {
+                        let start_key = format!("field.{}.start", name);
+                        let end_key = format!("field.{}.end", name);
+                        let start_key_option =
+                            fields_option_map.get(&start_key).map(|s| s.to_string());
+                        let end_key_option = fields_option_map.get(&end_key).map(|s| s.to_string());
+                        fields_map.insert(
+                            name,
+                            FieldGeneratorImpl::new(
+                                column.data_type.clone(),
+                                super::FieldKind::Sequence,
+                                start_key_option,
+                                end_key_option,
+                            )?,
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                let min_key = format!("field.{}.min", name);
+                let max_key = format!("field.{}.max", name);
+                let min_value_option = fields_option_map.get(&min_key).map(|s| s.to_string());
+                let max_value_option = fields_option_map.get(&max_key).map(|s| s.to_string());
+                fields_map.insert(
+                    name,
+                    FieldGeneratorImpl::new(
+                        column.data_type.clone(),
+                        super::FieldKind::Random,
+                        min_value_option,
+                        max_value_option,
+                    )?,
+                );
+            }
         }
+
+        Ok(DatagenSplitReader {
+            generator: DatagenEventGenerator::new(
+                fields_map,
+                0,
+                batch_chunk_size,
+                rows_per_second,
+            )?,
+        })
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {

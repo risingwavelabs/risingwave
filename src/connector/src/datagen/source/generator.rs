@@ -20,7 +20,7 @@ use tokio::time::{sleep, Duration};
 
 use super::field_generator::FieldGeneratorImpl;
 use super::FieldGenerator;
-use crate::{Column, SourceMessage};
+use crate::SourceMessage;
 pub type BoxedFieldGenerator = Box<dyn FieldGenerator>;
 
 pub struct DatagenEventGenerator {
@@ -32,33 +32,11 @@ pub struct DatagenEventGenerator {
 
 impl DatagenEventGenerator {
     pub fn new(
-        columns: Vec<Column>,
+        fields_map: HashMap<String, FieldGeneratorImpl>,
         last_offset: u64,
         batch_chunk_size: u64,
         rows_per_second: u64,
     ) -> Result<Self> {
-        // FIXME better way to throw out err in the map
-        let fields_map: HashMap<String, FieldGeneratorImpl> = columns[1..]
-            .iter()
-            .map(|column| {
-                (
-                    column.name.clone(),
-                    FieldGeneratorImpl::new(
-                        column.data_type.clone(),
-                        super::FieldKind::Random,
-                        None,
-                        None,
-                    ),
-                )
-            })
-            .map(|(s, field)| (s, Result::unwrap(field)))
-            .collect();
-        assert_eq!(
-            fields_map.len() + 1,
-            columns.len(),
-            "parsing datagen table fail!"
-        );
-
         Ok(Self {
             fields_map,
             last_offset,
