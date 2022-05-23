@@ -42,6 +42,18 @@ impl BatchSimpleAgg {
         BatchSimpleAgg { base, logical }
     }
 
+    pub fn new_with_dist(logical: LogicalAgg, dist: Distribution) -> Self {
+        let ctx = logical.base.ctx.clone();
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        BatchSimpleAgg { base, logical }
+    }
+
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
@@ -68,9 +80,10 @@ impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+        let new_input = self.input().to_distributed()?;
+        // let new_input = self
+        //     .input()
+        //     .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

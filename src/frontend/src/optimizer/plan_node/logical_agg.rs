@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::RequiredDist;
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -575,11 +575,18 @@ impl PredicatePushdown for LogicalAgg {
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
         if self.group_keys().is_empty() {
-            Ok(BatchSimpleAgg::new(new_logical).into())
+            // 2-phase agg
+            let partial_input = self.input().to_batch()?;
+            let partial_logical = self.clone_with_input(partial_input);
+            let partial_plan_node =
+                BatchSimpleAgg::new_with_dist(partial_logical.clone(), Distribution::SomeShard).into();
+
+            let total_logical = partial_logical.clone_with_input(partial_plan_node);
+            Ok(BatchSimpleAgg::new_with_dist(total_logical, Distribution::Single).into())
         } else {
+            let new_input = self.input().to_batch()?;
+            let new_logical = self.clone_with_input(new_input);
             Ok(BatchHashAgg::new(new_logical).into())
         }
     }
