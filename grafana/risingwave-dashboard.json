@@ -22,7 +22,7 @@
 	"fiscalYearStartMonth": 0,
 	"graphTooltip": 0,
 	"id": 2,
-	"iteration": 1652944791578,
+	"iteration": 1653032725452,
 	"links": [],
 	"liveNow": true,
 	"panels": [
@@ -1315,7 +1315,7 @@
 			"type": "timeseries"
 		},
 		{
-			"collapsed": false,
+			"collapsed": true,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
@@ -1323,262 +1323,449 @@
 				"y": 58
 			},
 			"id": 184,
-			"panels": [],
-			"title": "Object Storage",
-			"type": "row"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "Bps"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 59
-			},
-			"id": 186,
-			"options": {
-				"legend": {
-					"calcs": [
-						"min",
-						"max"
-					],
-					"displayMode": "table",
-					"placement": "right"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
+			"panels": [
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(object_store_read_bytes[1m]))by(instance)",
-					"interval": "",
-					"legendFormat": "read (cn: {{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(object_store_write_bytes[1m]))by(instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "write (cn: {{instance}})",
-					"refId": "B"
-				}
-			],
-			"title": "throughput",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
 							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": [
-					{
-						"__systemRef": "hideSeriesFrom",
-						"matcher": {
-							"id": "byNames",
-							"options": {
-								"mode": "exclude",
-								"names": [
-									"upload p99 (cn: 127.0.0.1:1260)"
-								],
-								"prefix": "All except:",
-								"readOnly": true
-							}
-						},
-						"properties": [
-							{
-								"id": "custom.hideFrom",
-								"value": {
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 10,
+								"gradientMode": "none",
+								"hideFrom": {
 									"legend": false,
 									"tooltip": false,
-									"viz": true
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "never",
+								"spanNulls": true,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
 								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green",
+										"value": null
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							},
+							"unit": "Bps"
+						},
+						"overrides": []
+					},
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 11
+					},
+					"id": 186,
+					"options": {
+						"legend": {
+							"calcs": [
+								"min",
+								"max"
+							],
+							"displayMode": "table",
+							"placement": "right"
+						},
+						"tooltip": {
+							"mode": "single"
+						}
+					},
+					"pluginVersion": "8.3.3",
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "sum(rate(object_store_read_bytes[1m]))by(instance)",
+							"interval": "",
+							"legendFormat": "read (cn: {{instance}})",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "sum(rate(object_store_write_bytes[1m]))by(instance)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "write (cn: {{instance}})",
+							"refId": "B"
+						}
+					],
+					"title": "throughput",
+					"type": "timeseries"
+				},
+				{
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
+							},
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 10,
+								"gradientMode": "none",
+								"hideFrom": {
+									"legend": false,
+									"tooltip": false,
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "never",
+								"spanNulls": true,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
+								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green",
+										"value": null
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							},
+							"unit": "s"
+						},
+						"overrides": [
+							{
+								"__systemRef": "hideSeriesFrom",
+								"matcher": {
+									"id": "byNames",
+									"options": {
+										"mode": "exclude",
+										"names": [
+											"upload p99 (cn: 127.0.0.1:1222)"
+										],
+										"prefix": "All except:",
+										"readOnly": true
+									}
+								},
+								"properties": [
+									{
+										"id": "custom.hideFrom",
+										"value": {
+											"legend": false,
+											"tooltip": false,
+											"viz": true
+										}
+									}
+								]
 							}
 						]
-					}
-				]
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 59
-			},
-			"id": 188,
-			"options": {
-				"legend": {
-					"calcs": [
-						"max"
+					},
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 11
+					},
+					"id": 188,
+					"options": {
+						"legend": {
+							"calcs": [
+								"max"
+							],
+							"displayMode": "table",
+							"placement": "right",
+							"sortBy": "Max",
+							"sortDesc": true
+						},
+						"tooltip": {
+							"mode": "single"
+						}
+					},
+					"pluginVersion": "8.3.3",
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p99 (cn: {{instance}})",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p90 (cn: {{instance}})",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} avg",
+							"refId": "D"
+						}
 					],
-					"displayMode": "table",
-					"placement": "right",
-					"sortBy": "Max",
-					"sortDesc": true
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p50",
-					"refId": "A"
+					"title": "operation duration",
+					"type": "timeseries"
 				},
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
+							},
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 10,
+								"gradientMode": "none",
+								"hideFrom": {
+									"legend": false,
+									"tooltip": false,
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "never",
+								"spanNulls": true,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
+								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green",
+										"value": null
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							},
+							"unit": "ops"
+						},
+						"overrides": []
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p99 (cn: {{instance}})",
-					"refId": "B"
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 19
+					},
+					"id": 192,
+					"options": {
+						"legend": {
+							"calcs": [],
+							"displayMode": "list",
+							"placement": "bottom"
+						},
+						"tooltip": {
+							"mode": "single"
+						}
+					},
+					"pluginVersion": "8.3.3",
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "sum(rate(object_store_operation_latency_count[1m])) by (le, type, instance)",
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "{{type}} (cn:{{instance}})",
+							"refId": "A"
+						}
+					],
+					"title": "ops",
+					"type": "timeseries"
 				},
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 19
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} p90 (cn: {{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
+					"hiddenSeries": false,
+					"id": 194,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
 					},
-					"exemplar": true,
-					"expr": "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}} avg",
-					"refId": "D"
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
+							"format": "time_series",
+							"hide": false,
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "{{type}}  p90",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "risedev-prometheus"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "{{type}} p80",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "ops size",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:37",
+							"format": "decbytes",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:38",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				}
 			],
-			"title": "operation duration",
-			"type": "timeseries"
+			"title": "Object Storage",
+			"type": "row"
 		},
 		{
 			"collapsed": false,
@@ -1586,7 +1773,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 67
+				"y": 59
 			},
 			"id": 38,
 			"panels": [],
@@ -1604,7 +1791,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 68
+				"y": 60
 			},
 			"hiddenSeries": false,
 			"id": 124,
@@ -1736,7 +1923,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 68
+				"y": 60
 			},
 			"hiddenSeries": false,
 			"id": 14,
@@ -1820,7 +2007,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 76
+				"y": 68
 			},
 			"hiddenSeries": false,
 			"id": 16,
@@ -1900,7 +2087,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 84
+				"y": 76
 			},
 			"id": 26,
 			"panels": [],
@@ -1957,13 +2144,38 @@
 					},
 					"unit": "ops"
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"range_scan (cn:127.0.0.1:1222)"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 85
+				"y": 77
 			},
 			"id": 30,
 			"options": {
@@ -2080,13 +2292,38 @@
 					},
 					"unit": "ops"
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"data_total  (cn:127.0.0.1:1222)"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 85
+				"y": 77
 			},
 			"id": 128,
 			"options": {
@@ -2107,35 +2344,11 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_store_block_request_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_sst_store_block_request_counts[1m])) by (instance, type)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "get (cn:{{instance}})",
+					"legendFormat": "{{type}}  (cn:{{instance}})",
 					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_store_get_remote_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get remote (cn:{{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_store_put_remote_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "put remote (cn:{{instance}})",
-					"refId": "B"
 				}
 			],
 			"title": "block ops",
@@ -2197,7 +2410,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 93
+				"y": 85
 			},
 			"id": 28,
 			"options": {
@@ -2404,7 +2617,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 93
+				"y": 85
 			},
 			"id": 130,
 			"options": {
@@ -2539,7 +2752,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 101
+				"y": 93
 			},
 			"id": 43,
 			"options": {
@@ -2638,7 +2851,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 101
+				"y": 93
 			},
 			"id": 32,
 			"options": {
@@ -2772,7 +2985,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 109
+				"y": 101
 			},
 			"id": 40,
 			"options": {
@@ -2942,7 +3155,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 109
+				"y": 101
 			},
 			"id": 132,
 			"options": {
@@ -3041,7 +3254,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 117
+				"y": 109
 			},
 			"id": 41,
 			"options": {
@@ -3164,7 +3377,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 117
+				"y": 109
 			},
 			"id": 48,
 			"options": {
@@ -3287,7 +3500,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 125
+				"y": 117
 			},
 			"id": 134,
 			"options": {
@@ -3410,7 +3623,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 125
+				"y": 117
 			},
 			"id": 44,
 			"options": {
@@ -3497,7 +3710,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 133
+				"y": 125
 			},
 			"id": 45,
 			"options": {
@@ -3545,7 +3758,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 141
+				"y": 133
 			},
 			"id": 115,
 			"panels": [
@@ -4135,7 +4348,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 142
+				"y": 134
 			},
 			"id": 113,
 			"panels": [
@@ -4437,7 +4650,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 143
+				"y": 135
 			},
 			"id": 97,
 			"panels": [
@@ -5027,7 +5240,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 144
+				"y": 136
 			},
 			"id": 88,
 			"panels": [
@@ -5401,7 +5614,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 145
+				"y": 137
 			},
 			"id": 84,
 			"panels": [
@@ -5655,7 +5868,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 146
+				"y": 138
 			},
 			"id": 82,
 			"panels": [
@@ -5670,7 +5883,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 58
+						"y": 27
 					},
 					"hiddenSeries": false,
 					"id": 76,
@@ -5790,7 +6003,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 58
+						"y": 27
 					},
 					"hiddenSeries": false,
 					"id": 85,
@@ -5910,7 +6123,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 66
+						"y": 35
 					},
 					"hiddenSeries": false,
 					"id": 86,
@@ -6029,7 +6242,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 147
+				"y": 139
 			},
 			"id": 78,
 			"panels": [
@@ -6668,7 +6881,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 148
+				"y": 140
 			},
 			"id": 62,
 			"panels": [
@@ -6683,7 +6896,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 132
+						"y": 29
 					},
 					"hiddenSeries": false,
 					"id": 68,
@@ -6774,7 +6987,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 132
+						"y": 29
 					},
 					"hiddenSeries": false,
 					"id": 71,
@@ -6942,7 +7155,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 140
+						"y": 37
 					},
 					"hiddenSeries": false,
 					"id": 60,
@@ -7044,7 +7257,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 140
+						"y": 37
 					},
 					"hiddenSeries": false,
 					"id": 72,
@@ -7212,7 +7425,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 148
+						"y": 45
 					},
 					"hiddenSeries": false,
 					"id": 64,
@@ -7314,7 +7527,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 148
+						"y": 45
 					},
 					"hiddenSeries": false,
 					"id": 73,
@@ -7525,7 +7738,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 156
+						"y": 53
 					},
 					"id": 66,
 					"options": {
@@ -7583,7 +7796,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 156
+						"y": 53
 					},
 					"hiddenSeries": false,
 					"id": 74,
@@ -7741,6 +7954,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 6,
+	"version": 28,
 	"weekStart": ""
 }

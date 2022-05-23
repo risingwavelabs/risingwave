@@ -114,7 +114,10 @@ impl ToBatchProst for BatchHashAgg {
 
 impl ToLocalBatch for BatchHashAgg {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        let new_input = self.input().to_local()?;
+
+        let new_input = Distribution::Single.enforce_if_not_satisfies(new_input, Order::any())?;
+
         Ok(self.clone_with_input(new_input).into())
     }
 }

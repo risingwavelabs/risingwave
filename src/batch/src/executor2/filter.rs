@@ -24,6 +24,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 pub struct FilterExecutor2 {
     expr: BoxedExpression,
@@ -93,7 +94,9 @@ impl FilterExecutor2 {
 }
 
 impl BoxedExecutor2Builder for FilterExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
 
         let filter_node = try_match_expand!(

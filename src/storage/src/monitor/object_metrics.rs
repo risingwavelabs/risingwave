@@ -26,6 +26,7 @@ macro_rules! for_all_metrics {
             write_bytes: GenericCounter<AtomicU64>,
             read_bytes: GenericCounter<AtomicU64>,
             operation_latency: HistogramVec,
+            operation_size: HistogramVec,
         }
     };
 }
@@ -72,11 +73,19 @@ impl ObjectStoreMetrics {
         );
         let operation_latency =
             register_histogram_vec_with_registry!(latency_opts, &["type"], registry).unwrap();
+        let bytes_opts = histogram_opts!(
+            "object_store_operation_bytes",
+            "size of operation result on object store",
+            exponential_buckets(1024.0, 2.0, 20).unwrap(), // max 1GB
+        );
+        let operation_size =
+            register_histogram_vec_with_registry!(bytes_opts, &["type"], registry).unwrap();
 
         Self {
             write_bytes,
             read_bytes,
             operation_latency,
+            operation_size,
         }
     }
 

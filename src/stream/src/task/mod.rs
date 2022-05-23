@@ -23,12 +23,10 @@ use risingwave_common::util::addr::HostAddr;
 use crate::executor::Message;
 
 mod barrier_manager;
-mod compute_client_pool;
 mod env;
 mod stream_manager;
 
 pub use barrier_manager::*;
-pub use compute_client_pool::*;
 pub use env::*;
 pub use stream_manager::*;
 
