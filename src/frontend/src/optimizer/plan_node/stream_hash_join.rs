@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::HashJoinNode;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -96,7 +96,7 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        predicate: &EqJoinPredicate,
+        _predicate: &EqJoinPredicate,
         l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {

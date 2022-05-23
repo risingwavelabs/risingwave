@@ -61,7 +61,7 @@ impl BatchHashJoin {
     fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        predicate: &EqJoinPredicate,
+        _predicate: &EqJoinPredicate,
         l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {

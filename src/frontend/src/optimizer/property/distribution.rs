@@ -159,7 +159,7 @@ impl RequiredDist {
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = match self {
             RequiredDist::Any => unreachable!(),
             // TODO: add round robin distributed type
