@@ -111,3 +111,18 @@ select 'true'::bool is true,
        'true'::bool is not false;
 ----
 t f f t
+
+query B
+select booleq(true,true),
+       booleq(true,false),
+       booleq(false,true),
+       booleq(false,false),
+       boolne(true,true),
+       boolne(true,false),
+       boolne(false,true),
+       booleq('true'::bool,false),
+       booleq('true'::bool,true),
+       boolne('true'::bool,false),
+       boolne('true'::bool,true);
+----
+t f f t f t t f t t f

@@ -180,6 +180,10 @@ impl ObjectStoreImpl {
             .operation_latency
             .with_label_values(&["upload"])
             .start_timer();
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&["upload"])
+            .observe(obj.len() as f64);
         self.inner.upload(path, obj).await?;
         Ok(())
     }
@@ -194,6 +198,10 @@ impl ObjectStoreImpl {
         self.object_store_metrics
             .read_bytes
             .inc_by(ret.len() as u64);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&["read"])
+            .observe(ret.len() as f64);
         Ok(ret)
     }
 

@@ -20,6 +20,9 @@ use bytes::Bytes;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+use crate::datagen::{
+    DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
+};
 use crate::dummy_connector::DummySplitReader;
 use crate::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::kafka::enumerator::KafkaSplitEnumerator;
@@ -71,6 +74,7 @@ pub enum SplitImpl {
     Pulsar(PulsarSplit),
     Kinesis(KinesisSplit),
     Nexmark(NexmarkSplit),
+    Datagen(DatagenSplit),
 }
 
 pub enum SplitReaderImpl {
@@ -79,6 +83,7 @@ pub enum SplitReaderImpl {
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
+    Datagen(Box<DatagenSplitReader>),
 }
 
 pub enum SplitEnumeratorImpl {
@@ -86,6 +91,7 @@ pub enum SplitEnumeratorImpl {
     Pulsar(PulsarSplitEnumerator),
     Kinesis(KinesisSplitEnumerator),
     Nexmark(NexmarkSplitEnumerator),
+    Datagen(DatagenSplitEnumerator),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -94,6 +100,7 @@ pub enum ConnectorProperties {
     Pulsar(PulsarProperties),
     Kinesis(KinesisProperties),
     Nexmark(Box<NexmarkProperties>),
+    Datagen(DatagenProperties),
     S3(S3Properties),
     Dummy(()),
 }
@@ -104,6 +111,7 @@ impl_connector_properties! {
     { Pulsar, PULSAR_CONNECTOR },
     { Kinesis, KINESIS_CONNECTOR },
     { Nexmark, NEXMARK_CONNECTOR },
+    { Datagen, DATAGEN_CONNECTOR },
     { S3, S3_CONNECTOR }
 }
 
@@ -112,7 +120,8 @@ impl_split_enumerator! {
     { Kafka, KafkaSplitEnumerator },
     { Pulsar, PulsarSplitEnumerator },
     { Kinesis, KinesisSplitEnumerator },
-    { Nexmark, NexmarkSplitEnumerator }
+    { Nexmark, NexmarkSplitEnumerator },
+    { Datagen, DatagenSplitEnumerator }
 }
 
 impl_split! {
@@ -120,7 +129,8 @@ impl_split! {
     { Kafka, KAFKA_CONNECTOR, KafkaSplit },
     { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
-    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit }
+    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
+    { Datagen, DATAGEN_CONNECTOR, DatagenSplit }
 }
 
 impl_split_reader! {
@@ -129,6 +139,7 @@ impl_split_reader! {
     { Pulsar, PulsarSplitReader },
     { Kinesis, KinesisMultiSplitReader },
     { Nexmark, NexmarkSplitReader },
+    { Datagen, DatagenSplitReader },
     { Dummy, DummySplitReader }
 }
 
@@ -217,6 +228,11 @@ impl From<SplitImpl> for ConnectorState {
                     Some(s) => s.to_string(),
                     _ => "".to_string(),
                 },
+                end_offset: "".to_string(),
+            },
+            SplitImpl::Datagen(dategen) => Self {
+                identifier: Bytes::from(dategen.id()),
+                start_offset: "".to_string(),
                 end_offset: "".to_string(),
             },
         }

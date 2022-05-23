@@ -18,10 +18,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    ToBatch, ToStream,
+};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -159,6 +162,12 @@ impl ColPrunable for LogicalTopN {
     }
 }
 
+impl PredicatePushdown for LogicalTopN {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    }
+}
+
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
         self.to_batch_with_order_required(Order::any())
@@ -182,7 +191,7 @@ impl ToStream for LogicalTopN {
         // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
         let input = self
             .input()
-            .to_stream_with_dist_required(&Distribution::Single)?;
+            .to_stream_with_dist_required(&RequiredDist::single())?;
         Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 

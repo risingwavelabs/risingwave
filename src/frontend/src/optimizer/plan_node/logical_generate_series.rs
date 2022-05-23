@@ -17,10 +17,11 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
-use super::{ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::BatchGenerateSeries;
 use crate::session::OptimizerContextRef;
+use crate::utils::Condition;
 /// `LogicalGenerateSeries` implements Hop Table Function.
 #[derive(Debug, Clone)]
 pub struct LogicalGenerateSeries {
@@ -83,6 +84,12 @@ impl ColPrunable for LogicalGenerateSeries {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
+    }
+}
+
+impl PredicatePushdown for LogicalGenerateSeries {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
