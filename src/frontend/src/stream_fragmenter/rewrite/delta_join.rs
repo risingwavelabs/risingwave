@@ -151,7 +151,6 @@ impl StreamFragmenter {
             column_descs,
         };
 
-        let distribution_keys = vec![];
         (
             arrangement_info.clone(),
             StreamNode {
@@ -162,7 +161,7 @@ impl StreamFragmenter {
                 node_body: Some(NodeBody::Arrange(ArrangeNode {
                     table_info: Some(arrangement_info),
                     table_id,
-                    distribution_keys,
+                    distribution_keys: exchange_node.pk_indices.clone(),
                 })),
                 input: vec![exchange_node.clone()],
                 append_only: exchange_node.append_only,
