@@ -144,7 +144,11 @@ impl RequiredDist {
         for i in keys {
             cols.insert(*i);
         }
-        Self::ShardByKey(cols)
+        if cols.count_ones(..) == 0 {
+            Self::Any
+        } else {
+            Self::ShardByKey(cols)
+        }
     }
 
     pub fn enforce_if_not_satisfies(

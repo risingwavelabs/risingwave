@@ -317,7 +317,7 @@ impl ColIndexMapping {
         match dist {
             RequiredDist::ShardByKey(keys) => {
                 let keys = self.rewrite_bitset(keys);
-                if keys.is_empty() {
+                if keys.count_ones(..) == 0 {
                     RequiredDist::Any
                 } else {
                     RequiredDist::ShardByKey(keys)

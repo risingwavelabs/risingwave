@@ -670,8 +670,8 @@
       BatchSort { order: [$0 ASC] }
         BatchProject { exprs: [$0, RoundDigit(($1 / $2), 6:Int32)] }
           BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
-            BatchProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
-              BatchExchange { order: [], dist: HashShard([]) }
+            BatchExchange { order: [], dist: HashShard([0]) }
+              BatchProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
                 BatchHashJoin { type: Inner, predicate: $4 = $5 }
                   BatchProject { exprs: [$0, $1, $2, $3, $6] }
                     BatchExchange { order: [], dist: HashShard([6]) }
@@ -716,8 +716,8 @@
     StreamMaterialize { columns: [o_year, mkt_share], pk_columns: [o_year] }
       StreamProject { exprs: [$0, RoundDigit(($2 / $3), 6:Int32)] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($2)] }
-          StreamProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $10, $11, $13] }
-            StreamExchange { dist: HashShard([]) }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $10, $11, $13] }
               StreamHashJoin { type: Inner, predicate: $4 = $12 }
                 StreamProject { exprs: [$0, $1, $2, $3, $12, $5, $6, $7, $8, $9, $10, $13] }
                   StreamExchange { dist: HashShard([12]) }
@@ -1861,8 +1861,8 @@
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
         BatchHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
-          BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
-            BatchExchange { order: [], dist: HashShard([]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
               BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2) }
                 BatchExchange { order: [], dist: Single }
                   BatchProject { exprs: [$1, $2] }
