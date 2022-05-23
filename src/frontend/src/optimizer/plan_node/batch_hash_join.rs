@@ -161,8 +161,10 @@ impl ToBatchProst for BatchHashJoin {
 
 impl ToLocalBatch for BatchHashJoin {
     fn to_local(&self) -> Result<PlanRef> {
-        let left = self.left().to_local()?;
-        let right = self.right().to_local()?;
+        let right = Distribution::Single
+            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
+        let left = Distribution::Single
+            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
