@@ -221,7 +221,7 @@ impl<S: MetaStore> UserManager<S> {
     }
 
     /// `release_privileges` removes the privileges with given target from all users, it will be
-    /// called when a database/schema/table is dropped.
+    /// called when a database/schema/table/source is dropped.
     pub async fn release_privileges(&self, target: &Target) -> Result<()> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
