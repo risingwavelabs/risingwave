@@ -108,6 +108,7 @@ jobs:
           ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt'
           sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt'
+          sqllogictest -p 4566 -d test './e2e_test/database/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill

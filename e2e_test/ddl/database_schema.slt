@@ -69,3 +69,7 @@ drop schema ddl_schema;
 # Drop it again with if exists.
 statement ok
 drop schema if exists ddl_schema;
+
+# Create a database for test new database.
+statement ok
+create database test;
