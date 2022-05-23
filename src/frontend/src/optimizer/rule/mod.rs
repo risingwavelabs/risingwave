@@ -27,14 +27,6 @@ pub(super) type BoxedRule = Box<dyn Rule>;
 
 mod project_join;
 pub use project_join::*;
-mod filter_join;
-pub use filter_join::*;
-mod filter_project;
-pub use filter_project::*;
-mod filter_agg;
-pub use filter_agg::*;
-mod filter_merge;
-pub use filter_merge::*;
 mod project_elim;
 pub use project_elim::*;
 mod project_merge;
