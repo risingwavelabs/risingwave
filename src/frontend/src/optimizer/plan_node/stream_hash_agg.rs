@@ -37,14 +37,9 @@ impl StreamHashAgg {
         let dist = match input_dist {
             Distribution::Single => Distribution::Single,
             Distribution::Broadcast => panic!(),
-            Distribution::HashShard(_) => {
-                assert!(input_dist.satisfies(&RequiredDist::PhysicalDist(
-                    Distribution::HashShard(logical.group_keys().to_vec())
-                )));
-                logical
-                    .i2o_col_mapping()
-                    .rewrite_provided_distribution(input_dist)
-            }
+            Distribution::HashShard(_) => logical
+                .i2o_col_mapping()
+                .rewrite_provided_distribution(input_dist),
             Distribution::SomeShard => Distribution::SomeShard,
         };
         // Hash agg executor might change the append-only behavior of the stream.

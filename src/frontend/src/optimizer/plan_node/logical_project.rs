@@ -26,7 +26,7 @@ use super::{
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
@@ -260,7 +260,13 @@ impl ToStream for LogicalProject {
         let input_required = self
             .o2i_col_mapping()
             .rewrite_required_distribution(required_dist);
-
+        let input_required = match input_required {
+            RequiredDist::PhysicalDist(dist) => match dist {
+                Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                _ => RequiredDist::PhysicalDist(dist),
+            },
+            _ => input_required,
+        };
         let new_input = self.input().to_stream_with_dist_required(&input_required)?;
         let new_logical = self.clone_with_input(new_input);
         let stream_plan = StreamProject::new(new_logical);

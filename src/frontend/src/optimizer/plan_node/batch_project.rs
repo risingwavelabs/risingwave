@@ -24,7 +24,7 @@ use super::{
 };
 use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows
@@ -40,6 +40,7 @@ impl BatchProject {
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input().distribution());
+
         // TODO: Derive order from input
         let base = PlanBase::new_batch(
             ctx,
@@ -84,6 +85,13 @@ impl ToDistributedBatch for BatchProject {
             .logical
             .o2i_col_mapping()
             .rewrite_required_distribution(required_dist);
+        let input_required = match input_required {
+            RequiredDist::PhysicalDist(dist) => match dist {
+                Distribution::Single | Distribution::Broadcast => RequiredDist::Any,
+                _ => RequiredDist::PhysicalDist(dist),
+            },
+            _ => input_required,
+        };
         let new_input = self
             .input()
             .to_distributed_with_required(required_order, &input_required)?;
