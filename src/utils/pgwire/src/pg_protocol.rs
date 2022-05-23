@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error as IoError, Result};
+use std::io::{Error as IoError, ErrorKind, Result};
 use std::sync::Arc;
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tracing::error;
+use tracing::log::trace;
 
 use crate::error::PsqlError;
+use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeQueryMessage,
     FeStartupMessage,
@@ -51,6 +54,17 @@ enum PgProtocolState {
     Regular,
 }
 
+// Truncate 0 from C string in Bytes and stringify it (returns slice, no allocations)
+// PG protocol strings are always C strings.
+fn cstr_to_str(b: &Bytes) -> Result<&str> {
+    let without_null = if b.last() == Some(&0) {
+        &b[..b.len() - 1]
+    } else {
+        &b[..]
+    };
+    std::str::from_utf8(without_null).map_err(|e| std::io::Error::new(ErrorKind::Other, e))
+}
+
 impl<S, SM> PgProtocol<S, SM>
 where
     S: AsyncWrite + AsyncRead + Unpin,
@@ -67,15 +81,15 @@ where
         }
     }
 
-    pub async fn process(&mut self) -> Result<bool> {
-        if self.do_process().await? {
+    pub async fn process(&mut self, unnamed_query_string: &mut Bytes) -> Result<bool> {
+        if self.do_process(unnamed_query_string).await? {
             return Ok(true);
         }
 
         Ok(self.is_terminate())
     }
 
-    async fn do_process(&mut self) -> Result<bool> {
+    async fn do_process(&mut self, unnamed_query_string: &mut Bytes) -> Result<bool> {
         let msg = match self.read_message().await {
             Ok(msg) => msg,
             Err(e) => {
@@ -104,7 +118,8 @@ where
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
-                self.process_query_msg(query_msg).await?;
+                self.process_query_msg(query_msg.get_sql(), false).await?;
+                self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
             }
             FeMessage::CancelQuery => {
                 self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(
@@ -113,6 +128,31 @@ where
             }
             FeMessage::Terminate => {
                 self.process_terminate();
+            }
+            FeMessage::Parse(m) => {
+                *unnamed_query_string = m.query_string;
+                self.write_message(&BeMessage::ParseComplete).await?;
+            }
+            FeMessage::Bind(_) => {
+                self.write_message(&BeMessage::BindComplete).await?;
+            }
+            FeMessage::Execute(_) => {
+                self.process_query_msg(cstr_to_str(unnamed_query_string), true)
+                    .await?;
+                // NOTE there is no ReadyForQuery message.
+            }
+            FeMessage::Describe(_) => {
+                self.write_message_no_flush(&BeMessage::ParameterDescription)?;
+                // FIXME: Introduce parser to analyze statements and bind data type. Here just
+                // hard-code a VARCHAR.
+                self.write_message(&BeMessage::RowDescription(&[PgFieldDescriptor::new(
+                    "VARCHAR".to_string(),
+                    TypeOid::Varchar,
+                )]))
+                .await?;
+            }
+            FeMessage::Sync => {
+                self.write_message(&BeMessage::ReadyForQuery).await?;
             }
         }
         self.flush().await?;
@@ -147,8 +187,12 @@ where
         self.is_terminate = true;
     }
 
-    async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
-        match query.get_sql() {
+    async fn process_query_msg(
+        &mut self,
+        query_string: Result<&str>,
+        extended: bool,
+    ) -> Result<()> {
+        match query_string {
             Ok(sql) => {
                 tracing::trace!("receive query: {}", sql);
                 let session = self.session.clone().unwrap();
@@ -159,7 +203,7 @@ where
                         if res.is_empty() {
                             self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
                         } else if res.is_query() {
-                            self.process_query_with_results(res).await?;
+                            self.process_query_with_results(res, extended).await?;
                         } else {
                             self.write_message_no_flush(&BeMessage::CommandComplete(
                                 BeCommandCompleteMessage {
@@ -180,13 +224,18 @@ where
             }
         };
 
-        self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }
 
-    async fn process_query_with_results(&mut self, res: PgResponse) -> Result<()> {
-        self.write_message(&BeMessage::RowDescription(&res.get_row_desc()))
-            .await?;
+    async fn process_query_with_results(&mut self, res: PgResponse, extended: bool) -> Result<()> {
+        // The possible responses to Execute are the same as those described above for queries
+        // issued via simple query protocol, except that Execute doesn't cause ReadyForQuery or
+        // RowDescription to be issued.
+        // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+        if !extended {
+            self.write_message(&BeMessage::RowDescription(&res.get_row_desc()))
+                .await?;
+        }
 
         let mut rows_cnt = 0;
         let iter = res.iter();

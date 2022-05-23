@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::io;
-use std::io::ErrorKind;
+use std::io::{Bytes, ErrorKind};
 use std::result::Result;
 use std::sync::Arc;
 
@@ -66,8 +66,9 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
 
 async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>) {
     let mut pg_proto = PgProtocol::new(socket, session_mgr);
+    let mut unnamed_query_string = bytes::Bytes::new();
     loop {
-        let terminate = pg_proto.process().await;
+        let terminate = pg_proto.process(&mut unnamed_query_string).await;
         match terminate {
             Ok(is_ter) => {
                 if is_ter {
@@ -83,5 +84,82 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>)
                 tracing::error!("Error {:?}!", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::sync::Arc;
+
+    use tokio_postgres::{Client, NoTls};
+
+    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+    use crate::pg_response::{PgResponse, StatementType};
+    use crate::pg_server::{pg_serve, Session, SessionManager};
+    use crate::types::Row;
+
+    struct MockSessionManager {}
+
+    impl SessionManager for MockSessionManager {
+        type Session = MockSession;
+
+        fn connect(
+            &self,
+            database: &str,
+        ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
+            Ok(Arc::new(MockSession {}))
+        }
+    }
+
+    struct MockSession {}
+
+    #[async_trait::async_trait]
+    impl Session for MockSession {
+        async fn run_statement(
+            self: Arc<Self>,
+            sql: &str,
+        ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+            Ok(PgResponse::new(
+                StatementType::SELECT,
+                1,
+                vec![Row::new(vec![Some("Hello, World".to_owned())])],
+                vec![PgFieldDescriptor::new(
+                    "VARCHAR".to_owned(),
+                    TypeOid::Varchar,
+                )],
+            ))
+        }
+    }
+
+    #[tokio::test]
+    /// The test below is copied from tokio-postgres doc.
+    async fn test_psql_extended_mode_connect() {
+        let session_mgr = Arc::new(MockSessionManager {});
+        let future = tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
+
+        // Connect to the database.
+        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
+            .await
+            .unwrap();
+
+        // The connection object performs the actual communication with the database,
+        // so spawn it off to run on its own.
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("connection error: {}", e);
+            }
+        });
+
+        // Now we can execute a simple statement that just returns its parameter.
+        let rows = client.query("SELECT 'Hello, World'", &[]).await.unwrap();
+        // FIXME: Enable this after handle prepared statement.
+        // let rows = client
+        //     .query("SELECT $1::TEXT", &[&"hello world"])
+        //     .await
+        //     .unwrap();
+
+        let value: &str = rows[0].get(0);
+        assert_eq!(value, "Hello, World");
     }
 }
