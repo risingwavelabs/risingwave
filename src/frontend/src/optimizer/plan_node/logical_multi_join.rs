@@ -19,7 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
@@ -82,6 +82,21 @@ impl LogicalMultiJoin {
             base: logical_join.base.clone(),
             inputs,
             on: Condition { conjunctions },
+        })
+    }
+
+    pub(crate) fn from_filter(join: &PlanRef) -> Option<Self> {
+        let logical_filter = join.as_logical_filter()?;
+        let input = logical_filter.input();
+        let multijoin = input.as_logical_multi_join()?;
+
+        Some(Self {
+            base: logical_filter.base.clone(),
+            inputs: multijoin.inputs().to_vec(),
+            on: multijoin
+                .on()
+                .clone()
+                .and(logical_filter.predicate().clone()),
         })
     }
 
