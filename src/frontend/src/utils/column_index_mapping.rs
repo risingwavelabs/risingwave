@@ -323,6 +323,9 @@ impl ColIndexMapping {
                     RequiredDist::ShardByKey(keys)
                 }
             }
+            RequiredDist::PhysicalDist(dist) => {
+                RequiredDist::PhysicalDist(self.rewrite_provided_distribution(dist))
+            }
             _ => dist.clone(),
         }
     }
