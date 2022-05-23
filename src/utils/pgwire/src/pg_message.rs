@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::env;
 use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
@@ -51,16 +50,9 @@ impl FeStartupMessage {
         }?;
         let mut map = HashMap::new();
         let config: Vec<&str> = config.split('\0').collect();
-        for i in 0..config.len() {
-            if i % 2 == 0 {
-                map.insert(config[i].to_string(), config[i + 1].to_string());
-            }
-        }
-        if let Ok(name) = env::var("USER") {
-            if Some(&name) == map.get("database") {
-                map.remove("database");
-            }
-        };
+        config.chunks(2).for_each(|chunk| {
+            map.insert(chunk[0].to_string(), chunk[1].to_string());
+        });
         Ok(FeStartupMessage { config: map })
     }
 }
