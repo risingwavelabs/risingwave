@@ -14,6 +14,8 @@
 use std::any::type_name;
 use std::convert::TryInto;
 use std::fmt::Debug;
+use std::ops::{BitAnd};
+
 use num_traits::{CheckedShl,CheckedShr};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
@@ -72,3 +74,59 @@ where
     })?;
     atm(l, r)
 }
+
+// TODO Select an error message for bitand
+#[inline(always)]
+pub fn general_bitand<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: BitAnd,
+{
+    general_atm(l, r,  |a, b|  a.bitand(b)
+        //Some(c) => Ok(c),
+        //None => Err(RwError::from(InternalError(String::from("Unknown Error")))),
+    )
+}
+
+
+// #[inline(always)]
+// pub fn general_bitor<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+// where
+//     T1: TryInto<T3> + Debug,
+//     T2: TryInto<T3> + Debug,
+//     T3: CheckedShr,
+// {
+//     general_atm(l, r, |a, b| match a.checked_shr(b) {
+//         Some(c) => Ok(c),
+//         None => Err(RwError::from(NumericValueOutOfRange)),
+//     })
+// }
+
+
+// #[inline(always)]
+// pub fn general_bitxor<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+// where
+//     T1: TryInto<T3> + Debug,
+//     T2: TryInto<T3> + Debug,
+// {
+//     general_shift(l, r, |a, b| match a.checked_shr(b) {
+//         Some(c) => Ok(c),
+//         None => Err(RwError::from(NumericValueOutOfRange)),
+//     })
+// }
+
+
+
+// #[inline(always)]
+// pub fn general_bitnot<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+// where
+//     T1: TryInto<T3> + Debug,
+//     T2: TryInto<u32> + Debug,
+//     T3: CheckedShr,
+// {
+//     general_shift(l, r, |a, b| match a.checked_shr(b) {
+//         Some(c) => Ok(c),
+//         None => Err(RwError::from(NumericValueOutOfRange)),
+//     })
+// }

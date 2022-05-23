@@ -167,39 +167,73 @@ macro_rules! gen_binary_expr_atm {
             { int16, int16, int16, $general_f },
             { int16, int32, int32, $general_f },
             { int16, int64, int64, $general_f },
-            //{ int16, float32, float64, $general_f },
-            //{ int16, float64, float64, $general_f },
+            { int16, float32, float64, $general_f },
+            { int16, float64, float64, $general_f },
             { int32, int16, int32, $general_f },
             { int32, int32, int32, $general_f },
             { int32, int64, int64, $general_f },
-            //{ int32, float32, float64, $general_f },
-            //{ int32, float64, float64, $general_f },
+            { int32, float32, float64, $general_f },
+            { int32, float64, float64, $general_f },
             { int64, int16,int64, $general_f },
             { int64, int32,int64, $general_f },
             { int64, int64, int64, $general_f },
-            //{ int64, float32, float64 , $general_f},
-            //{ int64, float64, float64, $general_f },
-            //{ float32, int16, float64, $general_f },
-            //{ float32, int32, float64, $general_f },
-            //{ float32, int64, float64 , $general_f},
-            //{ float32, float32, float32, $general_f },
-            //{ float32, float64, float64, $general_f },
-            //{ float64, int16, float64, $general_f },
-            //{ float64, int32, float64, $general_f },
-            //{ float64, int64, float64, $general_f },
-            //{ float64, float32, float64, $general_f },
-            //{ float64, float64, float64, $general_f },
-            // { decimal, int16, decimal, $general_f },
-            // { decimal, int32, decimal, $general_f },
-            // { decimal, int64, decimal, $general_f },
-            //{ decimal, float32, decimal, $general_f },
-            //{ decimal, float64, decimal, $general_f },
-            // { int16, decimal, decimal, $general_f },
-            // { int32, decimal, decimal, $general_f },
-            // { int64, decimal, decimal, $general_f },
-            // { decimal, decimal, decimal, $general_f },
-            //{ float32, decimal, float64, $general_f },
-            //{ float64, decimal, float64, $general_f },
+            { int64, float32, float64 , $general_f},
+            { int64, float64, float64, $general_f },
+            { float32, int16, float64, $general_f },
+            { float32, int32, float64, $general_f },
+            { float32, int64, float64 , $general_f},
+            { float32, float32, float32, $general_f },
+            { float32, float64, float64, $general_f },
+            { float64, int16, float64, $general_f },
+            { float64, int32, float64, $general_f },
+            { float64, int64, float64, $general_f },
+            { float64, float32, float64, $general_f },
+            { float64, float64, float64, $general_f },
+            { decimal, int16, decimal, $general_f },
+            { decimal, int32, decimal, $general_f },
+            { decimal, int64, decimal, $general_f },
+            { decimal, float32, decimal, $general_f },
+            { decimal, float64, decimal, $general_f },
+            { int16, decimal, decimal, $general_f },
+            { int32, decimal, decimal, $general_f },
+            { int64, decimal, decimal, $general_f },
+            { decimal, decimal, decimal, $general_f },
+            { float32, decimal, float64, $general_f },
+            { float64, decimal, float64, $general_f },
+            $(
+                { $i1, $i2, $rt, $func },
+            )*
+        }
+    };
+}
+
+/// `gen_binary_expr_shift` is similar to `gen_binary_expr_atm`.
+///  `shift` means arithmetic shift here.
+/// They are differentiate cuz shift operation does not support for float datatype.
+/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
+macro_rules! gen_binary_expr_shift {
+    (
+        $macro:ident,
+        $l:expr,
+        $r:expr,
+        $ret:expr,
+        $general_f:ident,
+        {
+            $( { $i1:ident, $i2:ident, $rt:ident, $func:ident }, )*
+        } $(,)?
+    ) => {
+        $macro! {
+            [$l, $r, $ret],
+            { int16, int16, int16, $general_f },
+            { int16, int32, int32, $general_f },
+            { int16, int64, int64, $general_f },
+            { int32, int16, int32, $general_f },
+            { int32, int32, int32, $general_f },
+            { int32, int64, int64, $general_f },
+            { int64, int16,int64, $general_f },
+            { int64, int32,int64, $general_f },
+            { int64, int64, int64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
             )*
@@ -316,8 +350,9 @@ pub fn new_binary_expr(
                 },
             }
         }
+        // BitWise Operation
         Type::PgBitwiseShiftLeft => {
-            gen_binary_expr_atm! {
+            gen_binary_expr_shift! {
                 gen_atm_impl,
                 l, r, ret,
                 general_shl,
@@ -327,7 +362,7 @@ pub fn new_binary_expr(
             }
         }
         Type::PgBitwiseShiftRight =>{
-            gen_binary_expr_atm! {
+            gen_binary_expr_shift! {
                 gen_atm_impl,
                 l, r, ret,
                 general_shr,
@@ -336,6 +371,15 @@ pub fn new_binary_expr(
                 },
             }
         }
+        Type::BitwiseAnd => {
+            gen_binary_expr_shift! {
+                gen_atm_impl,
+                l, r, ret,
+                general_bitand,
+                {
+                },
+            }
+        },
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
