@@ -131,6 +131,7 @@ async fn create_arrangement(
         arrangement_col_arrange_rules(),
         column_ids,
         1,
+        vec![0usize],
     ))
 }
 

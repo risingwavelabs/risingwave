@@ -55,7 +55,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             keys,
             column_ids,
             params.executor_id,
-            Some(distribution_keys),
+            distribution_keys,
         );
 
         Ok(executor.boxed())
@@ -101,7 +101,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             keys,
             column_ids,
             params.executor_id,
-            Some(distribution_keys),
+            distribution_keys,
         );
 
         Ok(executor.boxed())

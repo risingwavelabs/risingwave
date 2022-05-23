@@ -36,6 +36,7 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
         keyspace.clone(),
         column_descs.clone(),
         vec![OrderType::Ascending, OrderType::Descending],
+        None,
     );
     let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, orderings);
     let epoch: u64 = 0;
