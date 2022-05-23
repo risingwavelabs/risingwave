@@ -46,6 +46,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
+        distribution_keys: Option<Vec<usize>>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
@@ -63,7 +64,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .collect_vec();
         Self {
             input,
-            state_table: StateTable::new(keyspace, column_descs, arrange_order_types),
+            state_table: StateTable::new(
+                keyspace,
+                column_descs,
+                arrange_order_types,
+                distribution_keys,
+            ),
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
                 schema,
@@ -224,6 +230,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
+            None,
         ))
         .execute();
 

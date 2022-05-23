@@ -179,6 +179,8 @@ message ArrangeNode {
   uint32 table_id = 2;
   // Info about the arrangement
   ArrangementInfo table_info = 3;
+  // Hash keys of the materialize node, which is a subset of pk.
+  repeated int32 distribution_keys = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

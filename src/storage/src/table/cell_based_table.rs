@@ -58,6 +58,8 @@ pub struct CellBasedTable<S: StateStore> {
 
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
+
+    distribution_keys: Option<Vec<usize>>,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -78,6 +80,7 @@ impl<S: StateStore> CellBasedTable<S> {
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
         stats: Arc<StateStoreMetrics>,
+        distribution_keys: Option<Vec<usize>>,
     ) -> Self {
         let schema = Schema::new(
             column_descs
@@ -96,6 +99,7 @@ impl<S: StateStore> CellBasedTable<S> {
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
             stats,
+            distribution_keys,
         }
     }
 
@@ -109,6 +113,7 @@ impl<S: StateStore> CellBasedTable<S> {
             column_descs,
             Some(OrderedRowSerializer::new(order_types)),
             Arc::new(StateStoreMetrics::unused()),
+            None,
         )
     }
 
@@ -118,7 +123,7 @@ impl<S: StateStore> CellBasedTable<S> {
         column_descs: Vec<ColumnDesc>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
-        Self::new(keyspace, column_descs, None, stats)
+        Self::new(keyspace, column_descs, None, stats, None)
     }
 
     // cell-based interface
