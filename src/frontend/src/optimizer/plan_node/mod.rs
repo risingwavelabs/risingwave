@@ -504,7 +504,6 @@ macro_rules! impl_down_cast_fn {
 
 for_all_plan_nodes! { impl_down_cast_fn }
 
-
 #[derive(Clone, Debug)]
 pub struct OutputIndices {
     pub original_schema: Schema,
