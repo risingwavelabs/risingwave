@@ -26,9 +26,7 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::base::{
-    KAFKA_SPLIT_TYPE, KINESIS_SPLIT_TYPE, NEXMARK_SPLIT_TYPE, PULSAR_SPLIT_TYPE,
-};
+use risingwave_connector::{KAFKA_CONNECTOR, KINESIS_CONNECTOR, PULSAR_CONNECTOR, NEXMARK_CONNECTOR};
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorStateV2, SplitImpl};
 use risingwave_source::*;
@@ -239,10 +237,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect::<Vec<_>>();
         if !cache.is_empty() {
             impl_take_snapshot!([], self.split_state_store, epoch, cache,
-                { kafka, KAFKA_SPLIT_TYPE },
-                { kinesis, KINESIS_SPLIT_TYPE },
-                { nexmark, NEXMARK_SPLIT_TYPE },
-                { pulsar, PULSAR_SPLIT_TYPE }
+                { kafka, KAFKA_CONNECTOR },
+                { kinesis, KINESIS_CONNECTOR },
+                { nexmark, NEXMARK_CONNECTOR },
+                { pulsar, PULSAR_CONNECTOR }
             );
             self.state_cache.clear();
         }

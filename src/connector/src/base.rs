@@ -69,12 +69,6 @@ pub trait SplitReader: Sized {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
-pub const PULSAR_SPLIT_TYPE: &str = "pulsar";
-pub const S3_SPLIT_TYPE: &str = "s3";
-pub const KINESIS_SPLIT_TYPE: &str = "kinesis";
-pub const KAFKA_SPLIT_TYPE: &str = "kafka";
-pub const NEXMARK_SPLIT_TYPE: &str = "nexmark";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
