@@ -54,7 +54,7 @@
     select * from (select * from t), t;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $3, $4] }
-      LogicalJoin { type: Inner, on: true }
+      LogicalJoin { type: Inner, on: true, output_indices: [0, 1, 2, 3, 4] }
         LogicalProject { exprs: [$1, $2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
@@ -64,7 +64,7 @@
     select * from (select * from t) as tt join t on tt.v1=t.v1;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $3, $4] }
-      LogicalJoin { type: Inner, on: ($0 = $3) }
+      LogicalJoin { type: Inner, on: ($0 = $3), output_indices: [0, 1, 2, 3, 4] }
         LogicalProject { exprs: [$1, $2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
@@ -74,7 +74,7 @@
     select * from (select * from t) as tt(a) join t on a=v1;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $3, $4] }
-      LogicalJoin { type: Inner, on: ($0 = $3) }
+      LogicalJoin { type: Inner, on: ($0 = $3), output_indices: [0, 1, 2, 3, 4] }
         LogicalProject { exprs: [$1, $2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
