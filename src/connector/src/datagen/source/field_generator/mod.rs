@@ -12,13 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
-use risingwave_common::types::DataType;
-use serde_json::{json, Value};
+mod timestamp;
+mod varchar;
 
-use super::{FieldGenerator, FieldKind};
+pub use timestamp::*;
+pub use varchar::*;
+
+use risingwave_common::types::DataType;
+use serde_json::{json,Value};
+use rand::thread_rng;
+use rand::Rng;
+use anyhow::Result;
+
+pub trait FieldGenerator {
+    fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
+    where
+        Self: Sized;
+    fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>
+    where
+        Self: Sized;
+    fn generate(&mut self) -> Value;
+}
+
+// Generator of this '#' field. Can be 'sequence' or 'random'.
+pub enum FieldKind {
+    Sequence,
+    Random,
+}
+
+impl Default for FieldKind {
+    fn default() -> Self {
+        FieldKind::Random
+    }
+}
 
 pub enum FieldGeneratorImpl {
     I16(I16Field),
@@ -88,6 +114,7 @@ impl FieldGeneratorImpl {
         }
     }
 }
+
 #[macro_export]
 macro_rules! for_all_fields_variants {
     ($macro:ident) => {
@@ -187,43 +214,6 @@ macro_rules! impl_field_generator {
 
 for_all_fields_variants! {impl_field_generator}
 
-pub struct VarcharField {
-    length: usize,
-}
-impl VarcharField {
-    pub fn new(length_option: Option<String>) -> Result<Self> {
-        let length = if let Some(length_option) = length_option {
-            length_option.parse::<usize>()?
-        } else {
-            100
-        };
-        Ok(Self { length })
-    }
-}
-impl FieldGenerator for VarcharField {
-    fn with_random(_start: Option<String>, _end: Option<String>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
-
-    fn with_sequence(_min: Option<String>, _max: Option<String>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
-
-    fn generate(&mut self) -> Value {
-        let s: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(self.length)
-            .map(char::from)
-            .collect();
-        json!(s)
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;

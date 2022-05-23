@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::field_generator::FieldGeneratorImpl;
+use super::field_generator::{FieldKind,FieldGeneratorImpl};
 use super::generator::DatagenEventGenerator;
 use crate::datagen::DatagenProperties;
 use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader};
@@ -63,7 +63,7 @@ impl SplitReader for DatagenSplitReader {
                     name,
                     FieldGeneratorImpl::new(
                         column.data_type.clone(),
-                        super::FieldKind::Random,
+                            FieldKind::Random,
                         length_key_option,
                         None,
                     )?,
@@ -79,7 +79,7 @@ impl SplitReader for DatagenSplitReader {
                             name,
                             FieldGeneratorImpl::new(
                                 column.data_type.clone(),
-                                super::FieldKind::Sequence,
+                                FieldKind::Sequence,
                                 start_key_option,
                                 end_key_option,
                             )?,
@@ -93,7 +93,7 @@ impl SplitReader for DatagenSplitReader {
                             name,
                             FieldGeneratorImpl::new(
                                 column.data_type.clone(),
-                                super::FieldKind::Random,
+                                FieldKind::Random,
                                 min_value_option,
                                 max_value_option,
                             )?,

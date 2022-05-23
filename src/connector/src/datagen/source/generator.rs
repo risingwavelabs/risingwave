@@ -19,7 +19,7 @@ use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration};
 
 use super::field_generator::FieldGeneratorImpl;
-use super::FieldGenerator;
+use super::field_generator::FieldGenerator;
 use crate::SourceMessage;
 pub type BoxedFieldGenerator = Box<dyn FieldGenerator>;
 
