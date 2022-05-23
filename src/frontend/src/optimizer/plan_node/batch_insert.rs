@@ -84,7 +84,6 @@ impl ToBatchProst for BatchInsert {
 
 impl ToLocalBatch for BatchInsert {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local()?;
-        Ok(self.clone_with_input(new_input).into())
+        unreachable!()
     }
 }
