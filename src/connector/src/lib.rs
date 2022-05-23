@@ -30,8 +30,10 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(let_chains)]
 
 pub mod base;
+mod datagen;
 mod filesystem;
 mod kafka;
 pub mod kinesis;
