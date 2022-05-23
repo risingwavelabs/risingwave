@@ -100,7 +100,6 @@ impl DynamicLevelSelector {
                 task_id,
                 level,
                 self.overlap_strategy.clone(),
-                self.config.clone(),
             ))
         }
     }
