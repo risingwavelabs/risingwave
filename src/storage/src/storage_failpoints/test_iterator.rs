@@ -28,7 +28,7 @@ use crate::hummock::iterator::{
     HummockIterator, MergeIterator, ReadOptions, UserIterator,
 };
 use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::{BackwardSSTableIterator, SSTableIterator, SSTableIteratorType};
+use crate::hummock::{BackwardSSTableIterator, SSTableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[tokio::test]

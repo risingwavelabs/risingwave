@@ -135,7 +135,7 @@ impl HummockStorage {
         }
         // Might have the key, take it as might positive.
         stats.bloom_filter_might_positive_count += 1;
-        let mut iter = SSTableIterator::new(table, self.sstable_store.clone(), read_options);
+        let mut iter = SSTableIterator::create(table, self.sstable_store.clone(), read_options);
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
         if !iter.is_valid() {

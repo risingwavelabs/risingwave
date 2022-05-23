@@ -46,7 +46,7 @@ async fn test_failpoint_table_read() {
         .unwrap();
 
     let mut stats = StoreLocalStatistic::default();
-    let mut sstable_iter = SSTableIterator::new(
+    let mut sstable_iter = SSTableIterator::create(
         block_on(sstable_store.sstable(table.id, &mut stats)).unwrap(),
         sstable_store,
         Arc::new(ReadOptions::default()),
@@ -107,7 +107,7 @@ async fn test_failpoint_vacuum_and_metadata() {
 
     let mut stats = StoreLocalStatistic::default();
 
-    let mut sstable_iter = SSTableIterator::new(
+    let mut sstable_iter = SSTableIterator::create(
         block_on(sstable_store.sstable(table.id, &mut stats)).unwrap(),
         sstable_store,
         Arc::new(ReadOptions::default()),

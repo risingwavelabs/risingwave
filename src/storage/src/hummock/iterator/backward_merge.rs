@@ -27,7 +27,6 @@ mod test {
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedBackwardHummockIterator, HummockIterator};
-    use crate::hummock::sstable::SSTableIteratorType;
     use crate::hummock::test_utils::create_small_table_cache;
     use crate::hummock::BackwardSSTableIterator;
     use crate::monitor::StateStoreMetrics;

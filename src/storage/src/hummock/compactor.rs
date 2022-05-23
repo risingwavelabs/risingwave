@@ -472,7 +472,7 @@ impl Compactor {
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
-                    table_iters.push(Box::new(SSTableIterator::new(
+                    table_iters.push(Box::new(SSTableIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),

@@ -24,7 +24,7 @@ use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SSTableIteratorType: HummockIterator {
-    fn new(
+    fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
         read_options: Arc<ReadOptions>,
@@ -48,6 +48,21 @@ pub struct SSTableIterator {
 }
 
 impl SSTableIterator {
+    pub fn new(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        options: Arc<ReadOptions>,
+    ) -> Self {
+        Self {
+            block_iter: None,
+            cur_idx: 0,
+            sst: table,
+            sstable_store,
+            stats: StoreLocalStatistic::default(),
+            options,
+        }
+    }
+
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         tracing::trace!(
@@ -153,15 +168,12 @@ impl HummockIterator for SSTableIterator {
 }
 
 impl SSTableIteratorType for SSTableIterator {
-    fn new(table: TableHolder, sstable_store: SstableStoreRef, options: Arc<ReadOptions>) -> Self {
-        Self {
-            block_iter: None,
-            cur_idx: 0,
-            sst: table,
-            sstable_store,
-            stats: StoreLocalStatistic::default(),
-            options,
-        }
+    fn create(
+        table: TableHolder,
+        sstable_store: SstableStoreRef,
+        options: Arc<ReadOptions>,
+    ) -> Self {
+        SSTableIterator::new(table, sstable_store, options)
     }
 }
 
@@ -196,7 +208,7 @@ mod tests {
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
         let mut sstable_iter =
-            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
+            SSTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -225,7 +237,7 @@ mod tests {
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
         let mut sstable_iter =
-            SSTableIterator::new(handle, sstable_store, Arc::new(ReadOptions::default()));
+            SSTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
@@ -295,8 +307,9 @@ mod tests {
             .await
             .unwrap();
 
-        let mut sstable_iter = SSTableIterator::new(
-            block_on(sstable_store.sstable(table.id)).unwrap(),
+        let mut stats = StoreLocalStatistic::default();
+        let mut sstable_iter = SSTableIterator::create(
+            block_on(sstable_store.sstable(table.id, &mut stats)).unwrap(),
             sstable_store,
             Arc::new(ReadOptions { prefetch: true }),
         );

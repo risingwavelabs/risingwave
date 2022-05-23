@@ -88,13 +88,13 @@ impl HummockStorage {
                 .sstable(table_info.id, &mut stats)
                 .await?;
             if backward {
-                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
+                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::create(
                     table,
                     self.sstable_store(),
                     read_options.clone(),
                 )) as BoxedBackwardHummockIterator);
             } else {
-                overlapped_forward_iters.push(Box::new(SSTableIterator::new(
+                overlapped_forward_iters.push(Box::new(SSTableIterator::create(
                     table,
                     self.sstable_store(),
                     read_options.clone(),
@@ -154,7 +154,6 @@ impl HummockStorage {
                         overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                             table,
                             self.sstable_store(),
-                            read_options.clone(),
                         ))
                             as BoxedBackwardHummockIterator);
                     } else {
