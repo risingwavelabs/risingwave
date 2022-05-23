@@ -43,7 +43,7 @@ impl<S: StateStore> StateTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
-        distribution_keys: Option<Vec<usize>>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         Self {
             order_types: order_types.clone(),
@@ -53,7 +53,7 @@ impl<S: StateStore> StateTable<S> {
                 column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
                 Arc::new(StateStoreMetrics::unused()),
-                distribution_keys,
+                dist_key_indices,
             ),
         }
     }

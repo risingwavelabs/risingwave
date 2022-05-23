@@ -59,8 +59,9 @@ pub struct CellBasedTable<S: StateStore> {
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 
-    /// Indices of distribution keys in pk.
-    pk_dist_key_indices: Option<Vec<usize>>,
+    /// Indices of distribution keys in pk for computing value meta. None if value meta is not
+    /// required.
+    dist_key_indices: Option<Vec<usize>>,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -81,7 +82,7 @@ impl<S: StateStore> CellBasedTable<S> {
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
         stats: Arc<StateStoreMetrics>,
-        distribution_keys: Option<Vec<usize>>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let schema = Schema::new(
             column_descs
@@ -100,7 +101,7 @@ impl<S: StateStore> CellBasedTable<S> {
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
             stats,
-            pk_dist_key_indices: distribution_keys,
+            dist_key_indices,
         }
     }
 
@@ -211,7 +212,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 // distribution keys. Also, it is guaranteed that distribution key indices will
                 // not exceed the length of pk. So we simply do unwrap here.
                 let vnode = pk
-                    .hash_by_indices(self.pk_dist_key_indices.as_ref().unwrap(), &hash_builder)
+                    .hash_by_indices(self.dist_key_indices.as_ref().unwrap(), &hash_builder)
                     .unwrap()
                     .to_vnode();
                 ValueMeta::with_vnode(vnode)
