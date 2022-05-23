@@ -115,7 +115,7 @@ impl<S: StateStore> StateTable<S> {
         let mem_table_iter = self.mem_table.buffer.iter().peekable();
         StateTableRowIter::new(
             &self.keyspace,
-            &self.column_descs,
+            self.column_descs.clone(),
             mem_table_iter,
             &self.order_types,
             epoch,
@@ -140,7 +140,7 @@ type MemTableIter<'a> = btree_map::Iter<'a, Row, RowOp>;
 impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
         keyspace: &Keyspace<S>,
-        table_descs: &[ColumnDesc],
+        table_descs: Vec<ColumnDesc>,
         mem_table_iter: Peekable<MemTableIter<'a>>,
         order_types_vec: &[OrderType],
         epoch: u64,
