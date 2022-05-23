@@ -48,7 +48,7 @@ impl PlanBase {
             ctx,
             schema,
             pk_indices,
-            dist: Distribution::any().clone(),
+            dist: Distribution::Single,
             order: Order::any().clone(),
             // Logical plan node won't touch `append_only` field
             append_only: true,

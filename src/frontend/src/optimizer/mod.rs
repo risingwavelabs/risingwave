@@ -24,15 +24,17 @@ mod rule;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
-use property::{Distribution, Order};
+use property::Order;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::expr::InputRef;
+use crate::utils::Condition;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -47,7 +49,7 @@ use crate::expr::InputRef;
 #[derive(Debug, Clone)]
 pub struct PlanRoot {
     plan: PlanRef,
-    required_dist: Distribution,
+    required_dist: RequiredDist,
     required_order: Order,
     out_fields: FixedBitSet,
     out_names: Vec<String>,
@@ -57,7 +59,7 @@ pub struct PlanRoot {
 impl PlanRoot {
     pub fn new(
         plan: PlanRef,
-        required_dist: Distribution,
+        required_dist: RequiredDist,
         required_order: Order,
         out_fields: FixedBitSet,
         out_names: Vec<String>,
@@ -84,14 +86,6 @@ impl PlanRoot {
             out_fields,
             out_names,
             schema,
-        }
-    }
-
-    /// Change the distribution of [`PlanRoot`].
-    pub fn with_distribution(&self, dist: Distribution) -> Self {
-        Self {
-            required_dist: dist,
-            ..self.clone()
         }
     }
 
@@ -132,20 +126,11 @@ impl PlanRoot {
         };
 
         // Predicate Push-down
-        plan = {
-            let rules = vec![
-                FilterJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterAggRule::create(),
-                FilterMergeRule::create(),
-            ];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-            heuristic_optimizer.optimize(plan)
-        };
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Merge inner joins into multijoin
         plan = {
-            let rules = vec![MultiJoinJoinRule::create()];
+            let rules = vec![MultiJoinJoinRule::create(), MultiJoinFilterRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -154,14 +139,13 @@ impl PlanRoot {
         // Apply limited set of filter pushdown rules again since we pullup non eq-join
         // conditions into a filter above the multijoin.
         plan = {
-            let rules = vec![
-                ReorderMultiJoinRule::create(),
-                FilterProjectRule::create(),
-                FilterJoinRule::create(),
-            ];
+            let rules = vec![ReorderMultiJoinRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
+
+        // Predicate Push-down
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
         // Prune Columns
         //
@@ -185,9 +169,7 @@ impl PlanRoot {
         plan
     }
 
-    /// Optimize and generate a batch query plan.
-    /// Currently only used by test runner (Have distributed plan but not schedule yet).
-    /// Will be removed after dist execution.
+    /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
@@ -212,15 +194,39 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    /// Optimize and generate a batch query plan for local execution.
+    pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
+        // Logical optimization
+        let mut plan = self.gen_optimized_logical_plan();
+
+        // Convert to physical plan node
+        plan = plan.to_batch_with_order_required(&self.required_order)?;
+
+        // Convert to physical plan node
+        plan = plan.to_local_with_order_required(&self.required_order)?;
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            let exprs = self
+                .out_fields
+                .ones()
+                .zip_eq(self.schema.fields.clone())
+                .map(|(index, field)| InputRef::new(index, field.data_type).into())
+                .collect();
+            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
+        }
+
+        Ok(plan)
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
-                self.required_dist = out_col_change
-                    .rewrite_required_distribution(&self.required_dist)
-                    .unwrap();
+                self.required_dist =
+                    out_col_change.rewrite_required_distribution(&self.required_dist);
                 self.required_order = out_col_change
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
@@ -275,7 +281,7 @@ impl PlanRoot {
     }
 
     /// Set the plan root's required dist.
-    pub fn set_required_dist(&mut self, required_dist: Distribution) {
+    pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
 }
@@ -305,7 +311,7 @@ mod tests {
         let out_names = vec!["v1".into()];
         let root = PlanRoot::new(
             values,
-            Distribution::any().clone(),
+            RequiredDist::Any,
             Order::any().clone(),
             out_fields,
             out_names,

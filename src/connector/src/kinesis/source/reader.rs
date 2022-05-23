@@ -29,10 +29,10 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::base::{SourceMessage, SplitReader};
-use crate::kinesis::build_client;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::{Column, ConnectorStateV2, KinesisProperties, SplitImpl};
+use crate::kinesis::{build_client, KinesisProperties};
+use crate::{Column, ConnectorStateV2, SplitImpl};
 
 pub struct KinesisMultiSplitReader {
     /// splits are not allowed to be empty, otherwise connector source should create

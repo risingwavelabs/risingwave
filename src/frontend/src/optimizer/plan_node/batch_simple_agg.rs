@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::SortAggNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
 pub struct BatchSimpleAgg {
@@ -35,7 +35,6 @@ impl BatchSimpleAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Any => Distribution::Any,
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
@@ -71,7 +70,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self
             .input()
-            .to_distributed_with_required(Order::any(), &Distribution::Single)?;
+            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -92,7 +91,10 @@ impl ToBatchProst for BatchSimpleAgg {
 
 impl ToLocalBatch for BatchSimpleAgg {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local_with_order_required(Order::any())?;
+        let new_input = self.input().to_local()?;
+
+        let new_input = RequiredDist::single().enforce_if_not_satisfies(new_input, Order::any())?;
+
         Ok(self.clone_with_input(new_input).into())
     }
 }

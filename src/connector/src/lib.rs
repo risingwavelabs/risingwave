@@ -30,18 +30,19 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(let_chains)]
 
 pub mod base;
+mod datagen;
 mod filesystem;
 mod kafka;
 pub mod kinesis;
 mod nexmark;
-mod properties;
 mod pulsar;
 
 pub use base::*;
-pub use properties::*;
 
 pub mod aws_utils;
 pub mod dummy_connector;
+mod macros;
 pub mod state;

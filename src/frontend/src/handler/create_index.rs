@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
-use crate::optimizer::property::{Distribution, FieldOrder, Order};
+use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
@@ -112,7 +112,7 @@ pub(crate) fn gen_create_index_plan(
 
         PlanRoot::new(
             scan_node.into(),
-            Distribution::AnyShard,
+            RequiredDist::AnyShard,
             Order::new(
                 arrange_keys
                     .iter()

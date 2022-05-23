@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use super::Planner;
 use crate::binder::BoundDelete;
 use crate::optimizer::plan_node::{LogicalDelete, LogicalFilter};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
@@ -35,7 +35,7 @@ impl Planner {
 
         let order = Order::any().clone();
         // For delete, frontend will only schedule one task so do not need this to be single.
-        let dist = Distribution::Any;
+        let dist = RequiredDist::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let out_names = plan.schema().names();

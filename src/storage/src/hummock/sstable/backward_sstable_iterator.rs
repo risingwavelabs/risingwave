@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{Backward, HummockIterator};
+use crate::hummock::iterator::{Backward, HummockIterator, ReadOptions};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorType, SstableStoreRef, TableHolder,
 };
+use crate::monitor::StoreLocalStatistic;
 
 /// Iterates backwards on a table.
 pub struct BackwardSSTableIterator {
@@ -35,6 +37,8 @@ pub struct BackwardSSTableIterator {
     pub sst: TableHolder,
 
     sstable_store: SstableStoreRef,
+
+    stats: StoreLocalStatistic,
 }
 
 impl BackwardSSTableIterator {
@@ -44,6 +48,7 @@ impl BackwardSSTableIterator {
             cur_idx: table.value().meta.block_metas.len() - 1,
             sst: table,
             sstable_store,
+            stats: StoreLocalStatistic::default(),
         }
     }
 
@@ -58,6 +63,7 @@ impl BackwardSSTableIterator {
                     self.sst.value(),
                     idx as u64,
                     crate::hummock::CachePolicy::Fill,
+                    &mut self.stats,
                 )
                 .await?;
             let mut block_iter = BlockIterator::new(block);
@@ -80,6 +86,7 @@ impl HummockIterator for BackwardSSTableIterator {
     type Direction = Backward;
 
     async fn next(&mut self) -> HummockResult<()> {
+        self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.prev();
 
@@ -136,12 +143,14 @@ impl HummockIterator for BackwardSSTableIterator {
 
         Ok(())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats)
+    }
 }
 
 impl SSTableIteratorType for BackwardSSTableIterator {
-    type SSTableIterator = BackwardSSTableIterator;
-
-    fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
+    fn create(table: TableHolder, sstable_store: SstableStoreRef, _: Arc<ReadOptions>) -> Self {
         BackwardSSTableIterator::new(table, sstable_store)
     }
 }

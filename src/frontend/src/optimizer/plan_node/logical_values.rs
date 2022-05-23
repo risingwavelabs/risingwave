@@ -18,9 +18,13 @@ use std::{fmt, vec};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
-use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
+use super::{
+    BatchValues, ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
+    ToStream,
+};
 use crate::expr::{Expr, ExprImpl};
 use crate::session::OptimizerContextRef;
+use crate::utils::Condition;
 
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
@@ -79,6 +83,12 @@ impl ColPrunable for LogicalValues {
             .map(|i| self.schema().fields[*i].clone())
             .collect();
         Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
+    }
+}
+
+impl PredicatePushdown for LogicalValues {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 

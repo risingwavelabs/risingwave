@@ -210,6 +210,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         E::LessThanOrEqual,
         E::GreaterThan,
         E::GreaterThanOrEqual,
+        E::IsDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);

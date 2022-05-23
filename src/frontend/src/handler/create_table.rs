@@ -28,7 +28,7 @@ use super::create_source::make_prost_source;
 use crate::binder::expr::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
@@ -109,7 +109,7 @@ pub(crate) fn gen_materialized_source_plan(
 
         PlanRoot::new(
             source_node,
-            Distribution::HashShard(vec![0]),
+            RequiredDist::Any,
             Order::any().clone(),
             required_cols,
             out_names,

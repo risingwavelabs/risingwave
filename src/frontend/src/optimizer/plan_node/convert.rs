@@ -15,7 +15,7 @@
 use paste::paste;
 
 use super::*;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::ColIndexMapping;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
@@ -27,7 +27,7 @@ use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes}
 /// - Or, if the required distribution is given, there will be a better plan. For example a hash
 ///   join with hash-key(a,b) and the plan is required hash-distributed by (a,b,c). you can
 ///   implement `to_stream_with_dist_required`, and implement `to_stream` with
-///   `to_stream_with_dist_required(Distribution::any())`. you can see [`LogicalProject`] as an
+///   `to_stream_with_dist_required(RequiredDist::Any)`. you can see [`LogicalProject`] as an
 ///   example.
 pub trait ToStream {
     /// `logical_rewrite_for_stream` will rewrite the logical node, and return (`new_plan_node`,
@@ -39,11 +39,11 @@ pub trait ToStream {
     /// 2. add `row_count`() in every Agg
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)>;
 
-    /// `to_stream` is equivalent to `to_stream_with_dist_required(Distribution::any())`
+    /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
     fn to_stream(&self) -> Result<PlanRef>;
 
     /// convert the plan to streaming physical plan and satisfy the required distribution
-    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> Result<PlanRef> {
+    fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
         let ret = self.to_stream()?;
         required_dist.enforce_if_not_satisfies(ret, Order::any())
     }
@@ -93,14 +93,14 @@ pub trait ToLocalBatch {
 ///   implement `to_distributed_with_required`, and implement `to_distributed` with
 ///   `to_distributed_with_required(Order::any())`.
 pub trait ToDistributedBatch {
-    /// `to_distributed` is equivalent to `to_distributed_with_required(Distribution::any(),
+    /// `to_distributed` is equivalent to `to_distributed_with_required(RequiredDist::Any,
     /// Order::any())`
     fn to_distributed(&self) -> Result<PlanRef>;
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(
         &self,
         required_order: &Order,
-        required_dist: &Distribution,
+        required_dist: &RequiredDist,
     ) -> Result<PlanRef> {
         let ret = self.to_distributed()?;
         let ret = required_order.enforce_if_not_satisfies(ret)?;
