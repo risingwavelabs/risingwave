@@ -157,7 +157,7 @@ impl RearrangedChainExecutor {
                 .unwrap();
 
             // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
-            let upstream = Arc::new(Mutex::new(Some(upstream)));
+            let upstream = Arc::new(Mutex::new(upstream));
             let rearranged_barrier = Box::pin(Self::rearrange_barrier(
                 upstream.clone(),
                 upstream_tx,
@@ -237,13 +237,13 @@ impl RearrangedChainExecutor {
             }
 
             // Now we take back the remaining upstream.
-            let remaining_upstream = upstream.lock().await.take().unwrap();
+            let mut remaining_upstream = upstream.lock().await;
 
             // Consume remaining upstream.
             tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
 
             #[for_await]
-            for msg in remaining_upstream {
+            for msg in &mut *remaining_upstream {
                 let msg: Message = msg?;
                 let is_barrier = msg.as_barrier().is_some();
                 yield msg;
@@ -270,19 +270,19 @@ impl RearrangedChainExecutor {
     /// Check `execute_inner` for more details.
     #[try_stream(ok = RearrangedMessage, error = StreamExecutorError)]
     async fn rearrange_barrier<U>(
-        upstream: Arc<Mutex<Option<U>>>,
+        upstream: Arc<Mutex<U>>,
         upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
         mut stop_rearrange_rx: oneshot::Receiver<()>,
     ) where
         U: MessageStream + std::marker::Unpin,
     {
-        let mut up = upstream.lock().await.take().unwrap();
+        let mut upstream = upstream.lock().await;
 
         loop {
             use futures::future::{select, Either};
 
             // Stop when `stop_rearrange_rx` is received.
-            match select(&mut stop_rearrange_rx, up.next()).await {
+            match select(&mut stop_rearrange_rx, upstream.next()).await {
                 Either::Left((Ok(_), _)) => break,
                 Either::Left((Err(_e), _)) => {
                     return Err(StreamExecutorError::channel_closed("stop rearrange"))
@@ -306,9 +306,6 @@ impl RearrangedChainExecutor {
                 }
             }
         }
-
-        // Put back the `upstream` so outer can consume the remainings.
-        let _ = upstream.lock().await.insert(up);
     }
 }
 
