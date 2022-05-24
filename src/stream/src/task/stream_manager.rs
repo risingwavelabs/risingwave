@@ -347,7 +347,7 @@ impl LocalStreamManagerCore {
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
-            compute_client_pool: ComputeClientPool::new(1024),
+            compute_client_pool: ComputeClientPool::new(u64::MAX),
             config,
         }
     }
