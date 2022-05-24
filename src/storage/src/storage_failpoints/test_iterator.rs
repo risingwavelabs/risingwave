@@ -29,7 +29,7 @@ use crate::hummock::iterator::{
 };
 use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::{BackwardSSTableIterator, SSTableIterator};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
@@ -178,7 +178,8 @@ async fn test_failpoint_merge_invalid_key() {
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Forward>> {
                 Box::new(SSTableIterator::new(
-                    block_on(sstable_store.sstable(table.id)).unwrap(),
+                    block_on(sstable_store.sstable(table.id, &mut StoreLocalStatistic::default()))
+                        .unwrap(),
                     sstable_store.clone(),
                     Arc::new(ReadOptions::default()),
                 ))
@@ -228,7 +229,8 @@ async fn test_failpoint_backward_merge_invalid_key() {
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Backward>> {
                 Box::new(BackwardSSTableIterator::new(
-                    block_on(sstable_store.sstable(table.id)).unwrap(),
+                    block_on(sstable_store.sstable(table.id, &mut StoreLocalStatistic::default()))
+                        .unwrap(),
                     sstable_store.clone(),
                 ))
             }),
@@ -271,14 +273,15 @@ async fn test_failpoint_user_read_err() {
         200,
     )
     .await;
+    let mut stats = StoreLocalStatistic::default();
     let iters: Vec<BoxedForwardHummockIterator> = vec![
         Box::new(SSTableIterator::new(
-            block_on(sstable_store.sstable(table0.id)).unwrap(),
+            block_on(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
             sstable_store.clone(),
             Arc::new(ReadOptions::default()),
         )),
         Box::new(SSTableIterator::new(
-            block_on(sstable_store.sstable(table1.id)).unwrap(),
+            block_on(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
             sstable_store.clone(),
             Arc::new(ReadOptions::default()),
         )),
@@ -332,13 +335,14 @@ async fn test_failpoint_backward_user_read_err() {
         200,
     )
     .await;
+    let mut stats = StoreLocalStatistic::default();
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
         Box::new(BackwardSSTableIterator::new(
-            block_on(sstable_store.sstable(table0.id)).unwrap(),
+            block_on(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
             sstable_store.clone(),
         )),
         Box::new(BackwardSSTableIterator::new(
-            block_on(sstable_store.sstable(table1.id)).unwrap(),
+            block_on(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
             sstable_store.clone(),
         )),
     ];

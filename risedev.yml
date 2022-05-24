@@ -179,6 +179,11 @@ risedev:
       listen-address: "0.0.0.0"
       address: rw-meta
 
+    - use: grafana
+      listen-address: "0.0.0.0"
+      address: rw-meta
+      id: grafana-0
+
   #################################
   ### Configurations used on CI ###
   #################################
@@ -433,6 +438,9 @@ template:
 
   grafana:
     # Listen address of Grafana
+    listen-address: ${address}
+
+    # Advertise address of Grafana
     address: "127.0.0.1"
 
     # Listen port of Grafana

@@ -18,8 +18,12 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    gen_filter_and_pushdown, BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
+};
 use crate::catalog::TableId;
+use crate::utils::Condition;
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -86,6 +90,12 @@ impl ColPrunable for LogicalInsert {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols))
             .into()
+    }
+}
+
+impl PredicatePushdown for LogicalInsert {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

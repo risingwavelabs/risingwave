@@ -118,13 +118,13 @@ statement ok
 drop materialized view iii_mv3
 
 statement ok
-drop materialized view iii_index_2
+drop index iii_index_2
 
 statement ok
-drop materialized view iii_index_1
+drop index iii_index_1
 
 statement ok
-drop materialized view iii_index;
+drop index iii_index;
 
 statement ok
 drop materialized view iii_mv1;

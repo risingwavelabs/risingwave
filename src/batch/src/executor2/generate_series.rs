@@ -29,6 +29,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::{BoxedExecutor2, BoxedExecutor2Builder};
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, Executor2};
+use crate::task::BatchTaskContext;
 
 pub struct GenerateSeriesExecutor2<T: Array, S: Array> {
     start: T::OwnedItem,
@@ -116,7 +117,9 @@ where
 pub struct GenerateSeriesExecutor2Builder {}
 
 impl BoxedExecutor2Builder for GenerateSeriesExecutor2Builder {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::GenerateSeries

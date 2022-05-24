@@ -30,7 +30,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -77,17 +77,21 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index_on: Option<TableId>,
     ) -> Result<Self> {
-        // ensure the same pk will not shuffle to different node
-        let input = match input.distribution() {
-            Distribution::Single => input,
-            _ => Distribution::HashShard(if is_index_on.is_some() {
-                user_order_by.field_order.iter().map(|x| x.index).collect()
-            } else {
-                input.pk_indices().to_vec()
-            })
-            .enforce_if_not_satisfies(input, Order::any())?,
+        let required_dist = match input.distribution() {
+            Distribution::Single | Distribution::Broadcast => RequiredDist::single(),
+            _ => {
+                if is_index_on.is_some() {
+                    RequiredDist::PhysicalDist(Distribution::HashShard(
+                        user_order_by.field_order.iter().map(|x| x.index).collect(),
+                    ))
+                } else {
+                    // ensure the same pk will not shuffle to different node
+                    RequiredDist::shard_by_key(input.schema().len(), input.pk_indices())
+                }
+            }
         };
 
+        let input = required_dist.enforce_if_not_satisfies(input, Order::any())?;
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
@@ -272,7 +276,7 @@ impl ToStreamProst for StreamMaterialize {
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
         })
     }

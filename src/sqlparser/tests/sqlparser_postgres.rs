@@ -16,7 +16,6 @@
 
 #[macro_use]
 mod test_utils;
-use risingwave_sqlparser::ast::Expr::{Identifier, MapAccess};
 use risingwave_sqlparser::ast::*;
 use risingwave_sqlparser::parser::ParserError;
 use test_utils::*;
@@ -688,54 +687,6 @@ fn parse_pg_regex_match_ops() {
             select.projection[0]
         );
     }
-}
-
-#[test]
-fn parse_map_access_expr() {
-    let zero = "0".to_string();
-    let sql = "SELECT foo[0] FROM foos";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &MapAccess {
-            column: Box::new(Identifier(Ident {
-                value: "foo".to_string(),
-                quote_style: None
-            })),
-            keys: vec![Expr::Value(Value::Number(zero.clone(), false))]
-        },
-        expr_from_projection(only(&select.projection)),
-    );
-    let sql = "SELECT foo[0][0] FROM foos";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &MapAccess {
-            column: Box::new(Identifier(Ident {
-                value: "foo".to_string(),
-                quote_style: None
-            })),
-            keys: vec![
-                Expr::Value(Value::Number(zero.clone(), false)),
-                Expr::Value(Value::Number(zero.clone(), false))
-            ]
-        },
-        expr_from_projection(only(&select.projection)),
-    );
-    let sql = r#"SELECT bar[0]["baz"]["fooz"] FROM foos"#;
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &MapAccess {
-            column: Box::new(Identifier(Ident {
-                value: "bar".to_string(),
-                quote_style: None
-            })),
-            keys: vec![
-                Expr::Value(Value::Number(zero, false)),
-                Expr::Value(Value::SingleQuotedString("baz".to_string())),
-                Expr::Value(Value::SingleQuotedString("fooz".to_string()))
-            ]
-        },
-        expr_from_projection(only(&select.projection)),
-    );
 }
 
 #[test]

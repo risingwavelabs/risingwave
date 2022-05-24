@@ -17,8 +17,6 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result as RwResult, RwError};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
@@ -106,22 +104,23 @@ impl<S: StateStore> SourceStateHandler<S> {
         &self,
         stream_source_splits: &SplitImpl,
         epoch: u64,
-    ) -> RwResult<ConnectorState> {
+    ) -> Result<ConnectorState> {
         match self.restore_states(stream_source_splits.id(), epoch).await {
-            Ok(Some(s)) => ConnectorState::restore_from_bytes(&s)
-                .map_err(|e| RwError::from(InternalError(e.to_string()))),
-            Ok(None) => Err(RwError::from(InternalError(format!(
+            Ok(Some(s)) => {
+                ConnectorState::restore_from_bytes(&s).map_err(|e| anyhow!(e.to_string()))
+            }
+            Ok(None) => Err(anyhow!(
                 "cannot found state for {:?}, epoch: {:?}",
-                stream_source_splits, epoch
-            )))),
-            Err(e) => Err(RwError::from(InternalError(e.to_string()))),
+                stream_source_splits,
+                epoch
+            )),
+            Err(e) => Err(anyhow!(e.to_string())),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use itertools::Itertools;
     use risingwave_storage::memory::MemoryStateStore;
 

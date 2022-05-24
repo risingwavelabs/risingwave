@@ -69,7 +69,8 @@ message ExprNode {
     // Nested selection operators
     FIELD = 501;
     // Array expression.
-    ARRAY = 511;
+    ARRAY = 521;
+    ARRAY_ACCESS = 522;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;

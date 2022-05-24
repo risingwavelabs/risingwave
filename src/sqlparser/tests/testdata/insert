@@ -1,3 +1,0 @@
-INSERT public.customer (id, name, active) VALUES (1, 2, 3)
----
-sql parser error: Expected INTO, found: public

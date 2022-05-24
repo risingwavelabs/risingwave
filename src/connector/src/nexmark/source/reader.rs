@@ -20,8 +20,8 @@ use async_trait::async_trait;
 use crate::nexmark::config::NexmarkConfig;
 use crate::nexmark::source::event::EventType;
 use crate::nexmark::source::generator::NexmarkEventGenerator;
-use crate::nexmark::NexmarkSplit;
-use crate::{Column, ConnectorStateV2, NexmarkProperties, SourceMessage, SplitImpl, SplitReader};
+use crate::nexmark::{NexmarkProperties, NexmarkSplit};
+use crate::{Column, ConnectorStateV2, SourceMessage, SplitImpl, SplitReader};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkSplitReader {

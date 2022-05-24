@@ -22,10 +22,10 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{AddMutation, DispatcherMutation, NothingMutation, StopMutation};
 use risingwave_pb::stream_service::DropActorsRequest;
+use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
-use crate::manager::StreamClientsRef;
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -83,7 +83,7 @@ impl Command {
 pub struct CommandContext<'a, S> {
     fragment_manager: FragmentManagerRef<S>,
 
-    clients: StreamClientsRef,
+    client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
@@ -98,7 +98,7 @@ pub struct CommandContext<'a, S> {
 impl<'a, S> CommandContext<'a, S> {
     pub fn new(
         fragment_manager: FragmentManagerRef<S>,
-        clients: StreamClientsRef,
+        client_pool: StreamClientPoolRef,
         info: &'a BarrierActorInfo,
         prev_epoch: &'a Epoch,
         curr_epoch: &'a Epoch,
@@ -106,7 +106,7 @@ impl<'a, S> CommandContext<'a, S> {
     ) -> Self {
         Self {
             fragment_manager,
-            clients,
+            client_pool,
             info,
             prev_epoch,
             curr_epoch,
@@ -173,7 +173,7 @@ where
                     let request_id = Uuid::new_v4().to_string();
 
                     async move {
-                        let mut client = self.clients.get(node).await?;
+                        let mut client = self.client_pool.get(node).await?;
                         let request = DropActorsRequest {
                             request_id,
                             actor_ids: actors.to_owned(),

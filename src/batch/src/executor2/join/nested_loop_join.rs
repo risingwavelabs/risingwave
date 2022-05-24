@@ -34,6 +34,8 @@ use crate::executor2::join::JoinType;
 use crate::executor2::{
     BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2, ExecutorBuilder,
 };
+use crate::task::BatchTaskContext;
+
 /// Nested loop join executor.
 ///
 ///
@@ -187,7 +189,9 @@ impl NestedLoopJoinExecutor2 {
 }
 
 impl BoxedExecutor2Builder for NestedLoopJoinExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 2);
 
         let nested_loop_join_node = try_match_expand!(

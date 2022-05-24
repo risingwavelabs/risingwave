@@ -29,6 +29,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, which assumes
 /// that the input chunks has already been sorted by group columns.
@@ -48,7 +49,9 @@ pub struct SortAggExecutor2 {
 }
 
 impl BoxedExecutor2Builder for SortAggExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child =
             source.plan_node().get_children().get(0).ok_or_else(|| {

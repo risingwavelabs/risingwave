@@ -220,10 +220,7 @@ pub enum Expr {
         right: Box<Expr>,
     },
     /// Unary operation e.g. `NOT foo`
-    UnaryOp {
-        op: UnaryOperator,
-        expr: Box<Expr>,
-    },
+    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR(123))`
     Cast {
         expr: Box<Expr>,
@@ -266,14 +263,7 @@ pub enum Expr {
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
-    TypedString {
-        data_type: DataType,
-        value: String,
-    },
-    MapAccess {
-        column: Box<Expr>,
-        keys: Vec<Expr>,
-    },
+    TypedString { data_type: DataType, value: String },
     /// Scalar function call e.g. `LEFT(foo, 5)`
     Function(Function),
     /// `CASE [<operand>] WHEN <condition> THEN <result> ... [ELSE <result>] END`
@@ -304,23 +294,14 @@ pub enum Expr {
     /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
     /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
+    /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
+    ArrayIndex { obj: Box<Expr>, indexs: Vec<Expr> },
 }
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
-            Expr::MapAccess { column, keys } => {
-                write!(f, "{}", column)?;
-                for k in keys {
-                    match k {
-                        k @ Expr::Value(Value::Number(_, _)) => write!(f, "[{}]", k)?,
-                        Expr::Value(Value::SingleQuotedString(s)) => write!(f, "[\"{}\"]", s)?,
-                        _ => write!(f, "[{}]", k)?,
-                    }
-                }
-                Ok(())
-            }
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
             Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
@@ -479,6 +460,13 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
+            Expr::ArrayIndex { obj, indexs } => {
+                write!(f, "{}", obj)?;
+                for i in indexs {
+                    write!(f, "[{}]", i)?;
+                }
+                Ok(())
+            }
             Expr::Array(exprs) => write!(
                 f,
                 "ARRAY[{}]",
@@ -633,6 +621,7 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
+    Columns { table: ObjectName },
 }
 
 impl fmt::Display for ShowObject {
@@ -658,6 +647,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
 }
@@ -769,11 +759,6 @@ pub enum Statement {
     },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
-        /// Table or Source name
-        name: ObjectName,
-    },
-    /// SHOW COLUMN FROM TABLE OR SOURCE
-    ShowColumn {
         /// Table or Source name
         name: ObjectName,
     },
@@ -917,10 +902,6 @@ impl fmt::Display for Statement {
             }
             Statement::Describe { name } => {
                 write!(f, "DESCRIBE {}", name)?;
-                Ok(())
-            }
-            Statement::ShowColumn { name } => {
-                write!(f, "SHOW COLUMNS FROM {}", name)?;
                 Ok(())
             }
             Statement::ShowObjects(show_object) => {
