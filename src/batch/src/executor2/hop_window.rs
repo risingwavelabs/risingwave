@@ -28,6 +28,7 @@ use risingwave_pb::expr::expr_node;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 pub struct HopWindowExecutor2 {
     child: BoxedExecutor2,
@@ -39,7 +40,9 @@ pub struct HopWindowExecutor2 {
 }
 
 impl BoxedExecutor2Builder for HopWindowExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         ensure!(source.plan_node().get_children().len() == 1);
         let hop_window_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),

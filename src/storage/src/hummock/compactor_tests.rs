@@ -26,7 +26,7 @@ mod tests {
     use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::HummockStorage;
-    use crate::monitor::StateStoreMetrics;
+    use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use crate::storage_value::StorageValue;
     use crate::StateStore;
 
@@ -128,7 +128,7 @@ mod tests {
             .id;
         let table = storage
             .sstable_store()
-            .sstable(output_table_id)
+            .sstable(output_table_id, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
         let target_table_size = storage.options().sstable_size_mb * (1 << 20);

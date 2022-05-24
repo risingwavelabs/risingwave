@@ -258,7 +258,7 @@ where
             assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
-                self.env.stream_clients_ref(),
+                self.env.stream_client_pool_ref(),
                 &info,
                 &state.prev_epoch,
                 &new_epoch,
@@ -371,7 +371,7 @@ where
                 };
 
                 async move {
-                    let mut client = self.env.stream_clients().get(node).await?;
+                    let mut client = self.env.stream_client_pool().get(node).await?;
 
                     let request = InjectBarrierRequest {
                         request_id,
