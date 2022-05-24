@@ -64,9 +64,14 @@ impl LogicalHopWindow {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
-        // TODO: what about pk?
-        let mut pk_indices = input.pk_indices().to_vec();
-        pk_indices.push(input.schema().len());
+        let mut pk_indices = Vec::new();
+        if output_indices.contains(&input.schema().len()) {
+            pk_indices.extend(input.pk_indices());
+            pk_indices.push(input.schema().len());
+        } else if output_indices.contains(&(input.schema().len() + 1)) {
+            pk_indices.extend(input.pk_indices());
+            pk_indices.push(input.schema().len() + 1);
+        }
         let base = PlanBase::new_logical(ctx, actual_schema, pk_indices);
         LogicalHopWindow {
             base,
@@ -76,6 +81,16 @@ impl LogicalHopWindow {
             window_size,
             output_indices,
         }
+    }
+
+    pub fn decompose(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+        (
+            self.input,
+            self.time_col,
+            self.window_slide,
+            self.window_size,
+            self.output_indices,
+        )
     }
 
     /// the function will check if the cond is bool expression
@@ -197,19 +212,20 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             Some(new_output_indices),
         );
 
-        let (mut mapping, new_input_col_num) = input_col_change.into_parts();
+        let (mut mapping, mut new_input_col_num) = input_col_change.into_parts();
         assert_eq!(new_input_col_num, input.schema().len());
         if new_hop
             .output_indices
             .contains(&new_hop.window_start_col_idx())
         {
             mapping.push(Some(new_input_col_num));
+            new_input_col_num += 1;
         }
         if new_hop
             .output_indices
             .contains(&new_hop.window_end_col_idx())
         {
-            mapping.push(Some(new_input_col_num + 1));
+            mapping.push(Some(new_input_col_num));
         }
 
         (new_hop, ColIndexMapping::new(mapping))
@@ -292,6 +308,7 @@ impl ToBatch for LogicalHopWindow {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
+        let new_output_indices = new_logical.output_indices.clone();
         let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         // remove output indices
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
@@ -300,7 +317,7 @@ impl ToBatch for LogicalHopWindow {
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
-                    &new_logical.output_indices,
+                    &new_output_indices,
                     new_logical.internal_column_num(),
                 ),
             );
@@ -315,6 +332,7 @@ impl ToStream for LogicalHopWindow {
     fn to_stream(&self) -> Result<PlanRef> {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
+        let new_output_indices = new_logical.output_indices.clone();
         let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         // remove output indices
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
@@ -323,7 +341,7 @@ impl ToStream for LogicalHopWindow {
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
-                    &new_logical.output_indices,
+                    &new_output_indices,
                     new_logical.internal_column_num(),
                 ),
             );
@@ -335,17 +353,49 @@ impl ToStream for LogicalHopWindow {
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        dbg!(&input_col_change);
         let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
-        let mut new_output_indices = hop.output_indices.clone();
+        dbg!(&out_col_change);
+        let (input, time_col, window_slide, window_size, mut output_indices) = hop.decompose();
         let i2o = self.i2o_col_mapping();
-        new_output_indices.extend(
-            input
-                .pk_indices()
-                .iter()
-                .filter(|&&pk| i2o.try_map(pk).is_none()),
-        );
-        let hop_with_pk = hop.clone_with_output_indices(new_output_indices);
-        Ok((hop_with_pk.into(), out_col_change))
+
+        let new_pk_cols_to_add = input
+            .pk_indices()
+            .iter()
+            .cloned()
+            .filter(|i| i2o.try_map(*i).is_none());
+        output_indices.extend(new_pk_cols_to_add);
+        if !output_indices.contains(&input.schema().len())
+            && !output_indices.contains(&(input.schema().len() + 1))
+        // neither window_start or window_end is included in output index.
+        // we should add window_start so ensure we can derive pk
+        {
+            output_indices.push(input.schema().len());
+            let new_hop: PlanRef = Self::new(
+                input,
+                time_col,
+                window_slide,
+                window_size,
+                Some(output_indices.clone()),
+            )
+            .into();
+            let (mut mapping, new_input_col_num) = out_col_change.into_parts();
+            mapping.push(Some(new_input_col_num));
+            Ok((new_hop, ColIndexMapping::new(mapping)))
+        } else {
+            dbg!(&input.plan_base().pk_indices, &output_indices);
+            Ok((
+                Self::new(
+                    input,
+                    time_col,
+                    window_slide,
+                    window_size,
+                    Some(output_indices),
+                )
+                .into(),
+                out_col_change,
+            ))
+        }
     }
 }
 

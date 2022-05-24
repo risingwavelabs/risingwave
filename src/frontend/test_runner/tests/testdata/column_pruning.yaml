@@ -142,3 +142,10 @@
   optimized_logical_plan: |
     LogicalHopWindow { time_col: $1 slide: 00:15:00 size: 00:30:00 output_indices: [0, 3] }
       LogicalScan { table: t1, columns: [a, created_at] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $3] }
+        BatchHopWindow { time_col: $1 slide: 00:15:00 size: 00:30:00 output_indices: [0, 1, 2, 3] }
+          BatchScan { table: t1, columns: [a, created_at] }
+  stream_plan: |
+    

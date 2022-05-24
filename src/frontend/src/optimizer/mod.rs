@@ -223,12 +223,21 @@ impl PlanRoot {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
+                dbg!(eprintln!(
+                    "before rewrite {}",
+                    plan.explain_to_string().unwrap()
+                ));
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
+                dbg!(eprintln!(
+                    "after rewrite {}",
+                    plan.explain_to_string().unwrap()
+                ));
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);
                 self.required_order = out_col_change
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
+                dbg!(&out_col_change, &self.out_fields);
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)
