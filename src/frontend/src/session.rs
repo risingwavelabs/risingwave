@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
@@ -281,6 +281,13 @@ impl ConfigEntry {
     /// Only used for boolean configurations.
     pub fn is_set(&self, default: bool) -> bool {
         self.str_val.parse().unwrap_or(default)
+    }
+
+    pub fn get_val<V>(&self, default: V) -> V
+    where
+        for<'a> V: TryFrom<&'a str, Error = RwError>,
+    {
+        V::try_from(&self.str_val).unwrap_or(default)
     }
 }
 
