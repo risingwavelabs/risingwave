@@ -17,7 +17,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde_json::{json, Value};
 
-use super::DEFAULT_LENGHT;
+use super::DEFAULT_LENGTH;
 
 pub struct VarcharField {
     length: usize,
@@ -28,7 +28,7 @@ impl VarcharField {
         let length = if let Some(length_option) = length_option {
             length_option.parse::<usize>()?
         } else {
-            DEFAULT_LENGHT
+            DEFAULT_LENGTH
         };
         Ok(Self { length })
     }

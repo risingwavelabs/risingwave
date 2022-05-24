@@ -34,7 +34,7 @@ pub const DEFAULT_END: i16 = i16::MAX;
 pub const DEFAULT_MAX_PAST: Duration = Duration::from_secs(60 * 60 * 24);
 
 // default length for VarcharField = 10
-pub const DEFAULT_LENGHT: usize = 10;
+pub const DEFAULT_LENGTH: usize = 10;
 
 /// fields that can be continuously or randomly generated impl this trait
 /// such as i32, float, double
