@@ -338,6 +338,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: rustfmt
+      - name: Install required components
+        run: |
+          apt-get update -yy -o Acquire::Retries=3
+          apt-get install --upgrade -yy lld -o Acquire::Retries=3
       - name: Cache Cargo home
         uses: actions/cache@v2
         id: cache
