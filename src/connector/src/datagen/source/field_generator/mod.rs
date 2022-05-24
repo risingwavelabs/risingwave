@@ -16,6 +16,8 @@ mod numeric;
 mod timestamp;
 mod varchar;
 
+use std::time::Duration;
+
 use anyhow::Result;
 pub use numeric::*;
 use risingwave_common::types::DataType;
@@ -28,7 +30,13 @@ pub const DEFAULT_MAX: i16 = i16::MAX;
 pub const DEFAULT_START: i16 = 0;
 pub const DEFAULT_END: i16 = i16::MAX;
 
-/// fielsd that can continuously or randomly increasing impl this trait
+// default max_past for TimestampField =  1 day
+pub const DEFAULT_MAX_PAST: Duration = Duration::from_secs(60 * 60 * 24);
+
+// default length for VarcharField = 10
+pub const DEFAULT_LENGHT: usize = 10;
+
+/// fields that can be continuously or randomly generated impl this trait
 /// such as i32, float, double
 pub trait NumericFieldGenerator {
     fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
@@ -40,7 +48,7 @@ pub trait NumericFieldGenerator {
     fn generate(&mut self) -> Value;
 }
 
-/// Generator of this '#' field. Can be 'sequence' or 'random'.
+/// the way that datagen create the field data. such as 'sequence' or 'random'.
 pub enum FieldKind {
     Sequence,
     Random,

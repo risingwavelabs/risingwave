@@ -19,6 +19,8 @@ use parse_duration::parse;
 use rand::{thread_rng, Rng};
 use serde_json::{json, Value};
 
+use super::DEFAULT_MAX_PAST;
+
 pub struct TimestampField {
     max_past: Duration,
     local_now: NaiveDateTime,
@@ -27,14 +29,16 @@ pub struct TimestampField {
 impl TimestampField {
     pub fn new(max_past_option: Option<String>) -> Result<Self> {
         let local_now = Local::now().naive_local();
+        // std duration
         let max_past = if let Some(max_past_option) = max_past_option {
-            chrono::Duration::from_std(parse(&max_past_option)?)?
+            parse(&max_past_option)?
         } else {
             // default max_past = 1 day
-            Duration::seconds(60 * 60 * 24)
+            DEFAULT_MAX_PAST
         };
         Ok(Self {
-            max_past,
+            // convert to chrono::Duration
+            max_past: chrono::Duration::from_std(max_past)?,
             local_now,
         })
     }
