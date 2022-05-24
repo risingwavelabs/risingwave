@@ -76,7 +76,10 @@ impl PlanAggCall {
             AggKind::SingleValue => AggKind::SingleValue,
             AggKind::Sum | AggKind::Count | AggKind::RowCount => AggKind::Sum,
         };
-        PlanAggCall { agg_kind: new_agg_kind, ..self.clone() }
+        PlanAggCall {
+            agg_kind: new_agg_kind,
+            ..self.clone()
+        }
     }
 
     pub fn count_star() -> Self {

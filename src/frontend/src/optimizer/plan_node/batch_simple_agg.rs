@@ -84,10 +84,13 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 let total_agg_logical = LogicalAgg::new(
                     total_agg_types,
                     self.logical.group_keys().to_vec(),
-                    partial_dist_input
+                    partial_dist_input,
                 );
                 let total_agg_batch = BatchSimpleAgg::new(total_agg_logical);
-                total_agg_batch.to_distributed_with_required(Order::any(), &RequiredDist::PhysicalDist(Distribution::Single))?
+                total_agg_batch.to_distributed_with_required(
+                    Order::any(),
+                    &RequiredDist::PhysicalDist(Distribution::Single),
+                )?
             }
             _ => {
                 let new_input = self
