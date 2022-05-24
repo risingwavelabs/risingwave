@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
@@ -70,11 +70,21 @@ impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let plan = match self.input().distribution() {
+        // Ensure input is distributed, batch phase might not distribute it
+        // (e.g. BatchSeqScan::{new, to_distributed})
+        let dist_input = self.input().to_distributed()?;
+        let plan = match dist_input.distribution() {
             Distribution::SomeShard => {
                 // 2-phase agg
-                let partial_dist_input = self.input().to_distributed()?;
-                let partial_dist_input = self.clone_with_input(partial_dist_input).into();
+                let partial_agg = dist_input.clone();
+                let partial_agg = self.clone_with_input(partial_agg).into();
+
+                let exchange = BatchExchange::new(
+                    partial_agg,
+                    Order::any().clone(),
+                    Distribution::Single
+                ).into();
+
                 let total_agg_types = self
                     .logical
                     .agg_calls()
@@ -84,13 +94,11 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 let total_agg_logical = LogicalAgg::new(
                     total_agg_types,
                     self.logical.group_keys().to_vec(),
-                    partial_dist_input,
+                    exchange
                 );
                 let total_agg_batch = BatchSimpleAgg::new(total_agg_logical);
-                total_agg_batch.to_distributed_with_required(
-                    Order::any(),
-                    &RequiredDist::PhysicalDist(Distribution::Single),
-                )?
+                // &RequiredDist::PhysicalDist(Distribution::Single).enforce(total_agg_batch, &Order::any())
+                total_agg_batch.into()
             }
             _ => {
                 let new_input = self
