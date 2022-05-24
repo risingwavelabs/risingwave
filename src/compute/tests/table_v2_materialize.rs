@@ -157,6 +157,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
+        vec![0usize],
     )
     .boxed()
     .execute();

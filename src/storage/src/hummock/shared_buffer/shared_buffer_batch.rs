@@ -133,12 +133,16 @@ impl SharedBufferBatch {
         }
     }
 
+    pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
+        SharedBufferBatchIterator::<D>::new(self.inner)
+    }
+
     pub fn into_forward_iter(self) -> SharedBufferBatchIterator<Forward> {
-        SharedBufferBatchIterator::<Forward>::new(self.inner)
+        Self::into_directed_iter::<Forward>(self)
     }
 
     pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
-        SharedBufferBatchIterator::<Backward>::new(self.inner)
+        Self::into_directed_iter::<Backward>(self)
     }
 
     pub fn get_payload(&self) -> &[SharedBufferItem] {

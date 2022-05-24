@@ -51,6 +51,7 @@ async fn test_row_seq_scan() -> Result<()> {
         keyspace.clone(),
         column_descs.clone(),
         vec![OrderType::Ascending],
+        None,
     );
     let table = CellBasedTable::new_adhoc(
         keyspace,

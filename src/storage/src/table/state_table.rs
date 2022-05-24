@@ -48,6 +48,7 @@ impl<S: StateStore> StateTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
+        dist_key_indices: Option<Vec<usize>>,
     ) -> Self {
         let cell_based_keyspace = keyspace.clone();
         let cell_based_column_descs = column_descs.clone();
@@ -61,6 +62,7 @@ impl<S: StateStore> StateTable<S> {
                 cell_based_column_descs,
                 Some(OrderedRowSerializer::new(order_types)),
                 Arc::new(StateStoreMetrics::unused()),
+                dist_key_indices,
             ),
         }
     }
@@ -270,7 +272,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
         ];
         let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types);
+        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types, None);
         let mut epoch: u64 = 0;
         state_table
             .insert(
@@ -430,7 +432,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::from(4), DataType::Int32),
         ];
         let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types);
+        let mut state_table = StateTable::new(keyspace.clone(), column_descs, order_types, None);
         let mut epoch: u64 = 0;
         state_table
             .insert(
