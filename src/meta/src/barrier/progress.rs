@@ -29,6 +29,7 @@ enum ActorState {
     Done,
 }
 
+/// Progress of all actors containing chain nodes while creating mview.
 struct Progress {
     states: HashMap<ActorId, ActorState>,
 
@@ -36,6 +37,7 @@ struct Progress {
 }
 
 impl Progress {
+    /// Create a [`Progress`] for some creating mview, with all `actors` containing the chain nodes.
     fn new(actors: impl IntoIterator<Item = ActorId>) -> Self {
         let states = actors
             .into_iter()
@@ -49,6 +51,7 @@ impl Progress {
         }
     }
 
+    /// Update the progress of `actor` according to the given epochs.
     fn update(&mut self, actor: ActorId, consumed_epoch: Epoch, current_epoch: Epoch) {
         match self.states.get_mut(&actor).unwrap() {
             state @ (ActorState::ConsumingSnapshot | ActorState::ConsumingUpstream(_)) => {
@@ -63,27 +66,33 @@ impl Progress {
         }
     }
 
+    /// Returns whether all chains are done.
     fn is_done(&self) -> bool {
         self.done_count == self.states.len()
     }
 
+    /// Returns the ids of all actors containing the chain nodes for the mview tracked by this
+    /// [`Progress`].
     fn actors(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.states.keys().cloned()
     }
 }
 
-/// Stores the notifiers for commands that are not finished yet. Essentially for
-/// `CreateMaterializedView`.
+/// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
+/// called on registered notifiers.
 #[derive(Default)]
 pub(super) struct CreateMviewProgressTracker {
+    /// Progress of the create-mview DDL indicated by the epoch.
     progress_map: HashMap<CreateMviewEpoch, (Progress, Vec<Notifier>)>,
 
+    /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
 impl CreateMviewProgressTracker {
-    /// Add a command with current `epoch` and `notifiers`, that needs to wait for actors with
-    /// `actors` to report finishing.
+    /// Add a new create-mview DDL command to track with current epoch as `ddl_epoch` and
+    /// `notifiers`, that needs to wait for `actors` to report progress.
+    ///
     /// If `actors` is empty, [`Notifier::notify_finished`] will be called immediately.
     pub fn add(
         &mut self,
@@ -93,15 +102,10 @@ impl CreateMviewProgressTracker {
     ) {
         let actors = actors.into_iter().collect_vec();
         if actors.is_empty() {
-            // The barrier can be finished immediately.
+            // The command can be finished immediately.
             notifiers.into_iter().for_each(Notifier::notify_finished);
             return;
         }
-        // tracing::debug!(
-        //     "actors to be finished for DDL with epoch {}: {:?}",
-        //     ddl_epoch,
-        //     actor_ids
-        // );
 
         for &actor in &actors {
             self.actor_map.insert(actor, ddl_epoch);
@@ -113,6 +117,8 @@ impl CreateMviewProgressTracker {
         assert!(old.is_none());
     }
 
+    /// Update the progress of `actor` according to the given epochs. If all actors in this MV have
+    /// finished, `notify_finished` will be called on registered notifiers.
     pub fn update(&mut self, actor: ActorId, consumed_epoch: Epoch, current_epoch: Epoch) {
         let epoch = self.actor_map.get(&actor).cloned().unwrap_or_else(|| {
             panic!(
