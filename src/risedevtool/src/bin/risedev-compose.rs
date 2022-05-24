@@ -109,6 +109,7 @@ fn main() -> Result<()> {
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
     let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
+    let mut service_on_node: BTreeMap<String, String> = BTreeMap::new();
     let mut volumes = BTreeMap::new();
 
     for step in &steps {
@@ -147,9 +148,10 @@ fn main() -> Result<()> {
             compose.depends_on = vec![];
         }
         compose_services
-            .entry(address)
+            .entry(address.clone())
             .or_default()
             .insert(step.to_string(), compose);
+        service_on_node.insert(step.clone(), address);
     }
 
     if opts.deploy {
@@ -179,12 +181,21 @@ fn main() -> Result<()> {
             use std::fmt::Write;
             let mut x = String::new();
             writeln!(x, "#!/bin/bash -e")?;
-            writeln!(x, "")?;
+            writeln!(x)?;
+            writeln!(
+                x,
+                r#"
+DIR="$( cd "$( dirname "${{BASH_SOURCE[0]}}" )" >/dev/null 2>&1 && pwd )"
+cd "$DIR""#
+            )?;
+            writeln!(x)?;
             writeln!(x, "# --- Sync Config ---")?;
             for instance in &ec2_instances {
                 let host = &instance.dns_host;
                 let public_ip = &instance.public_ip;
+                let id = &instance.id;
                 let base_folder = "~/risingwave-deploy";
+                writeln!(x, r#"echo "{id}: $(tput setaf 2)sync config$(tput sgr0)""#,)?;
                 writeln!(
                     x,
                     "rsync -avH -e \"ssh -oStrictHostKeyChecking=no\" ./ ubuntu@{public_ip}:{base_folder}",
@@ -194,23 +205,45 @@ fn main() -> Result<()> {
                     "scp -oStrictHostKeyChecking=no ./{host}.yml ubuntu@{public_ip}:{base_folder}/docker-compose.yaml"
                 )?;
             }
+            writeln!(x)?;
             writeln!(x, "# --- Tear Down Services ---")?;
             for instance in &ec2_instances {
+                let id = &instance.id;
+                writeln!(
+                    x,
+                    r#"echo "{id}: $(tput setaf 2)stop services and pull latest image$(tput sgr0)""#,
+                )?;
                 let public_ip = &instance.public_ip;
                 let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} \"bash -c 'cd {base_folder} && sudo docker compose stop -t 0 && sudo docker compose down'\"")?;
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose stop -t 0 && docker compose down && docker pull {}'\"",
+                    compose_config.image.risingwave
+                )?;
             }
+            writeln!(x)?;
             writeln!(x, "# --- Start Services ---")?;
-            for instance in &ec2_instances {
+            for step in &steps {
+                let dns_host = service_on_node.get(step).unwrap();
+                let instance = ec2_instances
+                    .iter()
+                    .find(|ec2| &ec2.dns_host == dns_host)
+                    .unwrap();
+                let id = &instance.id;
+                writeln!(
+                    x,
+                    r#"echo "{id}: $(tput setaf 2)start service {step}$(tput sgr0)""#,
+                )?;
                 let public_ip = &instance.public_ip;
                 let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} \"bash -c 'cd {base_folder} && sudo docker compose up -d'\"")?;
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose up -d {step}'\"")?;
             }
+            writeln!(x)?;
             writeln!(x, "# --- Check Services ---")?;
             for instance in &ec2_instances {
+                let id = &instance.id;
+                writeln!(x, r#"echo "{id}: $(tput setaf 2)check status$(tput sgr0)""#,)?;
                 let public_ip = &instance.public_ip;
                 let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} \"bash -c 'cd {base_folder} && sudo docker compose ps'\"")?;
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose ps'\"")?;
             }
             x
         };
