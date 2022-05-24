@@ -19,12 +19,11 @@ use parse_duration::parse;
 use rand::{thread_rng, Rng};
 use serde_json::{json, Value};
 
-use crate::datagen::source::field_generator::FieldGenerator;
-
 pub struct TimestampField {
     max_past: Duration,
     local_now: NaiveDateTime,
 }
+
 impl TimestampField {
     pub fn new(max_past_option: Option<String>) -> Result<Self> {
         let local_now = Local::now().naive_local();
@@ -39,24 +38,8 @@ impl TimestampField {
             local_now,
         })
     }
-}
 
-impl FieldGenerator for TimestampField {
-    fn with_random(_start: Option<String>, _end: Option<String>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
-
-    fn with_sequence(_min: Option<String>, _max: Option<String>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
-
-    fn generate(&mut self) -> Value {
+    pub fn generate(&mut self) -> Value {
         let seconds = self.max_past.num_seconds();
         let mut rng = thread_rng();
         let max_seconds = rng.gen_range(0..=seconds);

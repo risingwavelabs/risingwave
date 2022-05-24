@@ -17,10 +17,10 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde_json::{json, Value};
 
-use super::FieldGenerator;
 pub struct VarcharField {
     length: usize,
 }
+
 impl VarcharField {
     pub fn new(length_option: Option<String>) -> Result<Self> {
         let length = if let Some(length_option) = length_option {
@@ -30,23 +30,8 @@ impl VarcharField {
         };
         Ok(Self { length })
     }
-}
-impl FieldGenerator for VarcharField {
-    fn with_random(_start: Option<String>, _end: Option<String>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
 
-    fn with_sequence(_min: Option<String>, _max: Option<String>) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        unimplemented!()
-    }
-
-    fn generate(&mut self) -> Value {
+    pub fn generate(&mut self) -> Value {
         let s: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(self.length)

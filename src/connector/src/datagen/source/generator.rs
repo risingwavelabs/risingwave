@@ -18,9 +18,9 @@ use bytes::Bytes;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration};
 
-use super::field_generator::{FieldGenerator, FieldGeneratorImpl};
+use super::field_generator::{FieldGeneratorImpl, NumericFieldGenerator};
 use crate::SourceMessage;
-pub type BoxedFieldGenerator = Box<dyn FieldGenerator>;
+pub type BoxedFieldGenerator = Box<dyn NumericFieldGenerator>;
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,

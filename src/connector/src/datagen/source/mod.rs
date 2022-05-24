@@ -17,3 +17,5 @@ mod generator;
 mod reader;
 
 pub use reader::*;
+
+const SEQUENCE_FIELD_KIND: &str = "sequence";

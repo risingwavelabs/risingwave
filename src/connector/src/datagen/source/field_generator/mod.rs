@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod numeric;
 mod timestamp;
 mod varchar;
 
 use anyhow::Result;
-use rand::{thread_rng, Rng};
+pub use numeric::*;
 use risingwave_common::types::DataType;
-use serde_json::{json, Value};
+use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
 
-pub trait FieldGenerator {
+pub const DEFAULT_MIN: i16 = i16::MIN;
+pub const DEFAULT_MAX: i16 = i16::MAX;
+pub const DEFAULT_START: i16 = 0;
+pub const DEFAULT_END: i16 = i16::MAX;
+
+pub trait NumericFieldGenerator {
     fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
     where
         Self: Sized;
@@ -118,127 +124,10 @@ impl FieldGeneratorImpl {
     }
 }
 
-#[macro_export]
-macro_rules! for_all_fields_variants {
-    ($macro:ident) => {
-        $macro! {
-            { I16Field,i16 },
-            { I32Field,i32 },
-            { I64Field,i64 },
-            { F32Field,f32 },
-            { F64Field,f64 }
-        }
-    };
-}
-#[macro_export]
-macro_rules! impl_field_generator {
-    ($({ $variant_name:ident, $field_type:ty }),*) => {
-        $(
-            #[derive(Default)]
-            pub struct $variant_name {
-                kind: FieldKind,
-                min: $field_type,
-                max: $field_type,
-                start: $field_type,
-                end: $field_type,
-                last: Option<$field_type>,
-            }
-
-            impl FieldGenerator for $variant_name {
-                fn with_random(min_option: Option<String>, max_option: Option<String>) -> Result<Self> {
-
-                    //FIXME should reconsider default value
-                    let mut min = i16::MIN as $field_type;
-                    let mut max = i16::MAX as $field_type;
-
-                    if let Some(min_option) = min_option {
-                        min = min_option.parse::<$field_type>()?;
-                    }
-                    if let Some(max_option) = max_option {
-                        max = max_option.parse::<$field_type>()?;
-                    }
-
-                    assert!(min < max);
-
-                    Ok(Self {
-                        kind: FieldKind::Random,
-                        min,
-                        max,
-                        ..Default::default()
-                    })
-                }
-
-                fn with_sequence(star_optiont: Option<String>, end_option: Option<String>) -> Result<Self> {
-
-                    //FIXME should reconsider default value
-                    let mut start = i16::MIN as $field_type;
-                    let mut end = i16::MAX as $field_type;
-
-                    if let Some(star_optiont) = star_optiont {
-                        start = star_optiont.parse::<$field_type>()?;
-                    }
-                    if let Some(end_option) = end_option {
-                        end = end_option.parse::<$field_type>()?;
-                    }
-
-                    assert!(start < end);
-
-                    Ok(Self {
-                        kind: FieldKind::Sequence,
-                        start,
-                        end,
-                        ..Default::default()
-                    })
-                }
-
-                fn generate(&mut self) -> serde_json::Value {
-                    match self.kind {
-                        FieldKind::Random => {
-                            let mut rng = thread_rng();
-                            let res = rng.gen_range(self.min..=self.max);
-                            json!(res)
-                        }
-                        FieldKind::Sequence => {
-                            if let Some(last) = self.last {
-                                let res = self.end.min(last + (1 as $field_type));
-                                self.last = Some(last + (1 as $field_type));
-                                json!(res)
-                            } else {
-                                self.last = Some(self.start);
-                                json!(self.start)
-                            }
-                        }
-                    }
-                }
-            }
-        )*
-    };
-}
-
-for_all_fields_variants! {impl_field_generator}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_field_generator_with_sequence() {
-        let mut i16_field =
-            I16Field::with_sequence(Some("5".to_string()), Some("10".to_string())).unwrap();
-        for i in 5..=10 {
-            assert_eq!(i16_field.generate(), json!(i));
-        }
-    }
-    #[test]
-    fn test_field_generator_with_random() {
-        let mut i64_field =
-            I64Field::with_random(Some("5".to_string()), Some("10".to_string())).unwrap();
-        for _ in 0..100 {
-            let res = i64_field.generate();
-            assert!(res.is_number());
-            let res = res.as_i64().unwrap();
-            assert!((5..=10).contains(&res));
-        }
-    }
+
     #[test]
     fn test_field_generator_impl() {
         let mut i32_field = FieldGeneratorImpl::new(
@@ -256,6 +145,14 @@ mod tests {
         )
         .unwrap();
 
+        let mut varchar_field = FieldGeneratorImpl::new(
+            DataType::Varchar,
+            FieldKind::Random,
+            Some("10".to_string()),
+                None
+        )
+        .unwrap();
+
         for _ in 0..10 {
             let value = i32_field.generate();
             assert!(value.is_number());
@@ -266,6 +163,11 @@ mod tests {
             assert!(value.is_number());
             let value = value.as_f64().unwrap();
             assert!((0.1..=9.9).contains(&value));
+
+            let value = varchar_field.generate();
+            assert!(value.is_string());
+            let value = value.as_str().unwrap();
+            assert_eq!(value.len(),10);
         }
     }
 }

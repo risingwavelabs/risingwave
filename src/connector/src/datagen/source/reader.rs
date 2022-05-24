@@ -19,6 +19,7 @@ use async_trait::async_trait;
 
 use super::field_generator::{FieldGeneratorImpl, FieldKind};
 use super::generator::DatagenEventGenerator;
+use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::DatagenProperties;
 use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader};
 
@@ -82,7 +83,7 @@ impl SplitReader for DatagenSplitReader {
                     )?,
                 );},
                 _ => {
-                    if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == "sequence"{
+                    if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND{
                         let start_key = format!("field.{}.start", name);
                         let end_key = format!("field.{}.end", name);
                         let start_key_option =

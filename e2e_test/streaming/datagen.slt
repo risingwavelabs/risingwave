@@ -1,8 +1,10 @@
 statement ok
-create materialized source s1 (v1 int) with ( 'connector' = 'datagen' ,'field.v1.kind' = 'sequence','field.v1.start' = '1','field.v1.end'  = '20')  row format json;
+create materialized source s1 (v1 int) with ( 'connector' = 'datagen' ,
+'field.v1.kind' = 'sequence','field.v1.start' = '1','field.v1.end'  = '20',
+'datagen.rows.per.second'='3','datagen.max.chunk.size'='6')  row format json;
 
 # Wait enough time to ensure Datagen connector generate data
-sleep 6s
+sleep 3s
 
 query I
 select v1 from s1;
@@ -12,9 +14,10 @@ select v1 from s1;
 3
 4
 5
+6
 
 # Wait enough time to ensure Datagen connector generate data
-sleep 6s
+sleep 2s
 
 query I
 select v1 from s1;
@@ -29,6 +32,8 @@ select v1 from s1;
 8
 9
 10
+11
+12
 
 statement ok
 drop source s1;

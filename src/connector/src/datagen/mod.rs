@@ -36,6 +36,14 @@ pub struct DatagenProperties {
         default = "default_rows_per_second"
     )]
     pub rows_per_second: String,
+    // Some connector options of the datagen source's fields
+    // for example: create datagen source with column v1 int, v2 float
+    // 'fields.v1.kind'='sequence',
+    // 'fields.v1.start'='1',
+    // 'fields.v1.end'='1000',
+    // 'fields.v1.kind'='random',
+    // datagen will create v1 by self-incrementing from 1 to 1000
+    // datagen will create v2 by randomly generating from default_min to default_max
     #[serde(flatten)]
     fields: HashMap<String, String>,
 }
