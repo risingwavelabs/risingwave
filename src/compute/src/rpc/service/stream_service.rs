@@ -160,6 +160,7 @@ impl StreamService for StreamServiceImpl {
             request_id: req.request_id,
             finished_create_mviews,
             status: None,
+            sycned_sstables: collect_result.synced_sstables,
         }))
     }
 
