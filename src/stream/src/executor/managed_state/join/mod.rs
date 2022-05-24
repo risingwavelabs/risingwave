@@ -211,7 +211,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     pub fn push(&mut self, key: K, state: JoinEntryState<S>) {
-        self.inner.push(key.clone(), state);
+        self.inner.push(key, state);
     }
 
     // Iter keys on the
@@ -299,19 +299,18 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
         update_table_info: TableInfo<S>,
     ) -> IterType<K, S> {
         if !key.has_null() {
-            match_entry = match_entry.or(JoinHashMap::<K, S>::fetch_cached_state(
-                &key,
-                &match_table_info,
-            )
-            .await
-            .ok()
-            .unwrap());
+            match_entry = match_entry.or_else(|| {
+                JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
+                    .await
+                    .ok()
+                    .unwrap()
+            });
         }
-        let update_entry = update_entry.unwrap_or(
+        let update_entry = update_entry.unwrap_or_else(|| {
             JoinHashMap::<K, S>::init_without_cache(&key, &update_table_info)
                 .ok()
-                .unwrap(),
-        );
+                .unwrap()
+        });
         (key, match_entry, update_entry)
     }
 }
