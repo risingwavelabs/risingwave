@@ -32,7 +32,7 @@ use crate::base::{SourceMessage, SplitReader};
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::kinesis::{build_client, KinesisProperties};
-use crate::{Column, ConnectorStateV2, SplitImpl};
+use crate::{Column, ConnectorState, SplitImpl};
 
 pub struct KinesisMultiSplitReader {
     /// splits are not allowed to be empty, otherwise connector source should create
@@ -180,17 +180,13 @@ impl SplitReader for KinesisMultiSplitReader {
 
     async fn new(
         properties: KinesisProperties,
-        state: ConnectorStateV2,
+        state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
         Self: Sized,
     {
-        let splits = match state {
-            ConnectorStateV2::Splits(s) => s,
-            ConnectorStateV2::None => unreachable!(),
-        };
-
+        let splits = state.unwrap();
         Ok(Self {
             splits: splits
                 .iter()
@@ -344,9 +340,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut reader =
-            KinesisMultiSplitReader::new(properties, ConnectorStateV2::Splits(splits), None)
-                .await?;
+        let mut reader = KinesisMultiSplitReader::new(properties, Some(splits), None).await?;
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         println!("1: {:?}", reader.next().await);
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;

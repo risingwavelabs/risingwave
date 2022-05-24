@@ -31,14 +31,12 @@ use crate::kafka::source::KafkaSplitReader;
 use crate::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::kinesis::source::reader::KinesisMultiSplitReader;
-use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::kinesis::split::KinesisSplit;
 use crate::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::nexmark::source::reader::NexmarkSplitReader;
 use crate::nexmark::{NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR};
 use crate::pulsar::source::reader::PulsarSplitReader;
-use crate::pulsar::{
-    PulsarEnumeratorOffset, PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
-};
+use crate::pulsar::{PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR};
 use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
@@ -63,7 +61,7 @@ pub trait SplitReader: Sized {
 
     async fn new(
         properties: Self::Properties,
-        state: ConnectorStateV2,
+        state: ConnectorState,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
@@ -168,100 +166,7 @@ pub trait SplitMetaData: Sized {
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
-/// The persistent state of the connector.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectorState {
-    pub identifier: Bytes,
-    pub start_offset: String,
-    pub end_offset: String,
-}
-
-impl ConnectorState {
-    pub fn from_hashmap(state: HashMap<String, String>) -> Vec<Self> {
-        if state.is_empty() {
-            return vec![];
-        }
-        let mut connector_states: Vec<Self> = Vec::with_capacity(state.len());
-        connector_states.extend(state.iter().map(|(split, offset)| Self {
-            identifier: Bytes::from(split.to_owned()),
-            start_offset: offset.clone(),
-            end_offset: "".to_string(),
-        }));
-        connector_states
-    }
-}
-
-// TODO: use macro and trait to simplify the code here
-impl From<SplitImpl> for ConnectorState {
-    fn from(split: SplitImpl) -> Self {
-        match split {
-            SplitImpl::Kafka(kafka) => Self {
-                identifier: Bytes::from(kafka.partition.to_string()),
-                start_offset: kafka.start_offset.unwrap().to_string(),
-                end_offset: if let Some(end_offset) = kafka.stop_offset {
-                    end_offset.to_string()
-                } else {
-                    "".to_string()
-                },
-            },
-            SplitImpl::Kinesis(kinesis) => Self {
-                identifier: Bytes::from(kinesis.shard_id),
-                start_offset: match kinesis.start_position {
-                    KinesisOffset::SequenceNumber(s) => s,
-                    _ => "".to_string(),
-                },
-                end_offset: match kinesis.end_position {
-                    KinesisOffset::SequenceNumber(s) => s,
-                    _ => "".to_string(),
-                },
-            },
-            SplitImpl::Pulsar(pulsar) => Self {
-                identifier: Bytes::from(pulsar.topic.to_string()),
-                start_offset: match pulsar.start_offset {
-                    PulsarEnumeratorOffset::MessageId(id) => id,
-                    _ => "".to_string(),
-                },
-                end_offset: "".to_string(),
-            },
-            SplitImpl::Nexmark(nex_mark) => Self {
-                identifier: Bytes::from(nex_mark.id()),
-                start_offset: match nex_mark.start_offset {
-                    Some(s) => s.to_string(),
-                    _ => "".to_string(),
-                },
-                end_offset: "".to_string(),
-            },
-            SplitImpl::Datagen(dategen) => Self {
-                identifier: Bytes::from(dategen.id()),
-                start_offset: "".to_string(),
-                end_offset: "".to_string(),
-            },
-        }
-    }
-}
-
-impl SplitMetaData for ConnectorState {
-    fn id(&self) -> String {
-        String::from_utf8(self.identifier.to_vec()).unwrap()
-    }
-
-    fn encode_to_bytes(&self) -> Bytes {
-        Bytes::from(serde_json::to_string(self).unwrap())
-    }
-
-    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectorStateV2 {
-    // ConnectorState should change to Vec<ConnectorState> because there can be multiple readers
-    // in a source executor
-    // State(ConnectorState),
-    Splits(Vec<SplitImpl>),
-    None,
-}
+pub type ConnectorState = Option<Vec<SplitImpl>>;
 
 mod tests {
     #[allow(unused_imports)]

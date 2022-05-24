@@ -40,7 +40,7 @@ use crate::filesystem::s3::s3_dir::{
     AwsCustomConfig, S3SourceBasicConfig, S3SourceConfig, SqsReceiveMsgConfig,
 };
 use crate::filesystem::s3::S3Properties;
-use crate::{Column, ConnectorState, ConnectorStateV2, SplitMetaData};
+use crate::{Column, ConnectorState, SplitMetaData};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -187,20 +187,6 @@ impl S3FileReader {
         s3_file_reader
     }
 
-    fn add_s3_split(&mut self, state: ConnectorState) -> anyhow::Result<()> {
-        let identifier_bytes = state.identifier.to_vec();
-        let raw_path = std::str::from_utf8(&identifier_bytes).unwrap();
-        let s3_file_split_rs = S3FileSplit::from_path(raw_path.to_string());
-        if let Ok(s3_file_split) = s3_file_split_rs {
-            self.s3_file_sender.send(s3_file_split).unwrap();
-            Ok(())
-        } else {
-            let err = s3_file_split_rs.err().unwrap();
-            error!("S3FileReader add_s3_split error. cause by {:?}", err);
-            Err(err)
-        }
-    }
-
     async fn stream_read(
         client_for_s3: s3_client::Client,
         s3_file_split: S3FileSplit,
@@ -321,7 +307,7 @@ impl SplitReader for S3FileReader {
     /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
     async fn new(
         props: S3Properties,
-        _state: ConnectorStateV2,
+        _state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
@@ -352,7 +338,7 @@ impl SplitReader for S3FileReader {
             sqs_config: SqsReceiveMsgConfig::default(),
         };
         let s3_file_reader = S3FileReader::build_from_config(s3_source_config);
-        // TODO: new s3 reader with ConnectorStateV2::Splits
+        // TODO: new s3 reader with ConnectorState
         Ok(s3_file_reader)
     }
 
@@ -388,11 +374,9 @@ impl SplitReader for S3FileReader {
 
 #[cfg(test)]
 mod test {
-    use bytes::Bytes;
 
     use crate::filesystem::s3::source::s3_file_reader::S3FileSplit;
     use crate::filesystem::s3::S3Properties;
-    use crate::ConnectorState;
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
@@ -409,16 +393,6 @@ mod test {
             match_pattern: None,
             access: "".to_string(),
             secret: "".to_string(),
-        }
-    }
-
-    fn new_test_connect_state(file_name: String) -> ConnectorState {
-        let path_string = format!("s3://{}/{}", BUCKET_NAME, file_name);
-        let identifier = Bytes::copy_from_slice(path_string.as_str().as_bytes());
-        ConnectorState {
-            identifier,
-            start_offset: "".to_string(),
-            end_offset: "".to_string(),
         }
     }
 

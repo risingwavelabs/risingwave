@@ -25,10 +25,9 @@ use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamC
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_common::try_match_expand;
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{
-    ConnectorStateV2, SplitImpl, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
+    ConnectorState, SplitImpl, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
     PULSAR_CONNECTOR,
 };
 use risingwave_source::*;
@@ -257,7 +256,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let epoch = barrier.epoch.prev;
 
         let mut boot_state = self.stream_source_splits.clone();
-        if !self.stream_source_splits.is_empty() {
+        if !boot_state.is_empty() {
             for ele in &mut boot_state {
                 match self
                     .split_state_store
@@ -274,7 +273,11 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         }
-        let recover_state = ConnectorStateV2::Splits(boot_state);
+        let recover_state: ConnectorState = if boot_state.is_empty() {
+            None
+        } else {
+            Some(boot_state)
+        };
 
         // todo: use epoch from msg to restore state from state store
         let stream_reader = match self.source_desc.source.as_ref() {
@@ -282,13 +285,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 .stream_reader(self.column_ids.clone())
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
-            SourceImpl::Connector(c) => {
-                let splits = try_match_expand!(recover_state, ConnectorStateV2::Splits)
-                    .expect("Parallel Connector Source only support Vec<Split> as state");
-                c.stream_reader(splits, self.column_ids.clone())
-                    .await
-                    .map(SourceStreamReaderImpl::Connector)
-            }
+            SourceImpl::Connector(c) => c
+                .stream_reader(recover_state, self.column_ids.clone())
+                .await
+                .map(SourceStreamReaderImpl::Connector),
         }
         .map_err(StreamExecutorError::source_error)?;
 

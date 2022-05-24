@@ -103,13 +103,11 @@ macro_rules! impl_split_reader {
 
              pub async fn create(
                 config: ConnectorProperties,
-                state: ConnectorStateV2,
+                state: ConnectorState,
                 columns: Option<Vec<Column>>,
             ) -> Result<Self> {
-                if let ConnectorStateV2::Splits(s) = &state {
-                    if s.is_empty() {
-                        return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                    }
+                if state.is_none() {
+                    return Ok(Self::Dummy(Box::new(DummySplitReader {})));
                 }
 
                 let connector = match config {

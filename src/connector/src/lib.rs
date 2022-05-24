@@ -48,6 +48,7 @@ pub mod dummy_connector;
 mod macros;
 pub mod state;
 
+pub use base::ConnectorState;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use nexmark::NEXMARK_CONNECTOR;
