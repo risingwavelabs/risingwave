@@ -258,7 +258,7 @@ impl SplitMetaData for ConnectorState {
 pub enum ConnectorStateV2 {
     // ConnectorState should change to Vec<ConnectorState> because there can be multiple readers
     // in a source executor
-    State(ConnectorState),
+    // State(ConnectorState),
     Splits(Vec<SplitImpl>),
     None,
 }

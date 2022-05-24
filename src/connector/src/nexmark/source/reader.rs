@@ -101,10 +101,6 @@ impl SplitReader for NexmarkSplitReader {
                     }
                 }
             }
-            ConnectorStateV2::State(cs) => {
-                log::debug!("Splits for nexmark found! {:?}", cs);
-                todo!()
-            }
             ConnectorStateV2::None => {}
         }
 

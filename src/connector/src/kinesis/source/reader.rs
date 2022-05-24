@@ -188,7 +188,6 @@ impl SplitReader for KinesisMultiSplitReader {
     {
         let splits = match state {
             ConnectorStateV2::Splits(s) => s,
-            ConnectorStateV2::State(_) => todo!("ConnectorStateV2::State is to be removed later"),
             ConnectorStateV2::None => unreachable!(),
         };
 
