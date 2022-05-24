@@ -173,7 +173,7 @@ impl ToStreamProst for StreamHashJoin {
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
             is_delta_join: self.is_delta,
             ..Default::default()

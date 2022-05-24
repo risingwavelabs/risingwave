@@ -20,7 +20,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::error::Result as RwResult;
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::hash::HashCode;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
@@ -287,6 +287,26 @@ impl Row {
             datum.hash(&mut hasher);
         }
         HashCode(hasher.finish())
+    }
+
+    /// Compute hash value of a row on corresponding indices.
+    pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> RwResult<HashCode>
+    where
+        H: BuildHasher,
+    {
+        let mut hasher = hash_builder.build_hasher();
+        for idx in hash_indices {
+            let datum = self.0.get(*idx);
+            match datum {
+                Some(datum) => datum.hash(&mut hasher),
+                None => {
+                    return Err(
+                        ErrorCode::InternalError(format!("index {} out of row bound", idx)).into(),
+                    )
+                }
+            }
+        }
+        Ok(HashCode(hasher.finish()))
     }
 }
 
