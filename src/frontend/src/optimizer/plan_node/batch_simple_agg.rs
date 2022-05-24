@@ -79,11 +79,9 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 let partial_agg = dist_input.clone();
                 let partial_agg = self.clone_with_input(partial_agg).into();
 
-                let exchange = BatchExchange::new(
-                    partial_agg,
-                    Order::any().clone(),
-                    Distribution::Single
-                ).into();
+                let exchange =
+                    BatchExchange::new(partial_agg, Order::any().clone(), Distribution::Single)
+                        .into();
 
                 let total_agg_types = self
                     .logical
@@ -94,10 +92,9 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 let total_agg_logical = LogicalAgg::new(
                     total_agg_types,
                     self.logical.group_keys().to_vec(),
-                    exchange
+                    exchange,
                 );
                 let total_agg_batch = BatchSimpleAgg::new(total_agg_logical);
-                // &RequiredDist::PhysicalDist(Distribution::Single).enforce(total_agg_batch, &Order::any())
                 total_agg_batch.into()
             }
             _ => {
