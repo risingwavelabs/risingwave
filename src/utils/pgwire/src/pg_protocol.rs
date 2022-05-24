@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error as IoError, Error, ErrorKind, Result};
+use std::io::{Error as IoError, Result};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -134,12 +134,6 @@ where
                 Some(v) => v.to_string(),
             }
         };
-        if !self.session_mgr.check_db_name(&db_name) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Not found database name: {}", db_name),
-            ));
-        }
         self.session = Some(self.session_mgr.connect(&db_name).map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(

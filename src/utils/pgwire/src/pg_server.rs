@@ -30,8 +30,6 @@ pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
     fn connect(&self, database: &str) -> Result<Arc<Self::Session>, BoxedError>;
-
-    fn check_db_name(&self, database: &str) -> bool;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to

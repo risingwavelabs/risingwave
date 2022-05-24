@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Formatter;
+use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -346,13 +347,15 @@ impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
-    }
-
-    fn check_db_name(&self, database: &str) -> bool {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        reader.get_database_by_name(database).is_ok()
+        if reader.get_database_by_name(database).is_err() {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Not found database name: {}", database),
+            )));
+        }
+        Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
 }
 

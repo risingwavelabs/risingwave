@@ -53,12 +53,6 @@ impl SessionManager for LocalFrontend {
     fn connect(&self, _database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
-
-    fn check_db_name(&self, database: &str) -> bool {
-        let catalog_reader = self.env.catalog_reader();
-        let reader = catalog_reader.read_guard();
-        reader.get_database_by_name(database).is_ok()
-    }
 }
 
 impl LocalFrontend {
