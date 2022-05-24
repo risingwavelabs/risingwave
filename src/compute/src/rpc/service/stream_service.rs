@@ -159,6 +159,7 @@ impl StreamService for StreamServiceImpl {
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
             finished_create_mviews,
+            create_mview_progress: Default::default(),
             status: None,
         }))
     }

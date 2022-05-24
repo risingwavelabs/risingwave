@@ -66,6 +66,10 @@ impl Notifier {
     }
 }
 
+struct CreateMviewProgress {
+
+}
+
 /// Stores the notifiers for commands that are not finished yet. Essentially for
 /// `CreateMaterializedView`.
 #[derive(Default)]

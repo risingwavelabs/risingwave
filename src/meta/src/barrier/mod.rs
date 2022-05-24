@@ -49,6 +49,7 @@ mod command;
 mod info;
 mod notifier;
 mod recovery;
+mod progress;
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
 
