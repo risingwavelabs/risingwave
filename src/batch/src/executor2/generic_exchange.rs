@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
@@ -29,21 +28,20 @@ use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
 
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::ExecutorBuilder;
-use crate::task::{BatchEnvironment, TaskId};
+use crate::task::{BatchTaskContext, TaskId};
 
-pub type ExchangeExecutor2 = GenericExchangeExecutor2<DefaultCreateSource>;
+pub type ExchangeExecutor2<C> = GenericExchangeExecutor2<DefaultCreateSource, C>;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
 
-pub struct GenericExchangeExecutor2<C> {
+pub struct GenericExchangeExecutor2<CS, C> {
     sources: Vec<ProstExchangeSource>,
-    server_addr: HostAddr,
-    env: BatchEnvironment,
+    context: C,
 
     source_idx: usize,
     current_source: Option<Box<dyn ExchangeSource>>,
 
     // Mock-able CreateSource.
-    source_creator: PhantomData<C>,
+    source_creator: PhantomData<CS>,
     schema: Schema,
     task_id: TaskId,
     identity: String,
@@ -53,7 +51,7 @@ pub struct GenericExchangeExecutor2<C> {
 #[async_trait::async_trait]
 pub trait CreateSource: Send {
     async fn create_source(
-        env: BatchEnvironment,
+        context: impl BatchTaskContext,
         prost_source: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>>;
@@ -64,18 +62,18 @@ pub struct DefaultCreateSource {}
 #[async_trait::async_trait]
 impl CreateSource for DefaultCreateSource {
     async fn create_source(
-        env: BatchEnvironment,
+        context: impl BatchTaskContext,
         prost_source: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = prost_source.get_host()?.into();
 
-        if is_local_address(env.server_address(), &peer_addr) {
+        if context.is_local_addr(&peer_addr) {
             trace!("Exchange locally [{:?}]", prost_source.get_task_output_id());
 
             Ok(Box::new(LocalExchangeSource::create(
                 prost_source.get_task_output_id()?.try_into()?,
-                env,
+                context,
                 task_id,
             )?))
         } else {
@@ -93,34 +91,39 @@ impl CreateSource for DefaultCreateSource {
     }
 }
 
-impl<CS: 'static + CreateSource> BoxedExecutor2Builder for GenericExchangeExecutor2<CS> {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+pub struct GenericExchangeExecutor2Builder {}
+
+impl BoxedExecutor2Builder for GenericExchangeExecutor2Builder {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Exchange
         )?;
 
-        let server_addr = source.global_batch_env().server_address().clone();
-
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
-        Ok(Box::new(Self {
-            sources,
-            server_addr,
-            env: source.global_batch_env().clone(),
-            source_creator: PhantomData,
-            source_idx: 0,
-            current_source: None,
-            schema: Schema { fields },
-            task_id: source.task_id.clone(),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            GenericExchangeExecutor2::<DefaultCreateSource, C> {
+                sources,
+                context: source.batch_task_context().clone(),
+                source_creator: PhantomData,
+                source_idx: 0,
+                current_source: None,
+                schema: Schema { fields },
+                task_id: source.task_id.clone(),
+                identity: source.plan_node().get_identity().clone(),
+            },
+        ))
     }
 }
 
-impl<CS: 'static + CreateSource> Executor2 for GenericExchangeExecutor2<CS> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor2
+    for GenericExchangeExecutor2<CS, C>
+{
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -134,14 +137,14 @@ impl<CS: 'static + CreateSource> Executor2 for GenericExchangeExecutor2<CS> {
     }
 }
 
-impl<CS: 'static + CreateSource> GenericExchangeExecutor2<CS> {
+impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor2<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
 
         for prost_source in &self.sources {
             let source =
-                CS::create_source(self.env.clone(), prost_source, self.task_id.clone()).await?;
+                CS::create_source(self.context.clone(), prost_source, self.task_id.clone()).await?;
             sources.push(source);
         }
 
@@ -179,6 +182,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::task::ComputeNodeContext;
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
         #[derive(Debug, Clone)]
@@ -202,7 +206,7 @@ mod tests {
         #[async_trait::async_trait]
         impl CreateSource for FakeCreateSource {
             async fn create_source(
-                _: BatchEnvironment,
+                _: impl BatchTaskContext,
                 _: &ProstExchangeSource,
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
@@ -224,19 +228,20 @@ mod tests {
             sources.push(ProstExchangeSource::default());
         }
 
-        let executor = Box::new(GenericExchangeExecutor2::<FakeCreateSource> {
-            sources,
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
-            source_idx: 0,
-            current_source: None,
-            source_creator: PhantomData,
-            env: BatchEnvironment::for_test(),
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int32)],
+        let executor = Box::new(
+            GenericExchangeExecutor2::<FakeCreateSource, ComputeNodeContext> {
+                sources,
+                source_idx: 0,
+                current_source: None,
+                source_creator: PhantomData,
+                context: ComputeNodeContext::new_for_test(),
+                schema: Schema {
+                    fields: vec![Field::unnamed(DataType::Int32)],
+                },
+                task_id: TaskId::default(),
+                identity: "GenericExchangeExecutor2".to_string(),
             },
-            task_id: TaskId::default(),
-            identity: "GenericExchangeExecutor2".to_string(),
-        });
+        );
 
         let mut stream = executor.execute();
         let mut chunks: Vec<DataChunk> = vec![];

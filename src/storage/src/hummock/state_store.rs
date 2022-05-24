@@ -20,17 +20,18 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 
 use super::iterator::{
     BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
     BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
 };
 use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
-use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator};
+use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{BoxedBackwardHummockIterator, ReadOptions};
 use crate::hummock::utils::prune_ssts;
+use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -79,16 +80,21 @@ impl HummockStorage {
 
         // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
         // `key_range`
+        let mut stats = StoreLocalStatistic::default();
         let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward, None);
         for table_info in table_infos.into_iter().rev() {
-            let table = self.sstable_store.sstable(table_info.id).await?;
+            let table = self
+                .sstable_store
+                .sstable(table_info.id, &mut stats)
+                .await?;
             if backward {
-                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
+                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::create(
                     table,
                     self.sstable_store(),
+                    read_options.clone(),
                 )) as BoxedBackwardHummockIterator);
             } else {
-                overlapped_forward_iters.push(Box::new(SSTableIterator::new(
+                overlapped_forward_iters.push(Box::new(SSTableIterator::create(
                     table,
                     self.sstable_store(),
                     read_options.clone(),
@@ -140,7 +146,10 @@ impl HummockStorage {
                 };
             } else {
                 for table_info in table_infos.into_iter().rev() {
-                    let table = self.sstable_store.sstable(table_info.id).await?;
+                    let table = self
+                        .sstable_store
+                        .sstable(table_info.id, &mut stats)
+                        .await?;
                     if backward {
                         overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
                             table,
@@ -211,6 +220,7 @@ impl HummockStorage {
         epoch: u64,
         vnode_set: Option<VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
+        let mut stats = StoreLocalStatistic::default();
         let (uncommitted_ssts, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
 
@@ -245,10 +255,13 @@ impl HummockStorage {
         );
         let read_options = Arc::new(ReadOptions::default());
         for table_info in table_infos.into_iter().rev() {
-            let table = self.sstable_store.sstable(table_info.id).await?;
+            let table = self
+                .sstable_store
+                .sstable(table_info.id, &mut stats)
+                .await?;
             table_counts += 1;
             if let Some(v) = self
-                .get_from_table(table, &internal_key, key, read_options.clone())
+                .get_from_table(table, &internal_key, key, read_options.clone(), &mut stats)
                 .await?
             {
                 return Ok(Some(v));
@@ -267,9 +280,9 @@ impl HummockStorage {
                         vnode_set.as_ref(),
                     );
                     for table_info in table_infos.into_iter().rev() {
-                        let table = self.sstable_store.sstable(table_info.id).await?;
+                        let table = self.sstable_store.sstable(table_info.id, &mut stats).await?;
                         table_counts += 1;
-                        if let Some(v) = self.get_from_table(table, &internal_key, key, read_options.clone()).await? {
+                        if let Some(v) = self.get_from_table(table, &internal_key, key, read_options.clone(), &mut stats).await? {
                             return Ok(Some(v));
                         }
                     }
@@ -299,6 +312,7 @@ impl HummockStorage {
                 */
         }
 
+        stats.report(self.stats.as_ref());
         self.stats
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
@@ -415,6 +429,10 @@ impl StateStore for HummockStorage {
                 .await?;
             Ok(())
         }
+    }
+
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+        self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }
 

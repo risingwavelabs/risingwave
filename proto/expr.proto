@@ -98,6 +98,11 @@ message ConstantValue {
   bytes body = 1;
 }
 
+// For serializing struct value to vec<bytes>.
+message StructValue {
+  repeated bytes fields = 1;
+}
+
 message FunctionCall {
   repeated ExprNode children = 1;
 }

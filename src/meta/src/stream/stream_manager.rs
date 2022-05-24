@@ -30,12 +30,13 @@ use risingwave_pb::stream_plan::{ActorMapping, DispatcherType, StreamNode, Strea
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
+use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, ParallelUnitId, WorkerId};
-use crate::manager::{HashMappingManagerRef, MetaSrvEnv, StreamClientsRef};
+use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
@@ -79,8 +80,8 @@ pub struct GlobalStreamManager<S: MetaStore> {
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
 
-    /// Clients to stream service on compute nodes
-    clients: StreamClientsRef,
+    /// Client Pool to stream service on compute nodes
+    client_pool: StreamClientPoolRef,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -101,7 +102,7 @@ where
             cluster_manager,
             source_manager,
             hash_mapping_manager: env.hash_mapping_manager_ref(),
-            clients: env.stream_clients_ref(),
+            client_pool: env.stream_client_pool_ref(),
         })
     }
 
@@ -559,7 +560,7 @@ where
         for (node_id, actors) in &node_actors {
             let node = locations.node_locations.get(node_id).unwrap();
 
-            let client = self.clients.get(node).await?;
+            let client = self.client_pool.get(node).await?;
 
             client
                 .to_owned()
@@ -590,7 +591,7 @@ where
         for (node_id, hanging_channels) in node_hanging_channels {
             let node = locations.node_locations.get(&node_id).unwrap();
 
-            let client = self.clients.get(node).await?;
+            let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 
             client
@@ -609,7 +610,7 @@ where
         for (node_id, actors) in node_actors {
             let node = locations.node_locations.get(&node_id).unwrap();
 
-            let client = self.clients.get(node).await?;
+            let client = self.client_pool.get(node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
