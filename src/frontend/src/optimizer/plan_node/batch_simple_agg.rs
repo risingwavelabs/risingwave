@@ -33,24 +33,12 @@ impl BatchSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
-        let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
-        BatchSimpleAgg { base, logical }
-    }
-
-    pub fn new_with_dist(logical: LogicalAgg, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let input_dist = input.distribution(); // Should we panic on broadcast?
+        // let dist = match input_dist {
+        //     Distribution::Single => Distribution::Single,
+        //     _ => panic!(),
+        // };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), input_dist.clone(), Order::any().clone());
         BatchSimpleAgg { base, logical }
     }
 
@@ -80,11 +68,33 @@ impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed()?;
-        // let new_input = self
-        //     .input()
-        //     .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
-        Ok(self.clone_with_input(new_input).into())
+        let plan = match self.input().distribution() {
+            Distribution::SomeShard => {
+                // 2-phase agg
+                let partial_dist_input = self.input().to_distributed()?;
+                let partial_dist_input = self.clone_with_input(partial_dist_input).into();
+                let total_agg_types = self
+                    .logical
+                    .agg_calls()
+                    .iter()
+                    .map(|agg_call| agg_call.partial_to_total_agg_call())
+                    .collect();
+                let total_agg_logical = LogicalAgg::new(
+                    total_agg_types,
+                    self.logical.group_keys().to_vec(),
+                    partial_dist_input
+                );
+                let total_agg_batch = BatchSimpleAgg::new(total_agg_logical);
+                total_agg_batch.to_distributed_with_required(Order::any(), &RequiredDist::PhysicalDist(Distribution::Single))?
+            }
+            _ => {
+                let new_input = self
+                    .input()
+                    .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+                self.clone_with_input(new_input).into()
+            }
+        };
+        Ok(plan)
     }
 }
 

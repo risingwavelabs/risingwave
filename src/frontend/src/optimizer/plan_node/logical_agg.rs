@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Aggregation Call
@@ -65,6 +65,18 @@ impl PlanAggCall {
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
         }
+    }
+
+    pub fn partial_to_total_agg_call(&self) -> PlanAggCall {
+        let new_agg_kind = match &self.agg_kind {
+            AggKind::Min => AggKind::Min,
+            AggKind::Max => AggKind::Max,
+            AggKind::Avg => AggKind::Avg,
+            AggKind::StringAgg => AggKind::StringAgg,
+            AggKind::SingleValue => AggKind::SingleValue,
+            AggKind::Sum | AggKind::Count | AggKind::RowCount => AggKind::Sum,
+        };
+        PlanAggCall { agg_kind: new_agg_kind, ..self.clone() }
     }
 
     pub fn count_star() -> Self {
@@ -575,18 +587,11 @@ impl PredicatePushdown for LogicalAgg {
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
+        let new_logical = self.clone_with_input(new_input);
         if self.group_keys().is_empty() {
-            // 2-phase agg
-            let partial_input = self.input().to_batch()?;
-            let partial_logical = self.clone_with_input(partial_input);
-            let partial_plan_node =
-                BatchSimpleAgg::new_with_dist(partial_logical.clone(), Distribution::SomeShard).into();
-
-            let total_logical = partial_logical.clone_with_input(partial_plan_node);
-            Ok(BatchSimpleAgg::new_with_dist(total_logical, Distribution::Single).into())
+            Ok(BatchSimpleAgg::new(new_logical).into())
         } else {
-            let new_input = self.input().to_batch()?;
-            let new_logical = self.clone_with_input(new_input);
             Ok(BatchHashAgg::new(new_logical).into())
         }
     }
