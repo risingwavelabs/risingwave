@@ -455,6 +455,8 @@ where
             }
         }
 
+        self.source_manager.register_source(source_actors_group_by_fragment.clone(), None).await.unwrap();
+
         let split_assignment = self
             .source_manager
             .schedule_split_for_actors(source_actors_group_by_fragment, affiliated_source)
