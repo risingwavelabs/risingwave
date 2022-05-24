@@ -276,7 +276,7 @@ impl ToStreamProst for StreamMaterialize {
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
         })
     }
