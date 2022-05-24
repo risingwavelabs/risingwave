@@ -50,6 +50,7 @@ impl Expression for ArrayAccessExpression {
 
         let mut builder = self.return_type().create_array_builder(input.cardinality())?;
 
+        //TODO(nanderstabel): refactor
         let len = array.len();
         for i in 0..len {
             if let ScalarImpl::List(value) = array.datum_at(i).unwrap() {
