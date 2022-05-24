@@ -20,7 +20,6 @@ use tokio::time::{sleep, Duration};
 
 use super::field_generator::{FieldGeneratorImpl, NumericFieldGenerator};
 use crate::SourceMessage;
-pub type BoxedFieldGenerator = Box<dyn NumericFieldGenerator>;
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
