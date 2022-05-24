@@ -28,7 +28,7 @@ use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput};
 #[derive(Clone)]
 pub struct BatchManager {
     /// Every task id has a corresponding task execution.
-    tasks: Arc<Mutex<HashMap<TaskId, Box<BatchTaskExecution<ComputeNodeContext>>>>>,
+    tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
 }
 
 impl BatchManager {
@@ -48,10 +48,11 @@ impl BatchManager {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
+        let task = Arc::new(task);
 
-        task.async_execute()?;
+        task.clone().async_execute()?;
         if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
-            e.insert(Box::new(task));
+            e.insert(task);
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -72,11 +73,18 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    #[cfg(test)]
+    pub fn abort_task(&self, sid: &ProstTaskId) -> Result<()> {
+        let sid = TaskId::from(sid);
+        match self.tasks.lock().get(&sid) {
+            Some(task) => task.abort_task(),
+            None => Err(TaskNotFound.into()),
+        }
+    }
+
     pub fn remove_task(
         &self,
         sid: &ProstTaskId,
-    ) -> Result<Option<Box<BatchTaskExecution<ComputeNodeContext>>>> {
+    ) -> Result<Option<Arc<BatchTaskExecution<ComputeNodeContext>>>> {
         let task_id = TaskId::from(sid);
         match self.tasks.lock().remove(&task_id) {
             Some(t) => Ok(Some(t)),
@@ -88,6 +96,13 @@ impl BatchManager {
     pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_running(),
+            None => Err(TaskNotFound.into()),
+        }
+    }
+
+    pub fn check_if_task_aborted(&self, task_id: &TaskId) -> Result<()> {
+        match self.tasks.lock().get(task_id) {
+            Some(task) => task.check_if_aborted(),
             None => Err(TaskNotFound.into()),
         }
     }
@@ -110,9 +125,15 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::batch_plan::TaskOutputId as ProstTaskOutputId;
+    use risingwave_pb::batch_plan::{
+        ExchangeInfo, GenerateSeriesNode, PlanFragment, PlanNode, TaskId as ProstTaskId,
+        TaskOutputId as ProstTaskOutputId, ValuesNode,
+    };
     use tonic::Code;
 
     use crate::task::{BatchManager, ComputeNodeContext, TaskId};
@@ -151,8 +172,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        use risingwave_pb::batch_plan::*;
-
         let manager = BatchManager::new();
         let plan = PlanFragment {
             root: Some(PlanNode {
@@ -169,8 +188,10 @@ mod tests {
             }),
         };
         let context = ComputeNodeContext::new_for_test();
-        let task_id = TaskId {
-            ..Default::default()
+        let task_id = ProstTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
         };
         manager
             .fire_task(&task_id, plan.clone(), 0, context.clone())
@@ -179,5 +200,42 @@ mod tests {
         assert!(err
             .to_string()
             .contains("can not create duplicate task with the same id"));
+    }
+
+    #[tokio::test]
+    async fn test_task_aborted() {
+        let manager = BatchManager::new();
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::GenerateSeries(GenerateSeriesNode {
+                    start: Some(make_i32_literal(1)),
+                    // This is a bit hacky as we want to make sure the task lasts long enough
+                    // for us to abort it.
+                    stop: Some(make_i32_literal(i32::MAX)),
+                    step: Some(make_i32_literal(1)),
+                })),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let context = ComputeNodeContext::new_for_test();
+        let task_id = ProstTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        manager
+            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .unwrap();
+        manager.abort_task(&task_id).unwrap();
+        let task_id = TaskId::from(&task_id);
+        while let Err(e) = manager.check_if_task_aborted(&task_id) {
+            println!("check_if_task_aborted:{}", e);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 }
