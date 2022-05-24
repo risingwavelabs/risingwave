@@ -37,9 +37,8 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    AbortEpochRequest, AbortEpochResponse, AddTablesRequest, AddTablesResponse, CommitEpochRequest,
-    CommitEpochResponse, CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot,
-    HummockVersion, PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
+    CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion,
+    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
     ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
     SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
@@ -356,20 +355,6 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.table_id)
     }
 
-    async fn add_tables(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
-    ) -> Result<HummockVersion> {
-        let req = AddTablesRequest {
-            context_id: self.worker_id(),
-            tables: sstables,
-            epoch,
-        };
-        let resp = self.inner.add_tables(req).await?;
-        Ok(resp.version.unwrap())
-    }
-
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         let req = ReportCompactionTasksRequest {
             compact_task: Some(compact_task),
@@ -378,16 +363,8 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        let req = CommitEpochRequest { epoch };
-        self.inner.commit_epoch(req).await?;
-        Ok(())
-    }
-
-    async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        let req = AbortEpochRequest { epoch };
-        self.inner.abort_epoch(req).await?;
-        Ok(())
+    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
+        unimplemented!("Only meta service can commit_epoch in production.")
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
@@ -485,13 +462,10 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
-            ,{ hummock_client, add_tables, AddTablesRequest, AddTablesResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
-            ,{ hummock_client, commit_epoch, CommitEpochRequest, CommitEpochResponse }
-            ,{ hummock_client, abort_epoch, AbortEpochRequest, AbortEpochResponse }
         }
     };
 }
