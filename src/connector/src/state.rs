@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::{internal_error, Result as RwResult, RwError};
+use risingwave_common::error::{internal_error, Result as RwResult};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
