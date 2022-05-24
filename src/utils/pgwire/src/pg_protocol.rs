@@ -97,10 +97,10 @@ where
                     })?;
             }
             FeMessage::Startup(msg) => {
-                self.process_startup_msg(msg).map_err(|e| {
+                if let Err(e) = self.process_startup_msg(msg) {
                     tracing::error!("failed to set up pg session: {}", e);
-                    e
-                })?;
+                    return Ok(true);
+                }
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
@@ -136,7 +136,7 @@ where
         };
         if !self.session_mgr.check_db_name(&db_name) {
             return Err(Error::new(
-                ErrorKind::UnexpectedEof,
+                ErrorKind::InvalidInput,
                 format!("Not found database name: {}", db_name),
             ));
         }
