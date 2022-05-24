@@ -154,7 +154,15 @@ async fn test_basic() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
     hummock_storage.sync(Some(epoch1)).await.unwrap();
-    meta_client.commit_epoch(epoch1).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch1,
+            hummock_storage
+                .local_version_manager
+                .get_uncommitted_ssts(epoch1),
+        )
+        .await
+        .unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
         .get(&Bytes::from("bb"), epoch2)
@@ -200,7 +208,13 @@ async fn test_vnode_filter() {
     let epoch: u64 = 1;
     storage.ingest_batch(batch, epoch).await.unwrap();
     storage.sync(Some(epoch)).await.unwrap();
-    meta_client.commit_epoch(epoch).await.unwrap();
+    meta_client
+        .commit_epoch(
+            epoch,
+            storage.local_version_manager.get_uncommitted_ssts(epoch),
+        )
+        .await
+        .unwrap();
 
     let value_with_dummy_filter = storage
         .get_with_vnode_set(

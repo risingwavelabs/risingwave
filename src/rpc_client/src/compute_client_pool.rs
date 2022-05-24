@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use moka::future::Cache;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -41,3 +43,5 @@ impl ComputeClientPool {
             })
     }
 }
+
+pub type ComputeClientPoolRef = Arc<ComputeClientPool>;
