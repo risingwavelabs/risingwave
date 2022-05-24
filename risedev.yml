@@ -135,6 +135,9 @@ risedev:
       listen-address: "0.0.0.0"
       console-address: "0.0.0.0"
 
+    # - use: aws-s3
+    #   bucket: ${terraform:s3-bucket}
+
     - use: meta-node
       # Id must starts with `meta-node`, therefore to be picked up by other
       # components.

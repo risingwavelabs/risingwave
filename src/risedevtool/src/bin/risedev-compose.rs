@@ -15,14 +15,13 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
-use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use risedev::{
-    Compose, ComposeConfig, ComposeFile, ComposeService, ComposeVolume, ConfigExpander,
-    DockerImageConfig, ServiceConfig,
+    compose_deploy, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile, ComposeService,
+    ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
 };
 use serde::Deserialize;
 
@@ -40,15 +39,11 @@ pub struct RiseDevComposeOpts {
     /// deploy.sh will be generated.
     #[clap(long)]
     deploy: bool,
-
-    /// Force override RisingWave image. Normally it will be used along with deploy compose mode.
-    #[clap(long)]
-    override_risingwave_image: Option<String>,
 }
 
 fn load_docker_image_config(
     risedev_config: &str,
-    override_risingwave_image: &Option<String>,
+    override_risingwave_image: Option<&String>,
 ) -> Result<DockerImageConfig> {
     #[derive(Deserialize)]
     struct ConfigInRiseDev {
@@ -56,58 +51,62 @@ fn load_docker_image_config(
     }
     let mut config: ConfigInRiseDev = serde_yaml::from_str(risedev_config)?;
     if let Some(override_risingwave_image) = override_risingwave_image {
-        config.compose.risingwave = override_risingwave_image.clone();
+        config.compose.risingwave = override_risingwave_image.to_string();
     }
     Ok(config.compose)
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[serde(deny_unknown_fields)]
-pub struct Ec2Instance {
-    id: String,
-    dns_host: String,
-    public_ip: String,
 }
 
 fn main() -> Result<()> {
     let opts = RiseDevComposeOpts::parse();
 
-    let risedev_config = {
+    let risedev_config_content = {
         let mut content = String::new();
         File::open("risedev.yml")?.read_to_string(&mut content)?;
         content
     };
 
-    let compose_config = ComposeConfig {
-        image: load_docker_image_config(&risedev_config, &opts.override_risingwave_image)?,
-        config_directory: opts.directory.clone(),
-    };
-
-    let (risedev_config, ec2_instances) = if opts.deploy {
-        let risedev_compose_config = {
+    let (risedev_config, compose_deploy_config) = if opts.deploy {
+        let compose_deploy_config = {
             let mut content = String::new();
             File::open("risedev-compose.yml")?.read_to_string(&mut content)?;
             content
         };
-        let ec2_instances: Vec<Ec2Instance> = serde_yaml::from_str(&risedev_compose_config)?;
+        let compose_deploy_config: ComposeDeployConfig =
+            serde_yaml::from_str(&compose_deploy_config)?;
 
         (
             ConfigExpander::expand_with_extra_info(
-                &risedev_config,
+                &risedev_config_content,
                 &opts.profile,
-                ec2_instances
+                compose_deploy_config
+                    .instances
                     .iter()
                     .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
+                    .chain(
+                        compose_deploy_config
+                            .risedev_extra_args
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone())),
+                    )
                     .collect(),
             )?,
-            Some(ec2_instances),
+            Some(compose_deploy_config),
         )
     } else {
         (
-            ConfigExpander::expand(&risedev_config, &opts.profile)?,
+            ConfigExpander::expand(&risedev_config_content, &opts.profile)?,
             None,
         )
+    };
+
+    let compose_config = ComposeConfig {
+        image: load_docker_image_config(
+            &risedev_config_content,
+            compose_deploy_config
+                .as_ref()
+                .and_then(|x| x.risingwave_image_override.as_ref()),
+        )?,
+        config_directory: opts.directory.clone(),
     };
 
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
@@ -182,95 +181,15 @@ fn main() -> Result<()> {
                 Path::new(&opts.directory).join(format!("{}.yml", node)),
                 yaml,
             )?;
-        }
-        let ec2_instances = ec2_instances.unwrap();
-        let shell_script = {
-            use std::fmt::Write;
-            let mut x = String::new();
-            writeln!(x, "#!/bin/bash -e")?;
-            writeln!(x)?;
-            writeln!(
-                x,
-                r#"
-DIR="$( cd "$( dirname "${{BASH_SOURCE[0]}}" )" >/dev/null 2>&1 && pwd )"
-cd "$DIR""#
+
+            compose_deploy(
+                Path::new(&opts.directory),
+                &steps,
+                &compose_deploy_config.as_ref().unwrap().instances,
+                &compose_config,
+                &service_on_node,
             )?;
-            writeln!(x)?;
-            writeln!(x, "# --- Sync Config ---")?;
-            writeln!(x, "parallel bash << EOF")?;
-            for instance in &ec2_instances {
-                let host = &instance.dns_host;
-                let public_ip = &instance.public_ip;
-                let id = &instance.id;
-                let base_folder = "~/risingwave-deploy";
-                let mut y = String::new();
-                writeln!(y, "#!/bin/bash -e")?;
-                writeln!(y)?;
-                writeln!(y, r#"echo "{id}: $(tput setaf 2)sync config$(tput sgr0)""#,)?;
-                writeln!(
-                    y,
-                    "rsync -azh -e \"ssh -oStrictHostKeyChecking=no\" ./ ubuntu@{public_ip}:{base_folder} --exclude 'deploy.sh' --exclude '*.partial.sh'",
-                )?;
-                writeln!(
-                    y,
-                    "scp -oStrictHostKeyChecking=no ./{host}.yml ubuntu@{public_ip}:{base_folder}/docker-compose.yaml"
-                )?;
-                writeln!(
-                    y,
-                    r#"echo "{id}: $(tput setaf 2)done sync config$(tput sgr0)""#,
-                )?;
-                let sh = format!("_deploy.{id}.partial.sh");
-                std::fs::write(Path::new(&opts.directory).join(&sh), y)?;
-                writeln!(x, "{sh}")?;
-            }
-            writeln!(x, "EOF")?;
-            writeln!(x)?;
-            writeln!(x, "# --- Tear Down Services ---")?;
-            for instance in &ec2_instances {
-                let id = &instance.id;
-                writeln!(
-                    x,
-                    r#"echo "{id}: $(tput setaf 2)stop services and pull latest image$(tput sgr0)""#,
-                )?;
-                let public_ip = &instance.public_ip;
-                let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose stop -t 0 && docker compose down && docker pull {}'\"",
-                    compose_config.image.risingwave
-                )?;
-            }
-            writeln!(x)?;
-            writeln!(x, "# --- Start Services ---")?;
-            for step in &steps {
-                let dns_host = service_on_node.get(step).unwrap();
-                let instance = ec2_instances
-                    .iter()
-                    .find(|ec2| &ec2.dns_host == dns_host)
-                    .unwrap();
-                let id = &instance.id;
-                writeln!(
-                    x,
-                    r#"echo "{id}: $(tput setaf 2)start service {step}$(tput sgr0)""#,
-                )?;
-                let public_ip = &instance.public_ip;
-                let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose up -d {step}'\"")?;
-            }
-            writeln!(x)?;
-            writeln!(x, "# --- Check Services ---")?;
-            for instance in &ec2_instances {
-                let id = &instance.id;
-                writeln!(x, r#"echo "{id}: $(tput setaf 2)check status$(tput sgr0)""#,)?;
-                let public_ip = &instance.public_ip;
-                let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose ps'\"")?;
-            }
-            x
-        };
-        let deploy_sh = Path::new(&opts.directory).join("deploy.sh");
-        fs::write(&deploy_sh, &shell_script)?;
-        let mut perms = fs::metadata(&deploy_sh)?.permissions();
-        perms.set_mode(perms.mode() | 0o755);
-        fs::set_permissions(&deploy_sh, perms)?;
+        }
     } else {
         let mut services = BTreeMap::new();
         for (_, s) in compose_services {

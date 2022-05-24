@@ -26,6 +26,8 @@ pub mod service_config;
 pub use service_config::*;
 mod compose;
 pub use compose::*;
+mod compose_deploy;
+pub use compose_deploy::*;
 
 mod task;
 pub mod util;
