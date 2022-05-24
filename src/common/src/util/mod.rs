@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::any::{type_name, Any};
-use std::fmt;
 use std::sync::Arc;
 
 pub use self::prost::*;
@@ -71,27 +70,4 @@ where
             type_name::<T>()
         )))
     })
-}
-
-pub struct DisplaySeparated<'a, T>
-where
-    T: fmt::Display,
-{
-    slice: &'a [T],
-    sep: &'static str,
-}
-
-impl<'a, T> fmt::Display for DisplaySeparated<'a, T>
-where
-    T: fmt::Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut delim = "";
-        for t in self.slice {
-            write!(f, "{}", delim)?;
-            delim = self.sep;
-            write!(f, "{}", t)?;
-        }
-        Ok(())
-    }
 }
