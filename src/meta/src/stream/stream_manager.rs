@@ -151,7 +151,8 @@ where
                     .get_table_hash_mapping(&table_id.table_id)
                     .unwrap_or_else(|| {
                         panic!("table {} should have a vnode mapping", table_id.table_id)
-                    });
+                    })
+                    .1;
 
                 let (upstream_actor_id, parallel_unit_id) = {
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
@@ -222,6 +223,7 @@ where
                     let (original_indices, data) = compress_data(&hash_mapping);
                     batch_query.hash_mapping = Some(ParallelUnitMapping {
                         table_id: Default::default(),
+                        map_seq: 0,
                         original_indices,
                         data,
                     });

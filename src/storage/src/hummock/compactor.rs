@@ -241,6 +241,9 @@ impl Compactor {
                 inf: false,
             }]
         };
+        compact_task
+            .vnode_mappings
+            .sort_by_key(|tar| tar.get_table_id());
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
@@ -330,7 +333,19 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
 
         for (_, ssts) in output_ssts {
-            for (sst, vnode_bitmaps) in ssts {
+            for (sst, mut vnode_bitmaps) in ssts {
+                for vnode_bitmap in &mut vnode_bitmaps {
+                    if let Ok(pos) = self
+                        .compact_task
+                        .get_vnode_mappings()
+                        .binary_search_by_key(&vnode_bitmap.get_table_id(), |tar| {
+                            tar.get_table_id()
+                        })
+                    {
+                        vnode_bitmap.map_seq =
+                            self.compact_task.get_vnode_mappings()[pos].get_map_seq();
+                    }
+                }
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {

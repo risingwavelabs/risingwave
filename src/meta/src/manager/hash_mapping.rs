@@ -14,12 +14,14 @@
 
 #![allow(dead_code)]
 
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::hash::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::hummock::VNodeBitmap;
 
 use super::TableId;
 use crate::cluster::ParallelUnitId;
@@ -69,13 +71,13 @@ impl HashMappingManager {
             .insert(state_table_id, fragment_id);
     }
 
-    pub fn get_table_hash_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
+    pub fn get_table_hash_mapping(&self, table_id: &TableId) -> Option<(u64, Vec<ParallelUnitId>)> {
         let core = self.core.lock();
         let fragment_id = core.state_table_fragment_mapping.get(table_id);
         if let Some(fragment_id) = fragment_id {
             core.hash_mapping_infos
                 .get(fragment_id)
-                .map(|info| info.vnode_mapping.clone())
+                .map(|info| (info.map_seq, info.vnode_mapping.clone()))
         } else {
             None
         }
@@ -91,6 +93,25 @@ impl HashMappingManager {
             .map(|info| info.vnode_mapping.clone())
     }
 
+    pub fn check_sst_deprecated(&self, vnode_bitmaps: &[VNodeBitmap]) -> bool {
+        let core = self.core.lock();
+        for vnode_bitmap in vnode_bitmaps {
+            if let Some(fragment_id) = core
+                .state_table_fragment_mapping
+                .get(&vnode_bitmap.get_table_id())
+            {
+                if let Some(HashMappingInfo { map_seq, .. }) =
+                    core.hash_mapping_infos.get(fragment_id)
+                {
+                    if *map_seq != vnode_bitmap.get_map_seq() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// For test.
     fn get_fragment_mapping_info(&self, fragment_id: &FragmentId) -> Option<HashMappingInfo> {
         let core = self.core.lock();
@@ -102,6 +123,8 @@ impl HashMappingManager {
 /// load-balanced vnode mapping.
 #[derive(Clone)]
 struct HashMappingInfo {
+    /// Sequence number of mapping in this fragment
+    map_seq: u64,
     /// Hash mapping from virtual node to parallel unit.
     vnode_mapping: Vec<ParallelUnitId>,
     /// Mapping from parallel unit to virtual node.
@@ -165,12 +188,27 @@ impl HashMappingManagerCore {
                 .push(*parallel_unit_id);
         });
 
+        let entry = self.hash_mapping_infos.entry(fragment_id);
+        let current_seq = match &entry {
+            Occupied(ocp) => ocp.get().map_seq,
+            Vacant(_) => 0,
+        };
         let mapping_info = HashMappingInfo {
+            map_seq: current_seq + 1,
             vnode_mapping: vnode_mapping.clone(),
             owner_mapping,
             load_balancer,
         };
-        self.hash_mapping_infos.insert(fragment_id, mapping_info);
+        match entry {
+            Occupied(mut ocp) => {
+                ocp.insert(mapping_info);
+                0
+            }
+            Vacant(vcn) => {
+                vcn.insert(mapping_info);
+                0
+            }
+        };
 
         vnode_mapping
     }
@@ -199,13 +237,27 @@ impl HashMappingManagerCore {
                 .push(*parallel_unit);
         });
 
+        let entry = self.hash_mapping_infos.entry(fragment_id);
+        let current_seq = match &entry {
+            Occupied(ocp) => ocp.get().map_seq,
+            Vacant(_) => 0,
+        };
         let mapping_info = HashMappingInfo {
+            map_seq: current_seq + 1,
             vnode_mapping,
             owner_mapping,
             load_balancer,
         };
-
-        self.hash_mapping_infos.insert(fragment_id, mapping_info);
+        match entry {
+            Occupied(mut ocp) => {
+                ocp.insert(mapping_info);
+                0
+            }
+            Vacant(vcn) => {
+                vcn.insert(mapping_info);
+                0
+            }
+        };
     }
 }
 
@@ -282,7 +334,8 @@ mod tests {
         assert_eq!(
             hash_mapping_manager
                 .get_table_hash_mapping(&table_id)
-                .unwrap(),
+                .unwrap()
+                .1,
             vnode_mapping
         );
     }
@@ -302,6 +355,7 @@ mod tests {
         let hash_mapping_manager = HashMappingManager::new();
         hash_mapping_manager.set_fragment_hash_mapping(fragment_id, old_vnode_mapping.clone());
         let HashMappingInfo {
+            map_seq: _,
             vnode_mapping,
             owner_mapping,
             load_balancer,

@@ -591,7 +591,7 @@ where
                     .collect::<HashSet<u32>>();
                 compact_task.vnode_mappings.reserve_exact(table_ids.len());
                 for table_id in table_ids {
-                    if let Some(vnode_mapping) = self
+                    if let Some((map_seq, vnode_mapping)) = self
                         .env
                         .hash_mapping_manager()
                         .get_table_hash_mapping(&table_id)
@@ -599,6 +599,7 @@ where
                         let (original_indices, compressed_data) = compress_data(&vnode_mapping);
                         let compressed_mapping = ParallelUnitMapping {
                             table_id,
+                            map_seq,
                             original_indices,
                             data: compressed_data,
                         };
