@@ -89,7 +89,7 @@ impl CreateMviewProgressTracker {
         //     actor_ids
         // );
 
-        for &actor in actors.iter() {
+        for &actor in &actors {
             self.actor_map.insert(actor, ddl_epoch);
         }
 
