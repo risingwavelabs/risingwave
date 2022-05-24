@@ -298,13 +298,11 @@ impl<'a, K: HashKey, S: StateStore> IterJoinEntriesMut<'a, K, S> {
         match_table_info: TableInfo<S>,
         update_table_info: TableInfo<S>,
     ) -> IterType<K, S> {
-        if !key.has_null() {
-            match_entry = match_entry.or_else(|| {
-                JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
-                    .await
-                    .ok()
-                    .unwrap()
-            });
+        if !key.has_null() && match_entry.is_none() {
+            match_entry = JoinHashMap::<K, S>::fetch_cached_state(&key, &match_table_info)
+                .await
+                .ok()
+                .unwrap();
         }
         let update_entry = update_entry.unwrap_or_else(|| {
             JoinHashMap::<K, S>::init_without_cache(&key, &update_table_info)
