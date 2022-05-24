@@ -140,7 +140,10 @@ fn main() -> Result<()> {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
             ServiceConfig::AwsS3(_) => continue,
-            ServiceConfig::RedPanda(c) => (c.address.clone(), c.compose(&compose_config)?),
+            ServiceConfig::RedPanda(c) => {
+                volumes.insert(c.id.clone(), ComposeVolume::default());
+                (c.address.clone(), c.compose(&compose_config)?)
+            }
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {
@@ -190,21 +193,33 @@ cd "$DIR""#
             )?;
             writeln!(x)?;
             writeln!(x, "# --- Sync Config ---")?;
+            writeln!(x, "parallel bash << EOF")?;
             for instance in &ec2_instances {
                 let host = &instance.dns_host;
                 let public_ip = &instance.public_ip;
                 let id = &instance.id;
                 let base_folder = "~/risingwave-deploy";
-                writeln!(x, r#"echo "{id}: $(tput setaf 2)sync config$(tput sgr0)""#,)?;
+                let mut y = String::new();
+                writeln!(y, "#!/bin/bash -e")?;
+                writeln!(y)?;
+                writeln!(y, r#"echo "{id}: $(tput setaf 2)sync config$(tput sgr0)""#,)?;
                 writeln!(
-                    x,
-                    "rsync -avH -e \"ssh -oStrictHostKeyChecking=no\" ./ ubuntu@{public_ip}:{base_folder}",
+                    y,
+                    "rsync -azh -e \"ssh -oStrictHostKeyChecking=no\" ./ ubuntu@{public_ip}:{base_folder} --exclude 'deploy.sh' --exclude '*.partial.sh'",
                 )?;
                 writeln!(
-                    x,
+                    y,
                     "scp -oStrictHostKeyChecking=no ./{host}.yml ubuntu@{public_ip}:{base_folder}/docker-compose.yaml"
                 )?;
+                writeln!(
+                    y,
+                    r#"echo "{id}: $(tput setaf 2)done sync config$(tput sgr0)""#,
+                )?;
+                let sh = format!("_deploy.{id}.partial.sh");
+                std::fs::write(Path::new(&opts.directory).join(&sh), y)?;
+                writeln!(x, "{sh}")?;
             }
+            writeln!(x, "EOF")?;
             writeln!(x)?;
             writeln!(x, "# --- Tear Down Services ---")?;
             for instance in &ec2_instances {

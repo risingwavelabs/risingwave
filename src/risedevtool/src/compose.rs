@@ -293,12 +293,15 @@ impl Compose for RedPandaConfig {
         command.args(vec![
             "start",
             "--smp",
-            "1",
+            "4",
             "--reserve-memory",
             "0M",
+            "--memory",
+            "4G",
             "--overprovisioned",
             "--node-id",
             "0",
+            "--check=false",
         ]);
 
         command.arg("--kafka-addr").arg(format!(
@@ -320,6 +323,7 @@ impl Compose for RedPandaConfig {
                 self.internal_port.to_string(),
                 self.outside_port.to_string(),
             ],
+            volumes: vec![format!("{}:/var/lib/redpanda/data", self.id)],
             ports: vec![format!("{}:{}", self.outside_port, self.outside_port)],
             ..Default::default()
         })
