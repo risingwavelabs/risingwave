@@ -61,13 +61,13 @@ impl Progress {
 /// Stores the notifiers for commands that are not finished yet. Essentially for
 /// `CreateMaterializedView`.
 #[derive(Default)]
-pub(super) struct CreateMviewProgressManager {
+pub(super) struct CreateMviewProgressTracker {
     progress_map: HashMap<CreateMviewEpoch, (Progress, Vec<Notifier>)>,
 
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
-impl CreateMviewProgressManager {
+impl CreateMviewProgressTracker {
     /// Add a command with current `epoch` and `notifiers`, that needs to wait for actors with
     /// `actors` to report finishing.
     /// If `actors` is empty, [`Notifier::notify_finished`] will be called immediately.

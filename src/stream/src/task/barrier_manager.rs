@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::error::Result;
-use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview as ProstFinishedCreateMview;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -41,15 +40,6 @@ pub struct FinishedCreateMview {
     /// The id of the actor that is responsible for running this DDL. Usually the actor of
     /// [`crate::executor::ChainExecutor`] for creating MV.
     pub actor_id: ActorId,
-}
-
-impl From<FinishedCreateMview> for ProstFinishedCreateMview {
-    fn from(f: FinishedCreateMview) -> Self {
-        Self {
-            epoch: f.epoch,
-            actor_id: f.actor_id,
-        }
-    }
 }
 
 /// To notify about the finish of an DDL with the `u64` epoch.
