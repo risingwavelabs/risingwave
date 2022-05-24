@@ -426,43 +426,4 @@ mod test {
         let s3_file_split: S3FileSplit = serde_json::from_str(split_str).unwrap();
         s3_file_split
     }
-
-    // async fn new_s3_file_reader(file_name: String) -> S3FileReader {
-    //     let s3_file_reader = S3FileReader::new(
-    //         test_config_map(),
-    //         ConnectorStateV2::State(new_test_connect_state(file_name)),
-    //         None,
-    //     );
-    //     s3_file_reader.await.unwrap()
-    // }
-
-    // #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    // #[ignore]
-    // async fn test_s3_file_reader() {
-    //     let mut s3_file_reader =
-    //         new_s3_file_reader("2022-02-28-09:32:34-example.json".to_string()).await;
-    //     let msg_rs = s3_file_reader.next().await;
-    //     assert!(msg_rs.is_ok());
-    //     println!("S3FileReader next() msg = {:?}", msg_rs.unwrap());
-    // }
-
-    // #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    // #[ignore]
-    // async fn test_empty_s3_file_reader() {
-    //     println!("S3FileReader read empty json file.");
-    //     let mut s3_file_reader =
-    //         new_s3_file_reader("EMPTY-2022-03-23-03:35:28.json".to_string()).await;
-    //     let task_join_handler = tokio::task::spawn(async move {
-    //         tokio::select! {
-    //             _=  tokio::time::sleep(tokio::time::Duration::from_secs(5))=> {
-    //                 println!("S3FileReader wait 5s for next message");
-    //             }
-    //             _= s3_file_reader.next() => {
-    //                 unreachable!()
-    //             }
-    //         }
-    //     });
-    //     let join_rs = task_join_handler.await;
-    //     assert!(join_rs.is_ok());
-    // }
 }

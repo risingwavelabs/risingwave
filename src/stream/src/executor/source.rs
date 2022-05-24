@@ -319,9 +319,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     let chunk_with_state =
                         chunk_with_state.map_err(StreamExecutorError::source_error)?;
                     if chunk_with_state.split_offset_mapping.is_some() {
-                        // self.state_cache = Some(ConnectorState::from_hashmap(
-                        //     chunk_with_state.split_offset_mapping.unwrap(),
-                        // ));
                         let mapping: HashMap<String, String> =
                             chunk_with_state.split_offset_mapping.unwrap();
                         let state: HashMap<String, SplitImpl> = mapping
