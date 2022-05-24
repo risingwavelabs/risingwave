@@ -251,7 +251,12 @@ async fn test_state_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
 
-    let mut state = StateTable::new(keyspace.clone(), column_descs.clone(), order_types.clone());
+    let mut state = StateTable::new(
+        keyspace.clone(),
+        column_descs.clone(),
+        order_types.clone(),
+        Some(vec![1]),
+    );
     let epoch: u64 = 0;
 
     state
@@ -522,11 +527,13 @@ async fn test_multi_state_table_iter() {
         keyspace_1.clone(),
         column_descs_1.clone(),
         order_types.clone(),
+        None,
     );
     let mut state_2 = StateTable::new(
         keyspace_2.clone(),
         column_descs_2.clone(),
         order_types.clone(),
+        None,
     );
 
     state_1
