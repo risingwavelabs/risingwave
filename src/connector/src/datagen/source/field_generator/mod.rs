@@ -28,6 +28,8 @@ pub const DEFAULT_MAX: i16 = i16::MAX;
 pub const DEFAULT_START: i16 = 0;
 pub const DEFAULT_END: i16 = i16::MAX;
 
+/// fielsd that can continuously or randomly increasing impl this trait
+/// such as i32, float, double
 pub trait NumericFieldGenerator {
     fn with_sequence(min: Option<String>, max: Option<String>) -> Result<Self>
     where
@@ -38,7 +40,7 @@ pub trait NumericFieldGenerator {
     fn generate(&mut self) -> Value;
 }
 
-// Generator of this '#' field. Can be 'sequence' or 'random'.
+/// Generator of this '#' field. Can be 'sequence' or 'random'.
 pub enum FieldKind {
     Sequence,
     Random,
@@ -59,6 +61,7 @@ pub enum FieldGeneratorImpl {
     Varchar(VarcharField),
     Timestamp(TimestampField),
 }
+
 impl FieldGeneratorImpl {
     pub fn new(
         data_type: DataType,
@@ -149,7 +152,7 @@ mod tests {
             DataType::Varchar,
             FieldKind::Random,
             Some("10".to_string()),
-                None
+            None,
         )
         .unwrap();
 
@@ -167,7 +170,7 @@ mod tests {
             let value = varchar_field.generate();
             assert!(value.is_string());
             let value = value.as_str().unwrap();
-            assert_eq!(value.len(),10);
+            assert_eq!(value.len(), 10);
         }
     }
 }

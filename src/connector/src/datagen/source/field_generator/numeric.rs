@@ -36,7 +36,6 @@ macro_rules! impl_field_generator {
             impl NumericFieldGenerator for $variant_name {
                 fn with_random(min_option: Option<String>, max_option: Option<String>) -> Result<Self> {
 
-                    //FIXME should reconsider default value
                     let mut min = DEFAULT_MIN as $field_type;
                     let mut max = DEFAULT_MAX as $field_type;
 
@@ -59,7 +58,6 @@ macro_rules! impl_field_generator {
 
                 fn with_sequence(star_optiont: Option<String>, end_option: Option<String>) -> Result<Self> {
 
-                    //FIXME should reconsider default value
                     let mut start = DEFAULT_START as $field_type;
                     let mut end = DEFAULT_END as $field_type;
 
