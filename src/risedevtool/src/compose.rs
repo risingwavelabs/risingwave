@@ -131,6 +131,13 @@ impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
         ComputeNodeService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
+
+        std::fs::copy(
+            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(&config.config_directory).join("risingwave.toml"),
+        )?;
+
         let command = get_cmd_args(&command, true)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
@@ -138,6 +145,12 @@ impl Compose for ComputeNodeConfig {
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+                .into_iter()
+                .collect(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node
@@ -154,10 +167,22 @@ impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
         MetaNodeService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
         let command = get_cmd_args(&command, true)?;
+
+        std::fs::copy(
+            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(&config.config_directory).join("risingwave.toml"),
+        )?;
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+                .into_iter()
+                .collect(),
             command,
             expose: vec![
                 self.port.to_string(),
@@ -179,6 +204,9 @@ impl Compose for FrontendConfig {
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
             command,
             ports: vec![format!("{}:{}", self.port, self.port)],
             expose: vec![self.port.to_string()],
@@ -192,13 +220,25 @@ impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
         CompactorService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
         let command = get_cmd_args(&command, true)?;
+
+        std::fs::copy(
+            Path::new("src").join("config").join("risingwave.toml"),
+            Path::new(&config.config_directory).join("risingwave.toml"),
+        )?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
+            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+                .into_iter()
+                .collect(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node
