@@ -33,12 +33,14 @@ impl BatchSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
-        let input_dist = input.distribution(); // Should we panic on broadcast?
-        // let dist = match input_dist {
-        //     Distribution::Single => Distribution::Single,
-        //     _ => panic!(),
-        // };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), input_dist.clone(), Order::any().clone());
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Single => Distribution::Single,
+            // distribution phase will perform total agg for this.
+            Distribution::SomeShard => Distribution::SomeShard,
+            _ => panic!(),
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchSimpleAgg { base, logical }
     }
 
