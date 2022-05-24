@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
+use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -30,28 +31,43 @@ use serde::Deserialize;
 #[clap(propagate_version = true)]
 pub struct RiseDevComposeOpts {
     #[clap(short, long)]
-    directory: Option<String>,
+    directory: String,
 
     #[clap(default_value = "compose")]
     profile: String,
 
-    /// Whether to use `network_mode: host` for compose. If enabled, will generate multiple compose
-    /// files based on listen address.
+    /// Whether to generate deployment script. If enabled, network mode will be set to host, a
+    /// deploy.sh will be generated.
     #[clap(long)]
-    host_mode: bool,
+    deploy: bool,
 
-    /// Whether to store all configs into a single docker-compose file.
+    /// Force override RisingWave image. Normally it will be used along with deploy compose mode.
     #[clap(long)]
-    single_file: bool,
+    override_risingwave_image: Option<String>,
 }
 
-fn load_docker_image_config(risedev_config: &str) -> Result<DockerImageConfig> {
+fn load_docker_image_config(
+    risedev_config: &str,
+    override_risingwave_image: &Option<String>,
+) -> Result<DockerImageConfig> {
     #[derive(Deserialize)]
     struct ConfigInRiseDev {
         compose: DockerImageConfig,
     }
-    let config: ConfigInRiseDev = serde_yaml::from_str(risedev_config)?;
+    let mut config: ConfigInRiseDev = serde_yaml::from_str(risedev_config)?;
+    if let Some(override_risingwave_image) = override_risingwave_image {
+        config.compose.risingwave = override_risingwave_image.clone();
+    }
     Ok(config.compose)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct Ec2Instance {
+    id: String,
+    dns_host: String,
+    public_ip: String,
 }
 
 fn main() -> Result<()> {
@@ -64,21 +80,38 @@ fn main() -> Result<()> {
     };
 
     let compose_config = ComposeConfig {
-        image: load_docker_image_config(&risedev_config)?,
-        config_directory: if !opts.single_file {
-            opts.directory.clone()
-        } else {
-            None
-        },
+        image: load_docker_image_config(&risedev_config, &opts.override_risingwave_image)?,
+        config_directory: opts.directory.clone(),
     };
 
-    let risedev_config = ConfigExpander::expand(&risedev_config)?;
+    let (risedev_config, ec2_instances) = if opts.deploy {
+        let risedev_compose_config = {
+            let mut content = String::new();
+            File::open("risedev-compose.yml")?.read_to_string(&mut content)?;
+            content
+        };
+        let ec2_instances: Vec<Ec2Instance> = serde_yaml::from_str(&risedev_compose_config)?;
+
+        (
+            ConfigExpander::expand_with_extra_info(
+                &risedev_config,
+                ec2_instances
+                    .iter()
+                    .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
+                    .collect(),
+            )?,
+            Some(ec2_instances),
+        )
+    } else {
+        (ConfigExpander::expand(&risedev_config)?, None)
+    };
+
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
 
     let mut compose_services: BTreeMap<String, BTreeMap<String, ComposeService>> = BTreeMap::new();
     let mut volumes = BTreeMap::new();
 
-    for step in steps.iter() {
+    for step in &steps {
         let service = services.get(step).unwrap();
         let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
@@ -90,7 +123,6 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-
             ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::MetaNode(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::FrontendV2(c) => (c.address.clone(), c.compose(&compose_config)?),
@@ -110,9 +142,8 @@ fn main() -> Result<()> {
             ServiceConfig::RedPanda(c) => (c.address.clone(), c.compose(&compose_config)?),
         };
         compose.container_name = service.id().to_string();
-        if opts.host_mode {
+        if opts.deploy {
             compose.network_mode = Some("host".into());
-            compose.volumes.push("/etc/hosts:/etc/hosts".into());
             compose.depends_on = vec![];
         }
         compose_services
@@ -121,8 +152,8 @@ fn main() -> Result<()> {
             .insert(step.to_string(), compose);
     }
 
-    if opts.host_mode {
-        for (node, services) in compose_services {
+    if opts.deploy {
+        for (node, services) in &compose_services {
             let mut node_volumes = BTreeMap::new();
             services.keys().for_each(|k| {
                 if let Some(v) = volumes.get(k) {
@@ -131,19 +162,63 @@ fn main() -> Result<()> {
             });
             let compose_file = ComposeFile {
                 version: "3".into(),
-                services,
+                services: services.clone(),
                 volumes: node_volumes,
                 name: format!("risingwave-{}", opts.profile),
             };
 
             let yaml = serde_yaml::to_string(&compose_file)?;
 
-            if let Some(ref directory) = opts.directory {
-                fs::write(Path::new(directory).join(format!("{}.yml", node)), yaml)?;
-            } else {
-                return Err(anyhow!("need to specify a directory"));
-            }
+            fs::write(
+                Path::new(&opts.directory).join(format!("{}.yml", node)),
+                yaml,
+            )?;
         }
+        let ec2_instances = ec2_instances.unwrap();
+        let shell_script = {
+            use std::fmt::Write;
+            let mut x = String::new();
+            writeln!(x, "#!/bin/bash -e")?;
+            writeln!(x, "")?;
+            writeln!(x, "# --- Sync Config ---")?;
+            for instance in &ec2_instances {
+                let host = &instance.dns_host;
+                let public_ip = &instance.public_ip;
+                let base_folder = "~/risingwave-deploy";
+                writeln!(
+                    x,
+                    "rsync -avH -e \"ssh -oStrictHostKeyChecking=no\" ./ ubuntu@{public_ip}:{base_folder}",
+                )?;
+                writeln!(
+                    x,
+                    "scp -oStrictHostKeyChecking=no ./{host}.yml ubuntu@{public_ip}:{base_folder}/docker-compose.yaml"
+                )?;
+            }
+            writeln!(x, "# --- Tear Down Services ---")?;
+            for instance in &ec2_instances {
+                let public_ip = &instance.public_ip;
+                let base_folder = "~/risingwave-deploy";
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} \"bash -c 'cd {base_folder} && sudo docker compose stop -t 0 && sudo docker compose down'\"")?;
+            }
+            writeln!(x, "# --- Start Services ---")?;
+            for instance in &ec2_instances {
+                let public_ip = &instance.public_ip;
+                let base_folder = "~/risingwave-deploy";
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} \"bash -c 'cd {base_folder} && sudo docker compose up -d'\"")?;
+            }
+            writeln!(x, "# --- Check Services ---")?;
+            for instance in &ec2_instances {
+                let public_ip = &instance.public_ip;
+                let base_folder = "~/risingwave-deploy";
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} \"bash -c 'cd {base_folder} && sudo docker compose ps'\"")?;
+            }
+            x
+        };
+        let deploy_sh = Path::new(&opts.directory).join("deploy.sh");
+        fs::write(&deploy_sh, &shell_script)?;
+        let mut perms = fs::metadata(&deploy_sh)?.permissions();
+        perms.set_mode(perms.mode() | 0o755);
+        fs::set_permissions(&deploy_sh, perms)?;
     } else {
         let mut services = BTreeMap::new();
         for (_, s) in compose_services {
@@ -160,11 +235,7 @@ fn main() -> Result<()> {
 
         let yaml = serde_yaml::to_string(&compose_file)?;
 
-        if let Some(directory) = opts.directory {
-            fs::write(Path::new(&directory).join("docker-compose.yml"), yaml)?;
-        } else {
-            println!("{}", yaml);
-        }
+        fs::write(Path::new(&opts.directory).join("docker-compose.yml"), yaml)?;
     }
 
     Ok(())

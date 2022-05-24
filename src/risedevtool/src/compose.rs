@@ -57,10 +57,10 @@ pub struct ComposeFile {
 #[serde(deny_unknown_fields)]
 pub struct DockerImageConfig {
     pub risingwave: String,
-    pub compute_node: String,
-    pub meta_node: String,
-    pub compactor_node: String,
-    pub frontend_node: String,
+    // pub compute_node: String,
+    // pub meta_node: String,
+    // pub compactor_node: String,
+    // pub frontend_node: String,
     pub prometheus: String,
     pub grafana: String,
     pub minio: String,
@@ -73,7 +73,7 @@ pub struct ComposeConfig {
 
     /// The directory to output all configs. If disabled, all config files will be embedded into
     /// the docker-compose file.
-    pub config_directory: Option<String>,
+    pub config_directory: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -308,28 +308,13 @@ impl Compose for PrometheusConfig {
             ..Default::default()
         };
 
-        if let Some(ref config_dir) = config.config_directory {
-            std::fs::write(
-                Path::new(config_dir).join("prometheus.yaml"),
-                prometheus_config,
-            )?;
-            service
-                .volumes
-                .push("./prometheus.yaml:/etc/prometheus/prometheus.yml".into());
-        } else {
-            let entrypoint = r#"
-        /bin/sh -c '
-        set -e
-        echo "$$PROMETHEUS_CONFIG" > /etc/prometheus/prometheus.yml
-        /bin/prometheus "$$0" "$$@"
-        '"#
-            .to_string();
-
-            service.entrypoint = Some(entrypoint);
-            service
-                .environment
-                .insert("PROMETHEUS_CONFIG".to_string(), prometheus_config);
-        }
+        std::fs::write(
+            Path::new(&config.config_directory).join("prometheus.yaml"),
+            prometheus_config,
+        )?;
+        service
+            .volumes
+            .push("./prometheus.yaml:/etc/prometheus/prometheus.yml".into());
 
         Ok(service)
     }
@@ -337,12 +322,7 @@ impl Compose for PrometheusConfig {
 
 impl Compose for GrafanaConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
-        let config_root = if let Some(ref config_dir) = config.config_directory {
-            Path::new(config_dir)
-        } else {
-            return Err(anyhow!("Grafana service must have a config directory. Disable this service or disable single-file mode."));
-        };
-
+        let config_root = Path::new(&config.config_directory);
         std::fs::write(
             config_root.join("grafana.ini"),
             &GrafanaGen.gen_custom_ini(self),

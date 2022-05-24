@@ -536,6 +536,7 @@ description = "Compose a docker-compose.yaml file"
 script = '''
 #!@shell
 set -e
+rm -rf ${PREFIX_DOCKER}/*
 mkdir -p "${PREFIX_DOCKER}"
 cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
 echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
