@@ -17,8 +17,7 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result as RwResult, RwError};
+use risingwave_common::error::{internal_error, Result as RwResult, RwError};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 #[allow(unused_imports)]
@@ -111,10 +110,10 @@ impl<S: StateStore> SourceStateHandler<S> {
         match self.restore_states(stream_source_split.id(), epoch).await {
             Ok(Some(s)) => Ok(Some(
                 SplitImpl::restore_from_bytes(connector_type, &s)
-                    .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+                    .map_err(|e| internal_error(e.to_string()))?,
             )),
             Ok(None) => Ok(None),
-            Err(e) => Err(RwError::from(InternalError(e.to_string()))),
+            Err(e) => Err(internal_error(e.to_string())),
         }
     }
 }
