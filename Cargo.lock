@@ -3803,6 +3803,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "paste",
  "pgwire",
+ "prost",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_expr",

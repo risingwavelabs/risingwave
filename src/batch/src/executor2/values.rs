@@ -160,11 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_values_executor() {
-        let value = StructValue::new(vec![
-            Some(ScalarImpl::Int32(1)),
-            Some(ScalarImpl::Int32(2)),
-            Some(ScalarImpl::Int32(3)),
-        ]);
+        let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
         let exprs = vec![
             Box::new(LiteralExpression::new(
                 DataType::Int16,
