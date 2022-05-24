@@ -281,7 +281,7 @@ where
 
                     // Then try to finish the barrier for Create MVs.
                     let actors_to_track = command_ctx.actors_to_track();
-                    tracker.add(new_epoch.0, actors_to_track, vec![]);
+                    tracker.add(new_epoch.0, actors_to_track, notifiers);
                     for progress in responses.into_iter().flat_map(|r| r.create_mview_progress) {
                         tracker.update(
                             progress.chain_actor_id,

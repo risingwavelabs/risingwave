@@ -127,29 +127,4 @@ impl CreateMviewProgressTracker {
             Entry::Vacant(_) => unreachable!(),
         }
     }
-
-    // /// Tell that the command with `epoch` has been reported to be finished on given `actors`. If
-    // /// we've finished on all actors, [`Notifier::notify_finished`] will be called.
-    // pub fn finish_actors(&mut self, epoch: Epoch, actors: impl IntoIterator<Item = ActorId>) {
-    //     use std::collections::hash_map::Entry;
-
-    //     match self.0.entry(epoch) {
-    //         Entry::Occupied(mut o) => {
-    //             actors.into_iter().for_each(|a| {
-    //                 tracing::debug!("finish actor {} for DDL with epoch {}", a, epoch);
-    //                 o.get_mut().0.remove(&a);
-    //             });
-
-    //             // All actors finished.
-    //             if o.get().0.is_empty() {
-    //                 tracing::debug!("finish all actors for DDL with epoch {}!", epoch);
-
-    //                 let notifiers = o.remove().1;
-    //                 notifiers.into_iter().for_each(Notifier::notify_finished);
-    //             }
-    //         }
-
-    //         Entry::Vacant(_) => todo!("handle finish report after meta recovery"),
-    //     }
-    // }
 }
