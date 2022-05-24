@@ -743,6 +743,7 @@ impl ActorGraphBuilder {
                 let info = fragment_manager
                     .get_build_graph_info(&ctx.dependent_table_ids)
                     .await?;
+                ctx.table_sink_map = info.table_sink_actor_ids.clone();
                 state.stream_graph_builder.fill_info(info);
 
                 // Generate actors of the streaming plan
