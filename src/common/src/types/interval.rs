@@ -66,7 +66,7 @@ impl IntervalUnit {
         self.ms
     }
 
-    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
+    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> Result<Self> {
         // TODO: remove IntervalType later.
         match ty {
             // the unit is months

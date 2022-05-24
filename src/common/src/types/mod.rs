@@ -720,7 +720,7 @@ impl ScalarImpl {
         body
     }
 
-    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> Result<ScalarImpl> {
+    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> Result<Self> {
         let value = match data_type.get_type_name()? {
             TypeName::Boolean => ScalarImpl::Bool(
                 i8::from_be_bytes(b.as_slice().try_into().map_err(|e| {
