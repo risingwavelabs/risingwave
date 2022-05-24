@@ -360,12 +360,7 @@ impl Compactor {
         self.compact_task
             .sorted_output_ssts
             .reserve(self.compact_task.splits.len());
-        if let Some(metrics) = self.compact_task.metrics.as_mut() {
-            if let Some(write) = metrics.write.as_mut() {
-                write.level_idx = self.compact_task.target_level;
-                write.cnt = output_ssts.len() as u64;
-            }
-        }
+        let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
             for (sst, vnode_bitmaps) in ssts {
                 let sst_info = SstableInfo {
@@ -378,14 +373,20 @@ impl Compactor {
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
                 };
-                self.context
-                    .stats
-                    .compaction_write_bytes
-                    .inc_by(sst_info.file_size);
+                compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
             }
         }
-
+        self.context
+            .stats
+            .compaction_write_bytes
+            .inc_by(compaction_write_bytes);
+        if let Some(metrics) = self.compact_task.metrics.as_mut() {
+            if let Some(write) = metrics.write.as_mut() {
+                write.cnt = self.compact_task.sorted_output_ssts.len() as u64;
+                write.size_kb = compaction_write_bytes / 1024;
+            }
+        }
         if let Err(e) = self
             .context
             .hummock_meta_client

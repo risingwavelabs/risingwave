@@ -90,24 +90,24 @@ pub fn trigger_sst_stat(
     }
 }
 
-fn single_level_stat_bytes<T: FnMut(String) -> prometheus::Result<Histogram>>(
+fn single_level_stat_bytes<T: FnMut(String) -> Histogram>(
     mut metric_vec: T,
     level_stat: &TableSetStatistics,
 ) {
-    let level_label = String::from("L") + &level_stat.level_idx.to_string();
-    metric_vec(level_label)
-        .unwrap()
-        .observe(level_stat.size_kb as f64);
+    if level_stat.size_kb > 0 {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).observe(level_stat.size_kb as f64);
+    }
 }
 
-fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<Histogram>>(
+fn single_level_stat_sstn<T: FnMut(String) -> Histogram>(
     mut metric_vec: T,
     level_stat: &TableSetStatistics,
 ) {
-    let level_label = String::from("L") + &level_stat.level_idx.to_string();
-    metric_vec(level_label)
-        .unwrap()
-        .observe(level_stat.cnt as f64);
+    if level_stat.cnt > 0 {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).observe(level_stat.cnt as f64);
+    }
 }
 
 pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) {
@@ -124,27 +124,15 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         .inc();
 
     single_level_stat_bytes(
-        |label| {
-            metrics
-                .level_compact_read_curr
-                .get_metric_with_label_values(&[&label])
-        },
+        |label| metrics.level_compact_read_curr.with_label_values(&[&label]),
         compact_metrics.read_level_n.as_ref().unwrap(),
     );
     single_level_stat_bytes(
-        |label| {
-            metrics
-                .level_compact_read_next
-                .get_metric_with_label_values(&[&label])
-        },
+        |label| metrics.level_compact_read_next.with_label_values(&[&label]),
         compact_metrics.read_level_nplus1.as_ref().unwrap(),
     );
     single_level_stat_bytes(
-        |label| {
-            metrics
-                .level_compact_write
-                .get_metric_with_label_values(&[&label])
-        },
+        |label| metrics.level_compact_write.with_label_values(&[&label]),
         compact_metrics.write.as_ref().unwrap(),
     );
 
@@ -152,7 +140,7 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         |label| {
             metrics
                 .level_compact_read_sstn_curr
-                .get_metric_with_label_values(&[&label])
+                .with_label_values(&[&label])
         },
         compact_metrics.read_level_n.as_ref().unwrap(),
     );
@@ -160,7 +148,7 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         |label| {
             metrics
                 .level_compact_read_sstn_next
-                .get_metric_with_label_values(&[&label])
+                .with_label_values(&[&label])
         },
         compact_metrics.read_level_nplus1.as_ref().unwrap(),
     );
@@ -168,7 +156,7 @@ pub fn trigger_rw_stat(metrics: &MetaMetrics, compact_metrics: &CompactMetrics) 
         |label| {
             metrics
                 .level_compact_write_sstn
-                .get_metric_with_label_values(&[&label])
+                .with_label_values(&[&label])
         },
         compact_metrics.write.as_ref().unwrap(),
     );
