@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,6 +27,40 @@ use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 
+pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
+/// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
+/// compaction groups.
+pub struct CompactionRequestChannel {
+    request_tx: UnboundedSender<CompactionGroupId>,
+    scheduled: Mutex<HashSet<CompactionGroupId>>,
+}
+
+impl CompactionRequestChannel {
+    fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
+        Self {
+            request_tx,
+            scheduled: Default::default(),
+        }
+    }
+
+    /// Enqueues only if the target is not yet in queue.
+    pub fn try_send(&self, compaction_group: CompactionGroupId) -> bool {
+        let mut guard = self.scheduled.lock();
+        if guard.get(&compaction_group).is_some() {
+            return false;
+        }
+        if self.request_tx.send(compaction_group).is_ok() {
+            guard.insert(compaction_group);
+            return true;
+        }
+        false
+    }
+
+    fn unschedule(&self, compaction_group: CompactionGroupId) {
+        self.scheduled.lock().remove(&compaction_group);
+    }
+}
+
 /// Schedules compaction task picking and assignment.
 pub struct CompactionScheduler<S>
 where
@@ -33,10 +68,6 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    shutdown_tx: UnboundedSender<()>,
-    shutdown_rx: Mutex<Option<UnboundedReceiver<()>>>,
-    request_tx: UnboundedSender<CompactionGroupId>,
-    request_rx: Mutex<Option<UnboundedReceiver<CompactionGroupId>>>,
 }
 
 impl<S> CompactionScheduler<S>
@@ -47,31 +78,18 @@ where
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Self {
-        let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
         Self {
             hummock_manager,
             compactor_manager,
-            shutdown_tx,
-            shutdown_rx: Mutex::new(Some(shutdown_rx)),
-            request_tx,
-            request_rx: Mutex::new(Some(request_rx)),
         }
     }
 
-    pub async fn start(&self) {
-        let (mut shutdown_rx, mut request_rx) = match (
-            self.shutdown_rx.lock().take(),
-            self.request_rx.lock().take(),
-        ) {
-            (Some(shutdown_rx), Some(request_rx)) => (shutdown_rx, request_rx),
-            _ => {
-                tracing::warn!("Compaction scheduler is already started");
-                return;
-            }
-        };
+    pub async fn start(&self, mut shutdown_rx: UnboundedReceiver<()>) {
+        let (request_tx, mut request_rx) =
+            tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
         self.hummock_manager
-            .set_compaction_scheduler(self.request_tx.clone());
+            .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
         'compaction_trigger: loop {
             let compaction_group: CompactionGroupId = tokio::select! {
@@ -88,26 +106,33 @@ where
                     break 'compaction_trigger;
                 }
             };
-            self.pick_and_assign(compaction_group).await;
+            self.pick_and_assign(compaction_group, request_channel.clone())
+                .await;
         }
         tracing::info!("Compaction scheduler is stopped");
     }
 
-    async fn pick_and_assign(&self, _compaction_group: CompactionGroupId) {
+    async fn pick_and_assign(
+        &self,
+        compaction_group: CompactionGroupId,
+        request_channel: Arc<CompactionRequestChannel>,
+    ) -> bool {
         // 1. Pick a compaction task.
         // TODO: specify compaction_group in get_compact_task
-        let compact_task = match self.hummock_manager.get_compact_task().await {
+        let compact_task = self.hummock_manager.get_compact_task().await;
+        request_channel.unschedule(compaction_group);
+        let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
-                return;
+                return false;
             }
             Err(err) => {
                 tracing::warn!("Failed to get compaction task: {:#?}.", err);
-                return;
+                return false;
             }
         };
-        tracing::info!(
+        tracing::trace!(
             "Picked compaction task. {}",
             compact_task_to_string(&compact_task)
         );
@@ -142,14 +167,15 @@ where
                 .await
             {
                 Ok(_) => {
-                    // TODO: decide if more compaction task available in compaction_group, then
-                    // either reschedule or unset compaction_group's is_scheduled.
-                    // TODO: timeout assigned compaction task
-                    tracing::info!(
+                    // TODO: timeout assigned compaction task and move send_task after
+                    // assign_compaction_task
+                    tracing::trace!(
                         "Assigned compaction task. {}",
                         compact_task_to_string(&compact_task)
                     );
-                    break 'send_task;
+                    // Reschedule it in case there are more tasks from this compaction group.
+                    request_channel.try_send(compaction_group);
+                    return true;
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -167,25 +193,6 @@ where
                     continue 'send_task;
                 }
             }
-        }
-    }
-
-    pub fn shutdown_sender(&self) -> UnboundedSender<()> {
-        self.shutdown_tx.clone()
-    }
-
-    pub fn request_sender(&self) -> UnboundedSender<CompactionGroupId> {
-        self.request_tx.clone()
-    }
-
-    #[allow(unused)]
-    fn reschedule_compaction_group(&self, compaction_group: CompactionGroupId) {
-        if let Err(err) = self.request_tx.send(compaction_group) {
-            tracing::warn!(
-                "Failed to schedule compaction_group {:?}: {}",
-                compaction_group,
-                err
-            );
         }
     }
 }

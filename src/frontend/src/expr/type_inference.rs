@@ -15,7 +15,6 @@
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::vec;
 
 use itertools::{iproduct, Itertools};
@@ -85,12 +84,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<Dat
         DataTypeName::Timestampz => DataType::Timestampz,
         DataTypeName::Time => DataType::Time,
         DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct => DataType::Struct {
-            fields: Arc::new([]),
-        },
-        DataTypeName::List => DataType::List {
-            datatype: Box::new(DataType::Int32),
-        },
+        DataTypeName::Struct | DataTypeName::List => {
+            panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+        }
     })
 }
 
@@ -214,6 +210,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         E::LessThanOrEqual,
         E::GreaterThan,
         E::GreaterThanOrEqual,
+        E::IsDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);

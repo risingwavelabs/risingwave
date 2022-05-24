@@ -336,8 +336,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::nexmark::NEXMARK_BASE_TIME;
-    use crate::NexmarkProperties;
+    use crate::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
 
     #[test]
     fn test_milli_ts_to_timestamp_string() -> Result<()> {

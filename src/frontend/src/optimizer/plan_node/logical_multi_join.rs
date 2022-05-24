@@ -19,7 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
@@ -82,6 +82,21 @@ impl LogicalMultiJoin {
             base: logical_join.base.clone(),
             inputs,
             on: Condition { conjunctions },
+        })
+    }
+
+    pub(crate) fn from_filter(join: &PlanRef) -> Option<Self> {
+        let logical_filter = join.as_logical_filter()?;
+        let input = logical_filter.input();
+        let multijoin = input.as_logical_multi_join()?;
+
+        Some(Self {
+            base: logical_filter.base.clone(),
+            inputs: multijoin.inputs().to_vec(),
+            on: multijoin
+                .on()
+                .clone()
+                .and(logical_filter.predicate().clone()),
         })
     }
 
@@ -302,6 +317,15 @@ impl ToBatch for LogicalMultiJoin {
 
 impl ColPrunable for LogicalMultiJoin {
     fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
+impl PredicatePushdown for LogicalMultiJoin {
+    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

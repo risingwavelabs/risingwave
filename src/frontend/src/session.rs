@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Formatter;
 use std::marker::Sync;
 use std::path::PathBuf;
@@ -23,12 +22,12 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{Session, SessionManager};
+use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
@@ -146,8 +145,12 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
-        let query_manager =
-            QueryManager::new(worker_node_manager.clone(), hummock_snapshot_manager);
+        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+        let query_manager = QueryManager::new(
+            worker_node_manager.clone(),
+            hummock_snapshot_manager,
+            compute_client_pool,
+        );
         Self {
             meta_client,
             catalog_writer,
@@ -177,7 +180,7 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
@@ -193,9 +196,11 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
+            compute_client_pool,
         );
 
         let observer_manager = ObserverManager::new(
@@ -338,14 +343,10 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(
-        &self,
-        database: &str,
-    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
-        Ok(Arc::new(SessionImpl::new(
-            self.env.clone(),
-            database.to_string(),
-        )))
+    type Session = SessionImpl;
+
+    fn connect(&self, database: &str) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+        Ok(SessionImpl::new(self.env.clone(), database.to_string()).into())
     }
 }
 
@@ -373,7 +374,7 @@ impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);

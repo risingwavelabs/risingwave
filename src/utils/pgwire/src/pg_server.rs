@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::error::Error;
 use std::io;
 use std::io::ErrorKind;
 use std::result::Result;
@@ -23,24 +22,25 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
+pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
+
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
-pub trait SessionManager: Send + Sync {
-    fn connect(&self, database: &str) -> Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>>;
+pub trait SessionManager: Send + Sync + 'static {
+    type Session: Session;
+
+    fn connect(&self, database: &str) -> Result<Arc<Self::Session>, BoxedError>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(
-        self: Arc<Self>,
-        sql: &str,
-    ) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
+    async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::Result<()> {
+pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
     tracing::info!("Server Listening at {}", addr);
@@ -64,7 +64,7 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::R
     }
 }
 
-async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) {
+async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>) {
     let mut pg_proto = PgProtocol::new(socket, session_mgr);
     loop {
         let terminate = pg_proto.process().await;

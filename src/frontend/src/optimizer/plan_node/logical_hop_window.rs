@@ -21,11 +21,11 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::{
-    BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchHopWindow, ColPrunable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone)]
@@ -206,6 +206,12 @@ impl ColPrunable for LogicalHopWindow {
             ColIndexMapping::with_remaining_columns(&output_cols, self.schema().len()),
         )
         .into()
+    }
+}
+
+impl PredicatePushdown for LogicalHopWindow {
+    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 

@@ -69,12 +69,20 @@ impl Binder {
                     ExprType::RoundDigit
                 }
                 "abs" => ExprType::Abs,
+                "booleq" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::Equal
+                }
+                "boolne" => {
+                    inputs = Self::rewrite_two_bool_inputs(inputs)?;
+                    ExprType::NotEqual
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
                         112.into(),
                     )
-                    .into())
+                    .into());
                 }
             };
             Ok(FunctionCall::new(function_type, inputs)?.into())
@@ -132,6 +140,20 @@ impl Binder {
         } else {
             inputs
         }
+    }
+
+    fn rewrite_two_bool_inputs(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        if inputs.len() != 2 {
+            return Err(
+                ErrorCode::BindError("function must contain only 2 arguments".to_string()).into(),
+            );
+        }
+        let left = inputs.pop().unwrap();
+        let right = inputs.pop().unwrap();
+        Ok(vec![
+            left.cast_implicit(DataType::Boolean)?,
+            right.cast_implicit(DataType::Boolean)?,
+        ])
     }
 
     fn ensure_aggregate_allowed(&self) -> Result<()> {

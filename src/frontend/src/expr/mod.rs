@@ -198,20 +198,12 @@ impl ExprImpl {
             has: bool,
         }
         impl ExprVisitor for Has {
-            fn visit_input_ref(&mut self, _: &InputRef) {
-                self.has = true;
-            }
-
-            fn visit_agg_call(&mut self, _: &AggCall) {
-                self.has = true;
-            }
-
-            fn visit_subquery(&mut self, _: &Subquery) {
-                self.has = true;
-            }
-
-            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
-                self.has = true;
+            fn visit_expr(&mut self, expr: &ExprImpl) {
+                match expr {
+                    ExprImpl::Literal(_inner) => {}
+                    ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                    _ => self.has = true,
+                }
             }
         }
         let mut visitor = Has { has: false };

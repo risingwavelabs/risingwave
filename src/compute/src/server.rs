@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,12 +42,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
 
 fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
-    if opts.config_path.is_empty() {
-        return ComputeNodeConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    ComputeNodeConfig::init(config_path).unwrap()
+    risingwave_common::config::load_config(&opts.config_path)
 }
 
 fn get_compile_mode() -> &'static str {
@@ -85,7 +79,7 @@ pub async fn compute_node_serve(
     let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
         vec![MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         )];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
@@ -133,7 +127,7 @@ pub async fn compute_node_serve(
         client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
-        config.clone(),
+        config.streaming.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(worker_id));
 

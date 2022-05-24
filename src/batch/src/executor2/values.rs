@@ -27,6 +27,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::ExecutorBuilder;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 /// `ValuesExecutor` implements Values executor.
 pub struct ValuesExecutor2 {
@@ -110,7 +111,9 @@ impl ValuesExecutor2 {
     }
 }
 impl BoxedExecutor2Builder for ValuesExecutor2 {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let value_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Values

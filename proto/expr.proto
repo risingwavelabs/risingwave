@@ -63,10 +63,14 @@ message ExprNode {
     IS_NOT_FALSE = 304;
     IS_NULL = 305;
     IS_NOT_NULL = 306;
+    IS_DISTINCT_FROM = 307;
     // Unary operators
     NEG = 401;
     // Nested selection operators
     FIELD = 501;
+    // Array expression.
+    ARRAY = 521;
+    ARRAY_ACCESS = 522;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;

@@ -221,6 +221,10 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
 }
 
 impl<K: HashKey> ProbeTable<K> {
+    pub(super) fn build_data_empty(&self) -> bool {
+        self.build_data.is_empty()
+    }
+
     pub(super) fn has_non_equi_cond(&self) -> bool {
         self.params.has_non_equi_cond()
     }

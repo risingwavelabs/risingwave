@@ -19,4 +19,25 @@ pub mod split;
 pub mod topic;
 
 pub use enumerator::*;
+use serde::Deserialize;
 pub use split::*;
+
+pub const PULSAR_CONNECTOR: &str = "pulsar";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct PulsarProperties {
+    #[serde(rename = "pulsar.topic")]
+    pub topic: String,
+
+    #[serde(rename = "pulsar.admin.url")]
+    pub admin_url: String,
+
+    #[serde(rename = "pulsar.service.url")]
+    pub service_url: String,
+
+    #[serde(rename = "pulsar.scan.startup.mode")]
+    pub scan_startup_mode: Option<String>,
+
+    #[serde(rename = "pulsar.time.offset")]
+    pub time_offset: Option<String>,
+}

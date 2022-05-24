@@ -80,15 +80,14 @@ pub async fn compactor_serve(
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
         storage_config.data_directory.to_string(),
-        state_store_stats.clone(),
-        storage_config.block_cache_capacity,
-        storage_config.meta_cache_capacity,
+        storage_config.block_cache_capacity_mb * (1 << 20),
+        storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             storage_config,

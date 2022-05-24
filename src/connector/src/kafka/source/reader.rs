@@ -22,13 +22,11 @@ use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::RwError;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::kafka::split::KafkaSplit;
-use crate::properties::KafkaProperties;
-use crate::{ConnectorStateV2, SplitImpl};
+use crate::kafka::KafkaProperties;
+use crate::{Column, ConnectorStateV2, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -41,7 +39,11 @@ pub struct KafkaSplitReader {
 impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
 
-    async fn new(properties: KafkaProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        properties: KafkaProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -71,7 +73,7 @@ impl SplitReader for KafkaSplitReader {
         let consumer: StreamConsumer = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| RwError::from(InternalError(format!("consumer creation failed {}", e))))?;
+            .map_err(|e| anyhow!("consumer creation failed {}", e))?;
 
         if let ConnectorStateV2::Splits(splits) = state {
             log::debug!("Splits for kafka found! {:?}", splits);

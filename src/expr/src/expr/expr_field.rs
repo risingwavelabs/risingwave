@@ -23,7 +23,7 @@ use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
 
-/// `InputRefExpression` references to a column in input relation
+/// `FieldExpression` access a field from a struct.
 #[derive(Debug)]
 pub struct FieldExpression {
     return_type: DataType,
@@ -39,7 +39,7 @@ impl Expression for FieldExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let array = self.input.eval(input)?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
-            Ok(struct_array.get_children_by_index(self.index))
+            Ok(struct_array.field_at(self.index))
         } else {
             Err(internal_error("expects a struct array ref"))
         }

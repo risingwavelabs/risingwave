@@ -128,26 +128,13 @@ fn start_compaction_scheduler<S>(
 where
     S: MetaStore,
 {
-    // TODO: remove this periodic trigger after #2121
-    let request_sender = compaction_scheduler.request_sender();
-    tokio::spawn(async move {
-        let mut min_interval = tokio::time::interval(Duration::from_secs(10));
-        loop {
-            min_interval.tick().await;
-            if request_sender.send(0.into()).is_err() {
-                tracing::info!("Stop periodic compaction trigger");
-                return;
-            }
-        }
-    });
-
     // Start compaction scheduler
-    let shutdown_sender = compaction_scheduler.shutdown_sender();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let join_handle = tokio::spawn(async move {
-        compaction_scheduler.start().await;
+        compaction_scheduler.start(shutdown_rx).await;
     });
 
-    (join_handle, shutdown_sender)
+    (join_handle, shutdown_tx)
 }
 
 /// Vacuum is triggered at this rate.

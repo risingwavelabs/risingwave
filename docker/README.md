@@ -42,6 +42,12 @@ docker-compose down -v
 For RisingWave kernel hackers, we always recommend using [risedev](../src/risedevtool/README.md) to start the full cluster, instead of using docker images.
 See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
 
+# Generate docker-compose.yml
+
+```bash
+./risedev compose --single-file
+```
+
 # Deploy with RiseDev Compose
 
 If you want to deploy with docker-compose without using something like docker swarm, we can use host network mode and separately start components on different servers.
