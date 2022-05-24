@@ -256,8 +256,6 @@ script = '''
 
 set -e
 
-cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
-cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
 cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"

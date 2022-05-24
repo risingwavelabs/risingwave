@@ -232,10 +232,6 @@ risedev:
 
 compose:
   risingwave: "ghcr.io/singularity-data/risingwave:latest"
-  # compute-node: "ghcr.io/singularity-data/compute-node:latest"
-  # meta-node: "ghcr.io/singularity-data/meta-node:latest"
-  # compactor-node: "ghcr.io/singularity-data/compactor-node:latest"
-  # frontend-node: "ghcr.io/singularity-data/frontend-node:latest"
   prometheus: "prom/prometheus:latest"
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"

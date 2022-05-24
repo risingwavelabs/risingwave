@@ -19,7 +19,6 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
-use console::style;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -57,10 +56,6 @@ pub struct ComposeFile {
 #[serde(deny_unknown_fields)]
 pub struct DockerImageConfig {
     pub risingwave: String,
-    // pub compute_node: String,
-    // pub meta_node: String,
-    // pub compactor_node: String,
-    // pub frontend_node: String,
     pub prometheus: String,
     pub grafana: String,
     pub minio: String,
@@ -377,6 +372,11 @@ impl Compose for GrafanaConfig {
             &GrafanaGen.gen_datasource_yml(self)?,
         )?;
 
+        std::fs::write(
+            config_root.join("grafana-risedev-dashboard.yml"),
+            &GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
+        )?;
+
         let service = ComposeService {
             image: config.image.grafana.clone(),
             expose: vec![self.port.to_string()],
@@ -385,14 +385,11 @@ impl Compose for GrafanaConfig {
                 format!("{}:/var/lib/grafana", self.id),
                 "./grafana.ini:/etc/grafana/grafana.ini".to_string(),
                 "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml".to_string(),
+                "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml".to_string(),
+                "./risingwave-dashboard.json:/risingwave-dashboards.json".to_string()
             ],
             ..Default::default()
         };
-
-        println!(
-            "[{}] You'll need to import dashboards into Grafana by yourself in compose mode.",
-            style("WARN").yellow().bold(),
-        );
 
         Ok(service)
     }

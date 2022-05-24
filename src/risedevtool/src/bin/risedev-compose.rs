@@ -234,7 +234,7 @@ cd "$DIR""#
                 )?;
                 let public_ip = &instance.public_ip;
                 let base_folder = "~/risingwave-deploy";
-                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose stop -t 0 && docker compose down -v && docker pull {}'\"",
+                writeln!(x, "ssh -oStrictHostKeyChecking=no ubuntu@{public_ip} -T \"bash -c 'cd {base_folder} && docker compose stop -t 0 && docker compose down && docker pull {}'\"",
                     compose_config.image.risingwave
                 )?;
             }
