@@ -18,7 +18,7 @@ use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField, Expr, Value};
 
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
     pub fn bind_value(&mut self, value: Value) -> Result<Literal> {
@@ -131,6 +131,25 @@ impl Binder {
         .into();
         Ok(expr)
     }
+    
+    pub(super) fn bind_array_index(&mut self, obj: Box<Expr>, indexs: Vec<Expr>) -> Result<ExprImpl> {
+
+        let obj = self.bind_expr(*obj)?;
+        let return_type = obj.return_type();
+        let mut indexs = indexs
+            .into_iter()
+            .map(|e| self.bind_expr(e))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+        indexs.insert(0, obj);
+        
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::ArrayAccess,
+            indexs,
+            return_type
+        )
+        .into();
+        Ok(expr)
+    }
 }
 
 #[cfg(test)]
@@ -190,7 +209,7 @@ mod tests {
     fn test_array_expr() {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
-            vec![ExprImpl::literal_int(1)],
+            vec![ExprImpl::literal_int(11)],
             DataType::List {
                 datatype: Box::new(DataType::Int32),
             },
@@ -204,5 +223,28 @@ mod tests {
             }
             _ => panic!("unexpected type"),
         };
+    }
+        
+    #[test]
+    fn test_array_index_expr() {
+        let array_expr = FunctionCall::new_unchecked(
+            ExprType::Array,
+            vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
+            DataType::List {
+                datatype: Box::new(DataType::Int32),
+            },
+        )
+        .into();
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(
+            ExprType::ArrayAccess,
+            vec![array_expr, ExprImpl::literal_int(1)],
+            DataType::Int32
+        )
+        .into();
+
+        let expr_pb = expr.to_expr_proto();
+        let expr = build_from_prost(&expr_pb).unwrap();
+        assert_eq!(expr.return_type(), DataType::Int32);
     }
 }

@@ -1,0 +1,12 @@
+- sql: |
+    select s.a, s.v from (select (ARRAY[11, 22])[0] as a, upper('foo') as v) as s;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1] }
+      LogicalProject { exprs: [ArrayAccess(0:Int32), Upper('foo':Varchar)] }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
+- sql: |
+    select (ARRAY['foo', 'bar'])[0];
+  logical_plan: |
+    LogicalProject { exprs: [ArrayAccess(Array('foo':Varchar, 'bar':Varchar), 0:Int32)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }

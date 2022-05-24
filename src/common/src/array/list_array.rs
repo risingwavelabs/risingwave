@@ -231,7 +231,7 @@ impl ListArray {
         Ok(arr.into())
     }
 
-    #[cfg(test)]
+    // Used for testing purposes
     pub fn from_slices(
         null_bitmap: &[bool],
         values: Vec<Option<ArrayImpl>>,
