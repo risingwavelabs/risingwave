@@ -32,12 +32,13 @@ pub use provide_expander::*;
 pub struct ConfigExpander;
 
 impl ConfigExpander {
-    pub fn expand(config: &str) -> Result<Yaml> {
-        Self::expand_with_extra_info(config, HashMap::new())
+    pub fn expand(config: &str, section: &str) -> Result<Yaml> {
+        Self::expand_with_extra_info(config, section, HashMap::new())
     }
 
     pub fn expand_with_extra_info(
         config: &str,
+        section: &str,
         extra_info: HashMap<String, String>,
     ) -> Result<Yaml> {
         let mut config = YamlLoader::load_from_str(config)?;
@@ -59,6 +60,7 @@ impl ConfigExpander {
             .ok_or_else(|| anyhow!("expect `risedev` section"))?;
         let risedev_section: Vec<(Yaml, Yaml)> = risedev_section
             .iter()
+            .filter(|(k, _)| k == &&Yaml::String(section.to_string()))
             .map(|(k, v)| {
                 let k = k
                     .as_str()

@@ -95,6 +95,7 @@ fn main() -> Result<()> {
         (
             ConfigExpander::expand_with_extra_info(
                 &risedev_config,
+                &opts.profile,
                 ec2_instances
                     .iter()
                     .map(|i| (format!("dns-host:{}", i.id), i.dns_host.clone()))
@@ -103,7 +104,10 @@ fn main() -> Result<()> {
             Some(ec2_instances),
         )
     } else {
-        (ConfigExpander::expand(&risedev_config)?, None)
+        (
+            ConfigExpander::expand(&risedev_config, &opts.profile)?,
+            None,
+        )
     };
 
     let (steps, services) = ConfigExpander::select(&risedev_config, &opts.profile)?;
