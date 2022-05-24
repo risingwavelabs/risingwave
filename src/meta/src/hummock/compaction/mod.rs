@@ -38,6 +38,7 @@ use crate::hummock::compaction::overlap_strategy::{
 use crate::hummock::compaction::CompactionMode::{ConsistentHashMode, RangeMode};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
+use crate::manager::HashMappingManager;
 use crate::model::Transactional;
 use crate::storage;
 use crate::storage::{MetaStore, Transaction};
@@ -168,12 +169,16 @@ impl CompactStatus {
         }
     }
 
-    pub fn get_compact_task(&mut self, levels: &[Level]) -> Option<CompactTask> {
+    pub fn get_compact_task(
+        &mut self,
+        levels: &[Level],
+        hash_mapping_manager: Option<&HashMappingManager>,
+    ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let ret = match self.pick_compaction(levels) {
+        let ret = match self.pick_compaction(levels, hash_mapping_manager) {
             Some(ret) => ret,
             None => return None,
         };
@@ -219,11 +224,16 @@ impl CompactStatus {
         Some(compact_task)
     }
 
-    fn pick_compaction(&mut self, levels: &[Level]) -> Option<SearchResult> {
+    fn pick_compaction(
+        &mut self,
+        levels: &[Level],
+        hash_mapping_manager: Option<&HashMappingManager>,
+    ) -> Option<SearchResult> {
         self.compaction_selector.pick_compaction(
             self.next_compact_task_id,
             levels,
             &mut self.level_handlers,
+            hash_mapping_manager,
         )
     }
 

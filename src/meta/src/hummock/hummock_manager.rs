@@ -558,7 +558,10 @@ where
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
         let current_version = self.versioning.read().await.current_version();
-        let compact_task = compact_status.get_compact_task(&current_version.levels);
+        let compact_task = compact_status.get_compact_task(
+            &current_version.levels,
+            Some(self.env.hash_mapping_manager()),
+        );
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
