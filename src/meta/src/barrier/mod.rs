@@ -332,19 +332,25 @@ where
         let result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch.0 != INVALID_EPOCH {
-            match result {
-                Ok(_) => {
+            match &result {
+                Ok(resps) => {
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
+                    let synced_ssts = resps
+                        .iter()
+                        .flat_map(|resp| resp.sycned_sstables.clone())
+                        .collect_vec();
                     self.hummock_manager
-                        .commit_epoch(command_context.prev_epoch.0)
+                        .commit_epoch(command_context.prev_epoch.0, synced_ssts)
                         .await?;
                 }
-                Err(_) => {
-                    self.hummock_manager
-                        .abort_epoch(command_context.prev_epoch.0)
-                        .await?;
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to commit epoch {}: {:#?}",
+                        command_context.prev_epoch.0,
+                        err
+                    );
                 }
             };
         }

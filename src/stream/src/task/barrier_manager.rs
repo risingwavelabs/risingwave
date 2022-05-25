@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::error::Result;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -69,6 +70,7 @@ impl std::fmt::Debug for FinishCreateMviewNotifier {
 pub struct CollectResult {
     /// Finished Create MV DDLs in current epoch.
     pub finished_create_mviews: Vec<FinishedCreateMview>,
+    pub synced_sstables: Vec<SstableInfo>,
 }
 
 enum BarrierState {
