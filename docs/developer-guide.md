@@ -9,32 +9,36 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
 
 ## Table of contents
 
-- [Read the design docs](#read-the-design-docs)
-- [Learn about the code structure](#learn-about-the-code-structure)
-- [Set up the development environment](#set-up-the-development-environment)
-    - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
+- [Developer guide](#developer-guide)
+  - [Table of contents](#table-of-contents)
+  - [Read the design docs](#read-the-design-docs)
+  - [Learn about the code structure](#learn-about-the-code-structure)
+  - [Set up the development environment](#set-up-the-development-environment)
+  - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
     - [Configure additional components](#configure-additional-components)
     - [Start the playground with RiseDev](#start-the-playground-with-risedev)
     - [Start the playground with cargo](#start-the-playground-with-cargo)
-- [Develop the dashboard](#developing-dashboard)
-    - [Dashboard V1](#dashboard-v1)
+  - [Develop the dashboard](#develop-the-dashboard)
+    - [Dashboard v1](#dashboard-v1)
     - [Dashboard v2](#dashboard-v2)
-- [Observability components](#observability-components)
+  - [Observability components](#observability-components)
     - [Monitoring](#monitoring)
     - [Tracing](#tracing)
     - [Dashboard](#dashboard)
     - [Logging](#logging)
-- [Test your code changes](#test-your-code-changes)
+  - [Test your code changes](#test-your-code-changes)
     - [Lint](#lint)
     - [Unit tests](#unit-tests)
     - [Planner tests](#planner-tests)
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
-- [Miscallenous checks](#miscellaneous-checks)
-- [Add new files](#add-new-files)
-- [Add new dependencies](#add-new-dependencies)
-- [Check in PRs from forks](#check-in-prs-from-forks)
-- [Submit PRs](#submit-prs)
+  - [Miscellaneous checks](#miscellaneous-checks)
+  - [Update CI workflow](#update-ci-workflow)
+  - [Update Grafana dashboard](#update-grafana-dashboard)
+  - [Add new files](#add-new-files)
+  - [Add new dependencies](#add-new-dependencies)
+  - [Check in PRs from forks](#check-in-prs-from-forks)
+  - [Submit PRs](#submit-prs)
 
 
 ## Read the design docs
@@ -332,6 +336,21 @@ After that, run `apply-ci-template` to update the final workflow config.
 
 ```shell
 ./risedev apply-ci-template
+```
+
+## Update Grafana dashboard
+
+Simply use the export functionality in Grafana, disable the config "external sharing". Then,
+manually modify the JSON.
+
+All datasource should use `risedev-prometheus` as datasource. If you found something else,
+change them.
+
+```
+"datasource": {
+  "type": "prometheus",
+  "uid": "risedev-prometheus"
+},
 ```
 
 ## Add new files
