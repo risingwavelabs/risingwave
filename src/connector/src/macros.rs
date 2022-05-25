@@ -61,7 +61,7 @@ macro_rules! impl_split {
 
             pub fn update(&self, start_offset: String) -> Self {
                 match self {
-                    $( Self::$variant_name(inner) => Self::$variant_name(inner.update(start_offset)), )*
+                    $( Self::$variant_name(inner) => Self::$variant_name(inner.copy_with_offset(start_offset)), )*
                 }
             }
 

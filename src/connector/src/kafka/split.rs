@@ -55,7 +55,7 @@ impl KafkaSplit {
         }
     }
 
-    pub fn update(&self, start_offset: String) -> Self {
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
         Self::new(
             self.partition,
             Some(start_offset.as_str().parse::<i64>().unwrap()),

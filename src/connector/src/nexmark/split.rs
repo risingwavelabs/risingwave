@@ -48,7 +48,7 @@ impl NexmarkSplit {
         }
     }
 
-    pub fn update(&self, start_offset: String) -> Self {
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
         Self::new(
             self.split_index,
             self.split_num,

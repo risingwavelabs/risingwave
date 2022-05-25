@@ -40,7 +40,7 @@ impl DatagenSplit {
         Self {}
     }
 
-    pub fn update(&self, start_offset: String) -> Self {
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
         // TODO make sure fail over for generators
         log::warn!(
             "DatagenSplit is updated to {:?} but not applied",

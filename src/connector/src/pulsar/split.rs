@@ -27,7 +27,7 @@ pub struct PulsarSplit {
 }
 
 impl PulsarSplit {
-    pub fn update(&self, start_offset: String) -> Self {
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
         let start_offset = if start_offset.is_empty() {
             PulsarEnumeratorOffset::Earliest
         } else {
