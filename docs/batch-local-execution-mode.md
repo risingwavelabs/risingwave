@@ -2,8 +2,7 @@
 
 ## Background
 
-The query engine of risingwave is expected to support two kinds of query: highly concurrent point query and adhoc query.
-The characteristics of these two different kinds of queries are summarized as followings:
+The query engine of RisingWave supports two types of queries: highly concurrent point queries and ad-hoc queries. The characteristics of these two different kinds of queries are summarized as followings:
 
 |	|Point Query	|Adhoc query	|
 |---	|---	|---	|
