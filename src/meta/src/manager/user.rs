@@ -72,7 +72,7 @@ impl<S: MetaStore> UserManager<S> {
         Ok(())
     }
 
-    pub async fn get_all_users(&self) -> Result<Vec<UserInfo>> {
+    pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
         let core = self.core.lock().await;
         Ok(core.values().cloned().collect())
     }
@@ -80,9 +80,10 @@ impl<S: MetaStore> UserManager<S> {
     pub async fn create_user(&self, user: &UserInfo) -> Result<()> {
         let mut core = self.core.lock().await;
         if core.contains_key(&user.name) {
-            return Err(RwError::from(InternalError(
-                "User already exists".to_string(),
-            )));
+            return Err(RwError::from(InternalError(format!(
+                "User {} already exists",
+                user.name
+            ))));
         }
         user.insert(self.env.meta_store()).await?;
         core.insert(user.name.clone(), user.clone());
@@ -90,13 +91,36 @@ impl<S: MetaStore> UserManager<S> {
         Ok(())
     }
 
+    pub async fn get_user(&self, user_name: &UserName) -> Result<UserInfo> {
+        let core = self.core.lock().await;
+
+        core.get(user_name)
+            .cloned()
+            .ok_or_else(|| RwError::from(InternalError(format!("User {} not found", user_name))))
+    }
+
     pub async fn drop_user(&self, user_name: &UserName) -> Result<()> {
         let mut core = self.core.lock().await;
         if !core.contains_key(user_name) {
-            return Err(RwError::from(InternalError(
-                "User does not exist".to_string(),
-            )));
+            return Err(RwError::from(InternalError(format!(
+                "User {} does not exist",
+                user_name
+            ))));
         }
+        if user_name == DEFAULT_SUPPER_USER {
+            return Err(RwError::from(InternalError(format!(
+                "Cannot drop default super user {}",
+                user_name
+            ))));
+        }
+        if !core.get(user_name).unwrap().grant_privileges.is_empty() {
+            return Err(RwError::from(InternalError(format!(
+                "Cannot drop user {} with privileges",
+                user_name
+            ))));
+        }
+
+        // TODO: add more check, like whether he owns any database/schema/table/source.
         UserInfo::delete(self.env.meta_store(), user_name).await?;
         core.remove(user_name);
 
@@ -115,13 +139,14 @@ impl<S: MetaStore> UserManager<S> {
         let mut core = self.core.lock().await;
         let mut user = core
             .get(user_name)
-            .ok_or_else(|| InternalError("User does not exist".to_string()))
+            .ok_or_else(|| InternalError(format!("User {} does not exist", user_name)))
             .cloned()?;
 
         if user.is_supper {
-            return Err(RwError::from(InternalError(
-                "Cannot grant privilege to supper user".to_string(),
-            )));
+            return Err(RwError::from(InternalError(format!(
+                "Cannot grant privilege to supper user {}",
+                user_name
+            ))));
         }
 
         new_grant_privileges.iter().for_each(|new_grant_privilege| {
@@ -169,13 +194,14 @@ impl<S: MetaStore> UserManager<S> {
         let mut core = self.core.lock().await;
         let mut user = core
             .get(user_name)
-            .ok_or_else(|| InternalError("User does not exist".to_string()))
+            .ok_or_else(|| InternalError(format!("User {} does not exist", user_name)))
             .cloned()?;
 
         if user.is_supper {
-            return Err(RwError::from(InternalError(
-                "Cannot revoke privilege from supper user".to_string(),
-            )));
+            return Err(RwError::from(InternalError(format!(
+                "Cannot revoke privilege from supper user {}",
+                user_name
+            ))));
         }
 
         let mut empty_privilege = false;
@@ -240,6 +266,163 @@ impl<S: MetaStore> UserManager<S> {
         for user in users_need_update {
             core.insert(user.name.clone(), user);
         }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::user::grant_privilege::{GrantTable, Privilege};
+
+    use super::*;
+
+    fn make_test_user(name: &str) -> UserInfo {
+        UserInfo {
+            name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn make_privilege(
+        target: Target,
+        privileges: &[Privilege],
+        with_grant_option: bool,
+    ) -> GrantPrivilege {
+        GrantPrivilege {
+            target: Some(target),
+            privilege_with_opts: privileges
+                .iter()
+                .map(|&p| PrivilegeWithGrantOption {
+                    privilege: p as i32,
+                    with_grant_option,
+                })
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_user_manager() -> Result<()> {
+        let user_manager = UserManager::new(MetaSrvEnv::for_test().await).await?;
+        let test_user = "test_user";
+        user_manager.create_user(&make_test_user(test_user)).await?;
+        assert!(user_manager
+            .create_user(&make_test_user(DEFAULT_SUPPER_USER))
+            .await
+            .is_err());
+
+        let users = user_manager.list_users().await?;
+        assert_eq!(users.len(), 2);
+
+        let target = Target::GrantTable(GrantTable {
+            database_id: 0,
+            schema_id: 0,
+            table_id: 0,
+        });
+        // Grant Select/Insert without grant option.
+        user_manager
+            .grant_privilege(
+                &test_user.to_string(),
+                &[make_privilege(
+                    target.clone(),
+                    &[Privilege::Select, Privilege::Insert],
+                    false,
+                )],
+            )
+            .await?;
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges.len(), 1);
+        assert_eq!(user.grant_privileges[0].target, Some(target.clone()));
+        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 2);
+        assert!(user.grant_privileges[0]
+            .privilege_with_opts
+            .iter()
+            .all(|p| !p.with_grant_option));
+
+        // Grant Select/Insert with grant option.
+        user_manager
+            .grant_privilege(
+                &test_user.to_string(),
+                &[make_privilege(
+                    target.clone(),
+                    &[Privilege::Select, Privilege::Insert],
+                    true,
+                )],
+            )
+            .await?;
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges.len(), 1);
+        assert_eq!(user.grant_privileges[0].target, Some(target.clone()));
+        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 2);
+        assert!(user.grant_privileges[0]
+            .privilege_with_opts
+            .iter()
+            .all(|p| p.with_grant_option));
+
+        // Grant Select/Update/Delete with grant option, while Select is duplicated.
+        user_manager
+            .grant_privilege(
+                &test_user.to_string(),
+                &[make_privilege(
+                    target.clone(),
+                    &[Privilege::Select, Privilege::Update, Privilege::Delete],
+                    true,
+                )],
+            )
+            .await?;
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges.len(), 1);
+        assert_eq!(user.grant_privileges[0].target, Some(target.clone()));
+        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 4);
+        assert!(user.grant_privileges[0]
+            .privilege_with_opts
+            .iter()
+            .all(|p| p.with_grant_option));
+
+        // Revoke Select/Update/Delete/Insert with grant option.
+        user_manager
+            .revoke_privilege(
+                &test_user.to_string(),
+                &[make_privilege(
+                    target.clone(),
+                    &[
+                        Privilege::Select,
+                        Privilege::Insert,
+                        Privilege::Delete,
+                        Privilege::Update,
+                    ],
+                    false,
+                )],
+                true,
+            )
+            .await?;
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 4);
+        assert!(user.grant_privileges[0]
+            .privilege_with_opts
+            .iter()
+            .all(|p| !p.with_grant_option));
+
+        // Revoke Select/Delete/Insert.
+        user_manager
+            .revoke_privilege(
+                &test_user.to_string(),
+                &[make_privilege(
+                    target.clone(),
+                    &[Privilege::Select, Privilege::Insert, Privilege::Delete],
+                    false,
+                )],
+                false,
+            )
+            .await?;
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert_eq!(user.grant_privileges.len(), 1);
+        assert_eq!(user.grant_privileges[0].privilege_with_opts.len(), 1);
+
+        // Release all privileges with target.
+        user_manager.release_privileges(&target).await?;
+        let user = user_manager.get_user(&test_user.to_string()).await?;
+        assert!(user.grant_privileges.is_empty());
 
         Ok(())
     }
