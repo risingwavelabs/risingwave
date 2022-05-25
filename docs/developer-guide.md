@@ -1,8 +1,13 @@
 # Developer guide
 
-This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [Contributing guidelines](../CONTRIBUTING.md).
+This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](../CONTRIBUTING.md).
 
-If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose) or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/singularity-data/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+
+To report bugs, create a [GitHub issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+
+
+## Table of contents
 
 - [Read the design docs](#read-the-design-docs)
 - [Learn about the code structure](#learn-about-the-code-structure)
@@ -14,7 +19,7 @@ If you have questions, please [create a Github issue](https://github.com/singula
 - [Develop the dashboard](#developing-dashboard)
     - [Dashboard V1](#dashboard-v1)
     - [Dashboard v2](#dashboard-v2)
-- [Observability components](#observability-components))
+- [Observability components](#observability-components)
     - [Monitoring](#monitoring)
     - [Tracing](#tracing)
     - [Dashboard](#dashboard)
@@ -26,11 +31,15 @@ If you have questions, please [create a Github issue](https://github.com/singula
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
 - [Miscallenous checks](#miscellaneous-checks)
+- [Add new files](#add-new-files)
+- [Add new dependencies](#add-new-dependencies)
+- [Check in PRs from forks](#check-in-prs-from-forks)
+- [Submit PRs](#submit-prs)
 
 
 ## Read the design docs
 
-Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in the [readme.md](readme.md).
+Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in the [readme.md](readme.md) first.
 
 ## Learn about the code structure
 
@@ -103,9 +112,11 @@ There are a few components that you can configure in RiseDev.
 Use the `./risedev configure` command to start the interactive configuration mode, in which you can enable and disable components.
 
 - Hummock (MinIO + MinIO-CLI): Enable this component to persist state data.
-- Prometheus and Grafana: Enable this component to view RisingWave thoroughput and performance metrics. You can view the metrics through a built-in Grafana dashboard.
+- Prometheus and Grafana: Enable this component to view RisingWave metrics. You can view the metrics through a built-in Grafana dashboard.
 - Etcd: Enable this component if you want to persist metadata node data.
+- Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
 - Jaeger: Use this component for tracing.
+
 
 
 To manually add those components into the cluster, you will need to configure RiseDev to download them first. For example,
@@ -126,9 +137,15 @@ After that, you can modify `risedev.yml` to reconfigure the cluster. For example
     - use: frontend
     - use: prometheus
     - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
 ```
 
-Now we can run `./risedev d`. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
+Note that the Kafka service depends on the ZooKeeper service. If you want to enable the Kafka the component, enable the ZooKeeper component first.
+
+Now you can run `./risedev d`. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
@@ -174,7 +191,7 @@ Dashboard v1 is bundled by default along with meta node. When the cluster is sta
 
 ### Dashboard v2
 
-The development instructions for dashboard v2 are available [here](https://github.com/singularity-data/risingwave/blob/main/dashboard/README.md).
+The development instructions for dashboard v2 are available [here](../dashboard/README.md).
 
 ## Observability components
 
@@ -206,7 +223,7 @@ If you need to adjust log levels, change the logging filters in `utils/logging/l
 
 ## Test your code changes
 
-Before you submit a PR, we recommend that you fully test the code changes and perform necessary checks.
+Before you submit a PR, fully test the code changes and perform necessary checks.
 
 The RisingWave project enforces several checks in CI. Every time the code is modified, you need to perform the checks and ensure they pass.
 
@@ -236,11 +253,11 @@ If you want to see the coverage report, run this command:
 
 ### Planner tests
 
-RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](src/frontend/test_runner/README.md).
+RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/test_runner/README.md).
 
 ### End-to-end tests
 
-Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
+Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
 
 sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
 
@@ -275,10 +292,9 @@ Basically, CI is using the following two configurations to run the full e2e test
 
 ```shell
 ./risedev dev ci-3cn-1fe
-./risedev dev ci-1cn-1fe
 ```
 
-We may adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
 
 ## Miscellaneous checks
 
@@ -289,9 +305,68 @@ brew install shellcheck
 shellcheck <new file>
 ```
 
-For Protobufs, we rely on [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rule, please run the commands:
+For Protobufs, we rely on [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rules, please run the commands:
 
 ```shell
 buf format -d --exit-code
 buf lint
 ```
+
+## Update CI workflow
+
+We use scripts to generate GitHub Action configurations based on templates in `.github/workflow-template`.
+
+To edit the workflow files, you will need to install `yq` >= 4.16.
+
+```shell
+> brew install yq
+> yq --version
+yq (https://github.com/mikefarah/yq/) version 4.16.1
+```
+
+Then, you may edit the files in `workflow-template`.
+
+* `template.yml` + `main-override.yml` = `main.yml`
+* `template.yml` + `pr-override.yml` = `pull-request.yml`
+
+After that, run `apply-ci-template` to update the final workflow config.
+
+```shell
+./risedev apply-ci-template
+```
+
+## Add new files
+
+We use [skywalking-eyes](https://github.com/apache/skywalking-eyes) to manage license headers.
+If you added new files, please follow the installation guide and run:
+
+```shell
+license-eye -c .licenserc.yaml header fix
+```
+
+## Add new dependencies
+
+To avoid rebuild some common dependencies across different crates in workspace, use
+[cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
+are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
+after deps get updated.
+
+Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
+workspace.
+
+And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+
+## Check in PRs from forks
+
+```shell
+gh pr checkout <PR id>
+git checkout -b forks/<PR id>
+git push origin HEAD -u
+```
+
+After that, CI checks will begin on branches of RisingWave's main repo,
+and the status will be automatically updated to PRs from forks.
+
+## Submit PRs
+
+Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
