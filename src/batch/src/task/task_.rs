@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -24,8 +24,7 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tracing_futures::Instrument;
 
 use crate::executor::ExecutorBuilder;
@@ -185,7 +184,7 @@ pub struct BatchTaskExecution<C> {
     failure: Arc<Mutex<Option<RwError>>>,
 
     /// Shutdown signal sender.
-    shutdown_tx: Mutex<Option<UnboundedSender<u64>>>,
+    shutdown_tx: Mutex<Option<Sender<u64>>>,
 
     epoch: u64,
 }
@@ -235,9 +234,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .build2()?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
-        let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
-        let shutdown_rx = UnboundedReceiverStream::new(shutdown_rx);
         self.receivers
             .lock()
             .extend(receivers.into_iter().map(Some));
@@ -276,19 +274,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    pub async fn try_execute<S: Stream<Item = u64>>(
+    pub async fn try_execute(
         &self,
         root: BoxedExecutor2,
         sender: &mut ChanSenderImpl,
-        shutdown_rx: S,
+        mut shutdown_rx: Receiver<u64>,
     ) -> Result<()> {
-        let mut shutdown_stream = Box::pin(shutdown_rx);
         let mut data_chunk_stream = root.execute();
         loop {
             tokio::select! {
                 // We prioritize abort signal over normal data chunks.
                 biased;
-                _ = shutdown_stream.next() => {
+                _ = &mut shutdown_rx => {
                     sender.send(None).await?;
                     *self.state.lock() = TaskStatus::Aborted;
                     break;
@@ -311,23 +308,22 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     }
 
     pub fn abort_task(&self) -> Result<()> {
-        self.shutdown_tx
-            .lock()
-            .as_mut()
-            .ok_or_else(|| {
-                ErrorCode::InternalError(format!(
-                    "Task{:?}'s shutdown channel does not exist.",
-                    self.task_id
-                ))
-            })?
-            .send(0)
-            .map_err(|err| {
-                ErrorCode::InternalError(format!(
-                    "Task{:?};s shutdown channel send error:{:?}",
-                    self.task_id, err
-                ))
-                .into()
-            })
+        let sender = self.shutdown_tx.lock().take().ok_or_else(|| {
+            ErrorCode::InternalError(format!(
+                "Task{:?}'s shutdown channel does not exist. \
+                    Either the task has been aborted once, \
+                    or the channel has neven been initialized.",
+                self.task_id
+            ))
+        })?;
+        *self.state.lock() = TaskStatus::Aborting;
+        sender.send(0).map_err(|err| {
+            ErrorCode::InternalError(format!(
+                "Task{:?};s shutdown channel send error:{:?}",
+                self.task_id, err
+            ))
+            .into()
+        })
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput<C>> {
@@ -364,15 +360,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    pub fn check_if_aborted(&self) -> Result<()> {
-        if *self.state.lock() != TaskStatus::Aborted {
-            return Err(ErrorCode::InternalError(format!(
-                "task {:?} has not been aborted",
+    pub fn check_if_aborted(&self) -> Result<bool> {
+        match *self.state.lock() {
+            TaskStatus::Aborted => Ok(true),
+            TaskStatus::Finished => Err(ErrorCode::InternalError(format!(
+                "task {:?} has been finished",
                 self.get_task_id()
             ))
-            .into());
+            .into()),
+            _ => Ok(false),
         }
-        Ok(())
     }
 }
 

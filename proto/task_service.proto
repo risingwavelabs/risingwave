@@ -33,6 +33,7 @@ message TaskInfo {
     FINISHED = 5;
     FAILED = 6;
     ABORTED = 7;
+    ABORTING = 8;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;

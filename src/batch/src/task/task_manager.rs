@@ -14,6 +14,7 @@
 
 use std::collections::{hash_map, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
@@ -100,10 +101,27 @@ impl BatchManager {
         }
     }
 
-    pub fn check_if_task_aborted(&self, task_id: &TaskId) -> Result<()> {
+    pub fn check_if_task_aborted(&self, task_id: &TaskId) -> Result<bool> {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_aborted(),
             None => Err(TaskNotFound.into()),
+        }
+    }
+
+    pub async fn wait_until_task_aborted(&self, task_id: &TaskId) -> Result<()> {
+        loop {
+            match self.tasks.lock().get(task_id) {
+                Some(task) => {
+                    let ret = task.check_if_aborted();
+                    match ret {
+                        Ok(true) => return Ok(()),
+                        Ok(false) => {}
+                        Err(err) => return Err(err),
+                    }
+                }
+                None => return Err(TaskNotFound.into()),
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await
         }
     }
 
@@ -125,8 +143,6 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -233,9 +249,7 @@ mod tests {
             .unwrap();
         manager.abort_task(&task_id).unwrap();
         let task_id = TaskId::from(&task_id);
-        while let Err(e) = manager.check_if_task_aborted(&task_id) {
-            println!("check_if_task_aborted:{}", e);
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let res = manager.wait_until_task_aborted(&task_id).await;
+        assert_eq!(res, Ok(()));
     }
 }
