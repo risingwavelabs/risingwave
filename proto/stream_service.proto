@@ -71,7 +71,8 @@ message InjectBarrierRequest {
 message InjectBarrierResponse {
   message CreateMviewProgress {
     uint32 chain_actor_id = 1;
-    uint64 consumed_epoch = 2;
+    bool done = 2;
+    uint64 consumed_epoch = 3;
   }
   string request_id = 1;
   common.Status status = 2;
