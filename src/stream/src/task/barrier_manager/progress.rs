@@ -83,9 +83,8 @@ impl CreateMviewProgress {
     }
 
     pub fn finish(&mut self) {
-        match self.state {
-            Some(ChainState::Done) => return,
-            _ => {}
+        if let Some(ChainState::Done) = self.state {
+            return;
         }
 
         self.state = Some(ChainState::Done);
