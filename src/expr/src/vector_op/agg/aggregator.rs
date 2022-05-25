@@ -190,6 +190,7 @@ pub fn create_agg_state_unary(
         (Min, min, float64, float64, None),
         (Min, min, decimal, decimal, None),
         (Min, min, boolean, boolean, None), // TODO(#359): remove once unnecessary
+        (Min, min_struct, struct_type, struct_type, None),
         (Min, min_str, varchar, varchar, None),
         (Max, max, int16, int16, None),
         (Max, max, int32, int32, None),
@@ -198,6 +199,7 @@ pub fn create_agg_state_unary(
         (Max, max, float64, float64, None),
         (Max, max, decimal, decimal, None),
         (Max, max, boolean, boolean, None), // TODO(#359): remove once unnecessary
+        (Max, max_struct, struct_type, struct_type, None),
         (Max, max_str, varchar, varchar, None),
         // Global Agg
         (Sum, sum, int64, int64, None),
