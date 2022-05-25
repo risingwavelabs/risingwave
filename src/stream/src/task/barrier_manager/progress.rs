@@ -52,6 +52,10 @@ impl CreateMviewProgress {
         }
     }
 
+    pub fn actor_id(&self) -> u32 {
+        self.chain_actor_id
+    }
+
     pub fn update(&mut self, consumed_epoch: ConsumedEpoch) {
         assert!(self.last_consumed_epoch.unwrap_or_default() < consumed_epoch);
         self.last_consumed_epoch = Some(consumed_epoch);
@@ -67,10 +71,6 @@ impl CreateMviewProgress {
         self.barrier_manager
             .lock()
             .update_create_mview_progress(self.chain_actor_id, consumed_epoch);
-    }
-
-    pub fn actor_id(&self) -> u32 {
-        self.chain_actor_id
     }
 }
 
@@ -105,25 +105,5 @@ impl SharedContext {
             chain_actor_id,
             last_consumed_epoch: None,
         }
-    }
-}
-
-/// To notify about the finish of an DDL with the `u64` epoch.
-pub struct FinishCreateMviewNotifier {
-    pub barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
-    pub actor_id: ActorId,
-}
-
-impl FinishCreateMviewNotifier {
-    pub fn notify(self, ddl_epoch: u64) {
-        todo!()
-    }
-}
-
-impl std::fmt::Debug for FinishCreateMviewNotifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FinishCreateMviewNotifier")
-            .field("actor_id", &self.actor_id)
-            .finish_non_exhaustive()
     }
 }

@@ -20,7 +20,7 @@ use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
 use super::progress::ConsumedEpoch;
-use super::{CollectResult};
+use super::CollectResult;
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
