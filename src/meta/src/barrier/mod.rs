@@ -36,7 +36,8 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use self::notifier::{Notifier, UnfinishedNotifiers};
+use self::notifier::Notifier;
+use self::progress::CreateMviewProgressTracker;
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
@@ -48,6 +49,7 @@ use crate::stream::FragmentManagerRef;
 mod command;
 mod info;
 mod notifier;
+mod progress;
 mod recovery;
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
@@ -207,7 +209,7 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
-        let mut unfinished = UnfinishedNotifiers::default();
+        let mut tracker = CreateMviewProgressTracker::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
         if self.enable_recovery {
@@ -217,11 +219,15 @@ where
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
-            let (new_epoch, actors_to_finish, finished_create_mviews) =
+            let (new_epoch, actors_to_track, create_mview_progress) =
                 self.recovery(state.prev_epoch).await;
-            unfinished.add(new_epoch.0, actors_to_finish, vec![]);
-            for finished in finished_create_mviews {
-                unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+            tracker.add(new_epoch, actors_to_track, vec![]);
+            for progress in create_mview_progress {
+                tracker.update(
+                    progress.chain_actor_id,
+                    progress.consumed_epoch.into(),
+                    new_epoch,
+                );
             }
             state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
@@ -273,10 +279,14 @@ where
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
 
                     // Then try to finish the barrier for Create MVs.
-                    let actors_to_finish = command_ctx.actors_to_finish();
-                    unfinished.add(new_epoch.0, actors_to_finish, notifiers);
-                    for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
-                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                    let actors_to_track = command_ctx.actors_to_track();
+                    tracker.add(new_epoch, actors_to_track, notifiers);
+                    for progress in responses.into_iter().flat_map(|r| r.create_mview_progress) {
+                        tracker.update(
+                            progress.chain_actor_id,
+                            progress.consumed_epoch.into(),
+                            new_epoch,
+                        );
                     }
 
                     state.prev_epoch = new_epoch;
@@ -287,12 +297,16 @@ where
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     if self.enable_recovery {
                         // If failed, enter recovery mode.
-                        let (new_epoch, actors_to_finish, finished_create_mviews) =
+                        let (new_epoch, actors_to_track, create_mview_progress) =
                             self.recovery(new_epoch).await;
-                        unfinished = UnfinishedNotifiers::default();
-                        unfinished.add(new_epoch.0, actors_to_finish, vec![]);
-                        for finished in finished_create_mviews {
-                            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                        tracker = CreateMviewProgressTracker::default(); // Reset progress tracker
+                        tracker.add(new_epoch, actors_to_track, vec![]);
+                        for progress in create_mview_progress {
+                            tracker.update(
+                                progress.chain_actor_id,
+                                progress.consumed_epoch.into(),
+                                new_epoch,
+                            );
                         }
 
                         state.prev_epoch = new_epoch;
