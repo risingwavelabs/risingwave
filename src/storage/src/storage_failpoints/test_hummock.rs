@@ -76,9 +76,7 @@ async fn test_failpoint_state_store_read_upload() {
     meta_client
         .commit_epoch(
             1,
-            hummock_storage
-                .local_version_manager()
-                .get_uncommitted_ssts(1),
+            hummock_storage.local_version_manager().get_remote_ssts(1),
         )
         .await
         .unwrap();
@@ -105,9 +103,7 @@ async fn test_failpoint_state_store_read_upload() {
     meta_client
         .commit_epoch(
             4,
-            hummock_storage
-                .local_version_manager()
-                .get_uncommitted_ssts(4),
+            hummock_storage.local_version_manager().get_remote_ssts(4),
         )
         .await
         .unwrap();

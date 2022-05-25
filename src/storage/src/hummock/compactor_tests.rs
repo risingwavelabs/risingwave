@@ -94,10 +94,7 @@ mod tests {
                 .unwrap();
             storage.sync(Some(epoch)).await.unwrap();
             hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
-                )
+                .commit_epoch(epoch, storage.local_version_manager.get_remote_ssts(epoch))
                 .await
                 .unwrap();
         }

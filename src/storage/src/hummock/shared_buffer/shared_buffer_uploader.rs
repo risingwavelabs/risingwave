@@ -25,27 +25,37 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
-use super::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::shared_buffer::{OrderIndex, OrderIndexedUncommittedData, UncommittedData};
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-pub(crate) type UploadTaskId = u64;
-pub(crate) type UploadTaskPayload = Vec<SharedBufferBatch>;
+pub(crate) type UploadTaskPayload = OrderIndexedUncommittedData;
 pub(crate) type UploadTaskResult =
-    BTreeMap<(HummockEpoch, UploadTaskId), HummockResult<Vec<SstableInfo>>>;
+    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<SstableInfo>>>;
 
 #[derive(Debug)]
 pub struct UploadTask {
-    pub(crate) id: UploadTaskId,
+    pub(crate) order_index: OrderIndex,
     pub(crate) epoch: HummockEpoch,
     pub(crate) payload: UploadTaskPayload,
+    pub(crate) is_local: bool,
 }
 
 impl UploadTask {
-    pub fn new(id: UploadTaskId, epoch: HummockEpoch, payload: UploadTaskPayload) -> Self {
-        Self { id, epoch, payload }
+    pub fn new(
+        order_index: OrderIndex,
+        epoch: HummockEpoch,
+        payload: UploadTaskPayload,
+        is_local: bool,
+    ) -> Self {
+        Self {
+            order_index,
+            epoch,
+            payload,
+            is_local,
+        }
     }
 }
 
@@ -109,31 +119,33 @@ impl SharedBufferUploader {
             let mut task_results = BTreeMap::new();
             let mut failed = false;
             for UploadTask {
-                id: task_id,
+                order_index,
                 epoch,
                 payload,
+                is_local,
             } in item.tasks
             {
                 // If a previous task failed, this task will also fail
-                if failed {
-                    task_results.insert(
-                        (epoch, task_id),
-                        Err(HummockError::shared_buffer_error(
-                            "failed due to previous failure",
-                        )),
-                    );
+                let result = if failed {
+                    Err(HummockError::shared_buffer_error(
+                        "failed due to previous failure",
+                    ))
                 } else {
-                    match self.flush(epoch, false, &payload).await {
-                        Ok(tables) => {
-                            task_results.insert((epoch, task_id), Ok(tables));
-                        }
+                    match self.flush(epoch, is_local, &payload).await {
+                        Ok(tables) => Ok(tables),
                         Err(e) => {
                             error!("Failed to flush shared buffer: {:?}", e);
                             failed = true;
-                            task_results.insert((epoch, task_id), Err(e));
+                            Err(e)
                         }
                     }
                 };
+                assert!(
+                    task_results.insert((epoch, order_index), result).is_none(),
+                    "Upload task duplicate. epoch: {:?}, order_index: {:?}",
+                    epoch,
+                    order_index,
+                );
             }
             item.notifier
                 .send(task_results)
@@ -146,9 +158,9 @@ impl SharedBufferUploader {
         &mut self,
         epoch: HummockEpoch,
         is_local: bool,
-        batches: &Vec<SharedBufferBatch>,
+        payload: &UploadTaskPayload,
     ) -> HummockResult<Vec<SstableInfo>> {
-        if batches.is_empty() {
+        if payload.is_empty() {
             return Ok(vec![]);
         }
 
@@ -173,12 +185,7 @@ impl SharedBufferUploader {
             },
         };
 
-        let tables = Compactor::compact_shared_buffer(
-            Arc::new(mem_compactor_ctx),
-            batches,
-            self.stats.clone(),
-        )
-        .await?;
+        let tables = Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), payload).await?;
 
         let uploaded_sst_info: Vec<SstableInfo> = tables
             .into_iter()
@@ -195,8 +202,12 @@ impl SharedBufferUploader {
             .collect();
 
         if let Some(detector) = &self.write_conflict_detector {
-            for batch in batches {
-                detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
+            for data_list in payload.values() {
+                for data in data_list {
+                    if let UncommittedData::Batch(batch) = data {
+                        detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);
+                    }
+                }
             }
         }
 

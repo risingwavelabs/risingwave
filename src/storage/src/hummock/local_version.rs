@@ -18,17 +18,16 @@ use std::sync::Arc;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
-use risingwave_pb::hummock::{HummockVersion, Level, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-
-pub type UncommittedSsts = BTreeMap<HummockEpoch, Vec<SstableInfo>>;
+use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::shared_buffer::{OrderIndex, UploadTaskType};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
-    uncommitted_ssts: UncommittedSsts,
     pinned_version: Arc<PinnedVersion>,
 }
 
@@ -39,7 +38,6 @@ impl LocalVersion {
     ) -> Self {
         Self {
             shared_buffer: BTreeMap::default(),
-            uncommitted_ssts: UncommittedSsts::default(),
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
         }
     }
@@ -65,21 +63,11 @@ impl LocalVersion {
             .clone()
     }
 
-    pub fn add_uncommitted_ssts(&mut self, epoch: HummockEpoch, ssts: Vec<SstableInfo>) {
-        self.uncommitted_ssts.entry(epoch).or_default().extend(ssts);
-    }
-
     pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
-            self.uncommitted_ssts = self
-                .uncommitted_ssts
-                .split_off(&(new_pinned_version.max_committed_epoch + 1));
-            let mut buffer_to_release = self
-                .shared_buffer
-                .split_off(&(new_pinned_version.max_committed_epoch + 1));
-            // buffer_to_release = older part, self.shared_buffer = new part
-            std::mem::swap(&mut buffer_to_release, &mut self.shared_buffer);
+            self.shared_buffer
+                .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
         }
 
         // update pinned version
@@ -101,21 +89,18 @@ impl LocalVersion {
             } else {
                 Vec::new()
             },
-            uncommitted_ssts: if read_epoch >= smallest_uncommitted_epoch {
-                self.uncommitted_ssts
-                    .range(smallest_uncommitted_epoch..=read_epoch)
-                    .rev() // Important: order by epoch descendingly
-                    .flat_map(|s| s.1.clone())
-                    .collect()
-            } else {
-                Vec::new()
-            },
             pinned_version: self.pinned_version.clone(),
         }
     }
 
-    pub fn get_uncommitted_ssts(&self) -> UncommittedSsts {
-        self.uncommitted_ssts.clone()
+    pub fn new_upload_task(
+        &self,
+        epoch: HummockEpoch,
+        task_type: UploadTaskType,
+    ) -> Option<(OrderIndex, UploadTaskPayload)> {
+        self.shared_buffer
+            .get(&epoch)
+            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(task_type))
     }
 }
 
@@ -166,6 +151,5 @@ impl PinnedVersion {
 
 pub struct ReadVersion {
     pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
-    pub uncommitted_ssts: Vec<SstableInfo>,
     pub pinned_version: Arc<PinnedVersion>,
 }
