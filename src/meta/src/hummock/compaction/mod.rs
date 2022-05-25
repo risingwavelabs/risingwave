@@ -198,17 +198,17 @@ impl CompactStatus {
             metrics: Some(CompactMetrics {
                 read_level_n: Some(TableSetStatistics {
                     level_idx: select_level_id,
-                    size_gb: 0f64,
+                    size_kb: 0,
                     cnt: 0,
                 }),
                 read_level_nplus1: Some(TableSetStatistics {
                     level_idx: target_level_id,
-                    size_gb: 0f64,
+                    size_kb: 0,
                     cnt: 0,
                 }),
                 write: Some(TableSetStatistics {
                     level_idx: target_level_id,
-                    size_gb: 0f64,
+                    size_kb: 0,
                     cnt: 0,
                 }),
             }),

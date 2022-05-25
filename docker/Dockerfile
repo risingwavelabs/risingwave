@@ -1,4 +1,4 @@
-FROM ubuntu:20.04 as builder
+FROM ubuntu:22.04 as builder
 
 ENV LANG en_US.utf8
 
@@ -12,10 +12,7 @@ RUN mkdir -p /risingwave
 
 WORKDIR /risingwave
 
-COPY proto proto
-COPY src src
-COPY rust-toolchain rust-toolchain
-COPY Cargo.toml Cargo.toml
+COPY ./ /risingwave
 
 ENV PATH /root/.cargo/bin/:$PATH
 
