@@ -223,7 +223,7 @@ where
                     let (original_indices, data) = compress_data(&hash_mapping);
                     batch_query.hash_mapping = Some(ParallelUnitMapping {
                         table_id: Default::default(),
-                        map_seq: 0,
+                        map_hsh: 0,
                         original_indices,
                         data,
                     });

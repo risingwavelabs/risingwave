@@ -342,8 +342,8 @@ impl Compactor {
                             tar.get_table_id()
                         })
                     {
-                        vnode_bitmap.map_seq =
-                            self.compact_task.get_vnode_mappings()[pos].get_map_seq();
+                        vnode_bitmap.map_hsh =
+                            self.compact_task.get_vnode_mappings()[pos].get_map_hsh();
                     }
                 }
                 let sst_info = SstableInfo {

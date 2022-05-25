@@ -23,7 +23,7 @@ message SstableIdInfo {
 message VNodeBitmap {
   uint32 table_id = 1;
   uint32 maplen = 2;
-  uint64 map_seq = 3;
+  uint64 map_hsh = 3;
   bytes bitmap = 4;
 }
 

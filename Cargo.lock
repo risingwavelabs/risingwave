@@ -3921,6 +3921,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "twox-hash",
  "uuid 1.0.0",
  "workspace-hack",
 ]

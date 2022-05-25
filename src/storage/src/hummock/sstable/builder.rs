@@ -194,7 +194,7 @@ impl SSTableBuilder {
                 .iter()
                 .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
                     table_id: *table_id,
-                    map_seq: 0,
+                    map_hsh: 0,
                     maplen: VNODE_BITMAP_LEN as u32,
                     bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
                 })

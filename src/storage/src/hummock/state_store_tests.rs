@@ -208,7 +208,7 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                map_seq: 0,
+                map_hsh: 0,
                 maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),
@@ -223,7 +223,7 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 0,
-                map_seq: 0,
+                map_hsh: 0,
                 maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [0; VNODE_BITMAP_LEN].to_vec(),
             }),
@@ -238,7 +238,7 @@ async fn test_vnode_filter() {
             epoch,
             Some(VNodeBitmap {
                 table_id: 5,
-                map_seq: 0,
+                map_hsh: 0,
                 maplen: VNODE_BITMAP_LEN as u32,
                 bitmap: [1; VNODE_BITMAP_LEN].to_vec(),
             }),

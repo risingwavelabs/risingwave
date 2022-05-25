@@ -14,8 +14,8 @@
 
 #![allow(dead_code)]
 
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap};
+use std::hash::Hasher;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -77,7 +77,7 @@ impl HashMappingManager {
         if let Some(fragment_id) = fragment_id {
             core.hash_mapping_infos
                 .get(fragment_id)
-                .map(|info| (info.map_seq, info.vnode_mapping.clone()))
+                .map(|info| (info.map_hsh, info.vnode_mapping.clone()))
         } else {
             None
         }
@@ -100,10 +100,10 @@ impl HashMappingManager {
                 .state_table_fragment_mapping
                 .get(&vnode_bitmap.get_table_id())
             {
-                if let Some(HashMappingInfo { map_seq, .. }) =
+                if let Some(HashMappingInfo { map_hsh, .. }) =
                     core.hash_mapping_infos.get(fragment_id)
                 {
-                    if *map_seq != vnode_bitmap.get_map_seq() {
+                    if *map_hsh != vnode_bitmap.get_map_hsh() {
                         return true;
                     }
                 }
@@ -124,7 +124,7 @@ impl HashMappingManager {
 #[derive(Clone)]
 struct HashMappingInfo {
     /// Sequence number of mapping in this fragment
-    map_seq: u64,
+    map_hsh: u64,
     /// Hash mapping from virtual node to parallel unit.
     vnode_mapping: Vec<ParallelUnitId>,
     /// Mapping from parallel unit to virtual node.
@@ -188,27 +188,20 @@ impl HashMappingManagerCore {
                 .push(*parallel_unit_id);
         });
 
-        let entry = self.hash_mapping_infos.entry(fragment_id);
-        let current_seq = match &entry {
-            Occupied(ocp) => ocp.get().map_seq,
-            Vacant(_) => 0,
+        let map_hsh = {
+            let mut hasher = twox_hash::XxHash64::with_seed(0);
+            for data in &vnode_mapping {
+                hasher.write_u32(*data);
+            }
+            hasher.finish() as u64
         };
         let mapping_info = HashMappingInfo {
-            map_seq: current_seq + 1,
+            map_hsh,
             vnode_mapping: vnode_mapping.clone(),
             owner_mapping,
             load_balancer,
         };
-        match entry {
-            Occupied(mut ocp) => {
-                ocp.insert(mapping_info);
-                0
-            }
-            Vacant(vcn) => {
-                vcn.insert(mapping_info);
-                0
-            }
-        };
+        self.hash_mapping_infos.insert(fragment_id, mapping_info);
 
         vnode_mapping
     }
@@ -237,27 +230,20 @@ impl HashMappingManagerCore {
                 .push(*parallel_unit);
         });
 
-        let entry = self.hash_mapping_infos.entry(fragment_id);
-        let current_seq = match &entry {
-            Occupied(ocp) => ocp.get().map_seq,
-            Vacant(_) => 0,
+        let map_hsh = {
+            let mut hasher = twox_hash::XxHash64::with_seed(0);
+            for data in &vnode_mapping {
+                hasher.write_u32(*data);
+            }
+            hasher.finish() as u64
         };
         let mapping_info = HashMappingInfo {
-            map_seq: current_seq + 1,
+            map_hsh,
             vnode_mapping,
             owner_mapping,
             load_balancer,
         };
-        match entry {
-            Occupied(mut ocp) => {
-                ocp.insert(mapping_info);
-                0
-            }
-            Vacant(vcn) => {
-                vcn.insert(mapping_info);
-                0
-            }
-        };
+        self.hash_mapping_infos.insert(fragment_id, mapping_info);
     }
 }
 
@@ -355,7 +341,7 @@ mod tests {
         let hash_mapping_manager = HashMappingManager::new();
         hash_mapping_manager.set_fragment_hash_mapping(fragment_id, old_vnode_mapping.clone());
         let HashMappingInfo {
-            map_seq: _,
+            map_hsh: _,
             vnode_mapping,
             owner_mapping,
             load_balancer,

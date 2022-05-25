@@ -64,7 +64,7 @@ message Cluster {
 // Vnode mapping for stream fragments / relational state tables. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
   uint32 table_id = 1;
-  uint64 map_seq = 2;
+  uint64 map_hsh = 2;
   repeated uint64 original_indices = 3;
   repeated uint32 data = 4;
 }
