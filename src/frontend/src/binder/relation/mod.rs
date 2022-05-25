@@ -160,7 +160,6 @@ impl Binder {
                     let (schema_name, table_name) = Self::resolve_table_name(name)?;
                     if let Some(bound_query) = self.cte_to_relation.get(&table_name) {
                         let (query, alias) = bound_query.clone();
-                        let sub_query_id = self.next_subquery_id();
                         self.bind_context(
                             query
                                 .body
@@ -168,7 +167,7 @@ impl Binder {
                                 .fields
                                 .iter()
                                 .map(|f| (false, f.clone())),
-                            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+                            table_name,
                             Some(alias),
                         )?;
                         Ok(Relation::Subquery(Box::new(BoundSubquery { query })))

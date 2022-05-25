@@ -27,7 +27,7 @@ impl Binder {
     /// [`BindContext`](crate::binder::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.
-    pub fn bind_subquery_relation(
+    pub(super) fn bind_subquery_relation(
         &mut self,
         query: Query,
         alias: Option<TableAlias>,
