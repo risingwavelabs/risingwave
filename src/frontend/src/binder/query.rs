@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
-use super::Relation;
+
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::{Direction, FieldOrder};
@@ -146,7 +146,7 @@ impl Binder {
 
     fn bind_with(&mut self, with: With) -> Result<()> {
         if with.recursive {
-            return Err(ErrorCode::NotImplemented("recursive cte".into(), None.into()).into());
+            Err(ErrorCode::NotImplemented("recursive cte".into(), None.into()).into())
         } else {
             for cte_table in with.cte_tables {
                 let Cte { alias, query, .. } = cte_table;
