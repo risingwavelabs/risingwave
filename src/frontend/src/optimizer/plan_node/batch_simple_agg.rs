@@ -87,7 +87,10 @@ impl ToDistributedBatch for BatchSimpleAgg {
                     .logical
                     .agg_calls()
                     .iter()
-                    .map(|agg_call| agg_call.partial_to_total_agg_call())
+                    .enumerate()
+                    .map(|(partial_output_idx, agg_call)| {
+                        agg_call.partial_to_total_agg_call(partial_output_idx)
+                    })
                     .collect();
                 let total_agg_logical = LogicalAgg::new(
                     total_agg_types,

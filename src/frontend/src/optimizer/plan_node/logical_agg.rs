@@ -67,7 +67,7 @@ impl PlanAggCall {
         }
     }
 
-    pub fn partial_to_total_agg_call(&self) -> PlanAggCall {
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         match &self.agg_kind {
             AggKind::Min
             | AggKind::Max
@@ -75,13 +75,13 @@ impl PlanAggCall {
             | AggKind::StringAgg
             | AggKind::SingleValue => PlanAggCall {
                 agg_kind: self.agg_kind.clone(),
-                // reuse inputs refs from original plan agg call
+                inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
                 ..self.clone()
             },
 
-            AggKind::Sum | AggKind::Count | AggKind::RowCount => PlanAggCall {
+            AggKind::Count | AggKind::RowCount | AggKind::Sum => PlanAggCall {
                 agg_kind: AggKind::Sum,
-                inputs: vec![InputRef::new(0, DataType::Int64)],
+                inputs: vec![InputRef::new(partial_output_idx, DataType::Int64)],
                 ..self.clone()
             },
         }
