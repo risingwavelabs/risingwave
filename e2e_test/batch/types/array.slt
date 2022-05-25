@@ -52,7 +52,7 @@ select * from t where Array[1,v1*2] > Array[1,2];
 3
 
 query I
-select * from t where Array[1,v1*2] >= Array[1,6];
+select * from t where Array[1,v1*2] >= Array[1,2];
 ----
 1
 2
