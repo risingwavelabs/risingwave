@@ -101,6 +101,7 @@ impl ManagedBarrierState {
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
                     chain_actor_id: actor,
+                    done: matches!(state, ChainState::Done),
                     consumed_epoch: match state {
                         ChainState::ConsumingUpstream(consumed_epoch) => {
                             assert!(consumed_epoch <= epoch);

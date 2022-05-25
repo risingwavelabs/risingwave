@@ -17,12 +17,14 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
 
 use super::notifier::Notifier;
 use crate::model::ActorId;
 
 type CreateMviewEpoch = Epoch;
 
+#[derive(Clone, Copy)]
 enum ChainState {
     ConsumingSnapshot,
     ConsumingUpstream(Epoch),
@@ -51,20 +53,16 @@ impl Progress {
         }
     }
 
-    /// Update the progress of `actor` according to the given epochs.
-    fn update(&mut self, actor: ActorId, consumed_epoch: Epoch, current_epoch: Epoch) {
+    /// Update the progress of `actor`.
+    fn update(&mut self, actor: ActorId, new_state: ChainState) {
         match self.states.get_mut(&actor).unwrap() {
             state @ (ChainState::ConsumingSnapshot | ChainState::ConsumingUpstream(_)) => {
-                if consumed_epoch == current_epoch {
-                    *state = ChainState::Done;
+                if matches!(new_state, ChainState::Done) {
                     self.done_count += 1;
-                } else {
-                    *state = ChainState::ConsumingUpstream(consumed_epoch);
                 }
+                *state = new_state;
             }
-
-            // Ignore `Done` after `Done`
-            ChainState::Done => assert_eq!(consumed_epoch, current_epoch),
+            ChainState::Done => unreachable!(),
         }
     }
 
@@ -119,18 +117,24 @@ impl CreateMviewProgressTracker {
         assert!(old.is_none());
     }
 
-    /// Update the progress of `actor` according to the given epochs. If all actors in this MV have
+    /// Update the progress of `actor` according to the Prost struct. If all actors in this MV have
     /// finished, `notify_finished` will be called on registered notifiers.
-    pub fn update(&mut self, actor: ActorId, consumed_epoch: Epoch, current_epoch: Epoch) {
+    pub fn update(&mut self, progress: CreateMviewProgress) {
+        let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
-            tracing::warn!("no tracked progress for actor {}, is it already finished?", actor);
-            return;
+            panic!("no tracked progress for actor {}, is it already finished?", actor);
+        };
+
+        let new_state = if progress.done {
+            ChainState::Done
+        } else {
+            ChainState::ConsumingUpstream(progress.consumed_epoch.into())
         };
 
         match self.progress_map.entry(epoch) {
             Entry::Occupied(mut o) => {
                 let progress = &mut o.get_mut().0;
-                progress.update(actor, consumed_epoch, current_epoch);
+                progress.update(actor, new_state);
 
                 if progress.is_done() {
                     tracing::debug!("all actors done for creating mview with epoch {}!", epoch);
