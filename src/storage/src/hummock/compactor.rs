@@ -223,11 +223,7 @@ impl Compactor {
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
-        tracing::info!(
-            "Ready to handle compaction task: \n{}",
-            compact_task_to_string(&compact_task)
-        );
-        let start_time = Instant::now();
+        tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
         let mut compaction_read_bytes = compact_task.input_ssts[0]
             .table_infos
             .iter()
@@ -271,7 +267,7 @@ impl Compactor {
                 left: vec![],
                 right: vec![],
                 inf: false,
-            }]
+            }];
         };
 
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -345,12 +341,12 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         compactor.compact_done(output_ssts, compact_success).await;
-        tracing::debug!(
-            "execute compaction task {} cost {:?}",
-            compact_task.task_id,
-            start_time.elapsed()
+        let cost_time = timer.stop_and_record() * 1000.0;
+        tracing::info!(
+            "Finished compaction task in {:?}ms: \n{}",
+            cost_time,
+            compact_task_to_string(&compactor.compact_task)
         );
-        timer.observe_duration();
         compact_success
     }
 
