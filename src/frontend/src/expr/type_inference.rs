@@ -213,7 +213,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         E::IsDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct, T::List]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
