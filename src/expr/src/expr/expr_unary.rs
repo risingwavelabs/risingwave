@@ -198,8 +198,8 @@ macro_rules! gen_unary_atm_expr  {
             { int16, int16, $general_func },
             { int32, int32, $general_func },
             { int64, int64, $general_func },
-            // { float32, float32, $general_func },
-            // { float64, float64, $general_func },
+            { float32, float32, $general_func },
+            { float64, float64, $general_func },
             $(
                 { $input, $rt, $func },
             )*
@@ -312,10 +312,12 @@ pub fn new_unary_expr(
         (ProstType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         (ProstType::BitwiseNot, _, _) => {
-            gen_unary_atm_expr! { "Bitwisenot", child_expr, return_type, general_bitnot,
-                {
+            gen_unary_impl!{ 
+                [ "Bitwisenot", child_expr, return_type],
+                { int16, int16, general_bitnot },
+                { int32, int32, general_bitnot },
+                { int64, int64, general_bitnot },
 
-                }
             }
         }
         (expr, ret, child) => {

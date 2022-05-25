@@ -137,6 +137,18 @@ fn test_arithmetic() {
 }
 
 #[test]
+fn test_bitwise() {
+    assert!(
+        general_shl::<i32, i32, i64>(1, 0).unwrap(),
+        1);
+    
+    assert!(
+        general_shl::<i32, i32, i64>(1, 0).unwrap(),
+        1);
+
+}
+
+#[test]
 fn test_comparison() {
     assert!(general_eq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
     assert!(general_eq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());

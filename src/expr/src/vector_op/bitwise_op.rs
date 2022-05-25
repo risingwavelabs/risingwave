@@ -74,7 +74,7 @@ where
     atm(l, r)
 }
 
-// TODO Select an error message for bitand
+
 #[inline(always)]
 pub fn general_bitand<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
