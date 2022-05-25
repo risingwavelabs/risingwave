@@ -35,16 +35,10 @@ use uuid::Uuid;
 use StageEvent::Failed;
 
 use crate::optimizer::plan_node::PlanNodeType;
-use crate::scheduler::execution::stage::StageState::Pending;
-use crate::scheduler::execution::QueryMessage;
-use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, QueryStageRef, StageId};
+use crate::scheduler::distributed::stage::StageState::Pending;
+use crate::scheduler::distributed::QueryMessage;
+use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, QueryStageRef, StageId, TaskId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-
-// Root stage always has only one task.
-pub const ROOT_TASK_ID: u32 = 0;
-// Root task has only one output.
-pub const ROOT_TASK_OUTPUT_ID: u32 = 0;
-pub(crate) type TaskId = u32;
 
 enum StageState {
     Pending,

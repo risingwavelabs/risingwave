@@ -23,35 +23,60 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 
 use super::iterator::{
-    BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
-    BoxedForwardHummockIterator, ConcatIterator, DirectedUserIterator, MergeIterator, UserIterator,
+    BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
 use super::utils::{can_concat, search_sst_idx, validate_epoch, validate_table_key_range};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
-use crate::hummock::iterator::{BoxedBackwardHummockIterator, ReadOptions};
+use crate::hummock::iterator::{
+    Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
+    HummockIteratorDirection, ReadOptions,
+};
 use crate::hummock::utils::prune_ssts;
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
+trait HummockIteratorType {
+    type Direction: HummockIteratorDirection;
+    type SstableIteratorType: SSTableIteratorType<Direction = Self::Direction>;
+    type UserIteratorBuilder: DirectedUserIteratorBuilder<Direction = Self::Direction>;
+
+    fn direction() -> DirectionEnum {
+        Self::Direction::direction()
+    }
+}
+
+struct ForwardIter;
+struct BackwardIter;
+
+impl HummockIteratorType for ForwardIter {
+    type Direction = Forward;
+    type SstableIteratorType = SSTableIterator;
+    type UserIteratorBuilder = UserIterator;
+}
+
+impl HummockIteratorType for BackwardIter {
+    type Direction = Backward;
+    type SstableIteratorType = BackwardSSTableIterator;
+    type UserIteratorBuilder = BackwardUserIterator;
+}
+
 impl HummockStorage {
-    async fn iter_inner<R, B>(
+    async fn iter_inner<R, B, T>(
         &self,
         key_range: R,
         epoch: u64,
-        backward: bool,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
+        T: HummockIteratorType,
     {
         let read_options = Arc::new(ReadOptions::default());
-        // if `backward` is true, use `overlapped_backward_sstable_iters`, otherwise use
-        // `overlapped_forward_sstable_iters`
-        let mut overlapped_forward_iters = vec![];
-        let mut overlapped_backward_iters = vec![];
+        let mut overlapped_iters = vec![];
+        let backward = T::direction() == DirectionEnum::Backward;
 
         let (uncommitted_ssts, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
@@ -64,14 +89,8 @@ impl HummockStorage {
             // Generate shared buffer iterators
             for shared_buffer in read_version.shared_buffer {
                 for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
-                    if backward {
-                        overlapped_backward_iters
-                            .push(Box::new(batch.into_backward_iter())
-                                as BoxedBackwardHummockIterator)
-                    } else {
-                        overlapped_forward_iters
-                        .push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator)
-                    }
+                    overlapped_iters
+                        .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
                 }
             }
 
@@ -87,19 +106,11 @@ impl HummockStorage {
                 .sstable_store
                 .sstable(table_info.id, &mut stats)
                 .await?;
-            if backward {
-                overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::create(
-                    table,
-                    self.sstable_store(),
-                    read_options.clone(),
-                )) as BoxedBackwardHummockIterator);
-            } else {
-                overlapped_forward_iters.push(Box::new(SSTableIterator::create(
-                    table,
-                    self.sstable_store(),
-                    read_options.clone(),
-                )) as BoxedForwardHummockIterator);
-            };
+            overlapped_iters.push(Box::new(T::SstableIteratorType::create(
+                table,
+                self.sstable_store(),
+                read_options.clone(),
+            )));
         }
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
@@ -122,86 +133,62 @@ impl HummockStorage {
                 assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
                 let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                if backward {
-                    overlapped_backward_iters.push(Box::new(BackwardConcatIterator::new(
-                        matched_table_infos
-                            .iter()
-                            .rev()
-                            .map(|&info| info.clone())
-                            .collect(),
-                        self.sstable_store(),
-                        read_options.clone(),
-                    ))
-                        as BoxedBackwardHummockIterator);
+                let tables = if backward {
+                    matched_table_infos
+                        .iter()
+                        .rev()
+                        .map(|&info| info.clone())
+                        .collect_vec()
                 } else {
-                    overlapped_forward_iters.push(Box::new(ConcatIterator::new(
-                        matched_table_infos
-                            .iter()
-                            .map(|&info| info.clone())
-                            .collect_vec(),
-                        self.sstable_store(),
-                        read_options.clone(),
-                    ))
-                        as BoxedForwardHummockIterator);
+                    matched_table_infos
+                        .iter()
+                        .map(|&info| info.clone())
+                        .collect_vec()
                 };
+
+                overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
+                    tables,
+                    self.sstable_store(),
+                    read_options.clone(),
+                )) as BoxedHummockIterator<T::Direction>);
             } else {
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
-                    if backward {
-                        overlapped_backward_iters.push(Box::new(BackwardSSTableIterator::new(
-                            table,
-                            self.sstable_store(),
-                        ))
-                            as BoxedBackwardHummockIterator);
-                    } else {
-                        overlapped_forward_iters.push(Box::new(SSTableIterator::new(
-                            table,
-                            self.sstable_store(),
-                            read_options.clone(),
-                        ))
-                            as BoxedForwardHummockIterator);
-                    };
+                    overlapped_iters.push(Box::new(T::SstableIteratorType::create(
+                        table,
+                        self.sstable_store(),
+                        read_options.clone(),
+                    )));
                 }
             }
         }
 
-        assert!(
-            (backward && overlapped_forward_iters.is_empty())
-                || (!backward && overlapped_backward_iters.is_empty())
-        );
-
         self.stats
             .iter_merge_sstable_counts
-            .observe((overlapped_forward_iters.len() + overlapped_backward_iters.len()) as f64);
+            .observe(overlapped_iters.len() as f64);
 
-        let mut user_iterator = if backward {
-            let backward_merge_iterator =
-                BackwardMergeIterator::new(overlapped_backward_iters, self.stats.clone());
-            DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
-                backward_merge_iterator,
-                (
-                    key_range.end_bound().map(|b| b.as_ref().to_owned()),
-                    key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                ),
-                epoch,
-                Some(pinned_version),
-            ))
+        let key_range = if backward {
+            (
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            )
         } else {
-            let merge_iterator = MergeIterator::new(overlapped_forward_iters, self.stats.clone());
-
-            DirectedUserIterator::Forward(UserIterator::new(
-                merge_iterator,
-                (
-                    key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                    key_range.end_bound().map(|b| b.as_ref().to_owned()),
-                ),
-                epoch,
-                Some(pinned_version),
-            ))
+            (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            )
         };
+
+        let mut user_iterator = T::UserIteratorBuilder::create(
+            overlapped_iters,
+            self.stats.clone(),
+            key_range,
+            epoch,
+            Some(pinned_version),
+        );
 
         user_iterator.rewind().await?;
         Ok(HummockStateStoreIter::new(user_iterator))
@@ -405,7 +392,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner(key_range, epoch, false)
+        self.iter_inner::<R, B, ForwardIter>(key_range, epoch)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -415,7 +402,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner(key_range, epoch, true)
+        self.iter_inner::<R, B, BackwardIter>(key_range, epoch)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {

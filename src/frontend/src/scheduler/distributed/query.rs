@@ -26,11 +26,11 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use super::stage::StageEvent;
-use crate::scheduler::execution::query::QueryMessage::Stage;
-use crate::scheduler::execution::query::QueryState::{Failed, Pending};
-use crate::scheduler::execution::StageEvent::Scheduled;
-use crate::scheduler::execution::{StageExecution, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::plan_fragmenter::{Query, StageId};
+use crate::scheduler::distributed::query::QueryMessage::Stage;
+use crate::scheduler::distributed::query::QueryState::{Failed, Pending};
+use crate::scheduler::distributed::StageEvent::Scheduled;
+use crate::scheduler::distributed::StageExecution;
+use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{HummockSnapshotManagerRef, QueryResultFetcher};
 
@@ -373,7 +373,7 @@ mod tests {
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
-    use crate::scheduler::execution::QueryExecution;
+    use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::HummockSnapshotManager;

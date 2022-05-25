@@ -26,6 +26,7 @@ pub struct StoreLocalStatistic {
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_count: u64,
     pub bloom_filter_might_positive_count: u64,
+    pub remote_io_time: f64,
 }
 
 impl StoreLocalStatistic {
@@ -40,30 +41,52 @@ impl StoreLocalStatistic {
         self.processed_key_count += other.processed_key_count;
         self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
         self.bloom_filter_might_positive_count += other.bloom_filter_might_positive_count;
+        self.remote_io_time += other.remote_io_time;
     }
 
     pub fn report(&self, metrics: &StateStoreMetrics) {
-        metrics
-            .sst_store_block_request_counts
-            .with_label_values(&["data_total"])
-            .inc_by(self.cache_data_block_total);
-        metrics
-            .sst_store_block_request_counts
-            .with_label_values(&["data_miss"])
-            .inc_by(self.cache_data_block_miss);
-        metrics
-            .sst_store_block_request_counts
-            .with_label_values(&["meta_total"])
-            .inc_by(self.cache_meta_block_total);
-        metrics
-            .sst_store_block_request_counts
-            .with_label_values(&["meta_miss"])
-            .inc_by(self.cache_meta_block_miss);
-        metrics
-            .bloom_filter_true_negative_counts
-            .inc_by(self.bloom_filter_true_negative_count);
-        metrics
-            .bloom_filter_might_positive_counts
-            .inc_by(self.bloom_filter_might_positive_count);
+        if self.cache_data_block_total > 0 {
+            metrics
+                .sst_store_block_request_counts
+                .with_label_values(&["data_total"])
+                .inc_by(self.cache_data_block_total);
+        }
+
+        if self.cache_data_block_miss > 0 {
+            metrics
+                .sst_store_block_request_counts
+                .with_label_values(&["data_miss"])
+                .inc_by(self.cache_data_block_miss);
+        }
+
+        if self.cache_meta_block_total > 0 {
+            metrics
+                .sst_store_block_request_counts
+                .with_label_values(&["meta_total"])
+                .inc_by(self.cache_meta_block_total);
+        }
+
+        if self.cache_data_block_miss > 0 {
+            metrics
+                .sst_store_block_request_counts
+                .with_label_values(&["meta_miss"])
+                .inc_by(self.cache_meta_block_miss);
+        }
+
+        if self.bloom_filter_true_negative_count > 0 {
+            metrics
+                .bloom_filter_true_negative_counts
+                .inc_by(self.bloom_filter_true_negative_count);
+        }
+
+        if self.bloom_filter_might_positive_count > 0 {
+            metrics
+                .bloom_filter_might_positive_counts
+                .inc_by(self.bloom_filter_might_positive_count);
+        }
+
+        if self.remote_io_time > 0.0 {
+            metrics.remote_read_time.observe(self.remote_io_time);
+        }
     }
 }
