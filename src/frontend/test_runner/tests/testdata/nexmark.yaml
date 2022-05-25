@@ -92,8 +92,8 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$3, $4, $5, $0] }
         BatchHashJoin { type: Inner, predicate: $1 = $2 }
-          BatchProject { exprs: [$0, $1] }
-            BatchExchange { order: [], dist: HashShard([1]) }
+          BatchExchange { order: [], dist: HashShard([1]) }
+            BatchProject { exprs: [$0, $1] }
               BatchFilter { predicate: ($2 = 10:Int32) }
                 BatchScan { table: auction, columns: [id, seller, category] }
           BatchExchange { order: [], dist: HashShard([0]) }
@@ -104,8 +104,8 @@
       StreamExchange { dist: HashShard([4, 5]) }
         StreamProject { exprs: [$4, $5, $6, $0, $2, $7] }
           StreamHashJoin { type: Inner, predicate: $1 = $3 }
-            StreamProject { exprs: [$0, $1, $3] }
-              StreamExchange { dist: HashShard([1]) }
+            StreamExchange { dist: HashShard([1]) }
+              StreamProject { exprs: [$0, $1, $3] }
                 StreamFilter { predicate: ($2 = 10:Int32) }
                   StreamTableScan { table: auction, columns: [id, seller, category, _row_id], pk_indices: [3] }
             StreamExchange { dist: HashShard([0]) }
@@ -129,8 +129,8 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, ($1 / $2)] }
         BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1)] }
-          BatchProject { exprs: [$1, $2] }
-            BatchExchange { order: [], dist: HashShard([1]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchProject { exprs: [$1, $2] }
               BatchHashAgg { group_keys: [$0, $1], aggs: [max($2)] }
                 BatchProject { exprs: [$0, $3, $5] }
                   BatchFilter { predicate: ($6 >= $1) AND ($6 <= $2) }
@@ -143,8 +143,8 @@
     StreamMaterialize { columns: [category, avg], pk_columns: [category] }
       StreamProject { exprs: [$0, ($2 / $3)] }
         StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
-          StreamProject { exprs: [$1, $3, $0] }
-            StreamExchange { dist: HashShard([1]) }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$1, $3, $0] }
               StreamHashAgg { group_keys: [$0, $1], aggs: [count, max($2)] }
                 StreamProject { exprs: [$0, $3, $6, $4, $8] }
                   StreamFilter { predicate: ($7 >= $1) AND ($7 <= $2) }
@@ -159,37 +159,77 @@
   sql: |
     SELECT AuctionBids.auction, AuctionBids.num
     FROM (
-      SELECT
-        B1.auction,
-        count(*) AS num,
-        HOP_START(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS starttime,
-        HOP_END(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS endtime
-      FROM bid B1
-      GROUP BY
-        B1.auction,
-        HOP(B1.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+        SELECT
+            bid.auction,
+            count(*) AS num, 
+            window_start AS starttime
+        FROM 
+            HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+        GROUP BY
+            window_start, 
+        bid.auction
     ) AS AuctionBids
     JOIN (
-      SELECT
-        max(CountBids.num) AS maxn,
-        CountBids.starttime,
-        CountBids.endtime
-      FROM (
         SELECT
-          count(*) AS num,
-          HOP_START(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS starttime,
-          HOP_END(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND) AS endtime
-        FROM bid B2
-        GROUP BY
-          B2.auction,
-          HOP(B2.dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-        ) AS CountBids
-      GROUP BY CountBids.starttime, CountBids.endtime
-    ) AS MaxBids
-    ON AuctionBids.starttime = MaxBids.starttime AND
-        AuctionBids.endtime = MaxBids.endtime AND
-        AuctionBids.num >= MaxBids.maxn;
-  binder_error: 'Feature is not yet implemented: unsupported function: "hop", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+            max(CountBids.num) AS maxn,
+            CountBids.starttime_c
+        FROM (
+            SELECT
+                count(*) AS num,
+                window_start AS starttime_c
+            FROM HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+            GROUP BY
+                bid.auction,
+                window_start
+            ) AS CountBids
+        GROUP BY 
+            CountBids.starttime_c
+        ) AS MaxBids
+    ON 
+      AuctionBids.starttime = MaxBids.starttime_c AND
+      AuctionBids.num >= MaxBids.maxn;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1] }
+        BatchFilter { predicate: ($1 >= $3) }
+          BatchHashJoin { type: Inner, predicate: $2 = $4 }
+            BatchExchange { order: [], dist: HashShard([2]) }
+              BatchProject { exprs: [$1, $2, $0] }
+                BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
+                  BatchExchange { order: [], dist: HashShard([0, 1]) }
+                    BatchProject { exprs: [$2, $0] }
+                      BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                        BatchScan { table: bid, columns: [auction, dateTime] }
+            BatchProject { exprs: [$1, $0] }
+              BatchHashAgg { group_keys: [$0], aggs: [max($1)] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchProject { exprs: [$1, $2] }
+                    BatchHashAgg { group_keys: [$0, $1], aggs: [count] }
+                      BatchExchange { order: [], dist: HashShard([0, 1]) }
+                        BatchProject { exprs: [$0, $2] }
+                          BatchHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                            BatchScan { table: bid, columns: [auction, dateTime] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
+      StreamProject { exprs: [$0, $1, $2, $4] }
+        StreamFilter { predicate: ($1 >= $3) }
+          StreamHashJoin { type: Inner, predicate: $2 = $4 }
+            StreamExchange { dist: HashShard([2]) }
+              StreamProject { exprs: [$1, $3, $0] }
+                StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
+                  StreamExchange { dist: HashShard([0, 1]) }
+                    StreamProject { exprs: [$3, $0, $2] }
+                      StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                        StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
+            StreamProject { exprs: [$2, $0] }
+              StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$1, $3, $0] }
+                    StreamHashAgg { group_keys: [$0, $1], aggs: [count, count] }
+                      StreamExchange { dist: HashShard([0, 1]) }
+                        StreamProject { exprs: [$0, $3, $2] }
+                          StreamHopWindow { time_col: $1 slide: 00:00:02 size: 00:00:10 }
+                            StreamTableScan { table: bid, columns: [auction, dateTime, _row_id], pk_indices: [2] }
 - id: nexmark_q6
   before:
     - create_tables

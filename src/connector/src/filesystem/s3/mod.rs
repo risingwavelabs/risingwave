@@ -14,3 +14,23 @@
 mod s3_dir;
 mod s3_notification_event;
 mod source;
+
+use serde::Deserialize;
+
+pub const S3_CONNECTOR: &str = "s3";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct S3Properties {
+    #[serde(rename = "s3.region_name")]
+    pub region_name: String,
+    #[serde(rename = "s3.bucket_name")]
+    pub bucket_name: String,
+    #[serde(rename = "sqs_queue_name")]
+    pub sqs_queue_name: String,
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+    #[serde(rename = "s3.credentials.access", default)]
+    pub access: String,
+    #[serde(rename = "s3.credentials.secret", default)]
+    pub secret: String,
+}

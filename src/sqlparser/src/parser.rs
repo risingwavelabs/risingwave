@@ -1048,31 +1048,26 @@ impl Parser {
                 expr: Box::new(expr),
             })
         } else if Token::LBracket == tok {
-            self.parse_map_access(expr)
+            self.parse_array_index(expr)
         } else {
             // Can only happen if `get_next_precedence` got out of sync with this function
             parser_err!(format!("No infix parser for token {:?}", tok))
         }
     }
 
-    pub fn parse_map_access(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let key = self.parse_map_key()?;
-        let tok = self.consume_token(&Token::RBracket);
-        debug!("Tok: {}", tok);
-        let mut key_parts: Vec<Expr> = vec![key];
+    pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
+        let index = self.parse_expr()?;
+        self.expect_token(&Token::RBracket)?;
+        let mut indexs: Vec<Expr> = vec![index];
         while self.consume_token(&Token::LBracket) {
-            let key = self.parse_map_key()?;
-            let tok = self.consume_token(&Token::RBracket);
-            debug!("Tok: {}", tok);
-            key_parts.push(key);
+            let index = self.parse_expr()?;
+            self.expect_token(&Token::RBracket)?;
+            indexs.push(index);
         }
-        match expr {
-            e @ Expr::Identifier(_) | e @ Expr::CompoundIdentifier(_) => Ok(Expr::MapAccess {
-                column: Box::new(e),
-                keys: key_parts,
-            }),
-            _ => Ok(expr),
-        }
+        Ok(Expr::ArrayIndex {
+            obj: Box::new(expr),
+            indexs,
+        })
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator
@@ -2592,9 +2587,9 @@ impl Parser {
                 }
                 Keyword::COLUMNS => {
                     if self.parse_keyword(Keyword::FROM) {
-                        return Ok(Statement::ShowColumn {
-                            name: self.parse_object_name()?,
-                        });
+                        return Ok(Statement::ShowObjects(ShowObject::Columns {
+                            table: self.parse_object_name()?,
+                        }));
                     } else {
                         return self.expected("from after columns", self.peek_token());
                     }

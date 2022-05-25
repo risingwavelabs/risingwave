@@ -28,9 +28,9 @@ use crate::pg_server::{Session, SessionManager};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S>
+pub struct PgProtocol<S, SM>
 where
-    S: AsyncWrite + AsyncRead + Unpin,
+    SM: SessionManager,
 {
     /// Used for write/read message in tcp connection.
     stream: S,
@@ -41,8 +41,8 @@ where
     /// Whether the connection is terminated.
     is_terminate: bool,
 
-    session_mgr: Arc<dyn SessionManager>,
-    session: Option<Arc<dyn Session>>,
+    session_mgr: Arc<SM>,
+    session: Option<Arc<SM::Session>>,
 }
 
 /// States flow happened from top to down.
@@ -51,11 +51,12 @@ enum PgProtocolState {
     Regular,
 }
 
-impl<S> PgProtocol<S>
+impl<S, SM> PgProtocol<S, SM>
 where
     S: AsyncWrite + AsyncRead + Unpin,
+    SM: SessionManager,
 {
-    pub fn new(stream: S, session_mgr: Arc<dyn SessionManager>) -> Self {
+    pub fn new(stream: S, session_mgr: Arc<SM>) -> Self {
         Self {
             stream,
             is_terminate: false,

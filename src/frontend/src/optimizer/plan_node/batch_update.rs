@@ -39,7 +39,7 @@ impl BatchUpdate {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            Distribution::any().clone(),
+            Distribution::Single,
             Order::any().clone(),
         );
         Self { base, logical }
@@ -93,7 +93,6 @@ impl ToBatchProst for BatchUpdate {
 
 impl ToLocalBatch for BatchUpdate {
     fn to_local(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_local()?;
-        Ok(self.clone_with_input(new_input).into())
+        unreachable!()
     }
 }

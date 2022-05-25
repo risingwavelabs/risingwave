@@ -9,6 +9,9 @@
 .idea/
 *.iml
 
+# GitPod
+.gitpod.yml
+
 # CLion
 cmake-build-debug/
 /cmake-build-wsl_profile/
@@ -47,3 +50,4 @@ log/
 # generated files
 risedev-components.user.env
 riselab-components.user.env
+risedev-compose.yml

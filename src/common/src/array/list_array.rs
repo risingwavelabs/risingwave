@@ -22,11 +22,14 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, RowRef,
+    NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{
+    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+};
 
 /// This is a naive implementation of list array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -111,6 +114,17 @@ impl ArrayBuilder for ListArrayBuilder {
             value_type: self.value_type,
             len: self.len,
         })
+    }
+}
+
+impl ListArrayBuilder {
+    pub fn append_row_ref(&mut self, row: RowRef) -> Result<()> {
+        self.bitmap.append(true);
+        let last = *self.offsets.last().unwrap();
+        self.offsets.push(last + row.size());
+        self.len += 1;
+        row.values()
+            .try_for_each(|v| self.value.append_datum_ref(v))
     }
 }
 
@@ -267,8 +281,13 @@ pub struct ListValue {
 }
 
 impl fmt::Display for ListValue {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Example of ListValue display: ARRAY[1, 2]
+        write!(
+            f,
+            "ARRAY[{}]",
+            self.values.iter().map(|v| v.as_ref().unwrap()).format(", ")
+        )
     }
 }
 
@@ -368,8 +387,10 @@ impl Debug for ListRef<'_> {
 }
 
 impl Display for ListRef<'_> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+    // This function will be invoked when pgwire prints a list value in string.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let values = self.values_ref().iter().map(display_datum_ref).join(",");
+        write!(f, "{{{}}}", values)
     }
 }
 
@@ -631,5 +652,12 @@ mod tests {
             ListValue::new(vec![Some(1.into()), None]),
             ListValue::new(vec![Some(1.into()), None]),
         );
+    }
+
+    #[test]
+    fn test_list_ref_display() {
+        let v = ListValue::new(vec![Some(1.into()), None]);
+        let r = ListRef::ValueRef { val: &v };
+        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
     }
 }

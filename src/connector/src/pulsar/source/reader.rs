@@ -29,8 +29,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::base::{SourceMessage, SplitReader};
 use crate::pulsar::split::PulsarSplit;
-use crate::pulsar::PulsarEnumeratorOffset;
-use crate::{ConnectorStateV2, PulsarProperties, SplitImpl};
+use crate::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
+use crate::{Column, ConnectorStateV2, SplitImpl};
 
 struct PulsarSingleSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -168,7 +168,11 @@ const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
 impl SplitReader for PulsarSplitReader {
     type Properties = PulsarProperties;
 
-    async fn new(props: PulsarProperties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        props: PulsarProperties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {

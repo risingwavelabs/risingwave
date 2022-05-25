@@ -14,8 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern crate core;
-
 pub mod error;
 pub mod pg_field_descriptor;
 pub mod pg_message;

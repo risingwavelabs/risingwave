@@ -57,6 +57,7 @@ pub use update::*;
 pub use values::*;
 
 use crate::executor::ExecutorBuilder;
+use crate::task::BatchTaskContext;
 
 pub type BoxedExecutor2 = Box<dyn Executor2>;
 pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
@@ -85,5 +86,7 @@ pub trait Executor2: Send + 'static {
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor2`
 /// from proto and global environment.
 pub trait BoxedExecutor2Builder {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2>;
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2>;
 }

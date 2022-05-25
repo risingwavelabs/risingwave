@@ -104,6 +104,20 @@ where
     general_cmp(l, r, |a, b| a < b)
 }
 
+pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> Result<Option<bool>>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    match (l, r) {
+        (Some(lv), Some(rv)) => Ok(general_ne::<T1, T2, T3>(lv, rv).ok()),
+        (Some(_), None) => Ok(Some(true)),
+        (None, Some(_)) => Ok(Some(true)),
+        (None, None) => Ok(Some(false)),
+    }
+}
+
 #[inline(always)]
 fn str_cmp<F>(l: &str, r: &str, func: F) -> Result<bool>
 where
@@ -140,6 +154,15 @@ pub fn str_le(l: &str, r: &str) -> Result<bool> {
 #[inline(always)]
 pub fn str_lt(l: &str, r: &str) -> Result<bool> {
     str_cmp(l, r, |a, b| a < b)
+}
+
+pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
+    match (l, r) {
+        (Some(lv), Some(rv)) => Ok(str_ne(lv, rv).ok()),
+        (Some(_), None) => Ok(Some(true)),
+        (None, Some(_)) => Ok(Some(true)),
+        (None, None) => Ok(Some(false)),
+    }
 }
 
 #[inline(always)]

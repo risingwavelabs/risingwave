@@ -25,6 +25,7 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use crate::executor::ExecutorBuilder;
 use crate::executor2::monitor::BatchMetrics;
 use crate::executor2::{BoxedDataChunkStream, BoxedExecutor2, BoxedExecutor2Builder, Executor2};
+use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor2<S: StateStore> {
@@ -75,7 +76,9 @@ impl RowSeqScanExecutor2Builder {
 }
 
 impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
-    fn new_boxed_executor2(source: &ExecutorBuilder) -> Result<BoxedExecutor2> {
+    fn new_boxed_executor2<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+    ) -> Result<BoxedExecutor2> {
         let seq_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::RowSeqScan
@@ -89,20 +92,24 @@ impl BoxedExecutor2Builder for RowSeqScanExecutor2Builder {
             .iter()
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        dispatch_state_store!(source.global_batch_env().state_store(), state_store, {
-            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
-            let storage_stats = state_store.stats();
-            let batch_stats = source.global_batch_env().stats();
-            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-            Ok(Box::new(RowSeqScanExecutor2::new(
-                table,
-                RowSeqScanExecutor2Builder::DEFAULT_CHUNK_SIZE,
-                source.task_id.task_id == 0,
-                source.plan_node().get_identity().clone(),
-                source.epoch(),
-                batch_stats,
-            )))
-        })
+        dispatch_state_store!(
+            source.batch_task_context().try_get_state_store()?,
+            state_store,
+            {
+                let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
+                let storage_stats = state_store.stats();
+                let batch_stats = source.batch_task_context().stats();
+                let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
+                Ok(Box::new(RowSeqScanExecutor2::new(
+                    table,
+                    RowSeqScanExecutor2Builder::DEFAULT_CHUNK_SIZE,
+                    source.task_id.task_id == 0,
+                    source.plan_node().get_identity().clone(),
+                    source.epoch(),
+                    batch_stats,
+                )))
+            }
+        )
     }
 }
 

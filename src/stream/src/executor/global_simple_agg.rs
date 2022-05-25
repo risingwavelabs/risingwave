@@ -295,7 +295,7 @@ mod tests {
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {
         test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
     }

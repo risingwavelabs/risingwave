@@ -20,8 +20,8 @@ use async_trait::async_trait;
 use crate::nexmark::config::NexmarkConfig;
 use crate::nexmark::source::event::EventType;
 use crate::nexmark::source::generator::NexmarkEventGenerator;
-use crate::nexmark::NexmarkSplit;
-use crate::{ConnectorStateV2, NexmarkProperties, SourceMessage, SplitImpl, SplitReader};
+use crate::nexmark::{NexmarkProperties, NexmarkSplit};
+use crate::{Column, ConnectorStateV2, SourceMessage, SplitImpl, SplitReader};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkSplitReader {
@@ -33,7 +33,11 @@ pub struct NexmarkSplitReader {
 impl SplitReader for NexmarkSplitReader {
     type Properties = Box<NexmarkProperties>;
 
-    async fn new(properties: Box<NexmarkProperties>, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        properties: Box<NexmarkProperties>,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -148,7 +152,7 @@ mod tests {
             .collect();
 
         let state = ConnectorStateV2::Splits(list_splits_resp);
-        let mut reader = NexmarkSplitReader::new(Box::new(props), state).await?;
+        let mut reader = NexmarkSplitReader::new(Box::new(props), state, None).await?;
         let chunk = reader.next().await?.unwrap();
         assert_eq!(chunk.len(), 5);
 

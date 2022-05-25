@@ -35,6 +35,18 @@
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
+    /* bind is distinct from */
+    SELECT 1 IS DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32)] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind is not distinct from */
+    SELECT 1 IS NOT DISTINCT FROM 2
+  logical_plan: |
+    LogicalProject { exprs: [Not(IsDistinctFrom(1:Int32, 2:Int32))] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
     /* in-list with aligned types */
     SELECT 1::real in (3, 1.0, 2);
   batch_plan: |
@@ -58,7 +70,8 @@
     BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = $0))] }
       BatchSimpleAgg { aggs: [min($0)] }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [v1] }
+          BatchSimpleAgg { aggs: [min($0)] }
+            BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: scalar subquery */
     create table t (v1 int);
@@ -72,7 +85,8 @@
             BatchScan { table: b, columns: [b2] }
           BatchSimpleAgg { aggs: [min($0)] }
             BatchExchange { order: [], dist: Single }
-              BatchScan { table: t, columns: [v1] }
+              BatchSimpleAgg { aggs: [min($0)] }
+                BatchScan { table: t, columns: [v1] }
 - sql: |
     /* in-list with non-const: correlated ref */
     create table t (v1 int);

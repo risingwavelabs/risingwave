@@ -21,7 +21,7 @@ use crate::base::SplitEnumerator;
 use crate::pulsar::admin::PulsarAdminClient;
 use crate::pulsar::split::PulsarSplit;
 use crate::pulsar::topic::{parse_topic, Topic};
-use crate::PulsarProperties;
+use crate::pulsar::PulsarProperties;
 
 pub struct PulsarSplitEnumerator {
     admin_client: PulsarAdminClient,
@@ -126,8 +126,8 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 mod test {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use crate::pulsar::{PulsarEnumeratorOffset, PulsarSplitEnumerator};
-    use crate::{PulsarProperties, SplitEnumerator};
+    use crate::pulsar::{PulsarEnumeratorOffset, PulsarProperties, PulsarSplitEnumerator};
+    use crate::SplitEnumerator;
 
     async fn mock_server(web_path: &str, body: &str) -> MockServer {
         let mock_server = MockServer::start().await;

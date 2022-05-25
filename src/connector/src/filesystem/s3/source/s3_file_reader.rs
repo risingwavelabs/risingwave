@@ -39,7 +39,8 @@ use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::filesystem::s3::s3_dir::{
     AwsCustomConfig, S3SourceBasicConfig, S3SourceConfig, SqsReceiveMsgConfig,
 };
-use crate::{ConnectorState, ConnectorStateV2, S3Properties, SplitMetaData};
+use crate::filesystem::s3::S3Properties;
+use crate::{Column, ConnectorState, ConnectorStateV2, SplitMetaData};
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -318,7 +319,11 @@ impl SplitReader for S3FileReader {
     /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's
     /// `access_key` and secret. For now, only static credential is supported.
     /// 2. The identifier of the State is the Path of S3 - <S3://bucket_name/object_key>
-    async fn new(props: S3Properties, state: ConnectorStateV2) -> Result<Self>
+    async fn new(
+        props: S3Properties,
+        state: ConnectorStateV2,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self>
     where
         Self: Sized,
     {
@@ -394,7 +399,8 @@ mod test {
 
     use crate::base::SplitReader;
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
-    use crate::{ConnectorState, ConnectorStateV2, S3Properties};
+    use crate::filesystem::s3::S3Properties;
+    use crate::{ConnectorState, ConnectorStateV2};
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
@@ -433,6 +439,7 @@ mod test {
         let s3_file_reader = S3FileReader::new(
             test_config_map(),
             ConnectorStateV2::State(new_test_connect_state(file_name)),
+            None,
         );
         s3_file_reader.await.unwrap()
     }

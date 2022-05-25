@@ -208,6 +208,9 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     }
 }
 
+/// The creation of [`Array`] typically does not rely on [`DataType`].
+/// For now the exceptions are list and struct, which require type details
+/// as they decide the layout of the array.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.

@@ -57,6 +57,7 @@ pub trait PlanNode:
     + ToDistributedBatch
     + ToProst
     + ToLocalBatch
+    + PredicatePushdown
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
@@ -201,6 +202,8 @@ mod eq_join_predicate;
 pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
+mod predicate_pushdown;
+pub use predicate_pushdown::*;
 
 mod batch_delete;
 mod batch_exchange;
@@ -298,8 +301,8 @@ pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
-/// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
-/// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]
+/// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
+/// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
 ///
 /// Every tuple has two elements, where `{ convention, name }`
 /// You can use it as follows

@@ -32,8 +32,9 @@ type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
 type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
-/// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
-/// entries.
+/// We manages a `BTreeMap` in memory for all entries belonging to a join key,
+/// since each `WriteBatch` is an ordered list of key-value pairs.
+/// When evicted, `BTreeMap` does not hold any entries.
 pub struct JoinEntryState<S: StateStore> {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: Option<BTreeMap<PkType, StateValueType>>,
@@ -96,9 +97,9 @@ impl<S: StateStore> JoinEntryState<S> {
         let mut cached = BTreeMap::new();
         for (raw_key, raw_value) in data {
             let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
-            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
+            let key = pk_deserializer.value_decode(raw_key)?;
             let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(&raw_value)?;
+            let value = deserializer.deserialize(raw_value)?;
             cached.insert(key, value);
         }
         Ok(cached)
@@ -132,7 +133,8 @@ impl<S: StateStore> JoinEntryState<S> {
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
-            let key_encoded = pk.serialize_not_null()?;
+            // pk here does not to be memcomparable.
+            let key_encoded = pk.value_encode()?;
 
             match v.into_option() {
                 Some(v) => {
@@ -219,7 +221,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);

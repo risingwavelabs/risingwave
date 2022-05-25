@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
@@ -26,7 +27,6 @@ use aws_smithy_types::tristate::TriState;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
 use http::Uri;
-use risingwave_common::error::ErrorCode::InternalError;
 use serde::{Deserialize, Serialize};
 
 pub const AWS_DEFAULT_CONFIG: [&str; 7] = [
@@ -140,10 +140,7 @@ impl From<HashMap<String, String>> for AwsConfigV2 {
                         config.endpoint = Some(EndpointWrapper {
                             uri: Uri::from_str(config_value.as_str())
                                 .map_err(|e| {
-                                    InternalError(format!(
-                                        "failed to parse url ({}): {}",
-                                        config_value, e
-                                    ))
+                                    anyhow!("failed to parse url ({}): {}", config_value, e)
                                 })
                                 .unwrap(),
                         });
