@@ -17,7 +17,7 @@ use risingwave_sqlparser::ast::{Query, TableAlias};
 
 use crate::binder::{Binder, BoundQuery, UNNAMED_SUBQUERY};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
 }
@@ -27,7 +27,7 @@ impl Binder {
     /// [`BindContext`](crate::binder::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.
-    pub(super) fn bind_subquery_relation(
+    pub fn bind_subquery_relation(
         &mut self,
         query: Query,
         alias: Option<TableAlias>,

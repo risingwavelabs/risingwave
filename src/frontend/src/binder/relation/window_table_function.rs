@@ -43,7 +43,7 @@ impl FromStr for WindowTableFunctionKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundWindowTableFunction {
     pub(crate) input: Relation,
     pub(crate) kind: WindowTableFunctionKind,

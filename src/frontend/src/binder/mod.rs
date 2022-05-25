@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{Statement, TableAlias};
 
 pub mod bind_context;
 mod delete;
@@ -44,6 +46,7 @@ pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
 
+
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
@@ -56,6 +59,8 @@ pub struct Binder {
     upper_contexts: Vec<BindContext>,
 
     next_subquery_id: usize,
+    /// Map the cte's name to its Relation::Subquery.
+    cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 }
 
 impl Binder {
@@ -66,6 +71,7 @@ impl Binder {
             context: BindContext::new(),
             upper_contexts: vec![],
             next_subquery_id: 0,
+            cte_to_relation: HashMap::new(),
         }
     }
 

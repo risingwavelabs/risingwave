@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{JoinConstraint, JoinOperator, TableWithJoins};
 use crate::binder::{Binder, Relation};
 use crate::expr::{Expr as _, ExprImpl};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundJoin {
     pub join_type: JoinType,
     pub left: Relation,

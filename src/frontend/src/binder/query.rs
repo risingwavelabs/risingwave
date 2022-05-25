@@ -17,15 +17,16 @@ use std::collections::HashMap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query, Value};
+use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
+use super::Relation;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
@@ -68,6 +69,9 @@ impl Binder {
     pub(super) fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
         let limit = query.get_limit_value();
         let offset = query.get_offset_value();
+        if let Some(with) = query.with {
+            self.bind_with(with)?;
+        }
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         body.schema()
@@ -138,5 +142,19 @@ impl Binder {
             }
         };
         Ok(FieldOrder { index, direct })
+    }
+
+    fn bind_with(&mut self, with: With) -> Result<()> {
+        if with.recursive {
+            return Err(ErrorCode::NotImplemented("recursive cte".into(), None.into()).into());
+        } else {
+            for cte_table in with.cte_tables {
+                let Cte { alias, query, .. } = cte_table;
+                let table_name = alias.name.value.clone();
+                let bound_query = self.bind_query(query)?;
+                self.cte_to_relation.insert(table_name, (bound_query, alias));
+            }
+            Ok(())
+        }
     }
 }
