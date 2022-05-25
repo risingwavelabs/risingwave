@@ -34,13 +34,16 @@ impl BatchSimpleAgg {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
-            // partial agg; distribution phase will insert total agg for this.
-            Distribution::SomeShard => Distribution::SomeShard,
-            _ => panic!(),
+        match input_dist {
+            Distribution::Single | Distribution::SomeShard | Distribution::HashShard(_) => {}
+            _ => unreachable!(),
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            input_dist.clone(),
+            Order::any().clone(),
+        );
         BatchSimpleAgg { base, logical }
     }
 
