@@ -1,6 +1,6 @@
 statement ok
 create materialized source s1 (v1 int) with ( 'connector' = 'datagen' ,
-'field.v1.kind' = 'sequence','field.v1.start' = '1','field.v1.end'  = '20',
+'fields.v1.kind' = 'sequence','fields.v1.start' = '1','fields.v1.end'  = '20',
 'datagen.rows.per.second'='3','datagen.max.chunk.size'='6')  row format json;
 
 # Wait enough time to ensure Datagen connector generate data

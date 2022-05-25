@@ -30,14 +30,14 @@ pub const DEFAULT_MAX: i16 = i16::MAX;
 pub const DEFAULT_START: i16 = 0;
 pub const DEFAULT_END: i16 = i16::MAX;
 
-// default max_past for TimestampField =  1 day
+/// default max_past for TimestampField =  1 day
 pub const DEFAULT_MAX_PAST: Duration = Duration::from_secs(60 * 60 * 24);
 
-// default length for VarcharField = 10
+/// default length for VarcharField = 10
 pub const DEFAULT_LENGTH: usize = 10;
 
 /// fields that can be continuously or randomly generated impl this trait
-/// such as i32, float, double
+/// such as i32, float32
 pub trait NumericFieldGenerator {
     fn with_sequence(
         min: Option<String>,

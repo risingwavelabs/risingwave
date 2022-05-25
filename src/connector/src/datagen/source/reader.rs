@@ -79,35 +79,53 @@ impl SplitReader for DatagenSplitReader {
         assert!(columns.len() > 1);
         let columns = &columns[1..];
 
+        // parse field connector option to build FieldGeneratorImpl
+        // for example:
+        // create materialized source s1  (
+        //     f_sequence INT,
+        //     f_random INT,
+        //    ) with (
+        //     'connector' = 'datagen',
+        // 'fields.f_sequence.kind'='sequence',
+        // 'fields.f_sequence.start'='1',
+        // 'fields.f_sequence.end'='1000',
+       
+        // 'fields.f_random.min'='1',
+        // 'fields.f_random.max'='1000',
+       
+        // 'fields.f_random_str.length'='10'
+        // )
+        
         for column in columns {
             let name = column.name.clone();
-            let kind_key = format!("field.{}.kind", name);
+            let kind_key = format!("fields.{}.kind", name);
+            let data_type = column.data_type.clone();
             match column.data_type{
                 DataType::Timestamp => {
-                let max_past_key = format!("field.{}.max_past", name);
-                let max_past_key_option =
+                let max_past_key = format!("fields.{}.max_past", name);
+                let max_past_value =
                 fields_option_map.get(&max_past_key).map(|s| s.to_string());
                 fields_map.insert(
                     name,
                     FieldGeneratorImpl::new(
-                        column.data_type.clone(),
+                        data_type,
                             FieldKind::Random,
-                            max_past_key_option,
+                            max_past_value,
                         None,
                         split_index,
                         split_num
                     )?,
                 );},
                 DataType::Varchar => {
-                let length_key = format!("field.{}.length", name);
-                let length_key_option =
+                let length_key = format!("fields.{}.length", name);
+                let length_value =
                 fields_option_map.get(&length_key).map(|s| s.to_string());
                 fields_map.insert(
                     name,
                     FieldGeneratorImpl::new(
-                        column.data_type.clone(),
+                        data_type,
                             FieldKind::Random,
-                        length_key_option,
+                        length_value,
                         None,
                         split_index,
                         split_num
@@ -115,34 +133,34 @@ impl SplitReader for DatagenSplitReader {
                 );},
                 _ => {
                     if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND{
-                        let start_key = format!("field.{}.start", name);
-                        let end_key = format!("field.{}.end", name);
-                        let start_key_option =
+                        let start_key = format!("fields.{}.start", name);
+                        let end_key = format!("fields.{}.end", name);
+                        let start_value =
                             fields_option_map.get(&start_key).map(|s| s.to_string());
-                        let end_key_option = fields_option_map.get(&end_key).map(|s| s.to_string());
+                        let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
                         fields_map.insert(
                             name,
                             FieldGeneratorImpl::new(
-                                column.data_type.clone(),
+                                data_type,
                                 FieldKind::Sequence,
-                                start_key_option,
-                                end_key_option,
+                                start_value,
+                                end_value,
                                 split_index,
                                 split_num
                             )?,
                         );
                     } else{
-                        let min_key = format!("field.{}.min", name);
-                        let max_key = format!("field.{}.max", name);
-                        let min_value_option = fields_option_map.get(&min_key).map(|s| s.to_string());
-                        let max_value_option = fields_option_map.get(&max_key).map(|s| s.to_string());
+                        let min_key = format!("fields.{}.min", name);
+                        let max_key = format!("fields.{}.max", name);
+                        let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
+                        let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
                         fields_map.insert(
                             name,
                             FieldGeneratorImpl::new(
-                                column.data_type.clone(),
+                                data_type,
                                 FieldKind::Random,
-                                min_value_option,
-                                max_value_option,
+                                min_value,
+                                max_value,
                                 split_index,
                                 split_num
                             )?,
