@@ -54,7 +54,7 @@ enum Commands {
     Default,
 }
 
-#[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq, ArgEnum)]
+#[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq, Eq, ArgEnum)]
 pub enum Components {
     #[clap(name = "minio")]
     MinIO,
