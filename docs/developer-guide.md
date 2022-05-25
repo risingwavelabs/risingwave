@@ -1,6 +1,6 @@
 # Developer guide
 
-This guide is intended to be used by contributors to learn about how to develop RisingWave. 
+This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [Contributing guidelines](../CONTRIBUTING.md).
 
 If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose) or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
 
@@ -25,11 +25,12 @@ If you have questions, please [create a Github issue](https://github.com/singula
     - [Planner tests](#planner-tests)
     - [End-to-end tests](#end-to-end-tests)
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
+- [Miscallenous checks](#miscellaneous-checks)
 
 
 ## Read the design docs
 
-Before you start to make code changes, read the design docs listed in the [readme.md](readme.md) to get familiar with the design and implementation of RisingWave.
+Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in the [readme.md](readme.md).
 
 ## Learn about the code structure
 
@@ -205,7 +206,7 @@ If you need to adjust log levels, change the logging filters in `utils/logging/l
 
 ## Test your code changes
 
-Before you submit a PR for your changes, you need to complete some tests.
+Before you submit a PR, we recommend that you fully test the code changes and perform necessary checks.
 
 The RisingWave project enforces several checks in CI. Every time the code is modified, you need to perform the checks and ensure they pass.
 
@@ -278,3 +279,19 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 We may adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+## Miscellaneous checks
+
+For shell code, please run:
+
+```shell
+brew install shellcheck
+shellcheck <new file>
+```
+
+For Protobufs, we rely on [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rule, please run the commands:
+
+```shell
+buf format -d --exit-code
+buf lint
+```
