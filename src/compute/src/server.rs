@@ -30,7 +30,9 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{
+    monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
+};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
@@ -119,6 +121,7 @@ pub async fn compute_node_serve(
             );
             sub_tasks.push((handle, shutdown_sender));
         }
+        monitor_cache(storage.inner().sstable_store(), &registry).unwrap();
     }
 
     // Initialize the managers.
