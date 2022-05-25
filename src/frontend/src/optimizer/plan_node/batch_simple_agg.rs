@@ -81,11 +81,9 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 let partial_agg = self.clone_with_input(dist_input).into();
 
                 // insert exchange
-                let exchange = BatchExchange::new(
-                    partial_agg,
-                    Order::any().clone(),
-                    Distribution::Single
-                ).into();
+                let exchange =
+                    BatchExchange::new(partial_agg, Order::any().clone(), Distribution::Single)
+                        .into();
 
                 // insert total agg
                 let total_agg_types = self
