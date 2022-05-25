@@ -221,13 +221,10 @@ impl RearrangedChainExecutor {
             }
 
             // 8. Consume remainings.
-
-            // The create mview progress can be `finish`ed only once.
-            let mut progress = Some(self.progress);
             let mut may_finish_progress = |msg: &Message| {
-                let Some(progress) = progress.take() else { return };
-                let Some(barrier) = msg.as_barrier() else { return };
-                progress.finish(barrier.epoch.curr);
+                if msg.as_barrier().is_some() {
+                    self.progress.finish();
+                }
             };
 
             // Note that there may still be some messages in `rearranged`. However the rearranged

@@ -19,7 +19,7 @@ use madsim::collections::HashSet;
 use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
-use super::progress::ConsumedEpoch;
+use super::progress::ChainState;
 use super::CollectResult;
 use crate::executor::Barrier;
 use crate::task::ActorId;
@@ -59,7 +59,7 @@ enum ManagedBarrierStateInner {
 pub(super) struct ManagedBarrierState {
     inner: ManagedBarrierStateInner,
 
-    pub create_mview_progress: HashMap<ActorId, ConsumedEpoch>,
+    pub create_mview_progress: HashMap<ActorId, ChainState>,
 }
 
 impl ManagedBarrierState {
@@ -99,9 +99,15 @@ impl ManagedBarrierState {
             );
             let create_mview_progress = std::mem::take(&mut self.create_mview_progress)
                 .into_iter()
-                .map(|(actor, epoch)| CreateMviewProgress {
+                .map(|(actor, state)| CreateMviewProgress {
                     chain_actor_id: actor,
-                    consumed_epoch: epoch,
+                    consumed_epoch: match state {
+                        ChainState::ConsumingUpstream(consumed_epoch) => {
+                            assert!(consumed_epoch <= epoch);
+                            consumed_epoch
+                        }
+                        ChainState::Done => epoch,
+                    },
                 })
                 .collect();
 

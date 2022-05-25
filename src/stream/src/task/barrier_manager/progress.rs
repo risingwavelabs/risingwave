@@ -17,18 +17,22 @@ use std::sync::Arc;
 use super::{BarrierState, LocalBarrierManager};
 use crate::task::{ActorId, SharedContext};
 
-pub(super) type ConsumedEpoch = u64;
+type ConsumedEpoch = u64;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ChainState {
+    ConsumingUpstream(ConsumedEpoch),
+    Done,
+}
 
 impl LocalBarrierManager {
-    pub fn update_create_mview_progress(&mut self, actor: ActorId, consumed_epoch: ConsumedEpoch) {
+    fn update_create_mview_progress(&mut self, actor: ActorId, state: ChainState) {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                managed_state
-                    .create_mview_progress
-                    .insert(actor, consumed_epoch);
+                managed_state.create_mview_progress.insert(actor, state);
             }
         }
     }
@@ -39,17 +43,24 @@ pub struct CreateMviewProgress {
 
     chain_actor_id: ActorId,
 
-    last_consumed_epoch: Option<ConsumedEpoch>,
+    state: Option<ChainState>,
 }
 
 impl CreateMviewProgress {
-    #[cfg(test)]
-    pub fn for_test(barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>) -> Self {
+    pub fn new(
+        barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
+        chain_actor_id: ActorId,
+    ) -> Self {
         Self {
             barrier_manager,
-            chain_actor_id: 0,
-            last_consumed_epoch: None,
+            chain_actor_id,
+            state: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>) -> Self {
+        Self::new(barrier_manager, 0)
     }
 
     pub fn actor_id(&self) -> u32 {
@@ -57,20 +68,30 @@ impl CreateMviewProgress {
     }
 
     pub fn update(&mut self, consumed_epoch: ConsumedEpoch) {
-        assert!(self.last_consumed_epoch.unwrap_or_default() < consumed_epoch);
-        self.last_consumed_epoch = Some(consumed_epoch);
+        match self.state {
+            Some(ChainState::ConsumingUpstream(last)) => {
+                assert!(last < consumed_epoch);
+            }
+            Some(ChainState::Done) => unreachable!(),
+            None => {}
+        }
 
+        self.state = Some(ChainState::ConsumingUpstream(consumed_epoch));
         self.barrier_manager
             .lock()
-            .update_create_mview_progress(self.chain_actor_id, consumed_epoch);
+            .update_create_mview_progress(self.chain_actor_id, self.state.unwrap());
     }
 
-    pub fn finish(self, consumed_epoch: ConsumedEpoch) {
-        assert!(self.last_consumed_epoch.unwrap_or_default() < consumed_epoch);
+    pub fn finish(&mut self) {
+        match self.state {
+            Some(ChainState::Done) => return,
+            _ => {}
+        }
 
+        self.state = Some(ChainState::Done);
         self.barrier_manager
             .lock()
-            .update_create_mview_progress(self.chain_actor_id, consumed_epoch);
+            .update_create_mview_progress(self.chain_actor_id, self.state.unwrap());
     }
 }
 
@@ -99,11 +120,6 @@ impl SharedContext {
     pub fn register_create_mview_progress(&self, chain_actor_id: ActorId) -> CreateMviewProgress {
         debug!("register create mview progress: {}", chain_actor_id);
 
-        let barrier_manager = self.barrier_manager.clone();
-        CreateMviewProgress {
-            barrier_manager,
-            chain_actor_id,
-            last_consumed_epoch: None,
-        }
+        CreateMviewProgress::new(self.barrier_manager.clone(), chain_actor_id)
     }
 }

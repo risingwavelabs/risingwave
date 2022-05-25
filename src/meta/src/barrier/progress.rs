@@ -62,7 +62,7 @@ impl Progress {
                     *state = ChainState::ConsumingUpstream(consumed_epoch);
                 }
             }
-            ChainState::Done => panic!("should not report progress after done"),
+            ChainState::Done => assert_eq!(consumed_epoch, current_epoch),
         }
     }
 

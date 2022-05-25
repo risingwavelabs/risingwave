@@ -76,7 +76,7 @@ impl ChainExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let mut upstream = self.upstream.execute();
 
         // 1. Poll the upstream to get the first barrier.
@@ -106,21 +106,13 @@ impl ChainExecutor {
             }
         }
 
-        // The create mview progress can be `finish`ed only once.
-        let mut progress = Some(self.progress);
-        let mut may_finish_progress = |msg: &Message| {
-            let Some(progress) = progress.take() else { return };
-            let Some(barrier) = msg.as_barrier() else { return };
-            progress.finish(barrier.epoch.curr);
-        };
+        // 3. Report that we've finished the creation.
+        self.progress.finish();
 
-        // 3. Continuously consume the upstream.
+        // 4. Continuously consume the upstream.
         #[for_await]
         for msg in upstream {
-            let msg = msg?;
-            // Report that we've finished the creation on the first barrier from upstream.
-            may_finish_progress(&msg);
-            yield mapping(&self.upstream_indices, msg);
+            yield mapping(&self.upstream_indices, msg?);
         }
     }
 }
