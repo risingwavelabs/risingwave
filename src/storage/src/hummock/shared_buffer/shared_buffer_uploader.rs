@@ -205,12 +205,6 @@ impl SharedBufferUploader {
             })
             .collect();
 
-        // Add all tables at once.
-        self.hummock_meta_client
-            .add_tables(epoch, uploaded_sst_info.clone())
-            .await
-            .map_err(HummockError::meta_error)?;
-
         if let Some(detector) = &self.write_conflict_detector {
             for batch in batches {
                 detector.check_conflict_and_track_write_batch(batch.get_payload(), epoch);

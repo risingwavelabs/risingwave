@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::array::StructValue;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 
 #[derive(Debug)]
 pub struct BoundInsert {
@@ -130,12 +131,47 @@ impl Binder {
                 return exprs
                     .into_iter()
                     .zip_eq(expected_types)
-                    .map(|(e, t)| e.cast_assign(t))
-                    .try_collect()
+                    .map(|(mut e, t)| {
+                        // If Literal is struct, check whether can use the expect type to change
+                        // origin to get the type of None value.
+                        if let ExprImpl::Literal(literal) = &e {
+                            if let Some(ScalarImpl::Struct(value)) = literal.get_data() {
+                                if Self::check_struct_type(value, e.return_type(), t.clone()) {
+                                    e = Literal::new(
+                                        Some(ScalarImpl::Struct(value.clone())),
+                                        t.clone(),
+                                    )
+                                    .into();
+                                }
+                            }
+                        }
+                        e.cast_assign(t)
+                    })
+                    .try_collect();
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
             std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
         };
         Err(ErrorCode::BindError(msg.into()).into())
+    }
+
+    /// Check whether can use target type to switch source type to determine the `data_type` of
+    /// `None` value.
+    pub fn check_struct_type(value: &StructValue, source: DataType, target: DataType) -> bool {
+        match (source, target) {
+            (DataType::Struct { fields: source }, DataType::Struct { fields: target }) => {
+                for i in 0..value.fields().len() {
+                    if let Some(ScalarImpl::Struct(v)) = &value.fields()[i] {
+                        if !Self::check_struct_type(v, source[i].clone(), target[i].clone()) {
+                            return false;
+                        }
+                    } else if source[i] != target[i] && value.fields()[i].is_some() {
+                        return false;
+                    }
+                }
+                true
+            }
+            (_, _) => false,
+        }
     }
 }

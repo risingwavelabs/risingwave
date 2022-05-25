@@ -19,17 +19,18 @@ use std::sync::Arc;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use super::stage::StageEvent;
-use crate::scheduler::execution::query::QueryMessage::Stage;
-use crate::scheduler::execution::query::QueryState::{Failed, Pending};
-use crate::scheduler::execution::StageEvent::Scheduled;
-use crate::scheduler::execution::{StageExecution, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::plan_fragmenter::{Query, StageId};
+use crate::scheduler::distributed::query::QueryMessage::Stage;
+use crate::scheduler::distributed::query::QueryState::{Failed, Pending};
+use crate::scheduler::distributed::StageEvent::Scheduled;
+use crate::scheduler::distributed::StageExecution;
+use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{HummockSnapshotManagerRef, QueryResultFetcher};
 
@@ -90,6 +91,7 @@ struct QueryRunner {
 
     epoch: u64,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 impl QueryExecution {
@@ -98,6 +100,7 @@ impl QueryExecution {
         epoch: u64,
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
+        compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -120,6 +123,7 @@ impl QueryExecution {
                     worker_node_manager.clone(),
                     sender.clone(),
                     children_stages,
+                    compute_client_pool.clone(),
                 ));
                 stage_executions.insert(stage_id, stage_exec);
             }
@@ -136,9 +140,9 @@ impl QueryExecution {
             root_stage_sender: Some(root_stage_sender),
             msg_sender: sender,
             scheduled_stages_count: 0,
-
             epoch,
             hummock_snapshot_manager,
+            compute_client_pool,
         };
 
         let state = Pending {
@@ -318,6 +322,7 @@ impl QueryRunner {
             self.hummock_snapshot_manager.clone(),
             root_task_output_id,
             root_task_status.task_host_unchecked(),
+            self.compute_client_pool.clone(),
         );
 
         // Consume sender here.
@@ -360,6 +365,7 @@ mod tests {
         HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
     };
     use risingwave_pb::plan_common::JoinType;
+    use risingwave_rpc_client::ComputeClientPool;
 
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
@@ -367,7 +373,7 @@ mod tests {
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
-    use crate::scheduler::execution::QueryExecution;
+    use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::HummockSnapshotManager;
@@ -378,6 +384,7 @@ mod tests {
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(1024));
         let query_execution = QueryExecution::new(
             create_query().await,
             100,
@@ -385,6 +392,7 @@ mod tests {
             Arc::new(HummockSnapshotManager::new(Arc::new(
                 MockFrontendMetaClient {},
             ))),
+            compute_client_pool,
         );
 
         assert!(query_execution.start().await.is_err());
