@@ -131,7 +131,6 @@ mod tests {
 
         let chunk = generator.next().await.unwrap().unwrap();
         assert_eq!(expected_length, chunk.len());
-        dbg!(chunk);
     }
 
     #[tokio::test]

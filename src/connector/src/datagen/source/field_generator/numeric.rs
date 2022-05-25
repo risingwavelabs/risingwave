@@ -12,95 +12,136 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+use std::str::FromStr;
+
 use anyhow::Result;
+use rand::distributions::uniform::SampleUniform;
 use rand::{thread_rng, Rng};
 use serde_json::json;
 
 use super::{DEFAULT_END, DEFAULT_MAX, DEFAULT_MIN, DEFAULT_START};
 use crate::datagen::source::field_generator::{FieldKind, NumericFieldGenerator};
 
-#[macro_export]
-macro_rules! impl_field_generator {
+trait NumericType
+where
+    Self: FromStr
+        + Copy
+        + Debug
+        + Default
+        + PartialOrd
+        + num_traits::Num
+        + num_traits::NumAssignOps
+        + num_traits::NumCast
+        + serde::Serialize
+        + SampleUniform,
+{
+    const DEFAULT_MIN: Self;
+    const DEFAULT_MAX: Self;
+    const DEFAULT_START: Self;
+    const DEFAULT_END: Self;
+}
+
+macro_rules! impl_numeric_type {
     ($({ $variant_name:ident, $field_type:ty }),*) => {
         $(
-            #[derive(Default)]
-            pub struct $variant_name {
-                kind: FieldKind,
-                min: $field_type,
-                max: $field_type,
-                start: $field_type,
-                end: $field_type,
-                events_so_far: u64,
-                split_index: $field_type,
-                split_num: $field_type,
-            }
-
-            impl NumericFieldGenerator for $variant_name {
-                fn with_random(min_option: Option<String>, max_option: Option<String>) -> Result<Self> {
-
-                    let mut min = DEFAULT_MIN as $field_type;
-                    let mut max = DEFAULT_MAX as $field_type;
-
-                    if let Some(min_option) = min_option {
-                        min = min_option.parse::<$field_type>()?;
-                    }
-                    if let Some(max_option) = max_option {
-                        max = max_option.parse::<$field_type>()?;
-                    }
-
-                    assert!(min < max);
-
-                    Ok(Self {
-                        kind: FieldKind::Random,
-                        min,
-                        max,
-                        ..Default::default()
-                    })
-                }
-
-                fn with_sequence(star_optiont: Option<String>, end_option: Option<String>,split_index:u64,split_num:u64) -> Result<Self> {
-
-                    let mut start = DEFAULT_START as $field_type;
-                    let mut end = DEFAULT_END as $field_type;
-
-                    if let Some(star_optiont) = star_optiont {
-                        start = star_optiont.parse::<$field_type>()?;
-                    }
-                    if let Some(end_option) = end_option {
-                        end = end_option.parse::<$field_type>()?;
-                    }
-
-                    assert!(start < end);
-
-                    Ok(Self {
-                        kind: FieldKind::Sequence,
-                        start,
-                        end,
-                        split_index: split_index as $field_type,
-                        split_num: split_num as $field_type,
-                        ..Default::default()
-                    })
-                }
-
-                fn generate(&mut self) -> serde_json::Value {
-                    match self.kind {
-                        FieldKind::Random => {
-                            let mut rng = thread_rng();
-                            let result = rng.gen_range(self.min..=self.max);
-                            json!(result)
-                        }
-                        FieldKind::Sequence => {
-                            let events_so_far = self.events_so_far as $field_type;
-                            let partition_result = self.start + self.split_index + self.split_num*events_so_far;
-                            let partition_result = self.end.min(partition_result);
-                            self.events_so_far += 1;
-                            json!(partition_result)
-                        }
-                    }
-                }
+            impl NumericType for $field_type {
+                const DEFAULT_MIN: $field_type = DEFAULT_MIN as $field_type;
+                const DEFAULT_MAX: $field_type = DEFAULT_MAX as $field_type;
+                const DEFAULT_START: $field_type = DEFAULT_START as $field_type;
+                const DEFAULT_END: $field_type = DEFAULT_END as $field_type;
             }
         )*
     };
+}
+
+#[derive(Default)]
+pub struct NumericFieldConcrete<T> {
+    kind: FieldKind,
+    min: T,
+    max: T,
+    start: T,
+    end: T,
+    cur: T,
+    split_index: u64,
+    split_num: u64,
+}
+
+impl<T> NumericFieldGenerator for NumericFieldConcrete<T>
+where
+    T: NumericType,
+    <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+{
+    fn with_random(min_option: Option<String>, max_option: Option<String>) -> Result<Self> {
+        let mut min = T::DEFAULT_MIN;
+        let mut max = T::DEFAULT_MAX;
+
+        if let Some(min_option) = min_option {
+            min = min_option.parse::<T>()?;
+        }
+        if let Some(max_option) = max_option {
+            max = max_option.parse::<T>()?;
+        }
+
+        assert!(min < max);
+
+        Ok(Self {
+            kind: FieldKind::Random,
+            min,
+            max,
+            ..Default::default()
+        })
+    }
+
+    fn with_sequence(
+        star_optiont: Option<String>,
+        end_option: Option<String>,
+        split_index: u64,
+        split_num: u64,
+    ) -> Result<Self> {
+        let mut start = T::DEFAULT_START;
+        let mut end = T::DEFAULT_END;
+
+        if let Some(star_optiont) = star_optiont {
+            start = star_optiont.parse::<T>()?;
+        }
+        if let Some(end_option) = end_option {
+            end = end_option.parse::<T>()?;
+        }
+
+        assert!(start < end);
+
+        Ok(Self {
+            kind: FieldKind::Sequence,
+            start,
+            end,
+            split_index,
+            split_num,
+            ..Default::default()
+        })
+    }
+
+    fn generate(&mut self) -> serde_json::Value {
+        match self.kind {
+            FieldKind::Random => {
+                let mut rng = thread_rng();
+                let result = rng.gen_range(self.min..=self.max);
+                json!(result)
+            }
+            FieldKind::Sequence => {
+                let partition_result = self.start
+                    + T::from(self.split_index).unwrap()
+                    + T::from(self.split_num).unwrap() * self.cur;
+                let partition_result = if partition_result > self.end {
+                    None
+                } else {
+                    Some(partition_result)
+                };
+                self.cur += T::one();
+                json!(partition_result)
+            }
+        }
+    }
 }
 
 #[macro_export]
@@ -116,7 +157,16 @@ macro_rules! for_all_fields_variants {
     };
 }
 
-for_all_fields_variants! {impl_field_generator}
+macro_rules! gen_field_alias {
+    ($({ $variant_name:ident, $field_type:ty }),*) => {
+        $(
+            pub type $variant_name = NumericFieldConcrete<$field_type>;
+        )*
+    };
+}
+
+for_all_fields_variants! { impl_numeric_type }
+for_all_fields_variants! { gen_field_alias }
 
 #[cfg(test)]
 mod tests {
