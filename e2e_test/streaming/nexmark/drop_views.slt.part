@@ -9,3 +9,9 @@ drop materialized view nexmark_q2;
 
 statement ok
 drop materialized view nexmark_q3;
+
+statement ok
+drop materialized view nexmark_q4;
+
+statement ok
+drop materialized view nexmark_q5;

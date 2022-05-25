@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -222,24 +223,51 @@ impl Compactor {
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
-        tracing::info!(
-            "Ready to handle compaction task: \n{}",
-            compact_task_to_string(&compact_task)
-        );
-        let start_time = Instant::now();
-        for level in &compact_task.input_ssts {
-            for f in &level.table_infos {
-                context.stats.compaction_read_bytes.inc_by(f.file_size);
+        tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
+        let mut compaction_read_bytes = compact_task.input_ssts[0]
+            .table_infos
+            .iter()
+            .map(|t| t.file_size)
+            .sum();
+        if let Some(metrics) = compact_task.metrics.as_mut() {
+            if let Some(read) = metrics.read_level_n.as_mut() {
+                read.level_idx = compact_task.input_ssts[0].level_idx;
+                read.cnt = compact_task.input_ssts[0].table_infos.len() as u64;
+                read.size_kb = compaction_read_bytes / 1024;
             }
         }
-        let timer = context.stats.compact_task_duration.start_timer();
+        if compact_task.input_ssts.len() > 1 {
+            let sec_level_read_bytes: u64 = compact_task.input_ssts[1]
+                .table_infos
+                .iter()
+                .map(|t| t.file_size)
+                .sum();
+            if let Some(metrics) = compact_task.metrics.as_mut() {
+                if let Some(read) = metrics.read_level_nplus1.as_mut() {
+                    read.level_idx = compact_task.input_ssts[1].level_idx;
+                    read.cnt = compact_task.input_ssts[1].table_infos.len() as u64;
+                    read.size_kb = sec_level_read_bytes / 1024;
+                }
+            }
+            compaction_read_bytes += sec_level_read_bytes;
+        }
+        context
+            .stats
+            .compaction_read_bytes
+            .inc_by(compaction_read_bytes);
+
+        let timer = context
+            .stats
+            .compact_task_duration
+            .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
+            .start_timer();
 
         if !compact_task.vnode_mappings.is_empty() {
             compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
                 left: vec![],
                 right: vec![],
                 inf: false,
-            }]
+            }];
         };
 
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -313,12 +341,12 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         compactor.compact_done(output_ssts, compact_success).await;
-        tracing::debug!(
-            "execute compaction task {} cost {:?}",
-            compact_task.task_id,
-            start_time.elapsed()
+        let cost_time = timer.stop_and_record() * 1000.0;
+        tracing::info!(
+            "Finished compaction task in {:?}ms: \n{}",
+            cost_time,
+            compact_task_to_string(&compactor.compact_task)
         );
-        timer.observe_duration();
         compact_success
     }
 
@@ -328,7 +356,7 @@ impl Compactor {
         self.compact_task
             .sorted_output_ssts
             .reserve(self.compact_task.splits.len());
-
+        let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
             for (sst, vnode_bitmaps) in ssts {
                 let sst_info = SstableInfo {
@@ -341,14 +369,20 @@ impl Compactor {
                     file_size: sst.meta.estimated_size as u64,
                     vnode_bitmaps,
                 };
-                self.context
-                    .stats
-                    .compaction_write_bytes
-                    .inc_by(sst_info.file_size);
+                compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
             }
         }
-
+        self.context
+            .stats
+            .compaction_write_bytes
+            .inc_by(compaction_write_bytes);
+        if let Some(metrics) = self.compact_task.metrics.as_mut() {
+            if let Some(write) = metrics.write.as_mut() {
+                write.cnt = self.compact_task.sorted_output_ssts.len() as u64;
+                write.size_kb = compaction_write_bytes / 1024;
+            }
+        }
         if let Err(e) = self
             .context
             .hummock_meta_client
@@ -378,18 +412,23 @@ impl Compactor {
             inf: split.get_inf(),
         };
 
+        let get_id_time = Arc::new(AtomicU64::new(0));
+
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = GroupedSstableBuilder::new(
             || async {
+                let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
+                let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
                 let builder = SSTableBuilder::new(self.context.options.as_ref().into());
+                get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok((table_id, builder))
             },
             VirtualNode(VirtualNodeGrouping::new(vnode2unit)),
         );
 
         // Monitor time cost building shared buffer to SSTs.
-        let timer = if self.context.is_share_buffer_compact {
+        let _timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
         } else {
             self.context.stats.compact_sst_duration.start_timer()
@@ -411,14 +450,26 @@ impl Compactor {
         // TODO: decide upload concurrency. Maybe we shall create a upload task channel for multiple
         // compaction tasks.
         let mut pending_requests = vec![];
-        for (table_id, data, meta, vnode_bitmaps) in builder.finish() {
+        let files = builder.finish();
+        let file_count = files.len();
+        for (table_id, data, meta, vnode_bitmaps) in files {
             let sst = Sstable { id: table_id, meta };
             let len = data.len();
             ssts.push((sst.clone(), vnode_bitmaps));
-            let sstable_store = self.context.sstable_store.clone();
-            let ret =
-                tokio::spawn(async move { sstable_store.put(sst, data, CachePolicy::Fill).await });
-            pending_requests.push(ret);
+            if file_count > 1 {
+                let sstable_store = self.context.sstable_store.clone();
+                let ret =
+                    tokio::spawn(
+                        async move { sstable_store.put(sst, data, CachePolicy::Fill).await },
+                    );
+                pending_requests.push(ret);
+            } else {
+                self.context
+                    .sstable_store
+                    .put(sst, data, CachePolicy::Fill)
+                    .await?;
+            }
+
             if self.context.is_share_buffer_compact {
                 self.context
                     .stats
@@ -428,13 +479,18 @@ impl Compactor {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
         }
-        timer.observe_duration();
-        for ret in try_join_all(pending_requests)
-            .await
-            .map_err(HummockError::other)?
-        {
-            ret?;
+        if !pending_requests.is_empty() {
+            for ret in try_join_all(pending_requests)
+                .await
+                .map_err(HummockError::other)?
+            {
+                ret?;
+            }
         }
+        self.context
+            .stats
+            .get_table_id_total_time_duration
+            .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
         Ok((split_index, ssts))
     }
 

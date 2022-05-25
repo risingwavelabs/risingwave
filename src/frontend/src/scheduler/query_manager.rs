@@ -28,7 +28,7 @@ use risingwave_rpc_client::{
 use uuid::Uuid;
 
 use super::HummockSnapshotManagerRef;
-use crate::scheduler::execution::QueryExecution;
+use crate::scheduler::distributed::QueryExecution;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::ExecutionContextRef;

@@ -66,6 +66,35 @@ impl IntervalUnit {
         self.ms
     }
 
+    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> Result<Self> {
+        // TODO: remove IntervalType later.
+        match ty {
+            // the unit is months
+            Year | YearToMonth | Month => {
+                let bytes = bytes.try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
+                })?;
+                let mouths = i32::from_be_bytes(bytes);
+                Ok(IntervalUnit::from_month(mouths))
+            }
+            // the unit is ms
+            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
+            | Minute | MinuteToSecond | Second => {
+                let bytes = bytes.try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
+                })?;
+                let ms = i64::from_be_bytes(bytes);
+                Ok(IntervalUnit::from_millis(ms))
+            }
+            Invalid => {
+                // Invalid means the interval is from the new frontend.
+                // TODO: make this default path later.
+                let mut cursor = Cursor::new(bytes);
+                read_interval_unit(&mut cursor)
+            }
+        }
+    }
+
     #[must_use]
     pub fn negative(&self) -> Self {
         IntervalUnit {
