@@ -32,6 +32,8 @@ message TaskInfo {
     CANCELLING = 4;
     FINISHED = 5;
     FAILED = 6;
+    ABORTED = 7;
+    ABORTING = 8;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
@@ -49,10 +51,17 @@ message CreateTaskResponse {
 
 message AbortTaskRequest {
   batch_plan.TaskId task_id = 1;
-  bool force = 2;
 }
 
 message AbortTaskResponse {
+  common.Status status = 1;
+}
+
+message RemoveTaskRequest {
+  batch_plan.TaskId task_id = 1;
+}
+
+message RemoveTaskResponse {
   common.Status status = 1;
 }
 
@@ -79,6 +88,7 @@ service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
+  rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
 }
 
 message GetDataRequest {

@@ -280,7 +280,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
-    pub async fn get_or_init_without_cache(&mut self, key: &K) -> RwResult<&mut JoinEntryState<S>> {
+    pub async fn get_or_init_without_cache<'a>(
+        &'a mut self,
+        key: &K,
+    ) -> RwResult<&'a mut JoinEntryState<S>> {
         // TODO: we should probably implement a entry function for `LruCache`
         let contains = self.inner.contains(key);
         if contains {
