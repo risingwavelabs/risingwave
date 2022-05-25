@@ -190,9 +190,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
-    /// FIXME(lmatz): Lifetime 'b is added due to some weird errors, possibly compiler error. May
-    /// double check after bumping the toolchain.
-    pub async fn get_mut<'a, 'b>(&'a mut self, key: &'b K) -> Option<&'a mut HashValueType<S>> {
+    pub async fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
         match state {
