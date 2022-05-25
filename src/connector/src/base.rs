@@ -19,7 +19,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use paste::paste;
 use serde::{Deserialize, Serialize};
 
 use crate::datagen::{
@@ -181,19 +180,10 @@ mod tests {
     fn test_split_impl_get_fn() -> Result<()> {
         let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
         let split_impl = SplitImpl::Kafka(split.clone());
-        let get_value = split_impl.get_kafka()?;
+        let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
         assert_eq!(split.encode_to_bytes(), get_value.encode_to_bytes());
 
         Ok(())
-    }
-
-    #[test]
-    fn test_enum() {
-        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
-        let split_impl = SplitImpl::Kafka(split.clone());
-        
-        let s = split_impl.into_kafka();
-        println!("{:?}", s);
     }
 }

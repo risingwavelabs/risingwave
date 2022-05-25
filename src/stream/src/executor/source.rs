@@ -23,8 +23,7 @@ use paste::paste;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{
     ConnectorState, SplitImpl, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
@@ -189,9 +188,9 @@ impl SourceReader {
             yield Message::Barrier(barrier);
             notifier.notify_one();
         }
-        return Err(RwError::from(InternalError(
+        return Err(internal_error(
             "barrier reader closed unexpectedly".to_string(),
-        )));
+        ));
     }
 
     fn into_stream(
@@ -219,7 +218,7 @@ macro_rules! impl_take_snapshot {
             match $vec_split_impl[0].get_type().as_str() {
                 $(
                     $connector_split_type => {
-                        let type_cache = $vec_split_impl.iter().map(|split_impl| split_impl.[<get_ $connector>]()).collect::<anyhow::Result<Vec<_>>>().to_rw_result()?;
+                        let type_cache = $vec_split_impl.iter().map(|split_impl| split_impl.[<as_ $connector>]().unwrap().clone()).collect::<Vec<_>>();
                         $state_store.take_snapshot(type_cache, $epoch).await.to_rw_result()?;
                     },
                 )*
@@ -330,10 +329,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                     .filter(|origin_split| origin_split.id().as_str() == split)
                                     .collect::<Vec<&SplitImpl>>();
                                 if origin_split_impl.is_empty() {
-                                    Err(RwError::from(InternalError(format!(
+                                    Err(internal_error(format!(
                                         "cannot find split: {:?} in stream_source_splits: {:?}",
                                         split, self.stream_source_splits
-                                    ))))
+                                    )))
                                 } else {
                                     Ok((split.clone(), origin_split_impl[0].update(offset.clone())))
                                 }
