@@ -29,7 +29,7 @@ use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
 use risingwave_storage::object::{parse_object_store, ObjectStoreImpl};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::rpc::CompactorServiceImpl;
@@ -40,7 +40,7 @@ pub async fn compactor_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: CompactorOpts,
-) -> (JoinHandle<()>, UnboundedSender<()>) {
+) -> (JoinHandle<()>, Sender<()>) {
     let config = {
         if opts.config_path.is_empty() {
             CompactorConfig::default()
@@ -102,14 +102,14 @@ pub async fn compactor_serve(
         ),
     ];
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(CompactorServiceServer::new(CompactorServiceImpl {}))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
-                    _ = shutdown_recv.recv() => {
+                    _ = &mut shutdown_recv => {
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if let Err(err) = shutdown_sender.send(()) {
                                 tracing::warn!("Failed to send shutdown: {:?}", err);
