@@ -1,0 +1,4 @@
+statement ok
+SET QUERY_MODE TO local;
+
+include ./boolean.slt.part

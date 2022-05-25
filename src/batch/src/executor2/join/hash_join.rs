@@ -207,22 +207,25 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor2<K> {
             }
         }
         // probe_remaining
-        while state == HashJoinState::ProbeRemaining {
-            let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+        if !probe_table.build_data_empty() {
+            while state == HashJoinState::ProbeRemaining {
                 let output_data_chunk =
-                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+                    if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+                        let output_data_chunk =
+                            probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-                probe_table.reset_result_index();
-                output_data_chunk
-            } else {
-                let ret_data_chunk = probe_table.consume_left()?;
-                let output_data_chunk =
-                    probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+                        probe_table.reset_result_index();
+                        output_data_chunk
+                    } else {
+                        let ret_data_chunk = probe_table.consume_left()?;
+                        let output_data_chunk =
+                            probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
 
-                state = HashJoinState::Done;
-                output_data_chunk
-            };
-            yield output_data_chunk
+                        state = HashJoinState::Done;
+                        output_data_chunk
+                    };
+                yield output_data_chunk
+            }
         }
     }
 }

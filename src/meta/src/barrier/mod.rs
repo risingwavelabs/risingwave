@@ -28,7 +28,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -36,7 +36,8 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use self::notifier::{Notifier, UnfinishedNotifiers};
+use self::notifier::Notifier;
+use self::progress::CreateMviewProgressTracker;
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
@@ -48,6 +49,7 @@ use crate::stream::FragmentManagerRef;
 mod command;
 mod info;
 mod notifier;
+mod progress;
 mod recovery;
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
@@ -194,10 +196,8 @@ where
         }
     }
 
-    pub async fn start(
-        barrier_manager: BarrierManagerRef<S>,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             barrier_manager.run(shutdown_rx).await;
         });
@@ -206,8 +206,8 @@ where
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
-    async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
-        let mut unfinished = UnfinishedNotifiers::default();
+    async fn run(&self, mut shutdown_rx: Receiver<()>) {
+        let mut tracker = CreateMviewProgressTracker::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
         if self.enable_recovery {
@@ -217,11 +217,15 @@ where
             assert!(new_epoch > state.prev_epoch);
             state.prev_epoch = new_epoch;
 
-            let (new_epoch, actors_to_finish, finished_create_mviews) =
+            let (new_epoch, actors_to_track, create_mview_progress) =
                 self.recovery(state.prev_epoch).await;
-            unfinished.add(new_epoch.0, actors_to_finish, vec![]);
-            for finished in finished_create_mviews {
-                unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+            tracker.add(new_epoch, actors_to_track, vec![]);
+            for progress in create_mview_progress {
+                tracker.update(
+                    progress.chain_actor_id,
+                    progress.consumed_epoch.into(),
+                    new_epoch,
+                );
             }
             state.prev_epoch = new_epoch;
             state.update(self.env.meta_store()).await.unwrap();
@@ -233,7 +237,7 @@ where
             tokio::select! {
                 biased;
                 // Shutdown
-                _ = shutdown_rx.recv() => {
+                _ = &mut shutdown_rx => {
                     tracing::info!("Barrier manager is shutting down");
                     return;
                 }
@@ -273,10 +277,14 @@ where
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
 
                     // Then try to finish the barrier for Create MVs.
-                    let actors_to_finish = command_ctx.actors_to_finish();
-                    unfinished.add(new_epoch.0, actors_to_finish, notifiers);
-                    for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
-                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                    let actors_to_track = command_ctx.actors_to_track();
+                    tracker.add(new_epoch, actors_to_track, notifiers);
+                    for progress in responses.into_iter().flat_map(|r| r.create_mview_progress) {
+                        tracker.update(
+                            progress.chain_actor_id,
+                            progress.consumed_epoch.into(),
+                            new_epoch,
+                        );
                     }
 
                     state.prev_epoch = new_epoch;
@@ -287,12 +295,16 @@ where
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     if self.enable_recovery {
                         // If failed, enter recovery mode.
-                        let (new_epoch, actors_to_finish, finished_create_mviews) =
+                        let (new_epoch, actors_to_track, create_mview_progress) =
                             self.recovery(new_epoch).await;
-                        unfinished = UnfinishedNotifiers::default();
-                        unfinished.add(new_epoch.0, actors_to_finish, vec![]);
-                        for finished in finished_create_mviews {
-                            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                        tracker = CreateMviewProgressTracker::default(); // Reset progress tracker
+                        tracker.add(new_epoch, actors_to_track, vec![]);
+                        for progress in create_mview_progress {
+                            tracker.update(
+                                progress.chain_actor_id,
+                                progress.consumed_epoch.into(),
+                                new_epoch,
+                            );
                         }
 
                         state.prev_epoch = new_epoch;
@@ -317,19 +329,25 @@ where
         let result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch.0 != INVALID_EPOCH {
-            match result {
-                Ok(_) => {
+            match &result {
+                Ok(resps) => {
                     // We must ensure all epochs are committed in ascending order, because
                     // the storage engine will query from new to old in the order in which
                     // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
+                    let synced_ssts = resps
+                        .iter()
+                        .flat_map(|resp| resp.sycned_sstables.clone())
+                        .collect_vec();
                     self.hummock_manager
-                        .commit_epoch(command_context.prev_epoch.0)
+                        .commit_epoch(command_context.prev_epoch.0, synced_ssts)
                         .await?;
                 }
-                Err(_) => {
-                    self.hummock_manager
-                        .abort_epoch(command_context.prev_epoch.0)
-                        .await?;
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to commit epoch {}: {:#?}",
+                        command_context.prev_epoch.0,
+                        err
+                    );
                 }
             };
         }

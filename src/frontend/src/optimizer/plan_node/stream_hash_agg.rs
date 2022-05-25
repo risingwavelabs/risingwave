@@ -92,7 +92,7 @@ impl ToStreamProst for StreamHashAgg {
             distribution_keys: self
                 .distribution_keys()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
             agg_calls: self
                 .agg_calls()

@@ -83,7 +83,7 @@ impl ToStreamProst for StreamSimpleAgg {
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| *idx as i32)
+                .map(|idx| *idx as u32)
                 .collect_vec(),
             table_ids: vec![],
             append_only: self.append_only(),

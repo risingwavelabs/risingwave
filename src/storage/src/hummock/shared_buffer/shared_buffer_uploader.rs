@@ -26,6 +26,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
 use super::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
@@ -70,6 +71,7 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
+    compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
 impl SharedBufferUploader {
@@ -82,6 +84,13 @@ impl SharedBufferUploader {
         stats: Arc<StateStoreMetrics>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> Self {
+        let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
+            None
+        } else {
+            Some(Arc::new(CompactionExecutor::new(Some(
+                options.share_buffer_compaction_worker_threads_number as usize,
+            ))))
+        };
         Self {
             options,
             write_conflict_detector,
@@ -90,6 +99,7 @@ impl SharedBufferUploader {
             hummock_meta_client,
             next_local_sstable_id: Arc::new(AtomicU64::new(0)),
             stats,
+            compaction_executor,
         }
     }
 
@@ -171,6 +181,7 @@ impl SharedBufferUploader {
             } else {
                 get_remote_sstable_id_generator(self.hummock_meta_client.clone())
             },
+            compaction_executor: self.compaction_executor.as_ref().cloned(),
         };
 
         let tables = Compactor::compact_shared_buffer(
@@ -193,12 +204,6 @@ impl SharedBufferUploader {
                 vnode_bitmaps,
             })
             .collect();
-
-        // Add all tables at once.
-        self.hummock_meta_client
-            .add_tables(epoch, uploaded_sst_info.clone())
-            .await
-            .map_err(HummockError::meta_error)?;
 
         if let Some(detector) = &self.write_conflict_detector {
             for batch in batches {
