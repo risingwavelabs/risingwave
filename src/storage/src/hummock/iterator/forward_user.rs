@@ -18,14 +18,31 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
 use super::{ForwardHummockIterator, MergeIterator};
-use crate::hummock::iterator::BackwardUserIterator;
+use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
+use crate::hummock::iterator::{
+    BackwardUserIterator, BoxedHummockIterator, Forward, HummockIteratorDirection,
+};
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
+use crate::monitor::StateStoreMetrics;
 
 pub enum DirectedUserIterator {
     Forward(UserIterator),
     Backward(BackwardUserIterator),
+}
+
+pub trait DirectedUserIteratorBuilder {
+    type Direction: HummockIteratorDirection;
+    /// Initialize an `DirectedUserIterator`.
+    /// The `key_range` should be from smaller key to larger key.
+    fn create(
+        iterator_iter: impl IntoIterator<Item = BoxedHummockIterator<Self::Direction>>,
+        stats: Arc<StateStoreMetrics>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_epoch: u64,
+        version: Option<Arc<PinnedVersion>>,
+    ) -> DirectedUserIterator;
 }
 
 impl DirectedUserIterator {
@@ -241,6 +258,21 @@ impl UserIterator {
         // Handle range scan
         // key >= begin_key is guaranteed by seek/rewind function
         (!self.out_of_range) && self.iterator.is_valid()
+    }
+}
+
+impl DirectedUserIteratorBuilder for UserIterator {
+    type Direction = Forward;
+
+    fn create(
+        iterator_iter: impl IntoIterator<Item = BoxedHummockIterator<Forward>>,
+        stats: Arc<StateStoreMetrics>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_epoch: u64,
+        version: Option<Arc<PinnedVersion>>,
+    ) -> DirectedUserIterator {
+        let iterator = UnorderedMergeIteratorInner::<Forward>::new(iterator_iter, stats);
+        DirectedUserIterator::Forward(Self::new(iterator, key_range, read_epoch, version))
     }
 }
 
