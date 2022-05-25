@@ -458,6 +458,17 @@ async fn test_state_table_iter() {
     assert!(res.is_some());
     assert_eq!(
         Row(vec![
+            Some(0_i32.into()),
+            Some(00_i32.into()),
+            Some(000_i32.into())
+        ]),
+        res.unwrap()
+    );
+
+    let res = iter.next().await.unwrap();
+    assert!(res.is_some());
+    assert_eq!(
+        Row(vec![
             Some(1_i32.into()),
             Some(11_i32.into()),
             Some(111_i32.into())
