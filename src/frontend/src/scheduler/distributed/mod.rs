@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Distributed execution for batch query.
+
 mod query;
 pub use query::*;
 mod stage;

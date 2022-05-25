@@ -179,13 +179,16 @@ impl LocalStreamManager {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
         // Wait for all actors finishing this barrier.
-        let collect_result = rx.await.unwrap();
+        let mut collect_result = rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         if need_sync {
             dispatch_state_store!(self.state_store(), store, {
                 match store.sync(Some(barrier.epoch.prev)).await {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        collect_result.synced_sstables =
+                            store.get_uncommitted_ssts(barrier.epoch.prev);
+                    }
                     // TODO: Handle sync failure by propagating it
                     // back to global barrier manager
                     Err(e) => panic!(
@@ -347,7 +350,7 @@ impl LocalStreamManagerCore {
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
-            compute_client_pool: ComputeClientPool::new(1024),
+            compute_client_pool: ComputeClientPool::new(u64::MAX),
             config,
         }
     }
