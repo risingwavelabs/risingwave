@@ -3,7 +3,10 @@
 		"list": [
 			{
 				"builtIn": 1,
-				"datasource": "-- Grafana --",
+				"datasource": {
+					"type": "datasource",
+					"uid": "grafana"
+				},
 				"enable": true,
 				"hide": true,
 				"iconColor": "rgba(0, 211, 255, 1)",
@@ -21,13 +24,16 @@
 	"editable": true,
 	"fiscalYearStartMonth": 0,
 	"graphTooltip": 0,
-	"id": 2,
-	"iteration": 1653032725452,
+	"id": 1,
 	"links": [],
 	"liveNow": true,
 	"panels": [
 		{
 			"collapsed": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
@@ -44,6 +50,10 @@
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fill": 1,
 			"fillGradient": 0,
 			"gridPos": {
@@ -70,7 +80,7 @@
 				"alertThreshold": true
 			},
 			"percentage": false,
-			"pluginVersion": "8.3.3",
+			"pluginVersion": "8.5.3",
 			"pointradius": 2,
 			"points": false,
 			"renderer": "flot",
@@ -80,11 +90,17 @@
 			"steppedLine": false,
 			"targets": [
 				{
-					"expr": "avg(process_resident_memory_bytes) by (instance)",
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"expr": "avg(process_resident_memory_bytes) by (job,instance)",
 					"format": "time_series",
 					"hide": false,
 					"intervalFactor": 2,
-					"legendFormat": "",
+					"legendFormat": "{{job}} @ {{instance}}",
+					"range": true,
 					"refId": "A"
 				}
 			],
@@ -125,6 +141,10 @@
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fill": 1,
 			"fillGradient": 0,
 			"gridPos": {
@@ -151,7 +171,7 @@
 				"alertThreshold": true
 			},
 			"percentage": false,
-			"pluginVersion": "8.3.3",
+			"pluginVersion": "8.5.3",
 			"pointradius": 2,
 			"points": false,
 			"renderer": "flot",
@@ -165,11 +185,13 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
-					"expr": "sum(rate(process_cpu_seconds_total[1m])) by (instance)",
+					"expr": "sum(rate(process_cpu_seconds_total[1m])) by (job,instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{instance}}",
+					"legendFormat": "{{job}} @ {{instance}}",
+					"range": true,
 					"refId": "B"
 				}
 			],
@@ -207,6 +229,10 @@
 		},
 		{
 			"collapsed": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
@@ -219,6 +245,10 @@
 			"type": "row"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -283,7 +313,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -292,11 +323,13 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
 					"expr": "sum(storage_level_sst_num) by (instance, level_index)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "{{instance}}-{{level_index}}",
+					"legendFormat": "{{level_index}}",
+					"range": true,
 					"refId": "B"
 				}
 			],
@@ -304,6 +337,10 @@
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -369,7 +406,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -378,10 +416,12 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
 					"expr": "storage_level_compact_frequency",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{job}} @ {{instance}}",
+					"range": true,
 					"refId": "A"
 				}
 			],
@@ -389,6 +429,10 @@
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -455,10 +499,11 @@
 					"displayMode": "table",
 					"placement": "right",
 					"sortBy": "Max",
-					"sortDesc": true
+					"sortDesc": false
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"pluginVersion": "8.3.3",
@@ -468,11 +513,13 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_compact_task_duration_bucket[1m])) by (le))",
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_compact_task_duration_bucket[1m])) by (le, job, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "compact-task p50",
+					"legendFormat": "compact-task p50 - {{job}} @ {{instance}}",
+					"range": true,
 					"refId": "A"
 				},
 				{
@@ -480,11 +527,13 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_compact_task_duration_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_compact_task_duration_bucket[1m])) by (le, job, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "compact-task p90 (cn: {{instance}})",
+					"legendFormat": "compact-task p90 - {{job}} @ {{instance}}",
+					"range": true,
 					"refId": "C"
 				},
 				{
@@ -504,11 +553,13 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
 					"expr": "sum by(le)(rate(state_store_compact_sst_duration_sum[1m])) / sum by(le) (rate(state_store_compact_sst_duration_count[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "compact-key-range avg",
+					"range": true,
 					"refId": "B"
 				},
 				{
@@ -516,18 +567,52 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_compact_sst_duration_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_compact_sst_duration_bucket[1m])) by (le, job, instance))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "compact-key-range p90",
+					"legendFormat": "compact-key-range p90 - {{job}} @ {{instance}}",
+					"range": true,
 					"refId": "E"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_get_table_id_total_time_duration_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "get-table-id p90 {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "F"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_remote_read_time_per_task_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "remote-io p90 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "G"
 				}
 			],
 			"title": "compact duration",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -593,7 +678,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"pluginVersion": "8.3.3",
@@ -603,10 +689,12 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
-					"expr": "sum(rate(state_store_compaction_read_bytes[1m]))by(instance)",
+					"expr": "sum(rate(state_store_compaction_read_bytes[1m]))by(job,instance)",
 					"interval": "",
-					"legendFormat": "read (cn: {{instance}})",
+					"legendFormat": "read - {{job}} @ {{instance}}",
+					"range": true,
 					"refId": "A"
 				},
 				{
@@ -614,18 +702,38 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
-					"expr": "sum(rate(state_store_compaction_write_bytes[1m]))by(instance)",
+					"expr": "sum(rate(state_store_compaction_write_bytes[1m]))by(job,instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "write (cn: {{instance}})",
+					"legendFormat": "write - {{job}} @ {{instance}}",
+					"range": true,
 					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_write_build_l0_bytes[1m]))by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "flush - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "C"
 				}
 			],
 			"title": "compact throughput",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -691,7 +799,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -700,10 +809,12 @@
 						"type": "prometheus",
 						"uid": "risedev-prometheus"
 					},
+					"editorMode": "code",
 					"exemplar": true,
 					"expr": "storage_level_compact_cnt",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}}",
+					"range": true,
 					"refId": "A"
 				}
 			],
@@ -711,6 +822,10 @@
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -776,7 +891,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -805,6 +921,10 @@
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -852,7 +972,8 @@
 								"value": 80
 							}
 						]
-					}
+					},
+					"unit": "deckbytes"
 				},
 				"overrides": []
 			},
@@ -870,7 +991,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -880,16 +1002,32 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "storage_level_compact_read_next",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}} read bytes p50",
 					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_next_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{level_index}} read bytes p99",
+					"refId": "B"
 				}
 			],
 			"title": "GBs read from next level",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -937,7 +1075,8 @@
 								"value": 80
 							}
 						]
-					}
+					},
+					"unit": "deckbytes"
 				},
 				"overrides": []
 			},
@@ -955,7 +1094,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -965,16 +1105,32 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "storage_level_compact_read_curr",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}} read bytes p50",
 					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_curr_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{level_index}} read bytes p99",
+					"refId": "B"
 				}
 			],
 			"title": "GBs read from current level",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1040,7 +1196,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -1050,16 +1207,32 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "storage_level_compact_read_sstn_curr",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}} p50",
 					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_curr_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{level_index}} p99",
+					"refId": "B"
 				}
 			],
 			"title": "count of sst read from current level",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1107,7 +1280,8 @@
 								"value": 80
 							}
 						]
-					}
+					},
+					"unit": "deckbytes"
 				},
 				"overrides": []
 			},
@@ -1125,7 +1299,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -1135,16 +1310,32 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "storage_level_compact_write",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}} write bytes p50",
 					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_write_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{level_index}} write bytes p99",
+					"refId": "B"
 				}
 			],
 			"title": "GBs written to next level",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1210,7 +1401,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -1220,16 +1412,32 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "storage_level_compact_write_sstn",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}} write count p50",
 					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_write_sstn_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{level_index}} write count p99",
+					"refId": "B"
 				}
 			],
 			"title": "count of sst written to next level",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"description": "",
 			"fieldConfig": {
 				"defaults": {
@@ -1295,7 +1503,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"targets": [
@@ -1305,17 +1514,33 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "storage_level_compact_read_sstn_next",
+					"expr": "histogram_quantile(0.5, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))",
 					"interval": "",
-					"legendFormat": "",
+					"legendFormat": "{{level_index}} read count p50",
 					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(storage_level_compact_read_sstn_next_bucket[1m])) by (le, level_index))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{level_index}} read count p99",
+					"refId": "B"
 				}
 			],
 			"title": "count of sst read from next level",
 			"type": "timeseries"
 		},
 		{
-			"collapsed": true,
+			"collapsed": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
@@ -1323,457 +1548,464 @@
 				"y": 58
 			},
 			"id": 184,
-			"panels": [
-				{
-					"fieldConfig": {
-						"defaults": {
-							"color": {
-								"mode": "palette-classic"
-							},
-							"custom": {
-								"axisLabel": "",
-								"axisPlacement": "auto",
-								"barAlignment": 0,
-								"drawStyle": "line",
-								"fillOpacity": 10,
-								"gradientMode": "none",
-								"hideFrom": {
-									"legend": false,
-									"tooltip": false,
-									"viz": false
-								},
-								"lineInterpolation": "linear",
-								"lineWidth": 1,
-								"pointSize": 5,
-								"scaleDistribution": {
-									"type": "linear"
-								},
-								"showPoints": "never",
-								"spanNulls": true,
-								"stacking": {
-									"group": "A",
-									"mode": "none"
-								},
-								"thresholdsStyle": {
-									"mode": "off"
-								}
-							},
-							"mappings": [],
-							"thresholds": {
-								"mode": "absolute",
-								"steps": [
-									{
-										"color": "green",
-										"value": null
-									},
-									{
-										"color": "red",
-										"value": 80
-									}
-								]
-							},
-							"unit": "Bps"
-						},
-						"overrides": []
-					},
-					"gridPos": {
-						"h": 8,
-						"w": 12,
-						"x": 0,
-						"y": 11
-					},
-					"id": 186,
-					"options": {
-						"legend": {
-							"calcs": [
-								"min",
-								"max"
-							],
-							"displayMode": "table",
-							"placement": "right"
-						},
-						"tooltip": {
-							"mode": "single"
-						}
-					},
-					"pluginVersion": "8.3.3",
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "sum(rate(object_store_read_bytes[1m]))by(instance)",
-							"interval": "",
-							"legendFormat": "read (cn: {{instance}})",
-							"refId": "A"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "sum(rate(object_store_write_bytes[1m]))by(instance)",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "write (cn: {{instance}})",
-							"refId": "B"
-						}
-					],
-					"title": "throughput",
-					"type": "timeseries"
-				},
-				{
-					"fieldConfig": {
-						"defaults": {
-							"color": {
-								"mode": "palette-classic"
-							},
-							"custom": {
-								"axisLabel": "",
-								"axisPlacement": "auto",
-								"barAlignment": 0,
-								"drawStyle": "line",
-								"fillOpacity": 10,
-								"gradientMode": "none",
-								"hideFrom": {
-									"legend": false,
-									"tooltip": false,
-									"viz": false
-								},
-								"lineInterpolation": "linear",
-								"lineWidth": 1,
-								"pointSize": 5,
-								"scaleDistribution": {
-									"type": "linear"
-								},
-								"showPoints": "never",
-								"spanNulls": true,
-								"stacking": {
-									"group": "A",
-									"mode": "none"
-								},
-								"thresholdsStyle": {
-									"mode": "off"
-								}
-							},
-							"mappings": [],
-							"thresholds": {
-								"mode": "absolute",
-								"steps": [
-									{
-										"color": "green",
-										"value": null
-									},
-									{
-										"color": "red",
-										"value": 80
-									}
-								]
-							},
-							"unit": "s"
-						},
-						"overrides": [
-							{
-								"__systemRef": "hideSeriesFrom",
-								"matcher": {
-									"id": "byNames",
-									"options": {
-										"mode": "exclude",
-										"names": [
-											"upload p99 (cn: 127.0.0.1:1222)"
-										],
-										"prefix": "All except:",
-										"readOnly": true
-									}
-								},
-								"properties": [
-									{
-										"id": "custom.hideFrom",
-										"value": {
-											"legend": false,
-											"tooltip": false,
-											"viz": true
-										}
-									}
-								]
-							}
-						]
-					},
-					"gridPos": {
-						"h": 8,
-						"w": 12,
-						"x": 12,
-						"y": 11
-					},
-					"id": 188,
-					"options": {
-						"legend": {
-							"calcs": [
-								"max"
-							],
-							"displayMode": "table",
-							"placement": "right",
-							"sortBy": "Max",
-							"sortDesc": true
-						},
-						"tooltip": {
-							"mode": "single"
-						}
-					},
-					"pluginVersion": "8.3.3",
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "{{type}} p50",
-							"refId": "A"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, instance))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "{{type}} p99 (cn: {{instance}})",
-							"refId": "B"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, instance))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "{{type}} p90 (cn: {{instance}})",
-							"refId": "C"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "{{type}} avg",
-							"refId": "D"
-						}
-					],
-					"title": "operation duration",
-					"type": "timeseries"
-				},
-				{
-					"fieldConfig": {
-						"defaults": {
-							"color": {
-								"mode": "palette-classic"
-							},
-							"custom": {
-								"axisLabel": "",
-								"axisPlacement": "auto",
-								"barAlignment": 0,
-								"drawStyle": "line",
-								"fillOpacity": 10,
-								"gradientMode": "none",
-								"hideFrom": {
-									"legend": false,
-									"tooltip": false,
-									"viz": false
-								},
-								"lineInterpolation": "linear",
-								"lineWidth": 1,
-								"pointSize": 5,
-								"scaleDistribution": {
-									"type": "linear"
-								},
-								"showPoints": "never",
-								"spanNulls": true,
-								"stacking": {
-									"group": "A",
-									"mode": "none"
-								},
-								"thresholdsStyle": {
-									"mode": "off"
-								}
-							},
-							"mappings": [],
-							"thresholds": {
-								"mode": "absolute",
-								"steps": [
-									{
-										"color": "green",
-										"value": null
-									},
-									{
-										"color": "red",
-										"value": 80
-									}
-								]
-							},
-							"unit": "ops"
-						},
-						"overrides": []
-					},
-					"gridPos": {
-						"h": 8,
-						"w": 12,
-						"x": 0,
-						"y": 19
-					},
-					"id": 192,
-					"options": {
-						"legend": {
-							"calcs": [],
-							"displayMode": "list",
-							"placement": "bottom"
-						},
-						"tooltip": {
-							"mode": "single"
-						}
-					},
-					"pluginVersion": "8.3.3",
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "sum(rate(object_store_operation_latency_count[1m])) by (le, type, instance)",
-							"interval": "",
-							"intervalFactor": 2,
-							"legendFormat": "{{type}} (cn:{{instance}})",
-							"refId": "A"
-						}
-					],
-					"title": "ops",
-					"type": "timeseries"
-				},
-				{
-					"aliasColors": {},
-					"bars": false,
-					"dashLength": 10,
-					"dashes": false,
-					"fill": 1,
-					"fillGradient": 0,
-					"gridPos": {
-						"h": 8,
-						"w": 12,
-						"x": 12,
-						"y": 19
-					},
-					"hiddenSeries": false,
-					"id": 194,
-					"legend": {
-						"avg": false,
-						"current": false,
-						"max": false,
-						"min": false,
-						"show": true,
-						"total": false,
-						"values": false
-					},
-					"lines": true,
-					"linewidth": 1,
-					"nullPointMode": "null",
-					"options": {
-						"alertThreshold": true
-					},
-					"percentage": false,
-					"pluginVersion": "8.3.3",
-					"pointradius": 2,
-					"points": false,
-					"renderer": "flot",
-					"seriesOverrides": [],
-					"spaceLength": 10,
-					"stack": false,
-					"steppedLine": false,
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
-							"format": "time_series",
-							"hide": false,
-							"interval": "",
-							"intervalFactor": 2,
-							"legendFormat": "{{type}}  p90",
-							"refId": "A"
-						},
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "risedev-prometheus"
-							},
-							"exemplar": true,
-							"expr": "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "{{type}} p80",
-							"refId": "B"
-						}
-					],
-					"thresholds": [],
-					"timeRegions": [],
-					"title": "ops size",
-					"tooltip": {
-						"shared": true,
-						"sort": 0,
-						"value_type": "individual"
-					},
-					"type": "graph",
-					"xaxis": {
-						"mode": "time",
-						"show": true,
-						"values": []
-					},
-					"yaxes": [
-						{
-							"$$hashKey": "object:37",
-							"format": "decbytes",
-							"logBase": 1,
-							"show": true
-						},
-						{
-							"$$hashKey": "object:38",
-							"format": "short",
-							"logBase": 1,
-							"show": true
-						}
-					],
-					"yaxis": {
-						"align": false
-					}
-				}
-			],
+			"panels": [],
 			"title": "Object Storage",
 			"type": "row"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "Bps"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 59
+			},
+			"id": 186,
+			"options": {
+				"legend": {
+					"calcs": [
+						"min",
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(object_store_read_bytes[1m]))by(job,instance)",
+					"interval": "",
+					"legendFormat": "read - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(object_store_write_bytes[1m]))by(job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "write - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "B"
+				}
+			],
+			"title": "throughput",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 59
+			},
+			"id": 188,
+			"options": {
+				"legend": {
+					"calcs": [
+						"max"
+					],
+					"displayMode": "table",
+					"placement": "right",
+					"sortBy": "Max",
+					"sortDesc": true
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{type}} p50",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(object_store_operation_latency_bucket[1m])) by (le, type, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{type}} p99 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_latency_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{type}} p90 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, type)(rate(object_store_operation_latency_sum[1m])) / sum by(le, type) (rate(object_store_operation_latency_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{type}} avg",
+					"refId": "D"
+				}
+			],
+			"title": "operation duration",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 67
+			},
+			"id": 192,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(object_store_operation_latency_count[1m])) by (le, type, job, instance)",
+					"interval": "",
+					"intervalFactor": 2,
+					"legendFormat": "{{type}} - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				}
+			],
+			"title": "ops",
+			"type": "timeseries"
+		},
+		{
+			"aliasColors": {},
+			"bars": false,
+			"dashLength": 10,
+			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fill": 1,
+			"fillGradient": 0,
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 67
+			},
+			"hiddenSeries": false,
+			"id": 194,
+			"legend": {
+				"avg": false,
+				"current": false,
+				"max": false,
+				"min": false,
+				"show": true,
+				"total": false,
+				"values": false
+			},
+			"lines": true,
+			"linewidth": 1,
+			"nullPointMode": "null",
+			"options": {
+				"alertThreshold": true
+			},
+			"percentage": false,
+			"pluginVersion": "8.5.3",
+			"pointradius": 2,
+			"points": false,
+			"renderer": "flot",
+			"seriesOverrides": [],
+			"spaceLength": 10,
+			"stack": false,
+			"steppedLine": false,
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
+					"format": "time_series",
+					"hide": false,
+					"interval": "",
+					"intervalFactor": 2,
+					"legendFormat": "{{type}}  p90",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.80, sum(rate(object_store_operation_bytes_bucket[1m])) by (le, type))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{type}} p80",
+					"refId": "B"
+				}
+			],
+			"thresholds": [],
+			"timeRegions": [],
+			"title": "ops size",
+			"tooltip": {
+				"shared": true,
+				"sort": 0,
+				"value_type": "individual"
+			},
+			"type": "graph",
+			"xaxis": {
+				"mode": "time",
+				"show": true,
+				"values": []
+			},
+			"yaxes": [
+				{
+					"$$hashKey": "object:37",
+					"format": "decbytes",
+					"logBase": 1,
+					"show": true
+				},
+				{
+					"$$hashKey": "object:38",
+					"format": "short",
+					"logBase": 1,
+					"show": true
+				}
+			],
+			"yaxis": {
+				"align": false
+			}
+		},
+		{
 			"collapsed": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 59
+				"y": 75
 			},
 			"id": 38,
 			"panels": [],
@@ -1785,13 +2017,17 @@
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fill": 1,
 			"fillGradient": 0,
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 60
+				"y": 76
 			},
 			"hiddenSeries": false,
 			"id": 124,
@@ -1811,7 +2047,7 @@
 				"alertThreshold": true
 			},
 			"percentage": false,
-			"pluginVersion": "8.3.3",
+			"pluginVersion": "8.5.3",
 			"pointradius": 2,
 			"points": false,
 			"renderer": "flot",
@@ -1917,13 +2153,17 @@
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fill": 1,
 			"fillGradient": 0,
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 60
+				"y": 76
 			},
 			"hiddenSeries": false,
 			"id": 14,
@@ -1943,7 +2183,7 @@
 				"alertThreshold": true
 			},
 			"percentage": false,
-			"pluginVersion": "8.3.3",
+			"pluginVersion": "8.5.3",
 			"pointradius": 2,
 			"points": false,
 			"renderer": "flot",
@@ -2001,13 +2241,17 @@
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fill": 1,
 			"fillGradient": 0,
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 68
+				"y": 84
 			},
 			"hiddenSeries": false,
 			"id": 16,
@@ -2027,7 +2271,7 @@
 				"alertThreshold": true
 			},
 			"percentage": false,
-			"pluginVersion": "8.3.3",
+			"pluginVersion": "8.5.3",
 			"pointradius": 2,
 			"points": false,
 			"renderer": "flot",
@@ -2083,11 +2327,15 @@
 		},
 		{
 			"collapsed": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 76
+				"y": 92
 			},
 			"id": 26,
 			"panels": [],
@@ -2095,608 +2343,10 @@
 			"type": "row"
 		},
 		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "ops"
-				},
-				"overrides": [
-					{
-						"__systemRef": "hideSeriesFrom",
-						"matcher": {
-							"id": "byNames",
-							"options": {
-								"mode": "exclude",
-								"names": [
-									"range_scan (cn:127.0.0.1:1222)"
-								],
-								"prefix": "All except:",
-								"readOnly": true
-							}
-						},
-						"properties": [
-							{
-								"id": "custom.hideFrom",
-								"value": {
-									"legend": false,
-									"tooltip": false,
-									"viz": true
-								}
-							}
-						]
-					}
-				]
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
 			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 77
-			},
-			"id": 30,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_duration_count[1m])) by (instance)",
-					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "get (cn:{{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_range_scan_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "range_scan (cn:{{instance}})",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_range_reverse_scan_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "reverse_range_scan (cn:{{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_shared_buffer_hit_counts[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "shared_buffer hit (cn:{{instance}})",
-					"refId": "F"
-				}
-			],
-			"title": "read ops",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "ops"
-				},
-				"overrides": [
-					{
-						"__systemRef": "hideSeriesFrom",
-						"matcher": {
-							"id": "byNames",
-							"options": {
-								"mode": "exclude",
-								"names": [
-									"data_total  (cn:127.0.0.1:1222)"
-								],
-								"prefix": "All except:",
-								"readOnly": true
-							}
-						},
-						"properties": [
-							{
-								"id": "custom.hideFrom",
-								"value": {
-									"legend": false,
-									"tooltip": false,
-									"viz": true
-								}
-							}
-						]
-					}
-				]
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 77
-			},
-			"id": 128,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_store_block_request_counts[1m])) by (instance, type)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "{{type}}  (cn:{{instance}})",
-					"refId": "D"
-				}
-			],
-			"title": "block ops",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 85
-			},
-			"id": 28,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "get p50 (cn: {{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "get p99 (cn: {{instance}})",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_get_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "get p90 (cn: {{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_get_duration_sum[1m])) / sum by(le, instance) (rate(state_store_get_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get avg (cn: {{instance}})",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "range_scan p50 (cn: {{instance}})",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "range_scan p99 (cn: {{instance}})",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "range_scan p90 (cn: {{instance}})",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_range_scan_duration_sum[1m])) / sum by(le, instance) (rate(state_store_range_scan_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "range_scan avg (cn: {{instance}})",
-					"refId": "H"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "reverse_range_scan p50 (cn: {{instance}})",
-					"refId": "I"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "reverse_range_scan p99 (cn: {{instance}})",
-					"refId": "J"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_range_reverse_scan_duration_sum[1m])) / sum by(le, instance) (rate(state_store_range_reverse_scan_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "reverse_range_scan avg (cn: {{instance}})",
-					"refId": "K"
-				}
-			],
-			"title": "read duration",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 0,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "auto",
-						"spanNulls": false,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "cpm"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 85
-			},
-			"id": 130,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_bloom_filter_true_negative_counts[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "bloom filter true negative (cn:{{instance}})",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_bloom_filter_might_positive_counts[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "bloom filter might positive (cn:{{instance}})",
-					"refId": "H"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "# merged ssts p90 (cn:{{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "# merged ssts p99 (cn:{{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_iter_merge_sstable_counts_sum[1m]))  / sum by(le, instance)(rate(state_store_iter_merge_sstable_counts_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "# merged ssts avg (cn:{{instance}})",
-					"refId": "B"
-				}
-			],
-			"title": "sst read counters",
-			"type": "timeseries"
-		},
-		{
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -2754,6 +2404,577 @@
 				"x": 0,
 				"y": 93
 			},
+			"id": 30,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_get_duration_count[1m])) by (job,instance)",
+					"interval": "",
+					"intervalFactor": 2,
+					"legendFormat": "get - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_range_scan_duration_count[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "range_scan - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_range_reverse_scan_duration_count[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "reverse_range_scan - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_get_shared_buffer_hit_counts[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "shared_buffer hit - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "F"
+				}
+			],
+			"title": "read ops",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 93
+			},
+			"id": 28,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "get p50 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "get p99 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_get_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "get p90 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum by(le, job, instance)(rate(state_store_get_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_get_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "get avg - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "D"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "range_scan p50 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "E"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "range_scan p99 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "F"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le,job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "range_scan p90 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "G"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum by(le, job, instance)(rate(state_store_range_scan_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_range_scan_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "range_scan avg - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "H"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "reverse_range_scan p50 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "I"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "reverse_range_scan p99 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "J"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum by(le, job, instance)(rate(state_store_range_reverse_scan_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_range_reverse_scan_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "reverse_range_scan avg - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "K"
+				}
+			],
+			"title": "read duration",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 101
+			},
+			"id": 128,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_sst_store_block_request_counts[1m])) by (instance, type)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "{{type}} - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "D"
+				}
+			],
+			"title": "block ops",
+			"type": "timeseries"
+		},
+		{
+			"aliasColors": {},
+			"bars": false,
+			"dashLength": 10,
+			"dashes": false,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fill": 1,
+			"fillGradient": 0,
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 101
+			},
+			"hiddenSeries": false,
+			"id": 196,
+			"legend": {
+				"avg": false,
+				"current": false,
+				"max": false,
+				"min": false,
+				"show": true,
+				"total": false,
+				"values": false
+			},
+			"lines": true,
+			"linewidth": 1,
+			"nullPointMode": "null",
+			"options": {
+				"alertThreshold": true
+			},
+			"percentage": false,
+			"pluginVersion": "8.5.3",
+			"pointradius": 2,
+			"points": false,
+			"renderer": "flot",
+			"seriesOverrides": [],
+			"spaceLength": 10,
+			"stack": false,
+			"steppedLine": false,
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "avg(state_store_meta_cache_size) by (job,instance)",
+					"format": "time_series",
+					"hide": false,
+					"interval": "",
+					"intervalFactor": 2,
+					"legendFormat": "meta-cache - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "avg(state_store_block_cache_size) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "meta-cache - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "B"
+				}
+			],
+			"thresholds": [],
+			"timeRegions": [],
+			"title": "Cache Size",
+			"tooltip": {
+				"shared": true,
+				"sort": 0,
+				"value_type": "individual"
+			},
+			"type": "graph",
+			"xaxis": {
+				"mode": "time",
+				"show": true,
+				"values": []
+			},
+			"yaxes": [
+				{
+					"$$hashKey": "object:37",
+					"format": "decbytes",
+					"logBase": 1,
+					"show": true
+				},
+				{
+					"$$hashKey": "object:38",
+					"format": "short",
+					"logBase": 1,
+					"show": true
+				}
+			],
+			"yaxis": {
+				"align": false
+			}
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 109
+			},
 			"id": 43,
 			"options": {
 				"legend": {
@@ -2762,7 +2983,307 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_write_batch_duration_count[1m])) by (job,instance)",
+					"interval": "",
+					"intervalFactor": 2,
+					"legendFormat": "write batch - {{job}} @ {{instance}} ",
+					"range": true,
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum(rate(state_store_shared_buffer_to_l0_duration_count[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "l0 - {{job}} @ {{instance}} ",
+					"range": true,
+					"refId": "B"
+				}
+			],
+			"title": "write ops",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 109
+			},
+			"id": 40,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, job, instance))",
+					"interval": "",
+					"legendFormat": "shared_buffer p50 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "shared_buffer p90 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "shared_buffer p99 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum by(le, job, instance)(rate(state_store_write_batch_duration_sum[1m]))  / sum by(le, job, instance)(rate(state_store_write_batch_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "shared_buffer avg - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "D"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_shared_buffer_sync_time_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "sync_remote p50 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "E"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_shared_buffer_sync_time_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "sync_remote p90 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "F"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_shared_buffer_sync_time_bucket[1m])) by (le, job, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "sync_remote p99 - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "G"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"editorMode": "code",
+					"exemplar": true,
+					"expr": "sum by(le, job, instance)(rate(state_store_write_shared_buffer_sync_time_sum[1m]))  / sum by(le, job, instance)(rate(state_store_write_shared_buffer_sync_time_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "sync_remote avg - {{job}} @ {{instance}}",
+					"range": true,
+					"refId": "H"
+				}
+			],
+			"title": "write duration",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 0,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "auto",
+						"spanNulls": false,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "cpm"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 117
+			},
+			"id": 130,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"pluginVersion": "8.3.3",
@@ -2773,10 +3294,34 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_write_batch_duration_count[1m])) by (instance)",
+					"expr": "sum(rate(state_store_bloom_filter_true_negative_counts[1m])) by (job,instance)",
+					"hide": false,
 					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "write batch cn= {{instance}} ",
+					"legendFormat": "bloom filter true negative  - {{job}} @ {{instance}}",
+					"refId": "G"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum(rate(state_store_bloom_filter_might_positive_counts[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "bloom filter might positive  - {{job}} @ {{instance}}",
+					"refId": "H"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "# merged ssts p90  - {{job}} @ {{instance}}",
 					"refId": "A"
 				},
 				{
@@ -2785,17 +3330,33 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_shared_buffer_to_l0_duration_count[1m])) by (instance)",
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "# merged ssts p99  - {{job}} @ {{instance}}",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_sum[1m]))  / sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "l0 cn = {{instance}} ",
+					"legendFormat": "# merged ssts avg  - {{job}} @ {{instance}}",
 					"refId": "B"
 				}
 			],
-			"title": "write ops",
+			"title": "sst read counters",
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -2851,7 +3412,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 93
+				"y": 117
 			},
 			"id": 32,
 			"options": {
@@ -2861,7 +3422,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"pluginVersion": "8.3.3",
@@ -2872,9 +3434,9 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum by(instance)(rate(state_store_get_key_size_sum[1m])+rate(state_store_get_value_size_sum[1m]))/sum by(instance)(rate(state_store_get_key_size_count[1m]))",
+					"expr": "sum by(job,instance)(rate(state_store_get_key_size_sum[1m])+rate(state_store_get_value_size_sum[1m]))/sum by(job,instance)(rate(state_store_get_key_size_count[1m]))",
 					"interval": "",
-					"legendFormat": "get (cn:{{instance}})",
+					"legendFormat": "get  - {{job}} @ {{instance}}",
 					"refId": "A"
 				},
 				{
@@ -2883,10 +3445,10 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum by(instance)(rate(state_store_get_key_size_sum[1m]))/sum by(instance)(rate(state_store_get_key_size_count[1m]))",
+					"expr": "sum by(job,instance)(rate(state_store_get_key_size_sum[1m]))/sum by(job,instance)(rate(state_store_get_key_size_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "get key (cn:{{instance}})",
+					"legendFormat": "get key  - {{job}} @ {{instance}}",
 					"refId": "B"
 				},
 				{
@@ -2895,10 +3457,10 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum by(instance)(rate(state_store_get_value_size_sum[1m]))/sum by(instance)(rate(state_store_get_value_size_count[1m]))",
+					"expr": "sum by(job,instance)(rate(state_store_get_value_size_sum[1m]))/sum by(job,instance)(rate(state_store_get_value_size_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "get value (cn:{{instance}})",
+					"legendFormat": "get value  - {{job}} @ {{instance}}",
 					"refId": "C"
 				},
 				{
@@ -2907,10 +3469,10 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum by(instance)(rate(state_store_range_scan_size_sum[1m]))/sum by(instance)(rate(state_store_range_scan_size_count[1m]))",
+					"expr": "sum by(job,instance)(rate(state_store_range_scan_size_sum[1m]))/sum by(job,instance)(rate(state_store_range_scan_size_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "range_scan (cn:{{instance}})",
+					"legendFormat": "range_scan  - {{job}} @ {{instance}}",
 					"refId": "D"
 				},
 				{
@@ -2919,10 +3481,10 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum by(instance)(rate(state_store_range_reverse_scan_size_sum[1m]))/sum by(instance)(rate(state_store_range_reverse_scan_size_count[1m]))",
+					"expr": "sum by(job,instance)(rate(state_store_range_reverse_scan_size_sum[1m]))/sum by(job,instance)(rate(state_store_range_reverse_scan_size_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "reverse_range_scan (cn:{{instance}})",
+					"legendFormat": "reverse_range_scan  - {{job}} @ {{instance}}",
 					"refId": "E"
 				}
 			],
@@ -2930,644 +3492,10 @@
 			"type": "timeseries"
 		},
 		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": []
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
 			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 101
-			},
-			"id": 40,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, instance))",
-					"interval": "",
-					"legendFormat": "shared_buffer p50  (cn: {{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "shared_buffer p90  (cn: {{instance}})",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "shared_buffer p99  (cn: {{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_write_batch_duration_sum[1m]))  / sum by(le, instance)(rate(state_store_write_batch_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "shared_buffer avg (cn: {{instance}})",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_shared_buffer_sync_time_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "sync_remote p50 (cn: {{instance}})",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_shared_buffer_sync_time_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "sync_remote p90 (cn: {{instance}})",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_shared_buffer_sync_time_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "sync_remote p99 (cn: {{instance}})",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_write_shared_buffer_sync_time_sum[1m]))  / sum by(le, instance)(rate(state_store_write_shared_buffer_sync_time_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "sync_remote avg (cn: {{instance}})",
-					"refId": "H"
-				}
-			],
-			"title": "write duration",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "ops"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 101
-			},
-			"id": 132,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_iter_merge_seek_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "MI seek (cn:{{instance}})",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_iter_merge_next_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "MI next (cn:{{instance}})",
-					"refId": "H"
-				}
-			],
-			"title": "merge iterators ops",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 109
-			},
-			"id": 41,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "p50 (cn: {{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "p90 (cn: {{instance}})",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "p99 (cn: {{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance) (rate(state_store_shared_buffer_to_l0_duration_sum[1m])) / sum by(le, instance) (rate(state_store_shared_buffer_to_l0_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "avg (cn: {{instance}})",
-					"refId": "D"
-				}
-			],
-			"title": "build sstable duration",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 109
-			},
-			"id": 48,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "mi_seek p50 (cn:{{instance}})",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "mi_seek p90 (cn:{{instance}})",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "mi_seek p99 (cn:{{instance}})",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance) (rate(state_store_iter_merge_seek_duration_sum[1m])) / sum by(le, instance) (rate(state_store_iter_merge_seek_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "mi_seek avg (cn:{{instance}})",
-					"refId": "H"
-				}
-			],
-			"title": "merge iterators duration",
-			"type": "timeseries"
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 10,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "never",
-						"spanNulls": true,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
-							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
-					},
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 117
-			},
-			"id": 134,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"pluginVersion": "8.3.3",
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "row_seq_scan next p50 (cn: {{instance}})",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "p90 (cn: {{instance}})",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
-					"hide": true,
-					"interval": "",
-					"legendFormat": "p99 (cn: {{instance}})",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "risedev-prometheus"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance) (rate(batch_row_seq_scan_next_duration_sum[1m])) / sum by(le, instance) (rate(batch_row_seq_scan_next_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "row_seq_scan next avg (cn: {{instance}})",
-					"refId": "D"
-				}
-			],
-			"title": "row seq scan next duration",
-			"type": "timeseries"
-		},
-		{
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -3622,8 +3550,8 @@
 			"gridPos": {
 				"h": 8,
 				"w": 12,
-				"x": 12,
-				"y": 117
+				"x": 0,
+				"y": 125
 			},
 			"id": 44,
 			"options": {
@@ -3633,7 +3561,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"pluginVersion": "8.3.3",
@@ -3644,7 +3573,7 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_write_batch_tuple_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_write_batch_tuple_counts[1m])) by (job,instance)",
 					"interval": "",
 					"intervalFactor": 2,
 					"legendFormat": "write_batch_kv_pair_count - {{instance}} ",
@@ -3655,6 +3584,10 @@
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"fieldConfig": {
 				"defaults": {
 					"color": {
@@ -3720,7 +3653,8 @@
 					"placement": "bottom"
 				},
 				"tooltip": {
-					"mode": "single"
+					"mode": "single",
+					"sort": "none"
 				}
 			},
 			"pluginVersion": "8.3.3",
@@ -3731,9 +3665,9 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_write_batch_size_sum[1m]))by(instance) / sum(rate(state_store_write_batch_size_count[1m]))by(instance)",
+					"expr": "sum(rate(state_store_write_batch_size_sum[1m]))by(job,instance) / sum(rate(state_store_write_batch_size_count[1m]))by(job,instance)",
 					"interval": "",
-					"legendFormat": "shared_buffer (cn: {{instance}})",
+					"legendFormat": "shared_buffer - {{job}} @ {{instance}}",
 					"refId": "A"
 				},
 				{
@@ -3742,10 +3676,10 @@
 						"uid": "risedev-prometheus"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_shared_buffer_to_sstable_size_sum[1m]))by(instance) / sum(rate(state_store_shared_buffer_to_sstable_size_count[1m]))by(instance)",
+					"expr": "sum(rate(state_store_shared_buffer_to_sstable_size_sum[1m]))by(job,instance) / sum(rate(state_store_shared_buffer_to_sstable_size_count[1m]))by(job,instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "sync (cn: {{instance}})",
+					"legendFormat": "sync - {{job}} @ {{instance}}",
 					"refId": "B"
 				}
 			],
@@ -3753,12 +3687,504 @@
 			"type": "timeseries"
 		},
 		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 133
+			},
+			"id": 41,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "p50 - {{job}} @ {{instance}}",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "p90 - {{job}} @ {{instance}}",
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "p99 - {{job}} @ {{instance}}",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, job, instance) (rate(state_store_shared_buffer_to_l0_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_shared_buffer_to_l0_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "avg - {{job}} @ {{instance}}",
+					"refId": "D"
+				}
+			],
+			"title": "build sstable duration",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 133
+			},
+			"id": 132,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum(rate(state_store_iter_merge_seek_duration_count[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "MI seek  - {{job}} @ {{instance}}",
+					"refId": "G"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum(rate(state_store_iter_merge_next_duration_count[1m])) by (job,instance)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "MI next  - {{job}} @ {{instance}}",
+					"refId": "H"
+				}
+			],
+			"title": "merge iterators ops",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 141
+			},
+			"id": 134,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "row_seq_scan next p50 - {{job}} @ {{instance}}",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "p90 - {{job}} @ {{instance}}",
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "p99 - {{job}} @ {{instance}}",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, job, instance) (rate(batch_row_seq_scan_next_duration_sum[1m])) / sum by(le, job, instance) (rate(batch_row_seq_scan_next_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "row_seq_scan next avg - {{job}} @ {{instance}}",
+					"refId": "D"
+				}
+			],
+			"title": "row seq scan next duration",
+			"type": "timeseries"
+		},
+		{
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 141
+			},
+			"id": 48,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single",
+					"sort": "none"
+				}
+			},
+			"pluginVersion": "8.3.3",
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "mi_seek p50  - {{job}} @ {{instance}}",
+					"refId": "E"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "mi_seek p90  - {{job}} @ {{instance}}",
+					"refId": "F"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, job, instance))",
+					"hide": true,
+					"interval": "",
+					"legendFormat": "mi_seek p99  - {{job}} @ {{instance}}",
+					"refId": "G"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, job, instance) (rate(state_store_iter_merge_seek_duration_sum[1m])) / sum by(le, job, instance) (rate(state_store_iter_merge_seek_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "mi_seek avg  - {{job}} @ {{instance}}",
+					"refId": "H"
+				}
+			],
+			"title": "merge iterators duration",
+			"type": "timeseries"
+		},
+		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 133
+				"y": 149
 			},
 			"id": 115,
 			"panels": [
@@ -3767,13 +4193,17 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 8,
 						"x": 0,
-						"y": 13
+						"y": 134
 					},
 					"hiddenSeries": false,
 					"id": 116,
@@ -3793,7 +4223,7 @@
 						"alertThreshold": true
 					},
 					"percentage": false,
-					"pluginVersion": "8.3.3",
+					"pluginVersion": "8.5.3",
 					"pointradius": 2,
 					"points": false,
 					"renderer": "flot",
@@ -3819,7 +4249,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance)) ",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, job, instance)) ",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ GetNewTableId_p50 - {{instance}} ",
@@ -3863,13 +4293,17 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 8,
 						"x": 8,
-						"y": 13
+						"y": 134
 					},
 					"hiddenSeries": false,
 					"id": 117,
@@ -3889,7 +4323,7 @@
 						"alertThreshold": true
 					},
 					"percentage": false,
-					"pluginVersion": "8.3.3",
+					"pluginVersion": "8.5.3",
 					"pointradius": 2,
 					"points": false,
 					"renderer": "flot",
@@ -3915,7 +4349,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ GetNewTableId_p90 - {{instance}} ",
@@ -3959,13 +4393,17 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 8,
 						"x": 16,
-						"y": 13
+						"y": 134
 					},
 					"hiddenSeries": false,
 					"id": 118,
@@ -3985,7 +4423,7 @@
 						"alertThreshold": true
 					},
 					"percentage": false,
-					"pluginVersion": "8.3.3",
+					"pluginVersion": "8.5.3",
 					"pointradius": 2,
 					"points": false,
 					"renderer": "flot",
@@ -4011,7 +4449,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_GetNewTableId_p99 - {{instance}} ",
@@ -4055,13 +4493,17 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 8,
 						"x": 0,
-						"y": 21
+						"y": 142
 					},
 					"hiddenSeries": false,
 					"id": 119,
@@ -4107,7 +4549,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ AddTables_p50 - {{instance}} ",
@@ -4151,13 +4593,17 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 8,
 						"x": 8,
-						"y": 21
+						"y": 142
 					},
 					"hiddenSeries": false,
 					"id": 120,
@@ -4203,7 +4649,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ AddTables_p90 - {{instance}} ",
@@ -4247,13 +4693,17 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 8,
 						"x": 16,
-						"y": 21
+						"y": 142
 					},
 					"hiddenSeries": false,
 					"id": 121,
@@ -4299,7 +4749,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ AddTables_p99 - {{instance}} ",
@@ -4344,11 +4794,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 134
+				"y": 150
 			},
 			"id": 113,
 			"panels": [
@@ -4357,6 +4811,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4409,7 +4867,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ ReportCompactionTasks_p50 - {{instance}} ",
@@ -4453,6 +4911,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4505,7 +4967,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ ReportCompactionTasks_p90 - {{instance}} ",
@@ -4549,6 +5011,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4601,7 +5067,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_ ReportCompactionTasks_p99 - {{instance}} ",
@@ -4646,11 +5112,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 135
+				"y": 151
 			},
 			"id": 97,
 			"panels": [
@@ -4659,6 +5129,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4700,7 +5174,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "hummock_manager_pinVersion_p50 - {{instance}} ",
 							"refId": "A"
@@ -4711,7 +5185,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_pinVersion_p50 - {{instance}} ",
@@ -4755,6 +5229,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4796,7 +5274,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "hummock_manager_pinVersion_p90 - {{instance}} ",
 							"refId": "A"
@@ -4807,7 +5285,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_pinVersion_p90 - {{instance}} ",
@@ -4851,6 +5329,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4892,7 +5374,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "hummock_manager_pinVersion_p99 - {{instance}} ",
 							"refId": "A"
@@ -4903,7 +5385,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_pinVersion_p99 - {{instance}} ",
@@ -4947,6 +5429,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -4988,7 +5474,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "hummock_manager_unpinVersion_p50 - {{instance}} ",
 							"refId": "A"
@@ -4999,7 +5485,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_unpinVersion_p50 - {{instance}} ",
@@ -5043,6 +5529,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5084,7 +5574,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "hummock_manager_unpinVersion_p90 - {{instance}} ",
 							"refId": "A"
@@ -5095,7 +5585,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_unpinVersion_p90 - {{instance}} ",
@@ -5139,6 +5629,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5180,7 +5674,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "hummock_manager_unpinVersion_p99 - {{instance}} ",
 							"refId": "A"
@@ -5191,7 +5685,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "hummock_client_unpinVersion_p99 - {{instance}} ",
@@ -5236,11 +5730,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 136
+				"y": 152
 			},
 			"id": 88,
 			"panels": [
@@ -5249,6 +5747,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5369,6 +5871,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5489,6 +5995,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5610,11 +6120,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 137
+				"y": 153
 			},
 			"id": 84,
 			"panels": [
@@ -5623,6 +6137,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5743,6 +6261,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5864,11 +6386,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 138
+				"y": 154
 			},
 			"id": 82,
 			"panels": [
@@ -5877,6 +6403,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -5997,6 +6527,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6117,6 +6651,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6238,11 +6776,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 139
+				"y": 155
 			},
 			"id": 78,
 			"panels": [
@@ -6251,6 +6793,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6419,6 +6965,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6587,6 +7137,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6708,6 +7262,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6877,11 +7435,15 @@
 		},
 		{
 			"collapsed": true,
+			"datasource": {
+				"type": "prometheus",
+				"uid": "risedev-prometheus"
+			},
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 140
+				"y": 156
 			},
 			"id": 62,
 			"panels": [
@@ -6890,6 +7452,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -6931,7 +7497,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_report_compaction_task_counts[1m])) by(instance)",
+							"expr": "sum(irate(state_store_report_compaction_task_counts[1m])) by(job,instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_counts - {{instance}} ",
@@ -6975,6 +7541,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fieldConfig": {
 						"defaults": {
 							"unit": "s"
@@ -7022,7 +7592,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "pin_version_latency_p50 - {{instance}} ",
 							"refId": "A"
@@ -7033,7 +7603,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_version_latency_p99 - {{instance}} ",
@@ -7045,7 +7615,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_version_latencyp90 - {{instance}} ",
@@ -7069,7 +7639,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_p50 - {{instance}} ",
@@ -7081,7 +7651,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_p99 - {{instance}} ",
@@ -7105,7 +7675,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_version_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_latency_p90 - {{instance}} ",
@@ -7149,6 +7719,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -7190,7 +7764,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_pin_version_counts[1m])) by(instance)",
+							"expr": "sum(irate(state_store_pin_version_counts[1m])) by(job,instance)",
 							"interval": "",
 							"legendFormat": "pin_version_counts - {{instance}} ",
 							"refId": "A"
@@ -7201,7 +7775,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_unpin_version_counts[1m])) by(instance)",
+							"expr": "sum(irate(state_store_unpin_version_counts[1m])) by(job,instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_version_counts - {{instance}} ",
@@ -7245,6 +7819,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fieldConfig": {
 						"defaults": {
 							"unit": "s"
@@ -7292,7 +7870,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, job, instance))",
 							"interval": "",
 							"legendFormat": "pin_snapshot_latency_p50 - {{instance}} ",
 							"refId": "A"
@@ -7303,7 +7881,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_snapshot_latency_p99 - {{instance}} ",
@@ -7315,7 +7893,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_snapshot_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "pin_snapshot_latencyp90 - {{instance}} ",
@@ -7339,7 +7917,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_latency_p50 - {{instance}} ",
@@ -7351,7 +7929,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_snapshot_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_latency_p99 - {{instance}} ",
@@ -7375,7 +7953,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_snapshot_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_snapshot_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_latency_p90 - {{instance}} ",
@@ -7419,6 +7997,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -7460,7 +8042,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_pin_snapshot_counts[1m])) by(instance)",
+							"expr": "sum(irate(state_store_pin_snapshot_counts[1m])) by(job,instance)",
 							"interval": "",
 							"legendFormat": "pin_snapshot_counts - {{instance}} ",
 							"refId": "A"
@@ -7471,7 +8053,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_unpin_snapshot_counts[1m])) by(instance)",
+							"expr": "sum(irate(state_store_unpin_snapshot_counts[1m])) by(job,instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "unpin_snapshot_counts - {{instance}} ",
@@ -7515,6 +8097,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fieldConfig": {
 						"defaults": {
 							"unit": "s"
@@ -7573,7 +8159,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "add_table_latency_p99 - {{instance}} ",
@@ -7585,7 +8171,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "add_table_latency_p90 - {{instance}} ",
@@ -7609,7 +8195,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_latency_p50 - {{instance}} ",
@@ -7621,7 +8207,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_latency_p99 - {{instance}} ",
@@ -7645,7 +8231,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_latency_p90 - {{instance}} ",
@@ -7685,6 +8271,10 @@
 					}
 				},
 				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fieldConfig": {
 						"defaults": {
 							"color": {
@@ -7758,7 +8348,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_add_tables_counts[1m]))by(instance)",
+							"expr": "sum(irate(state_store_add_tables_counts[1m]))by(job,instance)",
 							"interval": "",
 							"legendFormat": "add_tables_counts - {{instance}} ",
 							"refId": "A"
@@ -7769,7 +8359,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "sum(irate(state_store_get_new_table_id_counts[1m]))by(instance)",
+							"expr": "sum(irate(state_store_get_new_table_id_counts[1m]))by(job,instance)",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "get_new_table_id_counts - {{instance}} ",
@@ -7784,6 +8374,10 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
+					"datasource": {
+						"type": "prometheus",
+						"uid": "risedev-prometheus"
+					},
 					"fieldConfig": {
 						"defaults": {
 							"unit": "s"
@@ -7831,7 +8425,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_latency_p50 - {{instance}}",
@@ -7843,7 +8437,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_latency_p99 - {{instance}}",
@@ -7867,7 +8461,7 @@
 								"uid": "risedev-prometheus"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.90, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, job, instance))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "report_compaction_task_latency_p90 - {{instance}}",
@@ -7912,39 +8506,11 @@
 		}
 	],
 	"refresh": "10s",
-	"schemaVersion": 34,
+	"schemaVersion": 36,
 	"style": "dark",
 	"tags": [],
 	"templating": {
-		"list": [
-			{
-				"current": {
-					"selected": true,
-					"text": [
-						"All"
-					],
-					"value": [
-						"$__all"
-					]
-				},
-				"definition": "label_values(state_store_get_counts, instance)",
-				"hide": 0,
-				"includeAll": true,
-				"label": "compute_node",
-				"multi": true,
-				"name": "compute_node",
-				"options": [],
-				"query": {
-					"query": "label_values(state_store_get_counts, instance)",
-					"refId": "StandardVariableQuery"
-				},
-				"refresh": 2,
-				"regex": "",
-				"skipUrlSync": false,
-				"sort": 0,
-				"type": "query"
-			}
-		]
+		"list": []
 	},
 	"time": {
 		"from": "now-30m",
@@ -7954,6 +8520,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 28,
+	"version": 31,
 	"weekStart": ""
 }

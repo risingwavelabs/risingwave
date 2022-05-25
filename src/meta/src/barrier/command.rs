@@ -149,7 +149,7 @@ where
 
     /// For `CreateMaterializedView`, returns the actors of the `Chain` nodes. For other commands,
     /// returns an empty set.
-    pub fn actors_to_finish(&self) -> HashSet<ActorId> {
+    pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
             Command::CreateMaterializedView { dispatches, .. } => dispatches
                 .iter()

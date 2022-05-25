@@ -19,7 +19,6 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
@@ -32,6 +31,7 @@ use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::Notify;
+use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
@@ -347,7 +347,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
@@ -430,11 +430,10 @@ mod tests {
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
-            madsim::task::spawn(async move {
+            tokio::spawn(async move {
                 let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
-            })
-            .detach();
+            });
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
@@ -476,7 +475,7 @@ mod tests {
         Ok(())
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_table_dropped() -> Result<()> {
         let table_id = TableId::default();
 
@@ -553,11 +552,10 @@ mod tests {
 
         let write_chunk = |chunk: StreamChunk| {
             let source = source.clone();
-            madsim::task::spawn(async move {
+            tokio::spawn(async move {
                 let table_source = source.as_table_v2().unwrap();
                 table_source.blocking_write_chunk(chunk).await.unwrap();
-            })
-            .detach();
+            });
         };
 
         write_chunk(chunk.clone());

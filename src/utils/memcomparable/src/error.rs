@@ -22,7 +22,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// An error that can be produced during (de)serializing.
 #[allow(missing_docs)]
-#[derive(Error, Clone, Debug, PartialEq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     #[error("{0}")]
     Message(String),

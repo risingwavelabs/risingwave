@@ -134,7 +134,7 @@ mod tests {
         }
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_managed_value_state() {
         let keyspace = create_in_memory_keyspace();
         let mut managed_state =

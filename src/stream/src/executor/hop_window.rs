@@ -215,7 +215,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, ExecutorInfo, StreamChunk};
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_execute() {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);

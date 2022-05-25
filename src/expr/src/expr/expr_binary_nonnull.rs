@@ -16,8 +16,6 @@ use risingwave_common::array::{
     Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
     Utf8Array,
 };
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
@@ -31,11 +29,6 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
-
-/// A placeholder function that returns bool in [`gen_binary_expr_atm`]
-pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
-    Err(InternalError("The function is not supported".to_string()).into())
-}
 
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases

@@ -148,7 +148,7 @@ mod test {
     use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_basic() {
         let test_batch_size = 50;
         let test_batch_count = 5;
