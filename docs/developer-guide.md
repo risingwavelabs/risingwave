@@ -117,16 +117,15 @@ Use the `./risedev configure` command to start the interactive configuration mod
 - Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
 - Jaeger: Use this component for tracing.
 
-
-
 To manually add those components into the cluster, you will need to configure RiseDev to download them first. For example,
 
 ```shell
 ./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
 ./risedev configure enable minio                  # enable MinIO
 ```
+**Note**: Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
-After that, you can modify `risedev.yml` to reconfigure the cluster. For example, you can modify the default section to:
+For example, you can modify the default section to:
 
 ```yaml
   default:
@@ -143,9 +142,9 @@ After that, you can modify `risedev.yml` to reconfigure the cluster. For example
       persist-data: true
 ```
 
-Note that the Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
+**Note**: The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
-Now you can run `./risedev d`. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
+Now you can run `./risedev d` to start a new dev cluster. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
