@@ -28,7 +28,7 @@ RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
 
-FROM ubuntu:20.04 as image-base
+FROM ubuntu:22.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 FROM image-base as frontend-node
