@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_pb::hummock::VNodeBitmap;
+use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -89,8 +89,8 @@ impl HummockStorage {
             // Generate shared buffer iterators
             for shared_buffer in read_version.shared_buffer {
                 for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
-                    overlapped_iters.push(Box::new(batch.into_directed_iter::<T::Direction>())
-                        as BoxedHummockIterator<T::Direction>);
+                    overlapped_iters
+                        .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
                 }
             }
 
@@ -416,6 +416,10 @@ impl StateStore for HummockStorage {
                 .await?;
             Ok(())
         }
+    }
+
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+        self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }
 

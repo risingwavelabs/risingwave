@@ -51,6 +51,7 @@ mod meta_client;
 pub mod test_utils;
 extern crate core;
 extern crate risingwave_common;
+
 mod config;
 
 use std::ffi::OsString;

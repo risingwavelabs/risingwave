@@ -51,7 +51,7 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = { version = "0.2.0-alpha.1", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.1", package = "madsim-tonic" }
 twox-hash = "1"
 url = "2"
 urlencoding = "2"

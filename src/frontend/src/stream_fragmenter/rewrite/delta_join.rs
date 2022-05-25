@@ -361,14 +361,21 @@ impl StreamFragmenter {
 
         // TODO: when distribution key is added to catalog, chain and delta join won't have any
         // exchange in-between. Then we can safely remove this function.
-        fn check_no_exchange(node: &StreamNode) {
-            if let NodeBody::Exchange(_) = node.get_node_body().unwrap() {
-                panic!("exchange not allowed between delta join and arrange");
+        fn pass_through_exchange(mut node: StreamNode) -> StreamNode {
+            if let Some(NodeBody::Exchange(exchange)) = node.node_body {
+                if let DispatcherType::NoShuffle =
+                    exchange.strategy.as_ref().unwrap().get_type().unwrap()
+                {
+                    return node.input.remove(0);
+                }
+                panic!("exchange other than no_shuffle not allowed between delta join and arrange");
+            } else {
+                unimplemented!()
             }
         }
 
-        check_no_exchange(&arrange_0);
-        check_no_exchange(&arrange_1);
+        let arrange_0 = pass_through_exchange(arrange_0);
+        let arrange_1 = pass_through_exchange(arrange_1);
 
         let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
         let arrange_1_frag = self.build_and_add_fragment(state, arrange_1)?;
