@@ -18,7 +18,7 @@ use bytes::Bytes;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration};
 
-use super::field_generator::{FieldGeneratorImpl};
+use super::field_generator::{FieldGeneratorImpl, NumericFieldGenerator,FieldKind};
 use crate::SourceMessage;
 
 #[derive(Default)]
@@ -36,24 +36,34 @@ pub struct DatagenEventGenerator {
 impl DatagenEventGenerator {
     pub fn new(
         fields_map: HashMap<String, FieldGeneratorImpl>,
-        batch_chunk_size: u64,
         rows_per_second: u64,
+        events_so_far:u64,
+        split_id: String,
+        split_num: i32,
+        split_index: i32,
     ) -> Result<Self> {
         Ok(Self {
             fields_map,
-            batch_chunk_size,
             rows_per_second,
+            events_so_far,
+            split_id,
+            split_num,
+            split_index,
             ..Default::default()
         })
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         sleep(Duration::from_secs(
-            self.batch_chunk_size / self.rows_per_second,
+           1
         ))
         .await;
         let mut res = vec![];
-        for i in 0..self.batch_chunk_size {
+        let split_index:u64 = self.split_index as u64 ;
+        let split_num:u64 = self.split_num as u64;
+        let addition_one:u64 = if self.rows_per_second%split_num > split_index {1} else{0};
+        let partition_size = self.rows_per_second/split_num + addition_one;
+        for i in 0..partition_size {
             let map: Map<String, Value> = self
                 .fields_map
                 .iter_mut()
@@ -64,12 +74,42 @@ impl DatagenEventGenerator {
             let msg = SourceMessage {
                 payload: Some(Bytes::from(value.to_string())),
                 offset: (self.events_so_far + i).to_string(),
-                split_id: 0.to_string(),
+                split_id: self.split_id.clone(),
             };
 
             res.push(msg);
         }
-        self.events_so_far += self.batch_chunk_size;
+        self.events_so_far += partition_size;
+        dbg!(res.len());
+        dbg!(split_index);
         Ok(Some(res))
+
+        
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_partition_sequence() {
+        let mut fields_map = HashMap::new();
+        fields_map.insert("v1".to_string(),FieldGeneratorImpl::new(
+            risingwave_common::types::DataType::Int32,
+            FieldKind::Sequence,
+            Some("1".to_string()),
+            Some("10".to_string()),
+            1,
+            2
+        ).unwrap());
+
+        let mut generator = DatagenEventGenerator::new(fields_map,
+        2,0,"2-1".to_string(),2,1).unwrap();
+        
+
+        let first_chunk = generator.next().await.unwrap().unwrap();
+        let second_chunk = generator.next().await.unwrap().unwrap();
     }
 }

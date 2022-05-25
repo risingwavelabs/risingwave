@@ -30,7 +30,9 @@ macro_rules! impl_field_generator {
                 max: $field_type,
                 start: $field_type,
                 end: $field_type,
-                last: Option<$field_type>,
+                events_so_far: u64,
+                split_index: $field_type,
+                split_num: $field_type,
             }
 
             impl NumericFieldGenerator for $variant_name {
@@ -56,7 +58,7 @@ macro_rules! impl_field_generator {
                     })
                 }
 
-                fn with_sequence(star_optiont: Option<String>, end_option: Option<String>) -> Result<Self> {
+                fn with_sequence(star_optiont: Option<String>, end_option: Option<String>,split_index:i32,split_num:i32) -> Result<Self> {
 
                     let mut start = DEFAULT_START as $field_type;
                     let mut end = DEFAULT_END as $field_type;
@@ -74,6 +76,8 @@ macro_rules! impl_field_generator {
                         kind: FieldKind::Sequence,
                         start,
                         end,
+                        split_index: split_index as $field_type,
+                        split_num: split_num as $field_type,
                         ..Default::default()
                     })
                 }
@@ -82,18 +86,15 @@ macro_rules! impl_field_generator {
                     match self.kind {
                         FieldKind::Random => {
                             let mut rng = thread_rng();
-                            let res = rng.gen_range(self.min..=self.max);
-                            json!(res)
+                            let result = rng.gen_range(self.min..=self.max);
+                            json!(result)
                         }
                         FieldKind::Sequence => {
-                            if let Some(last) = self.last {
-                                let res = self.end.min(last + (1 as $field_type));
-                                self.last = Some(last + (1 as $field_type));
-                                json!(res)
-                            } else {
-                                self.last = Some(self.start);
-                                json!(self.start)
-                            }
+                            let events_so_far = self.events_so_far as $field_type;
+                            let partition_result = self.start + self.split_index + self.split_num*events_so_far;
+                            let partition_result = self.end.min(partition_result);
+                            self.events_so_far += 1;
+                            json!(partition_result)
                         }
                     }
                 }
@@ -123,7 +124,7 @@ mod tests {
     #[test]
     fn test_field_generator_with_sequence() {
         let mut i16_field =
-            I16Field::with_sequence(Some("5".to_string()), Some("10".to_string())).unwrap();
+            I16Field::with_sequence(Some("5".to_string()), Some("10".to_string()),0,1).unwrap();
         for i in 5..=10 {
             assert_eq!(i16_field.generate(), json!(i));
         }

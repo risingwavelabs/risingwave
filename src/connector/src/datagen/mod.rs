@@ -26,15 +26,13 @@ pub use split::*;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
+    // split_num means data source partition 
     #[serde(rename = "datagen.split.num")]
-    pub split_num: Option<i32>,
+    pub split_num: Option<String>,
 
-    #[serde(
-        rename = "datagen.max.chunk.size",
-        default = "default_datagen_max_chunk_size"
-    )]
-
-    pub max_chunk_size: String,
+    //default default_rows_per_second =10
+    //when the split_num = 3 and default_rows_per_second =10
+    //there will be three readers that generate respectly 4,3,3 message per second
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
@@ -55,8 +53,6 @@ pub struct DatagenProperties {
 }
 
 fn default_rows_per_second() -> String {
-    "1".to_string()
+    "10".to_string()
 }
-fn default_datagen_max_chunk_size() -> String {
-    "5".to_string()
-}
+

@@ -27,7 +27,7 @@ pub struct DatagenSplit {
 
 impl SplitMetaData for DatagenSplit {
     fn id(&self) -> String {
-        format!("{}", 0)
+        format!("{}-{}", self.split_num, self.split_index)
     }
 
     fn encode_to_bytes(&self) -> Bytes {

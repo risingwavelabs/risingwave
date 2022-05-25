@@ -28,8 +28,9 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     type Split = DatagenSplit;
 
     async fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
-        let split_num = properties.split_num.unwrap_or(1);
-        Ok(Self { split_num })
+        let split_num = properties.split_num.unwrap_or("1".to_string());
+        let split_num = split_num.parse::<i32>()?;
+        Ok(Self { split_num})
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {

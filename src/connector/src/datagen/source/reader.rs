@@ -27,8 +27,8 @@ use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader, Spli
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct DatagenSplitReader {
-    generator: DatagenEventGenerator,
-    assigned_split: Option<DatagenSplit>,
+    pub generator: DatagenEventGenerator,
+    pub assigned_split: DatagenSplit,
 }
 
 #[async_trait]
@@ -43,8 +43,34 @@ impl SplitReader for DatagenSplitReader {
     where
         Self: Sized,
     {
+        let mut assigned_split = DatagenSplit::default();
+        let mut split_id = String::new();
+        let mut events_so_far = u64::default();
+        match state {
+            ConnectorStateV2::Splits(splits) => {
+                log::debug!("Splits for datagen found! {:?}", splits);
+                for split in splits {
+                    // TODO: currently, assume there's only on split in one reader
+                     split_id = split.id();
+                    if let SplitImpl::Datagen(n) = split {
+                        if let Some(s) = n.start_offset {
+                            events_so_far = s;
+                        };
+                        assigned_split = n;
+                        break;
+                    }
+                }
+            }
+            ConnectorStateV2::State(cs) => {
+                log::debug!("Splits for datagen found! {:?}", cs);
+                todo!()
+            }
+            ConnectorStateV2::None => {}
+        }
 
-        let batch_chunk_size = properties.max_chunk_size.parse::<u64>()?;
+        let split_index = assigned_split.split_index;
+        let split_num = assigned_split.split_num;
+
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
         let fields_option_map = properties.fields;
         let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
@@ -69,6 +95,8 @@ impl SplitReader for DatagenSplitReader {
                             FieldKind::Random,
                             max_past_key_option,
                         None,
+                        split_index,
+                        split_num
                     )?,
                 );},
                 DataType::Varchar => {
@@ -82,6 +110,8 @@ impl SplitReader for DatagenSplitReader {
                             FieldKind::Random,
                         length_key_option,
                         None,
+                        split_index,
+                        split_num
                     )?,
                 );},
                 _ => {
@@ -98,6 +128,8 @@ impl SplitReader for DatagenSplitReader {
                                 FieldKind::Sequence,
                                 start_key_option,
                                 end_key_option,
+                                split_index,
+                                split_num
                             )?,
                         );
                     } else{
@@ -112,6 +144,9 @@ impl SplitReader for DatagenSplitReader {
                                 FieldKind::Random,
                                 min_value_option,
                                 max_value_option,
+                                split_index,
+                                split_num
+                                
                             )?,
                         );
                     }
@@ -119,46 +154,64 @@ impl SplitReader for DatagenSplitReader {
             }
         }
 
-        let mut generator = DatagenEventGenerator::new(
+        let generator = DatagenEventGenerator::new(
             fields_map,
-            batch_chunk_size,
             rows_per_second,
+            events_so_far,
+            split_id,
+            split_num,
+            split_index,
         )?;
 
-        let mut assigned_split = DatagenSplit::default();
-
-        match state {
-            ConnectorStateV2::Splits(splits) => {
-                log::debug!("Splits for datagen found! {:?}", splits);
-                for split in splits {
-                    // TODO: currently, assume there's only on split in one reader
-                    let split_id = split.id();
-                    if let SplitImpl::Datagen(n) = split {
-                        generator.split_index = n.split_index;
-                        generator.split_num = n.split_num;
-                        if let Some(s) = n.start_offset {
-                            generator.events_so_far = s;
-                        };
-                        generator.split_id = split_id;
-                        assigned_split = n;
-                        break;
-                    }
-                }
-            }
-            ConnectorStateV2::State(cs) => {
-                log::debug!("Splits for nexmark found! {:?}", cs);
-                todo!()
-            }
-            ConnectorStateV2::None => {}
-        }
-        
         Ok(DatagenSplitReader {
             generator,
-            assigned_split: Some(assigned_split),
+            assigned_split,
         })
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         self.generator.next().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_partition_sequence() {
+        let mut fields_map = HashMap::new();
+        let split_num = 2;
+     let split_index= 0;
+    let split_id = format!("{}-{}",split_num,split_index);
+        fields_map.insert("v1".to_string(),FieldGeneratorImpl::new(
+            risingwave_common::types::DataType::Int32,
+            FieldKind::Sequence,
+            Some("1".to_string()),
+            Some("100".to_string()),
+            split_index,
+            split_num
+        ).unwrap());
+
+        let generator = DatagenEventGenerator::new(fields_map,
+        5,0,split_id,split_num,split_index).unwrap();
+
+        let assigned_split = DatagenSplit{
+            split_index,
+            split_num,
+            start_offset: None,
+        };
+
+
+        let mut reader = DatagenSplitReader{
+            assigned_split,
+            generator,
+        };
+
+        loop{
+            let chunk = reader.next().await.unwrap().unwrap();
+        }
+
     }
 }
