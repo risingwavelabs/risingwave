@@ -210,7 +210,6 @@ where
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
         let mut tracker = CreateMviewProgressTracker::default();
-        // let mut unfinished = UnfinishedNotifiers::default();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
 
         if self.enable_recovery {

@@ -120,12 +120,10 @@ impl CreateMviewProgressTracker {
     /// Update the progress of `actor` according to the given epochs. If all actors in this MV have
     /// finished, `notify_finished` will be called on registered notifiers.
     pub fn update(&mut self, actor: ActorId, consumed_epoch: Epoch, current_epoch: Epoch) {
-        let epoch = self.actor_map.get(&actor).cloned().unwrap_or_else(|| {
-            panic!(
-                "bad actor {} to update progress, are we after meta recovery?",
-                actor
-            )
-        });
+        let Some(epoch) = self.actor_map.get(&actor).copied() else {
+            tracing::warn!("no tracked progress for actor {}, is it already finished?", actor);
+            return;
+        };
 
         match self.progress_map.entry(epoch) {
             Entry::Occupied(mut o) => {
