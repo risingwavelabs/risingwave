@@ -63,6 +63,7 @@ impl GrafanaService {
         )?;
 
         let config_datasources_dir = config_root.join("provisioning").join("datasources");
+        std::fs::remove_dir_all(&config_datasources_dir)?;
         std::fs::create_dir_all(&config_datasources_dir)?;
         std::fs::write(
             config_datasources_dir.join("risedev-prometheus.yml"),
@@ -71,6 +72,7 @@ impl GrafanaService {
 
         let prefix_config = prefix_config.as_ref();
         let config_dashboards_dir = config_root.join("provisioning").join("dashboards");
+        std::fs::remove_dir_all(&config_dashboards_dir)?;
         std::fs::create_dir_all(&config_dashboards_dir)?;
         std::fs::write(
             config_dashboards_dir.join("risingwave-dashboard.yaml"),
