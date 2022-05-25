@@ -26,7 +26,6 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use tokio::net::TcpListener;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -111,7 +110,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     ui_path: Option<String>,
     opts: MetaOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let listener = TcpListener::bind(addr).await.unwrap();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
@@ -246,25 +244,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
-            .serve_with_incoming_shutdown(
-                tokio_stream::wrappers::TcpListenerStream::new(listener),
-                async move {
-                    tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        _ = &mut shutdown_recv => {
-                            for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
-                                    continue;
-                                }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                                }
+            .serve_with_shutdown(addr, async move {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = &mut shutdown_recv => {
+                        for (join_handle, shutdown_sender) in sub_tasks {
+                            if let Err(err) = shutdown_sender.send(()) {
+                                tracing::warn!("Failed to send shutdown: {:?}", err);
+                                continue;
                             }
-                        },
-                    }
-                },
-            )
+                            if let Err(err) = join_handle.await {
+                                tracing::warn!("Failed to join shutdown: {:?}", err);
+                            }
+                        }
+                    },
+                }
+            })
             .await
             .unwrap();
     });

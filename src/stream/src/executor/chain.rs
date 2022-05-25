@@ -150,7 +150,7 @@ mod test {
     use crate::executor::{Barrier, Executor, Message, PkIndices};
     use crate::task::{FinishCreateMviewNotifier, LocalBarrierManager};
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_basic() {
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let first = Box::new(
