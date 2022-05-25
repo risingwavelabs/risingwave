@@ -100,8 +100,9 @@ impl CreateMviewProgress {
 
 impl SharedContext {
     /// Create a struct for reporting the progress of creating mview. The chain executors should
-    /// report the progress of barrier rearranging continuosly using this. The updated progress will
-    /// be collected by the barrier manager and reported to the meta service in this epoch.
+    /// report the progress of barrier rearranging continuously using this. The updated progress
+    /// will be collected by the local barrier manager and reported to the meta service in this
+    /// epoch.
     ///
     /// When all chain executors of the creating mview finish, the creation progress will be done at
     /// frontend and the mview will be exposed to the user.
