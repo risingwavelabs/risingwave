@@ -107,6 +107,7 @@ where
 
 #[async_trait::async_trait]
 impl<S: MetaStore> UserService for UserServiceImpl<S> {
+    #[cfg_attr(coverage, no_coverage)]
     async fn create_user(
         &self,
         request: Request<CreateUserRequest>,
@@ -124,6 +125,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop_user(
         &self,
         request: Request<DropUserRequest>,
@@ -141,6 +143,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn grant_privilege(
         &self,
         request: Request<GrantPrivilegeRequest>,
@@ -162,6 +165,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn revoke_privilege(
         &self,
         request: Request<RevokePrivilegeRequest>,
