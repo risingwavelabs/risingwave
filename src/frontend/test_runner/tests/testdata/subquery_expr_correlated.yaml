@@ -291,3 +291,17 @@
       (select max(v2) + v3 from t2)  -- access to v3 is ok
     from t;
   planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select t2.x, (select x from t1 where t1.y = t2.y) from t2 where x > 100 order by t2.x limit 100;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1] }
+      LogicalTopN { order: [$2 ASC], limit: 100, offset: 0 }
+        LogicalProject { exprs: [$1, $3, $1] }
+          LogicalApply { type: LeftOuter, on: true }
+            LogicalFilter { predicate: ($1 > 100:Int32) }
+              LogicalScan { table: t2, columns: [_row_id, x, y] }
+            LogicalProject { exprs: [$1] }
+              LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 2, depth: 1 }) }
+                LogicalScan { table: t1, columns: [_row_id, x, y] }

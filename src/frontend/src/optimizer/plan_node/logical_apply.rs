@@ -21,7 +21,6 @@ use super::{
     ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::ExprImpl;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -46,7 +45,7 @@ impl fmt::Display for LogicalApply {
 }
 
 impl LogicalApply {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
+    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType) -> Self {
         assert!(
             matches!(
                 join_type,
@@ -70,6 +69,8 @@ impl LogicalApply {
             &output_indices,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        // TODO: Remove on from LogicalApply.
+        let on = Condition::true_cond();
         LogicalApply {
             base,
             left,
@@ -79,13 +80,8 @@ impl LogicalApply {
         }
     }
 
-    pub fn create(
-        left: PlanRef,
-        right: PlanRef,
-        join_type: JoinType,
-        on_clause: ExprImpl,
-    ) -> PlanRef {
-        Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
+    pub fn create(left: PlanRef, right: PlanRef, join_type: JoinType) -> PlanRef {
+        Self::new(left, right, join_type).into()
     }
 
     /// Get the join type of the logical apply.
@@ -108,7 +104,7 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(left, right, self.join_type, self.on.clone())
+        Self::new(left, right, self.join_type)
     }
 }
 

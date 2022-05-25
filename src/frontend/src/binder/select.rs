@@ -44,12 +44,14 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn get_correlated_inputs(&self) -> Vec<InputRef> {
+        let mut ret = vec![];
         self.select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
-            .any(|expr| expr.has_correlated_input_ref())
+            .for_each(|expr| ret.extend(expr.get_correlated_inputs()));
+        ret
     }
 }
 

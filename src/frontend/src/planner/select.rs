@@ -172,7 +172,7 @@ impl Planner {
             JoinType::LeftSemi
         };
         let subquery = expr.into_subquery().unwrap();
-        let is_correlated = subquery.is_correlated();
+        let correlated_inputs = subquery.get_correlated_inputs();
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.as_subplan();
         let on = match subquery.kind {
@@ -189,8 +189,7 @@ impl Planner {
                 .into())
             }
         };
-        *input =
-            Self::create_apply_or_join(is_correlated, input.clone(), right_plan, on, join_type);
+        *input = Self::create_join(correlated_inputs, input.clone(), right_plan, on, join_type);
         Ok(())
     }
 
@@ -231,7 +230,7 @@ impl Planner {
             .collect();
 
         for subquery in rewriter.subqueries {
-            let is_correlated = subquery.is_correlated();
+            let is_correlated = subquery.get_correlated_inputs();
             let mut right = self.plan_query(subquery.query)?.as_subplan();
 
             match subquery.kind {
@@ -248,7 +247,7 @@ impl Planner {
                 }
             }
 
-            root = Self::create_apply_or_join(
+            root = Self::create_join(
                 is_correlated,
                 root,
                 right,
@@ -259,15 +258,48 @@ impl Planner {
         Ok((root, exprs))
     }
 
-    fn create_apply_or_join(
-        is_correlated: bool,
+    fn create_join(
+        correlated_inputs: Vec<InputRef>,
         left: PlanRef,
         right: PlanRef,
-        on: ExprImpl,
+        mut on: ExprImpl,
         join_type: JoinType,
     ) -> PlanRef {
-        if is_correlated {
-            LogicalApply::create(left, right, join_type, on)
+        if !correlated_inputs.is_empty() {
+            // Translate Apply here.
+            let logical_project = LogicalProject::create(
+                left.clone(),
+                correlated_inputs
+                    .clone()
+                    .into_iter()
+                    .map(|input| input.into())
+                    .collect(),
+            );
+            let group_exprs = (0..correlated_inputs.len()).collect();
+            let logical_agg = LogicalAgg::new(vec![], group_exprs, logical_project);
+            let logical_apply = LogicalApply::create(logical_agg.into(), right, JoinType::Inner);
+
+            let mut shifted_inputs = correlated_inputs.clone();
+            shifted_inputs
+                .iter_mut()
+                .for_each(|input| input.shift_with_offset(left.schema().len() as isize));
+            correlated_inputs
+                .into_iter()
+                .zip_eq(shifted_inputs.into_iter())
+                .for_each(|(input, shifted_input)| {
+                    let equal_predicate = FunctionCall::new(
+                        ExprType::Equal,
+                        vec![input.into(), shifted_input.into()],
+                    )
+                    .unwrap()
+                    .into();
+                    on = ExprImpl::FunctionCall(
+                        FunctionCall::new(ExprType::And, vec![on.clone(), equal_predicate])
+                            .unwrap()
+                            .into(),
+                    );
+                });
+            LogicalJoin::create(left, logical_apply, join_type, on)
         } else {
             LogicalJoin::create(left, right, join_type, on)
         }

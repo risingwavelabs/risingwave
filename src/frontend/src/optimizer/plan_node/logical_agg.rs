@@ -281,7 +281,7 @@ impl ExprRewriter for ExprHandler {
     }
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
-        if subquery.is_correlated() {
+        if !subquery.get_correlated_inputs().is_empty() {
             self.error = Some(ErrorCode::NotImplemented(
                 "correlated subquery in HAVING or SELECT with agg".into(),
                 2275.into(),

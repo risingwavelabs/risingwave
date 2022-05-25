@@ -152,16 +152,19 @@ impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
 
 impl ExprImpl {
     // We need to traverse inside subqueries.
-    pub fn has_correlated_input_ref(&self) -> bool {
+    pub fn get_correlated_inputs(&self) -> Vec<InputRef> {
         struct Has {
-            has: bool,
+            correlated_inputs: Vec<InputRef>,
             depth: usize,
         }
 
         impl ExprVisitor for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
                 if correlated_input_ref.depth() >= self.depth {
-                    self.has = true;
+                    self.correlated_inputs.push(InputRef::new(
+                        correlated_input_ref.index(),
+                        correlated_input_ref.return_type(),
+                    ));
                 }
             }
 
@@ -183,11 +186,11 @@ impl ExprImpl {
         }
 
         let mut visitor = Has {
-            has: false,
+            correlated_inputs: vec![],
             depth: 1,
         };
         visitor.visit_expr(self);
-        visitor.has
+        visitor.correlated_inputs
     }
 
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.

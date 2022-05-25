@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
@@ -45,8 +45,8 @@ impl BoundQuery {
         self.schema().data_types()
     }
 
-    pub fn is_correlated(&self) -> bool {
-        self.body.is_correlated()
+    pub fn get_correlated_inputs(&self) -> Vec<InputRef> {
+        self.body.get_correlated_inputs()
     }
 }
 
