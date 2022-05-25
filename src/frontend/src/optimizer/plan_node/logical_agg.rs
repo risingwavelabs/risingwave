@@ -67,6 +67,23 @@ impl PlanAggCall {
         }
     }
 
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
+        let total_agg_kind = match &self.agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Avg
+            | AggKind::StringAgg
+            | AggKind::SingleValue => self.agg_kind.clone(),
+
+            AggKind::Count | AggKind::RowCount | AggKind::Sum => AggKind::Sum,
+        };
+        PlanAggCall {
+            agg_kind: total_agg_kind,
+            inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            ..self.clone()
+        }
+    }
+
     pub fn count_star() -> Self {
         PlanAggCall {
             agg_kind: AggKind::Count,
