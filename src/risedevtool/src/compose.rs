@@ -386,7 +386,7 @@ impl Compose for GrafanaConfig {
                 "./grafana.ini:/etc/grafana/grafana.ini".to_string(),
                 "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml".to_string(),
                 "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml".to_string(),
-                "./risingwave-dashboard.json:/risingwave-dashboards.json".to_string()
+                "./risingwave-dashboard.json:/risingwave-dashboard.json".to_string()
             ],
             ..Default::default()
         };

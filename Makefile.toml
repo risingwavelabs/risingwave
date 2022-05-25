@@ -559,5 +559,5 @@ description = "Run deploy.sh"
 script = '''
 #!@shell
 set -e
-.risingwave/rw-docker/deploy.sh
+.risingwave/rw-docker/deploy.sh "$@"
 '''

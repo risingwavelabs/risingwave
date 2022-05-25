@@ -59,7 +59,44 @@ pub fn compose_deploy(
 DIR="$( cd "$( dirname "${{BASH_SOURCE[0]}}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR""#
         )?;
+
         writeln!(x)?;
+
+        writeln!(
+            x,
+            r#"
+DO_ALL_STEPS=1
+
+while getopts '1234' OPT; do
+    case $OPT in
+        1)
+            DO_SYNC=1
+            DO_ALL_STEPS=0
+            ;;
+        2)
+            DO_TEAR_DOWN=1
+            DO_ALL_STEPS=0
+            ;;
+        3)
+            DO_START=1
+            DO_ALL_STEPS=0
+            ;;
+        4)
+            DO_CHECK=1
+            DO_ALL_STEPS=0
+        ;;
+    esac
+done
+
+if [[ "$DO_ALL_STEPS" -eq 1 ]]; then
+DO_SYNC=1
+DO_TEAR_DOWN=1
+DO_START=1
+DO_CHECK=1
+fi
+"#
+        )?;
+        writeln!(x, r#"if [[ "$DO_SYNC" -eq 1 ]]; then"#)?;
         writeln!(x, "# --- Sync Config ---")?;
         writeln!(x, r#"echo "$(tput setaf 2)(1/4) sync config$(tput sgr0)""#)?;
         writeln!(x, "echo \"If this step takes too long time, maybe EC2 IP has been changed. You'll need to re-run $(tput setaf 2)terraform apply$(tput sgr0) to get the latest IP, and then $(tput setaf 2)./risedev compose-deploy <profile>$(tput sgr0) again to update the deploy script.\"")?;
@@ -93,7 +130,9 @@ cd "$DIR""#
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
+        writeln!(x, r#"fi"#)?;
         writeln!(x)?;
+        writeln!(x, r#"if [[ "$DO_TEAR_DOWN" -eq 1 ]]; then"#)?;
         writeln!(x, "# --- Tear Down Services ---")?;
         writeln!(
             x,
@@ -137,7 +176,9 @@ cd "$DIR""#
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
+        writeln!(x, r#"fi"#)?;
         writeln!(x)?;
+        writeln!(x, r#"if [[ "$DO_START" -eq 1 ]]; then"#)?;
         writeln!(x, "# --- Start Services ---")?;
         writeln!(
             x,
@@ -163,7 +204,9 @@ cd "$DIR""#
             let base_folder = "~/risingwave-deploy";
             writeln!(x, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose up -d {step}'\"")?;
         }
+        writeln!(x, r#"fi"#)?;
         writeln!(x)?;
+        writeln!(x, r#"if [[ "$DO_CHECK" -eq 1 ]]; then"#)?;
         writeln!(x, "# --- Check Services ---")?;
         writeln!(
             x,
@@ -184,6 +227,7 @@ cd "$DIR""#
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
+        writeln!(x, r#"fi"#)?;
         x
     };
     let deploy_sh = Path::new(output_directory).join("deploy.sh");
