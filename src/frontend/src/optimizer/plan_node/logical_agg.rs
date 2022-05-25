@@ -81,7 +81,7 @@ impl PlanAggCall {
 
             AggKind::Count | AggKind::RowCount | AggKind::Sum => PlanAggCall {
                 agg_kind: AggKind::Sum,
-                inputs: vec![InputRef::new(partial_output_idx, DataType::Int64)],
+                inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
                 ..self.clone()
             },
         }
