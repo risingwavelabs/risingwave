@@ -65,6 +65,7 @@ impl Binder {
                     ExprType::Case
                 }
                 "concat_ws" => ExprType::ConcatWs,
+                "split_part" => ExprType::SplitPart,
                 "coalesce" => ExprType::Coalesce,
                 "round" => {
                     inputs = Self::rewrite_round_args(inputs);

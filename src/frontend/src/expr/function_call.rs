@@ -135,6 +135,25 @@ impl FunctionCall {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(DataType::Varchar)
             }
+
+            ExprType::SplitPart => {
+                if inputs.len() < 2 {
+                    return Err(ErrorCode::BindError(todo!()).into());
+                }
+
+                inputs = inputs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, input)| match i {
+                        0 => input.cast_implicit(DataType::Varchar),
+                        1 => input.cast_implicit(DataType::Varchar),
+                        2 => input.cast_implicit(DataType::Int64),
+                        _ => todo!(),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(DataType::Varchar)
+            }
+
             _ => infer_type(
                 func_type,
                 inputs.iter().map(|expr| expr.return_type()).collect(),
