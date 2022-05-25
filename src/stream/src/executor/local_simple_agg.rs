@@ -181,7 +181,7 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, LocalSimpleAggExecutor};
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_no_chunk() -> Result<()> {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]);
@@ -220,7 +220,7 @@ mod tests {
         Ok(())
     }
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_local_simple_agg() -> Result<()> {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\

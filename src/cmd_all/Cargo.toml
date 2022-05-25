@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
+madsim = "=0.2.0-alpha.3"
 risedev = { path = "../risedevtool" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
@@ -15,7 +16,7 @@ risingwave_frontend = { path = "../frontend" }
 risingwave_logging = { path = "../utils/logging" }
 risingwave_meta = { path = "../meta" }
 tikv-jemallocator = "0.4"
-tokio = { version = "1", features = [
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
