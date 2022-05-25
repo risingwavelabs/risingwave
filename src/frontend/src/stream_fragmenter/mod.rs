@@ -97,7 +97,10 @@ impl StreamFragmenter {
             let input = match child_node.get_node_body()? {
                 // For stateful operators, set `exchange_flag = true`. If it's already true, force
                 // add an exchange.
-                NodeBody::HashAgg(_) | NodeBody::HashJoin(_) | NodeBody::DeltaIndexJoin(_) => {
+                NodeBody::HashAgg(_)
+                | NodeBody::HashJoin(_)
+                | NodeBody::DeltaIndexJoin(_)
+                | NodeBody::Chain(_) => {
                     // We didn't make `fields` available on Java frontend yet, so we check if schema
                     // is available (by `child_node.fields.is_empty()`) before deciding to do the
                     // rewrite.

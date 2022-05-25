@@ -120,7 +120,7 @@ impl UnfinishedNotifiers {
                 }
             }
 
-            Entry::Vacant(_) => todo!("handle finish report after meta recovery"),
+            Entry::Vacant(_) => unreachable!(),
         }
     }
 }
