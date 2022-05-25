@@ -31,7 +31,7 @@ pub use env::*;
 pub use stream_manager::*;
 
 /// Default capacity of channel if two actors are on the same node
-pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 4;
+pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
