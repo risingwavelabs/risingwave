@@ -243,7 +243,6 @@ impl LogicalJoin {
     ///
     /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
     fn push_down(
-        &self,
         predicate: &mut Condition,
         left_col_num: usize,
         right_col_num: usize,
@@ -286,35 +285,35 @@ impl LogicalJoin {
         (left, right, on)
     }
 
-    fn can_push_left_from_filter(&self, ty: JoinType) -> bool {
+    fn can_push_left_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
         )
     }
 
-    fn can_push_right_from_filter(&self, ty: JoinType) -> bool {
+    fn can_push_right_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
         )
     }
 
-    fn can_push_on_from_filter(&self, ty: JoinType) -> bool {
+    fn can_push_on_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
         )
     }
 
-    fn can_push_left_from_on(&self, ty: JoinType) -> bool {
+    fn can_push_left_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
         )
     }
 
-    fn can_push_right_from_on(&self, ty: JoinType) -> bool {
+    fn can_push_right_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
@@ -514,22 +513,22 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right.schema().len();
         let join_type = self.simplify_outer(&predicate, left_col_num, self.join_type);
 
-        let (left_from_filter, right_from_filter, on) = self.push_down(
+        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
             &mut predicate,
             left_col_num,
             right_col_num,
-            self.can_push_left_from_filter(join_type),
-            self.can_push_right_from_filter(join_type),
-            self.can_push_on_from_filter(join_type),
+            LogicalJoin::can_push_left_from_filter(join_type),
+            LogicalJoin::can_push_right_from_filter(join_type),
+            LogicalJoin::can_push_on_from_filter(join_type),
         );
 
         let mut new_on = self.on.clone().and(on);
-        let (left_from_on, right_from_on, on) = self.push_down(
+        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
             &mut new_on,
             left_col_num,
             right_col_num,
-            self.can_push_left_from_on(join_type),
-            self.can_push_right_from_on(join_type),
+            LogicalJoin::can_push_left_from_on(join_type),
+            LogicalJoin::can_push_right_from_on(join_type),
             false,
         );
         assert!(
