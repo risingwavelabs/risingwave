@@ -156,7 +156,7 @@ fi
             } else {
                 ""
             };
-            writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose stop 0 && docker compose down --remove-orphans{down_extra_arg} && docker pull {}'\"",
+            writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose kill && docker compose down --remove-orphans{down_extra_arg} && docker pull {}'\"",
                 compose_config.image.risingwave
             )?;
             if tear_down_volumes {
