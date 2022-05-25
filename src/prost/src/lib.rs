@@ -1,4 +1,5 @@
 #![allow(clippy::all)]
+#![allow(rustdoc::bare_urls)]
 
 #[rustfmt::skip]
 pub mod catalog;

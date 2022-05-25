@@ -45,7 +45,7 @@ impl PrometheusService {
             "--web.listen-address={}:{}",
             config.listen_address, config.port
         ));
-
+        cmd.arg("--storage.tsdb.retention.time=30d");
         Ok(())
     }
 }
