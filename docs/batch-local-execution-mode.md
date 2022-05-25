@@ -29,7 +29,7 @@ Let’s use above sql as example:
 
 The key changes from distributed mode:
 
-1. The exchange executor will be executed by directly local query execution, not by distributed scheduler. This means that we no longer have async execution/monitoring, etc.
+1. The exchange executor will be executed directly by local query execution, not by distributed scheduler. This means that we no longer have async execution/monitoring, etc.
 2. The rpc is issued by exchange executor directly, not by scheduler.
 
 ## Example2: SELECT pk, t1.a, t1.fk, t2.b FROM t1, t2 WHERE t1.fk = t2.pk AND t1.pk = 114514
@@ -45,7 +45,7 @@ As explained above, the lookup join/exchange phase will be executed directly on 
 
 The overall process will be quite similar to distributed processing, but with a little difference:
 
-1. We only use heuristic optimizater for it, and only a limit set of rules will be applied.
+1. We only use heuristic optimizater for it, and only a limited set of rules will be applied.
 2. No scheduler will involve, and the physical plan is executed in current thread(coroutine) immeidately.
 
 ### Monitoring/Management
@@ -64,7 +64,7 @@ In distributed mode we have several steps to execute compute task and fetch resu
 There are some problems with above process in local mode:
 
 1. We need at least two rpcs to fetch task execution result, this increases query overhead
-2. We have task lifecycle management apis, this is unnecessary for local mode.
+2. We have task lifecycle management APIs, this is unnecessary for local mode.
 3. We may need to add several new apis for task monitoring/failure detection
 
 
