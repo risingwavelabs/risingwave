@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing to RisingWave! We welcome and appreciate contributions.
 
-This document describes how to submit your code changes. To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [readme.md in the design docs directory](docs/README.md).
+This document describes how to submit your code changes. To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [docs/README.md](docs/README.md).
 
 If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/singularity-data/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
 

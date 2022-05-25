@@ -39,7 +39,7 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
 
 ## Read the design docs
 
-Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in the [readme.md in the design docs directory](readme.md) first.
+Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in [docs/README.md](README.md) first.
 
 ## Learn about the code structure
 
