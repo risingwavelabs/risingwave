@@ -57,11 +57,7 @@ impl DatagenEventGenerator {
         let mut res = vec![];
         let split_index = self.split_index;
         let split_num = self.split_num;
-        let addition_one: u64 = if self.rows_per_second % split_num > split_index {
-            1
-        } else {
-            0
-        };
+        let addition_one = ((self.rows_per_second % split_num) > split_index) as u64;
         let partition_size = self.rows_per_second / split_num + addition_one;
         for i in 0..partition_size {
             let map: Map<String, Value> = self
