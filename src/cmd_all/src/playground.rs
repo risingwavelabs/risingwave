@@ -35,7 +35,7 @@ async fn load_risedev_config() -> Result<(Vec<String>, HashMap<String, ServiceCo
             .await?;
         content
     };
-    let risedev_config = ConfigExpander::expand(&risedev_config)?;
+    let risedev_config = ConfigExpander::expand(&risedev_config, "playground")?;
     let (steps, services) = ConfigExpander::select(&risedev_config, "playground")?;
 
     Ok((steps, services))
