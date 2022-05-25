@@ -58,7 +58,7 @@ macro_rules! impl_field_generator {
                     })
                 }
 
-                fn with_sequence(star_optiont: Option<String>, end_option: Option<String>,split_index:i32,split_num:i32) -> Result<Self> {
+                fn with_sequence(star_optiont: Option<String>, end_option: Option<String>,split_index:u64,split_num:u64) -> Result<Self> {
 
                     let mut start = DEFAULT_START as $field_type;
                     let mut end = DEFAULT_END as $field_type;
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn test_field_generator_with_sequence() {
         let mut i16_field =
-            I16Field::with_sequence(Some("5".to_string()), Some("10".to_string()),0,1).unwrap();
+            I16Field::with_sequence(Some("5".to_string()), Some("10".to_string()), 0, 1).unwrap();
         for i in 5..=10 {
             assert_eq!(i16_field.generate(), json!(i));
         }

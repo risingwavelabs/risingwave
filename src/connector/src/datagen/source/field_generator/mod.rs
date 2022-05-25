@@ -39,7 +39,12 @@ pub const DEFAULT_LENGTH: usize = 10;
 /// fields that can be continuously or randomly generated impl this trait
 /// such as i32, float, double
 pub trait NumericFieldGenerator {
-    fn with_sequence(min: Option<String>, max: Option<String>,split_index:i32,split_num:i32) -> Result<Self>
+    fn with_sequence(
+        min: Option<String>,
+        max: Option<String>,
+        split_index: u64,
+        split_num: u64,
+    ) -> Result<Self>
     where
         Self: Sized;
     fn with_random(start: Option<String>, end: Option<String>) -> Result<Self>
@@ -76,8 +81,8 @@ impl FieldGeneratorImpl {
         kind: FieldKind,
         first_arg: Option<String>,
         second_arg: Option<String>,
-        split_index:i32,
-        split_num:i32,
+        split_index: u64,
+        split_num: u64,
     ) -> Result<Self> {
         match kind {
             // todo(d2lark) use macro to simplify the code later
@@ -105,19 +110,34 @@ impl FieldGeneratorImpl {
             },
             FieldKind::Sequence => match data_type {
                 DataType::Int16 => Ok(FieldGeneratorImpl::I16(I16Field::with_sequence(
-                    first_arg, second_arg,split_index,split_num
+                    first_arg,
+                    second_arg,
+                    split_index,
+                    split_num,
                 )?)),
                 DataType::Int32 => Ok(FieldGeneratorImpl::I32(I32Field::with_sequence(
-                    first_arg, second_arg,split_index,split_num
+                    first_arg,
+                    second_arg,
+                    split_index,
+                    split_num,
                 )?)),
                 DataType::Int64 => Ok(FieldGeneratorImpl::I64(I64Field::with_sequence(
-                    first_arg, second_arg,split_index,split_num
+                    first_arg,
+                    second_arg,
+                    split_index,
+                    split_num,
                 )?)),
                 DataType::Float32 => Ok(FieldGeneratorImpl::F32(F32Field::with_sequence(
-                    first_arg, second_arg,split_index,split_num
+                    first_arg,
+                    second_arg,
+                    split_index,
+                    split_num,
                 )?)),
                 DataType::Float64 => Ok(FieldGeneratorImpl::F64(F64Field::with_sequence(
-                    first_arg, second_arg,split_index,split_num
+                    first_arg,
+                    second_arg,
+                    split_index,
+                    split_num,
                 )?)),
                 _ => unimplemented!(),
             },
@@ -143,27 +163,29 @@ mod tests {
 
     #[test]
     fn test_partition_sequence() {
-        let split_num = 4; 
+        let split_num = 4;
         let mut i32_fields = vec![];
-        for split_index in 0..4{
-            i32_fields.push(            FieldGeneratorImpl::new(
-                DataType::Int32,
-                FieldKind::Sequence,
-                Some("1".to_string()),
-                Some("20".to_string()),
-                split_index,
-                split_num
-            )
-            .unwrap());
+        for split_index in 0..4 {
+            i32_fields.push(
+                FieldGeneratorImpl::new(
+                    DataType::Int32,
+                    FieldKind::Sequence,
+                    Some("1".to_string()),
+                    Some("20".to_string()),
+                    split_index,
+                    split_num,
+                )
+                .unwrap(),
+            );
         }
 
-        for step in 0..5{
-            for (index,i32_field)  in i32_fields.iter_mut().enumerate(){
+        for step in 0..5 {
+            for (index, i32_field) in i32_fields.iter_mut().enumerate() {
                 let value = i32_field.generate();
                 assert!(value.is_number());
                 let num = value.as_i64();
-                let expected_num = 4*step+1+index as i64;
-                assert_eq!(expected_num,num.unwrap());
+                let expected_num = 4 * step + 1 + index as i64;
+                assert_eq!(expected_num, num.unwrap());
             }
         }
     }

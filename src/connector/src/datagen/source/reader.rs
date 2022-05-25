@@ -17,12 +17,11 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::datagen::DatagenSplit;
 use super::field_generator::{FieldGeneratorImpl, FieldKind};
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
-use crate::datagen::DatagenProperties;
-use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader, SplitImpl};
+use crate::datagen::{DatagenProperties, DatagenSplit};
+use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitImpl, SplitReader};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -51,7 +50,7 @@ impl SplitReader for DatagenSplitReader {
                 log::debug!("Splits for datagen found! {:?}", splits);
                 for split in splits {
                     // TODO: currently, assume there's only on split in one reader
-                     split_id = split.id();
+                    split_id = split.id();
                     if let SplitImpl::Datagen(n) = split {
                         if let Some(s) = n.start_offset {
                             events_so_far = s;
@@ -68,8 +67,8 @@ impl SplitReader for DatagenSplitReader {
             ConnectorStateV2::None => {}
         }
 
-        let split_index = assigned_split.split_index;
-        let split_num = assigned_split.split_num;
+        let split_index = assigned_split.split_index as u64;
+        let split_num = assigned_split.split_num as u64;
 
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
         let fields_option_map = properties.fields;
@@ -146,7 +145,6 @@ impl SplitReader for DatagenSplitReader {
                                 max_value_option,
                                 split_index,
                                 split_num
-                                
                             )?,
                         );
                     }
@@ -171,47 +169,5 @@ impl SplitReader for DatagenSplitReader {
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
         self.generator.next().await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_partition_sequence() {
-        let mut fields_map = HashMap::new();
-        let split_num = 2;
-     let split_index= 0;
-    let split_id = format!("{}-{}",split_num,split_index);
-        fields_map.insert("v1".to_string(),FieldGeneratorImpl::new(
-            risingwave_common::types::DataType::Int32,
-            FieldKind::Sequence,
-            Some("1".to_string()),
-            Some("100".to_string()),
-            split_index,
-            split_num
-        ).unwrap());
-
-        let generator = DatagenEventGenerator::new(fields_map,
-        5,0,split_id,split_num,split_index).unwrap();
-
-        let assigned_split = DatagenSplit{
-            split_index,
-            split_num,
-            start_offset: None,
-        };
-
-
-        let mut reader = DatagenSplitReader{
-            assigned_split,
-            generator,
-        };
-
-        loop{
-            let chunk = reader.next().await.unwrap().unwrap();
-        }
-
     }
 }

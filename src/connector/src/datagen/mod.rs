@@ -26,20 +26,19 @@ pub use split::*;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
-    // split_num means data source partition 
+    // split_num means data source partition
     #[serde(rename = "datagen.split.num")]
     pub split_num: Option<String>,
 
-    //default default_rows_per_second =10
-    //when the split_num = 3 and default_rows_per_second =10
-    //there will be three readers that generate respectly 4,3,3 message per second
+    // default default_rows_per_second =10
+    // when the split_num = 3 and default_rows_per_second =10
+    // there will be three readers that generate respectly 4,3,3 message per second
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
     )]
-
     pub rows_per_second: String,
-    
+
     // Some connector options of the datagen source's fields
     // for example: create datagen source with column v1 int, v2 float
     // 'fields.v1.kind'='sequence',
@@ -55,4 +54,3 @@ pub struct DatagenProperties {
 fn default_rows_per_second() -> String {
     "10".to_string()
 }
-
