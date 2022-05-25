@@ -222,12 +222,12 @@ where
 
             let (new_epoch, actors_to_track, create_mview_progress) =
                 self.recovery(state.prev_epoch).await;
-            tracker.add(new_epoch.0, actors_to_track, vec![]);
+            tracker.add(new_epoch, actors_to_track, vec![]);
             for progress in create_mview_progress {
                 tracker.update(
                     progress.chain_actor_id,
-                    progress.consumed_epoch,
-                    new_epoch.0,
+                    progress.consumed_epoch.into(),
+                    new_epoch,
                 );
             }
             state.prev_epoch = new_epoch;
@@ -281,12 +281,12 @@ where
 
                     // Then try to finish the barrier for Create MVs.
                     let actors_to_track = command_ctx.actors_to_track();
-                    tracker.add(new_epoch.0, actors_to_track, notifiers);
+                    tracker.add(new_epoch, actors_to_track, notifiers);
                     for progress in responses.into_iter().flat_map(|r| r.create_mview_progress) {
                         tracker.update(
                             progress.chain_actor_id,
-                            progress.consumed_epoch,
-                            new_epoch.0,
+                            progress.consumed_epoch.into(),
+                            new_epoch,
                         );
                     }
 
@@ -301,12 +301,12 @@ where
                         let (new_epoch, actors_to_track, create_mview_progress) =
                             self.recovery(new_epoch).await;
                         tracker = CreateMviewProgressTracker::default(); // Reset progress tracker
-                        tracker.add(new_epoch.0, actors_to_track, vec![]);
+                        tracker.add(new_epoch, actors_to_track, vec![]);
                         for progress in create_mview_progress {
                             tracker.update(
                                 progress.chain_actor_id,
-                                progress.consumed_epoch,
-                                new_epoch.0,
+                                progress.consumed_epoch.into(),
+                                new_epoch,
                             );
                         }
 

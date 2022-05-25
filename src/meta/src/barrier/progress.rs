@@ -16,14 +16,14 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::util::epoch::Epoch;
 
 use super::notifier::Notifier;
 use crate::model::ActorId;
 
-type Epoch = u64;
 type CreateMviewEpoch = Epoch;
 
-enum ActorState {
+enum ChainState {
     ConsumingSnapshot,
     ConsumingUpstream(Epoch),
     Done,
@@ -31,7 +31,7 @@ enum ActorState {
 
 /// Progress of all actors containing chain nodes while creating mview.
 struct Progress {
-    states: HashMap<ActorId, ActorState>,
+    states: HashMap<ActorId, ChainState>,
 
     done_count: usize,
 }
@@ -41,7 +41,7 @@ impl Progress {
     fn new(actors: impl IntoIterator<Item = ActorId>) -> Self {
         let states = actors
             .into_iter()
-            .map(|a| (a, ActorState::ConsumingSnapshot))
+            .map(|a| (a, ChainState::ConsumingSnapshot))
             .collect::<HashMap<_, _>>();
         assert!(!states.is_empty());
 
@@ -54,15 +54,15 @@ impl Progress {
     /// Update the progress of `actor` according to the given epochs.
     fn update(&mut self, actor: ActorId, consumed_epoch: Epoch, current_epoch: Epoch) {
         match self.states.get_mut(&actor).unwrap() {
-            state @ (ActorState::ConsumingSnapshot | ActorState::ConsumingUpstream(_)) => {
+            state @ (ChainState::ConsumingSnapshot | ChainState::ConsumingUpstream(_)) => {
                 if consumed_epoch == current_epoch {
-                    *state = ActorState::Done;
+                    *state = ChainState::Done;
                     self.done_count += 1;
                 } else {
-                    *state = ActorState::ConsumingUpstream(consumed_epoch);
+                    *state = ChainState::ConsumingUpstream(consumed_epoch);
                 }
             }
-            ActorState::Done => panic!("should not report progress after done"),
+            ChainState::Done => panic!("should not report progress after done"),
         }
     }
 
