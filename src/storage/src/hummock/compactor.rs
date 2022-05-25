@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{
     CompactTask, SstableInfo, SubscribeCompactTasksResponse, VNodeBitmap, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::group_builder::KeyValueGroupingImpl::VirtualNode;
@@ -610,7 +610,7 @@ impl Compactor {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         compaction_executor: Option<Arc<CompactionExecutor>>,
-    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+    ) -> (JoinHandle<()>, Sender<()>) {
         let compactor_context = Arc::new(CompactorContext {
             options,
             hummock_meta_client: hummock_meta_client.clone(),
@@ -620,7 +620,7 @@ impl Compactor {
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor,
         });
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
             let process_task = |compact_task,
@@ -641,7 +641,7 @@ impl Compactor {
                     // Wait for interval.
                     _ = min_interval.tick() => {},
                     // Shutdown compactor.
-                    _ = shutdown_rx.recv() => {
+                    _ = &mut shutdown_rx => {
                         tracing::info!("Compactor is shutting down");
                         return;
                     }
@@ -672,7 +672,7 @@ impl Compactor {
                             message
                         },
                         // Shutdown compactor
-                        _ = shutdown_rx.recv() => {
+                        _ = &mut shutdown_rx => {
                             tracing::info!("Compactor is shutting down");
                             return
                         }
