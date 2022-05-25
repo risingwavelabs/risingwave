@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{Array, StructRef};
+use risingwave_common::array::{Array, ListRef, StructRef};
 use risingwave_common::error::{ErrorCode, Result};
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
@@ -91,6 +91,10 @@ pub fn min_struct<'a>(
     min(r, i)
 }
 
+pub fn min_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Option<ListRef<'a>>> {
+    min(r, i)
+}
+
 pub fn max<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
 where
     T: ScalarRef<'a> + PartialOrd,
@@ -111,6 +115,10 @@ pub fn max_struct<'a>(
     r: Option<StructRef<'a>>,
     i: Option<StructRef<'a>>,
 ) -> Result<Option<StructRef<'a>>> {
+    max(r, i)
+}
+
+pub fn max_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Option<ListRef<'a>>> {
     max(r, i)
 }
 
