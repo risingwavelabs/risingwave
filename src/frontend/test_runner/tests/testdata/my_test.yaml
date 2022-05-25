@@ -1,8 +1,0 @@
-- sql: |
-    create table t (v1 real not null);
-    select count(*) from t;
-  batch_plan: |
-    BatchSimpleAgg { aggs: [sum] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [count] }
-          BatchScan { table: t, columns: [] }
