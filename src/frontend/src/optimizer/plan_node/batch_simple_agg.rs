@@ -75,8 +75,8 @@ impl ToDistributedBatch for BatchSimpleAgg {
         let dist_input = self.input().to_distributed()?;
 
         match dist_input.distribution() {
+            // 2-phase agg
             Distribution::SomeShard => {
-                // 2-phase agg
                 // partial agg
                 let partial_agg = self.clone_with_input(dist_input).into();
 
