@@ -540,8 +540,9 @@ impl PredicatePushdown for LogicalAgg {
         let num_agg_calls = self.agg_calls.len();
         assert!(num_group_keys + num_agg_calls == self.schema().len());
 
-        // Specially, SimpleAgg should be skipped because the predicate either references agg_calls
+        // SimpleAgg should be skipped because the predicate either references agg_calls
         // or is const.
+        // If the filter references agg_calls, we can not push it.
         // When it is constantly true, pushing is useless and may actually cause more evaulation
         // cost of the predicate.
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
