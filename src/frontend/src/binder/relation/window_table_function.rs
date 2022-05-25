@@ -99,14 +99,23 @@ impl Binder {
 
         let columns = base_columns
             .into_iter()
-            .map(|c| (c.is_hidden, c.field))
+            .map(|c| {
+                if c.field.name == "window_start" || c.field.name == "window_end" {
+                    Err(ErrorCode::BindError(
+                        "column names `window_start` and `window_end` are not allowed in window table function's input."
+                        .into())
+                    .into())
+                } else {
+                    Ok((c.is_hidden, c.field))
+                }
+            })
             .chain(
                 [
-                    (false, Field::with_name(DataType::Timestamp, "window_start")),
-                    (false, Field::with_name(DataType::Timestamp, "window_end")),
+                    Ok((false, Field::with_name(DataType::Timestamp, "window_start"))),
+                    Ok((false, Field::with_name(DataType::Timestamp, "window_end"))),
                 ]
                 .into_iter(),
-            );
+            ).collect::<Result<Vec<_>>>()?;
 
         self.bind_context(columns, table_name.clone(), alias)?;
 
