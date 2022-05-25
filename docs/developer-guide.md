@@ -39,11 +39,11 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
 
 ## Read the design docs
 
-Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in the [readme.md](readme.md) first.
+Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in the [readme.md in the design docs directory](readme.md) first.
 
 ## Learn about the code structure
 
-- The `src` folder contains all of the kernal components, refer to [src/README.md](src/README.md) for more details.
+- The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md)) for more details.
 - The `docker` folder contains Docker files to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
@@ -70,7 +70,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client tmux
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -202,9 +202,9 @@ Uncomment `grafana` and `prometheus` lines in `risedev.yml` to enable Grafana an
 
 ### Tracing
 
-Compute nodes support streaming tracing. Tracing is not enabled by default. You will need to
-use `./risedev configure` to enable tracing components. After that, simply uncomment `jaeger`
-service in `risedev.yml`.
+Compute nodes support streaming tracing. Tracing is not enabled by default. You need to
+use `./risedev configure` to download the tracing components first. After that, you will need to uncomment `jaeger`
+service in `risedev.yml` and start a new dev cluster to allow the components to work.
 
 ### Dashboard
 
