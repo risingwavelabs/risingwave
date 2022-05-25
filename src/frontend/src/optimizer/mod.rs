@@ -115,11 +115,21 @@ impl PlanRoot {
         let mut plan = self.plan.clone();
 
         // Subquery Unnesting.
+        // plan = {
+        //     let rules = vec![
+        //         // This rule should be applied first to pull up LogicalAgg.
+        //         UnnestAggForLOJ::create(),
+        //         PullUpCorrelatedPredicate::create(),
+        //     ];
+        //     let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+        //     heuristic_optimizer.optimize(plan)
+        // };
         plan = {
             let rules = vec![
-                // This rule should be applied first to pull up LogicalAgg.
-                UnnestAggForLOJ::create(),
-                PullUpCorrelatedPredicate::create(),
+                ApplyAgg::create(),
+                ApplyFilter::create(),
+                ApplyProj::create(),
+                ApplyScan::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
