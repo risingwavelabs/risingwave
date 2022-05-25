@@ -22,6 +22,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
+use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::SstableStore;
 use risingwave_storage::monitor::{
@@ -97,6 +98,7 @@ pub async fn compactor_serve(
             hummock_meta_client,
             sstable_store,
             state_store_stats,
+            Some(Arc::new(CompactionExecutor::new(None))),
         ),
     ];
 

@@ -119,6 +119,11 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
 
+    /// Worker threads number of dedicated tokio runtime for share buffer compaction. 0 means use
+    /// tokio's default value (number of CPU core).
+    #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
+    pub share_buffer_compaction_worker_threads_number: u32,
+
     // /// Size threshold to trigger shared buffer flush.
     // #[serde(default = "default::shared_buffer_threshold")]
     // pub shared_buffer_threshold: u32,
@@ -213,6 +218,10 @@ mod default {
     }
 
     pub fn share_buffers_sync_parallelism() -> u32 {
+        2
+    }
+
+    pub fn share_buffer_compaction_worker_threads_number() -> u32 {
         2
     }
 
