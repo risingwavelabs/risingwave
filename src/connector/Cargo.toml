@@ -29,7 +29,7 @@ http-serde = "1.1.0"
 hyper = "0.14"
 itertools = "0.10"
 log = "0.4"
-madsim = "=0.2.0-alpha.2"
+madsim = "=0.2.0-alpha.3"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
@@ -49,10 +49,10 @@ smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = { version = "=0.2.0-alpha.2", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 twox-hash = "1"
 url = "2"
 urlencoding = "2"

@@ -2,43 +2,43 @@
 #![allow(rustdoc::bare_urls)]
 
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/catalog.rs")]
+#[cfg_attr(madsim, path = "sim/catalog.rs")]
 pub mod catalog;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/common.rs")]
+#[cfg_attr(madsim, path = "sim/common.rs")]
 pub mod common;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/data.rs")]
+#[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/ddl_service.rs")]
+#[cfg_attr(madsim, path = "sim/ddl_service.rs")]
 pub mod ddl_service;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/expr.rs")]
+#[cfg_attr(madsim, path = "sim/expr.rs")]
 pub mod expr;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/meta.rs")]
+#[cfg_attr(madsim, path = "sim/meta.rs")]
 pub mod meta;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/plan_common.rs")]
+#[cfg_attr(madsim, path = "sim/plan_common.rs")]
 pub mod plan_common;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/batch_plan.rs")]
+#[cfg_attr(madsim, path = "sim/batch_plan.rs")]
 pub mod batch_plan;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/task_service.rs")]
+#[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/stream_plan.rs")]
+#[cfg_attr(madsim, path = "sim/stream_plan.rs")]
 pub mod stream_plan;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/stream_service.rs")]
+#[cfg_attr(madsim, path = "sim/stream_service.rs")]
 pub mod stream_service;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/hummock.rs")]
+#[cfg_attr(madsim, path = "sim/hummock.rs")]
 pub mod hummock;
 #[rustfmt::skip]
-#[cfg_attr(feature = "sim", path = "sim/user.rs")]
+#[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
 
 #[rustfmt::skip]

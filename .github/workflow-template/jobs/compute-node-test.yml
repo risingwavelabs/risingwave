@@ -62,7 +62,7 @@ jobs:
       - name: Run deterministic test
         continue-on-error: true
         run: |
-          cargo test --no-fail-fast --features=tokio/sim,tonic/sim,risingwave_pb/sim -p risingwave_batch -p risingwave_stream -p risingwave_storage -p risingwave_connector -p risingwave_source -p risingwave_compute
+          RUSTFLAGS="--cfg madsim" cargo test --target-dir target/sim --no-fail-fast -p risingwave_batch -p risingwave_stream -p risingwave_storage -p risingwave_connector -p risingwave_source -p risingwave_compute
 
       - uses: codecov/codecov-action@v2
         with:

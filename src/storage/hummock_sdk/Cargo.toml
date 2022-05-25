@@ -7,7 +7,7 @@ edition = "2021"
 bytes = "1"
 hex = "0.4"
 log = "0.4"
-madsim = "=0.2.0-alpha.2"
+madsim = "=0.2.0-alpha.3"
 prost = "0.10"
 risingwave_pb = { path = "../../prost" }
-tokio = { version = "=0.2.0-alpha.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }

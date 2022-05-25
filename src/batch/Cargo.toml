@@ -18,7 +18,7 @@ futures-async-stream = "0.2"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-madsim = "=0.2.0-alpha.2"
+madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -40,7 +40,7 @@ smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.2", package = "madsim-tokio", features = [
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -50,7 +50,7 @@ tokio = { version = "=0.2.0-alpha.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.2", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 tracing-futures = "0.2"
 twox-hash = "1"

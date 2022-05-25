@@ -19,7 +19,7 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 lru = "0.7"
-madsim = "=0.2.0-alpha.2"
+madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.2"
 num-traits = "0.2"
@@ -31,10 +31,10 @@ rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
 toml = "0.5"
-tonic = { version = "=0.2.0-alpha.2", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = { version = "0.1" }
