@@ -31,7 +31,7 @@ use crate::Keyspace;
 /// encoding.
 
 // test state table
-#[madsim::test]
+#[tokio::test]
 async fn test_state_table() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
     let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
@@ -380,7 +380,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_state_table_iter() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -642,7 +642,7 @@ async fn test_state_table_iter() {
     assert!(res.is_none());
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_multi_state_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -781,7 +781,7 @@ async fn test_multi_state_table_iter() {
     state_2.commit(epoch).await.unwrap();
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_cell_based_get_row_by_scan() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -863,7 +863,7 @@ async fn test_cell_based_get_row_by_scan() {
 }
 
 // test cell_based table
-#[madsim::test]
+#[tokio::test]
 async fn test_cell_based_get_row_by_muti_get() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -956,7 +956,7 @@ async fn test_cell_based_get_row_by_muti_get() {
     assert_eq!(get_no_exist_res, None);
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_cell_based_get_row_for_string() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -1050,7 +1050,7 @@ async fn test_cell_based_get_row_for_string() {
     assert_eq!(get_row2_res, None);
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_shuffled_column_id_for_get_row() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(3), ColumnId::from(2), ColumnId::from(1)];
@@ -1143,7 +1143,7 @@ async fn test_shuffled_column_id_for_get_row() {
     assert_eq!(get_no_exist_res, None);
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -1215,7 +1215,7 @@ async fn test_cell_based_table_iter() {
     assert!(res.is_none());
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_multi_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -1358,7 +1358,7 @@ async fn test_multi_cell_based_table_iter() {
     assert!(res_2_2.is_none());
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_cell_based_scan_empty_column_ids_cardinality() {
     let state_store = MemoryStateStore::new();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];

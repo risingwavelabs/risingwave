@@ -30,7 +30,6 @@ lazy_static = "1"
 libc = "0.2"
 log = "0.4"
 lz4 = "1.23.1"
-madsim = "0.2.0-alpha.1"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.8", features = ["future"] }
 num-integer = "0.1"

@@ -4086,7 +4086,6 @@ dependencies = [
  "libc",
  "log 0.4.17",
  "lz4",
- "madsim",
  "madsim-tonic",
  "memcomparable",
  "moka",
