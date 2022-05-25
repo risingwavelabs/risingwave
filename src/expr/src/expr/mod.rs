@@ -27,6 +27,7 @@ mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
+mod expr_split_part;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod template;
@@ -49,6 +50,7 @@ use crate::expr::expr_array::ArrayExpression;
 use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
+use crate::expr::expr_split_part::SplitPartExpression;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
@@ -92,6 +94,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         ConcatWs => ConcatWsExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        SplitPart => SplitPartExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
