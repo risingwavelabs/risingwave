@@ -106,13 +106,21 @@ impl ChainExecutor {
             }
         }
 
-        // 3. Report that we've finished the creation (for a workaround).
-        self.progress.finish(epoch.curr);
+        // The create mview progress can be `finish`ed only once.
+        let mut progress = Some(self.progress);
+        let mut may_finish_progress = |msg: &Message| {
+            let Some(progress) = progress.take() else { return };
+            let Some(barrier) = msg.as_barrier() else { return };
+            progress.finish(barrier.epoch.curr);
+        };
 
-        // 4. Continuously consume the upstream.
+        // 3. Continuously consume the upstream.
         #[for_await]
         for msg in upstream {
-            yield mapping(&self.upstream_indices, msg?);
+            let msg = msg?;
+            // Report that we've finished the creation on the first barrier from upstream.
+            may_finish_progress(&msg);
+            yield mapping(&self.upstream_indices, msg);
         }
     }
 }
