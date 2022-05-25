@@ -76,12 +76,13 @@ impl PlanAggCall {
             AggKind::SingleValue =>
                 PlanAggCall {
                     agg_kind: self.agg_kind.clone(),
+                    // reuse inputs refs from original plan agg call
                     ..self.clone()
                 },
 
             AggKind::Sum | AggKind::Count | AggKind::RowCount => PlanAggCall {
                 agg_kind: AggKind::Sum,
-                inputs: vec![InputRef::new(0, DataType::Int32)],
+                inputs: vec![InputRef::new(0, DataType::Int64)],
                 ..self.clone()
             }
         }
