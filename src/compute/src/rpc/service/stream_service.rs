@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
-use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::{Barrier, Epoch};
@@ -151,20 +150,10 @@ impl StreamService for StreamServiceImpl {
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        // TODO: we are only reporting progress when we finished now
-        let create_mview_progress = collect_result
-            .finished_create_mviews
-            .into_iter()
-            .map(|f| CreateMviewProgress {
-                chain_actor_id: f.actor_id,
-                consumed_epoch: barrier.epoch.curr,
-            })
-            .collect();
-
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
-            create_mview_progress,
             status: None,
+            create_mview_progress: collect_result.create_mview_progress,
             sycned_sstables: collect_result.synced_sstables,
         }))
     }

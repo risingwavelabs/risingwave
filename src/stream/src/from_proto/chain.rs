@@ -33,21 +33,21 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // TODO(bugen): how can we know the way of mapping?
         let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
 
-        // For notifying about creation finish.
-        let notifier = stream
+        // For reporting the progress.
+        let progress = stream
             .context
-            .register_finish_create_mview_notifier(params.actor_id);
+            .register_create_mview_progress(params.actor_id);
 
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.
         let schema = snapshot.schema().clone();
 
         if node.disable_rearrange {
-            let executor = ChainExecutor::new(snapshot, mview, column_idxs, notifier, schema);
+            let executor = ChainExecutor::new(snapshot, mview, column_idxs, progress, schema);
             Ok(executor.boxed())
         } else {
             let executor =
-                RearrangedChainExecutor::new(snapshot, mview, column_idxs, notifier, schema);
+                RearrangedChainExecutor::new(snapshot, mview, column_idxs, progress, schema);
             Ok(executor.boxed())
         }
     }
