@@ -2,9 +2,11 @@
 
 Thanks for your interest in contributing to RisingWave! We welcome and appreciate contributions.
 
-This document describes how to submit your code changes. To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [readme.md](docs/README.md).
+This document describes how to submit your code changes. To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [readme.md in the design docs directory](docs/README.md).
 
-If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose) or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/singularity-data/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+
+To report bugs, create a [GitHub issue](https://github.com/singularity-data/risingwave/issues/new/choose).
 
 
 ## Table of contents
@@ -14,10 +16,6 @@ If you have questions, please [create a Github issue](https://github.com/singula
     - [Pull Request title](#pull-request-title)
     - [Pull Request description](#pull-request-description)
     - [Sign the CLA](#sign-the-cla)
-  - [Update CI workflow](#update-ci-workflow)
-  - [Add new files](#add-new-files)
-  - [Add new dependencies](#add-new-dependencies)
-  - [Check in PRs from forks](#check-in-prs-from-forks)
 
 ## Tests and miscellaneous checks
 
@@ -57,57 +55,3 @@ You may also check out previous PRs in the [PR list](https://github.com/singular
 
 Contributors will need to sign Singularity Data's CLA.
 
-## Update CI workflow
-
-We use scripts to generate GitHub Action configurations based on templates in `.github/workflow-template`.
-
-To edit the workflow files, you will need to install `yq` >= 4.16.
-
-```shell
-> brew install yq
-> yq --version
-yq (https://github.com/mikefarah/yq/) version 4.16.1
-```
-
-Then, you may edit the files in `workflow-template`.
-
-* `template.yml` + `main-override.yml` = `main.yml`
-* `template.yml` + `pr-override.yml` = `pull-request.yml`
-
-After that, run `apply-ci-template` to update the final workflow config.
-
-```shell
-./risedev apply-ci-template
-```
-
-## Add new files
-
-We use [skywalking-eyes](https://github.com/apache/skywalking-eyes) to manage license headers.
-If you added new files, please follow the installation guide and run:
-
-```shell
-license-eye -c .licenserc.yaml header fix
-```
-
-## Add new dependencies
-
-To avoid rebuild some common dependencies across different crates in workspace, we use
-[cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
-are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
-after deps get updated.
-
-Also, we use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
-workspace.
-
-We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
-
-## Check in PRs from forks
-
-```shell
-gh pr checkout <PR id>
-git checkout -b forks/<PR id>
-git push origin HEAD -u
-```
-
-After that, CI checks will begin on branches of RisingWave's main repo,
-and the status will be automatically updated to PRs from forks.
