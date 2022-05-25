@@ -14,7 +14,6 @@
 
 use std::collections::{hash_map, HashMap};
 use std::sync::Arc;
-use std::time::Duration;
 
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
@@ -108,7 +107,9 @@ impl BatchManager {
         }
     }
 
-    pub async fn wait_until_task_aborted(&self, task_id: &TaskId) -> Result<()> {
+    #[cfg(test)]
+    async fn wait_until_task_aborted(&self, task_id: &TaskId) -> Result<()> {
+        use std::time::Duration;
         loop {
             match self.tasks.lock().get(task_id) {
                 Some(task) => {
