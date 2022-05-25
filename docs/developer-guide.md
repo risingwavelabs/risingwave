@@ -43,7 +43,7 @@ Before you start to make code changes, ensure that you understand the design and
 
 ## Learn about the code structure
 
-- The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md)) for more details.
+- The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md) for more details.
 - The `docker` folder contains Docker files to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
