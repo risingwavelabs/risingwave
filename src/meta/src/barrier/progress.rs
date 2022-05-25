@@ -62,6 +62,8 @@ impl Progress {
                     *state = ChainState::ConsumingUpstream(consumed_epoch);
                 }
             }
+
+            // Ignore `Done` after `Done`
             ChainState::Done => assert_eq!(consumed_epoch, current_epoch),
         }
     }

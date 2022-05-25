@@ -34,17 +34,6 @@ pub use progress::CreateMviewProgress;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-// /// Represents the Create MV DDL with `epoch` is finished on the actor with `actor_id`.
-// #[derive(Debug)]
-// pub struct FinishedCreateMview {
-//     /// The epoch of the configuration change barrier for this DDL.
-//     pub epoch: u64,
-
-//     /// The id of the actor that is responsible for running this DDL. Usually the actor of
-//     /// [`crate::executor::ChainExecutor`] for creating MV.
-//     pub actor_id: ActorId,
-// }
-
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
@@ -181,30 +170,6 @@ impl LocalBarrierManager {
 
         Ok(())
     }
-
-    // /// Report that a Create MV DDL with given `ddl_epoch` is finished on the actor with
-    // `actor_id`. /// This will be piggybacked by the collection of current/next barrier and
-    // then be reported /// to the meta service.
-    // pub fn finish_create_mview(&mut self, ddl_epoch: u64, actor_id: ActorId) {
-    //     info!(
-    //         "create mview finish on actor {} with ddl epoch {}",
-    //         actor_id, ddl_epoch
-    //     );
-
-    //     match &mut self.state {
-    //         #[cfg(test)]
-    //         BarrierState::Local => {}
-
-    //         BarrierState::Managed(managed_state) => {
-    //             managed_state
-    //                 .finished_create_mviews
-    //                 .push(FinishedCreateMview {
-    //                     epoch: ddl_epoch,
-    //                     actor_id,
-    //                 })
-    //         }
-    //     }
-    // }
 }
 
 #[cfg(test)]

@@ -38,9 +38,11 @@ impl LocalBarrierManager {
     }
 }
 
+/// The progress held by the chain executors to report to the local barrier manager.
 pub struct CreateMviewProgress {
     barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
 
+    /// The id of the actor containing the chain node.
     chain_actor_id: ActorId,
 
     state: Option<ChainState>,
@@ -67,6 +69,15 @@ impl CreateMviewProgress {
         self.chain_actor_id
     }
 
+    fn update_inner(&mut self, state: ChainState) {
+        self.state = Some(state);
+        self.barrier_manager
+            .lock()
+            .update_create_mview_progress(self.chain_actor_id, state);
+    }
+
+    /// Update the progress to `ConsumingUpstream(consumed_epoch)`. The epoch must be monotonically
+    /// increasing.
     pub fn update(&mut self, consumed_epoch: ConsumedEpoch) {
         match self.state {
             Some(ChainState::ConsumingUpstream(last)) => {
@@ -75,50 +86,27 @@ impl CreateMviewProgress {
             Some(ChainState::Done) => unreachable!(),
             None => {}
         }
-
-        self.state = Some(ChainState::ConsumingUpstream(consumed_epoch));
-        self.barrier_manager
-            .lock()
-            .update_create_mview_progress(self.chain_actor_id, self.state.unwrap());
+        self.update_inner(ChainState::ConsumingUpstream(consumed_epoch));
     }
 
+    /// Finish the progress. If the progress is already finished, then perform no-op.
     pub fn finish(&mut self) {
         if let Some(ChainState::Done) = self.state {
             return;
         }
-
-        self.state = Some(ChainState::Done);
-        self.barrier_manager
-            .lock()
-            .update_create_mview_progress(self.chain_actor_id, self.state.unwrap());
+        self.update_inner(ChainState::Done);
     }
 }
 
 impl SharedContext {
-    // /// Create a notifier for Create MV DDL finish. When an executor/actor (essentially a
-    // /// [`crate::executor::ChainExecutor`]) finishes its DDL job, it can report that using this
-    // /// notifier. Note that a DDL of MV always corresponds to an epoch in our system.
-    // ///
-    // /// Creation of an MV may last for several epochs to finish.
-    // /// Therefore, when the [`crate::executor::ChainExecutor`] finds that the creation is
-    // /// finished, it will send the DDL epoch using this notifier, which can be collected by the
-    // /// barrier manager and reported to the meta service soon.
-    // pub fn register_finish_create_mview_notifier(
-    //     &self,
-    //     actor_id: ActorId,
-    // ) -> FinishCreateMviewNotifier {
-    //     debug!("register finish create mview notifier: {}", actor_id);
-
-    //     let barrier_manager = self.barrier_manager.clone();
-    //     FinishCreateMviewNotifier {
-    //         barrier_manager,
-    //         actor_id,
-    //     }
-    // }
-
+    /// Create a struct for reporting the progress of creating mview. The chain executors should
+    /// report the progress of barrier rearranging continuosly using this. The updated progress will
+    /// be collected by the barrier manager and reported to the meta service in this epoch.
+    ///
+    /// When all chain executors of the creating mview finish, the creation progress will be done at
+    /// frontend and the mview will be exposed to the user.
     pub fn register_create_mview_progress(&self, chain_actor_id: ActorId) -> CreateMviewProgress {
-        debug!("register create mview progress: {}", chain_actor_id);
-
+        trace!("register create mview progress: {}", chain_actor_id);
         CreateMviewProgress::new(self.barrier_manager.clone(), chain_actor_id)
     }
 }
