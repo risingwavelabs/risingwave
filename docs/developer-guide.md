@@ -34,7 +34,7 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
     - [End-to-end tests on CI](#end-to-end-tests-on-ci)
   - [Miscellaneous checks](#miscellaneous-checks)
   - [Update CI workflow](#update-ci-workflow)
-  - [Update Grafana Dashboard](#update-grafana-dashboard)
+  - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
   - [Add new dependencies](#add-new-dependencies)
   - [Check in PRs from forks](#check-in-prs-from-forks)
@@ -338,7 +338,7 @@ After that, run `apply-ci-template` to update the final workflow config.
 ./risedev apply-ci-template
 ```
 
-## Update Grafana Dashboard
+## Update Grafana dashboard
 
 Simply use the export functionality in Grafana, disable the config "external sharing". Then,
 manually modify the JSON.
