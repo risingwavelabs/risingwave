@@ -130,6 +130,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 )],
                 // Primary key includes group key.
                 vec![OrderType::Descending; key_indices.len() + get_key_len(agg_call)],
+                Some(key_indices.clone()),
             );
             state_tables.push(state_table);
         }

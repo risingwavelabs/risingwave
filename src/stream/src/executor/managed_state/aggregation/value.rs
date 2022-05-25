@@ -150,6 +150,7 @@ mod tests {
             keyspace.clone(),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
+            None,
         );
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), Some(0), None, &state_table)
@@ -212,6 +213,7 @@ mod tests {
             keyspace.clone(),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
+            None,
         );
         let mut managed_state = ManagedValueState::new(
             create_test_max_agg_append_only(),
