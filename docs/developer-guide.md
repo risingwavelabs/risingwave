@@ -143,7 +143,7 @@ After that, you can modify `risedev.yml` to reconfigure the cluster. For example
       persist-data: true
 ```
 
-Note that the Kafka service depends on the ZooKeeper service. If you want to enable the Kafka the component, enable the ZooKeeper component first.
+Note that the Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
 Now you can run `./risedev d`. The new dev cluster will contain components as configured in the yaml file. RiseDev will automatically configure the components to use the available storage service and to monitor the target.
 
