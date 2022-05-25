@@ -144,7 +144,6 @@ enum NextOutcome {
     Storage,
     Both,
     End,
-    Pass,
 }
 impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     async fn new(
@@ -169,9 +168,9 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
-        let mut next_flag;
-        let mut res = None;
         loop {
+            let next_flag;
+            let res;
             let cell_based_item = self.cell_based_item.take();
             match (cell_based_item, self.mem_table_iter.peek()) {
                 (None, None) => {
@@ -189,7 +188,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                             res = Some(row.clone());
                         }
                         RowOp::Delete(_) => {
-                            next_flag = NextOutcome::Pass;
+                            res = None;
                         }
                         RowOp::Update((_, new_row)) => {
                             res = Some(new_row.clone());
@@ -209,32 +208,29 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                             // mem_table_item will be return, while both cell_based_streaming_iter
                             // and mem_table_iter need to execute next()
                             // once.
-
+                            next_flag = NextOutcome::Both;
                             match mem_table_row_op {
                                 RowOp::Insert(row) => {
                                     res = Some(row.clone());
-                                    next_flag = NextOutcome::Both;
                                 }
                                 RowOp::Delete(_) => {
-                                    next_flag = NextOutcome::Pass;
+                                    res = None;
                                 }
                                 RowOp::Update((old_row, new_row)) => {
                                     debug_assert!(old_row == &cell_based_row);
                                     res = Some(new_row.clone());
-                                    next_flag = NextOutcome::Both;
                                 }
                             }
                         }
                         Ordering::Greater => {
                             // mem_table_item will be return
-
+                            next_flag = NextOutcome::MemTable;
                             match mem_table_row_op {
                                 RowOp::Insert(row) => {
                                     res = Some(row.clone());
-                                    next_flag = NextOutcome::MemTable;
                                 }
                                 RowOp::Delete(_) => {
-                                    next_flag = NextOutcome::Pass;
+                                    res = None;
                                 }
                                 RowOp::Update(_) => {
                                     panic!(
@@ -251,33 +247,31 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
             match next_flag {
                 NextOutcome::MemTable => {
                     self.mem_table_iter.next();
-                    break;
+                    if res.is_some() {
+                        return Ok(res);
+                    }
                 }
                 NextOutcome::Storage => {
                     self.cell_based_item =
                         self.cell_based_streaming_iter.next().await.map_err(err)?;
-                    break;
+
+                    if res.is_some() {
+                        return Ok(res);
+                    }
                 }
                 NextOutcome::Both => {
                     self.mem_table_iter.next();
                     self.cell_based_item =
                         self.cell_based_streaming_iter.next().await.map_err(err)?;
-                    break;
+                    if res.is_some() {
+                        return Ok(res);
+                    }
                 }
                 NextOutcome::End => {
-                    break;
-                }
-                NextOutcome::Pass => {
-                    // if a pk exist in both shared storage(cell_based_table) and
-                    // memory(mem_table), and
-                    // mem_table stores a delete record, just next again
-                    self.mem_table_iter.next();
-                    self.cell_based_item =
-                        self.cell_based_streaming_iter.next().await.map_err(err)?;
+                    return Ok(res);
                 }
             }
         }
-        Ok(res)
     }
 }
 
