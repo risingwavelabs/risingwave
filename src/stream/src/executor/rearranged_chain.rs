@@ -24,7 +24,7 @@ use tokio::sync::Mutex;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream};
-use crate::task::{ActorId, FinishCreateMviewNotifier};
+use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
@@ -40,7 +40,7 @@ pub struct RearrangedChainExecutor {
 
     upstream_indices: Arc<[usize]>,
 
-    notifier: FinishCreateMviewNotifier,
+    progress: CreateMviewProgress,
 
     actor_id: ActorId,
 
@@ -99,7 +99,7 @@ impl RearrangedChainExecutor {
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
         upstream_indices: Vec<usize>,
-        notifier: FinishCreateMviewNotifier,
+        progress: CreateMviewProgress,
         schema: Schema,
     ) -> Self {
         Self {
@@ -111,13 +111,13 @@ impl RearrangedChainExecutor {
             snapshot,
             upstream,
             upstream_indices: upstream_indices.into(),
-            actor_id: notifier.actor_id,
-            notifier,
+            actor_id: progress.actor_id(),
+            progress,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         // 0. Project the upstream with `upstream_indices`.
         let upstream_indices = self.upstream_indices.clone();
         let mut upstream = self
@@ -186,12 +186,15 @@ impl RearrangedChainExecutor {
             #[for_await]
             for rearranged_msg in &mut rearranged {
                 match rearranged_msg? {
-                    // If we received a phantom barrier, check whether we catches up with the
-                    // progress of upstream MV.
+                    // If we received a phantom barrier, update the progress and check whether we
+                    // catches up with the progress of upstream MV.
                     //
                     // Note that there's no phantom barrier in the snapshot. So we must have already
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(barrier) => {
+                        // Update the progress since we've consumed all chunks before this phantom.
+                        self.progress.update(barrier.epoch.curr);
+
                         if barrier.epoch.curr >= last_rearranged_epoch.curr {
                             // Stop the background rearrangement task.
                             stop_rearrange_tx.take().unwrap().send(()).map_err(|_| {
@@ -218,7 +221,14 @@ impl RearrangedChainExecutor {
             }
 
             // 8. Consume remainings.
-            let mut notifier = Some(self.notifier);
+
+            // The create mview progress can be `finish`ed only once.
+            let mut progress = Some(self.progress);
+            let mut may_finish_progress = |msg: &Message| {
+                let Some(progress) = progress.take() else { return };
+                let Some(barrier) = msg.as_barrier() else { return };
+                progress.finish(barrier.epoch.curr);
+            };
 
             // Note that there may still be some messages in `rearranged`. However the rearranged
             // barriers must be ignored, we should take the phantoms.
@@ -226,14 +236,8 @@ impl RearrangedChainExecutor {
             for msg in rearranged {
                 let msg: RearrangedMessage = msg?;
                 let Some(msg) = msg.phantom_into() else { continue };
-
-                let is_barrier = msg.as_barrier().is_some();
+                may_finish_progress(&msg);
                 yield msg;
-
-                if is_barrier && let Some(notifier) = notifier.take()  {
-                    // Notify about the finish after the first barrier.
-                    notifier.notify(create_epoch.curr);
-                }
             }
 
             // Now we take back the remaining upstream. There should be no contention since
@@ -246,13 +250,8 @@ impl RearrangedChainExecutor {
             #[for_await]
             for msg in &mut *remaining_upstream {
                 let msg: Message = msg?;
-                let is_barrier = msg.as_barrier().is_some();
+                may_finish_progress(&msg);
                 yield msg;
-
-                if is_barrier && let Some(notifier) = notifier.take()  {
-                    // Notify about the finish after the first barrier.
-                    notifier.notify(create_epoch.curr);
-                }
             }
         } else {
             // If there's no need to consume the snapshot ...

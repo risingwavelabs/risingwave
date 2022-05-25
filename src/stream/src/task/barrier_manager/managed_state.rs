@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::iter::once;
 
 use madsim::collections::HashSet;
+use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
-use super::{CollectResult, FinishedCreateMview};
+use super::progress::ConsumedEpoch;
+use super::{CollectResult};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -56,7 +59,7 @@ enum ManagedBarrierStateInner {
 pub(super) struct ManagedBarrierState {
     inner: ManagedBarrierStateInner,
 
-    pub finished_create_mviews: Vec<FinishedCreateMview>,
+    pub create_mview_progress: HashMap<ActorId, ConsumedEpoch>,
 }
 
 impl ManagedBarrierState {
@@ -67,7 +70,7 @@ impl ManagedBarrierState {
                 // TODO: specify last epoch
                 last_epoch: None,
             },
-            finished_create_mviews: Default::default(),
+            create_mview_progress: Default::default(),
         }
     }
 
@@ -94,7 +97,13 @@ impl ManagedBarrierState {
                     last_epoch: Some(epoch),
                 },
             );
-            let finished_create_mviews = std::mem::take(&mut self.finished_create_mviews);
+            let create_mview_progress = std::mem::take(&mut self.create_mview_progress)
+                .into_iter()
+                .map(|(actor, epoch)| CreateMviewProgress {
+                    chain_actor_id: actor,
+                    consumed_epoch: epoch,
+                })
+                .collect();
 
             match state {
                 ManagedBarrierStateInner::Issued {
@@ -102,8 +111,7 @@ impl ManagedBarrierState {
                 } => {
                     // Notify about barrier finishing.
                     let result = CollectResult {
-                        finished_create_mviews,
-
+                        create_mview_progress,
                         synced_sstables: vec![],
                     };
                     if collect_notifier.send(result).is_err() {
