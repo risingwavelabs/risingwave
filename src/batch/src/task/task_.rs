@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use futures_async_stream::for_await;
+use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -24,6 +24,7 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tracing_futures::Instrument;
 
 use crate::executor::ExecutorBuilder;
@@ -182,6 +183,9 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
+    /// Shutdown signal sender.
+    shutdown_tx: Mutex<Option<Sender<u64>>>,
+
     epoch: u64,
 }
 
@@ -200,6 +204,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             context,
             failure: Arc::new(Mutex::new(None)),
             epoch,
+            shutdown_tx: Mutex::new(None),
         })
     }
 
@@ -213,7 +218,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result idependently.
-    pub fn async_execute(&self) -> Result<()> {
+    pub fn async_execute(self: Arc<Self>) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
@@ -229,6 +234,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .build2()?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
+        *self.shutdown_tx.lock() = Some(shutdown_tx);
         self.receivers
             .lock()
             .extend(receivers.into_iter().map(Some));
@@ -243,7 +250,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = try_execute(exec, &mut sender)
+                if let Err(e) = self
+                    .try_execute(exec, &mut sender, shutdown_rx)
                     .instrument(tracing::trace_span!(
                         "batch_execute",
                         task_id = ?task_id.task_id,
@@ -255,6 +263,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     // Prints the entire backtrace of error.
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
                     *failure.lock() = Some(e);
+                    *self.state.lock() = TaskStatus::Failed;
                 }
             });
 
@@ -263,6 +272,58 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         });
         Ok(())
+    }
+
+    pub async fn try_execute(
+        &self,
+        root: BoxedExecutor2,
+        sender: &mut ChanSenderImpl,
+        mut shutdown_rx: Receiver<u64>,
+    ) -> Result<()> {
+        let mut data_chunk_stream = root.execute();
+        loop {
+            tokio::select! {
+                // We prioritize abort signal over normal data chunks.
+                biased;
+                _ = &mut shutdown_rx => {
+                    sender.send(None).await?;
+                    *self.state.lock() = TaskStatus::Aborted;
+                    break;
+                }
+                res = data_chunk_stream.next() => {
+                    match res {
+                        Some(data_chunk) => {
+                            sender.send(Some(data_chunk?)).await?;
+                        }
+                        None => {
+                            debug!("data chunk stream shuts down");
+                            sender.send(None).await?;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn abort_task(&self) -> Result<()> {
+        let sender = self.shutdown_tx.lock().take().ok_or_else(|| {
+            ErrorCode::InternalError(format!(
+                "Task{:?}'s shutdown channel does not exist. \
+                    Either the task has been aborted once, \
+                    or the channel has neven been initialized.",
+                self.task_id
+            ))
+        })?;
+        *self.state.lock() = TaskStatus::Aborting;
+        sender.send(0).map_err(|err| {
+            ErrorCode::InternalError(format!(
+                "Task{:?};s shutdown channel send error:{:?}",
+                self.task_id, err
+            ))
+            .into()
+        })
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput<C>> {
@@ -298,18 +359,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
         Ok(())
     }
-}
 
-pub async fn try_execute(root: BoxedExecutor2, sender: &mut ChanSenderImpl) -> Result<()> {
-    #[for_await]
-    for chunk in root.execute() {
-        let chunk = chunk?;
-        if chunk.cardinality() > 0 {
-            sender.send(Some(chunk)).await?;
+    pub fn check_if_aborted(&self) -> Result<bool> {
+        match *self.state.lock() {
+            TaskStatus::Aborted => Ok(true),
+            TaskStatus::Finished => Err(ErrorCode::InternalError(format!(
+                "task {:?} has been finished",
+                self.get_task_id()
+            ))
+            .into()),
+            _ => Ok(false),
         }
     }
-    sender.send(None).await?;
-    Ok(())
 }
 
 #[cfg(test)]
