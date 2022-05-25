@@ -244,6 +244,8 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                 }
             }
 
+            // If a pk exist in both shared storage(cell_based_table) and memory(mem_table), and
+            // mem_table stores a delete record, state table iter need to next again.
             match next_flag {
                 NextOutcome::MemTable => {
                     self.mem_table_iter.next();
