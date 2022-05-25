@@ -38,7 +38,7 @@ docker pull ghcr.io/singularity-data/risingwave:latest
 docker run -it --network host ghcr.io/singularity-data/risingwave:latest playground
 ```
 
-**Compile from Source with [RiseDev](./CONTRIBUTING.md#setting-up-development-environment) (Linux and macOS)**
+**Compile from Source with [RiseDev](docs/developer-guide.md#set-up-the-development-environment) (Linux and macOS)**
 
 ```shell
 # Install Rust toolchain
@@ -49,13 +49,13 @@ git clone https://github.com/singularity-data/risingwave.git && cd risingwave
 ./risedev playground
 ```
 
-To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. Please refer to [Contribution and Development Guidelines](CONTRIBUTING.md) for more information.
+To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. Please refer to the [developer guide](docs/developer-guide.md) for more information.
 
-You may launch a RisingWave cluster and process streaming data in a distributed manner, or enable other features like metrics collection and data persistence. Please refer to [Contribution and Development Guidelines](CONTRIBUTING.md) for more information.
+You can launch a RisingWave cluster and process streaming data in a distributed manner, and enable other features like metrics collection and data persistence. Please refer to the [developer guide](docs/developer-guide.md) for more information.
 
 ### Your First Query
 
-To connect to the RisingWave server, you will need to [install PostgreSQL shell](./CONTRIBUTING.md#setting-up-development-environment) (`psql`) in advance.
+To connect to the RisingWave server, you will need to [install PostgreSQL shell](docs/developer-guide.md#set-up-the-development-environment) (`psql`) in advance.
 
 ```shell
 # Use psql to connect RisingWave cluster
@@ -92,11 +92,11 @@ in the terminal.
 
 ### Connecting to an External Source
 
-Please refer to [getting started guide](https://www.risingwave.dev/docs/latest/getting-started/) for more information.
+FPlease refer to [get started guide](https://www.risingwave.dev/docs/latest/get-started/) for more information.
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about how we design and implement RisingWave, refer to [RisingWave developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
+To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about the development process, see the [developer guide](docs/developer-guide.md). To understand the design and implementation of RisingWave, refer to the design docs listed in [readme.md](docs/README.md).
 
 ## License
 
@@ -104,4 +104,4 @@ RisingWave is under the Apache License 2.0. Please refer to [LICENSE](LICENSE) f
 
 ## Contributing
 
-Thanks for your interest in contributing to the project! Please refer to [Contribution and Development Guidelines](CONTRIBUTING.md) for more information.
+Thanks for your interest in contributing to the project! Please refer to [contribution guidelines](CONTRIBUTING.md) for more information.
