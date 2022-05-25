@@ -74,40 +74,35 @@ impl ToDistributedBatch for BatchSimpleAgg {
         // (e.g. see distribution of BatchSeqScan::new vs BatchSeqScan::to_distributed)
         let dist_input = self.input().to_distributed()?;
 
-        match dist_input.distribution() {
-            // 2-phase agg
-            Distribution::SomeShard => {
-                // partial agg
-                let partial_agg = self.clone_with_input(dist_input).into();
+        if dist_input.distribution().satisfies(&RequiredDist::AnyShard) {
+            // partial agg
+            let partial_agg = self.clone_with_input(dist_input).into();
 
-                // insert exchange
-                let exchange =
-                    BatchExchange::new(partial_agg, Order::any().clone(), Distribution::Single)
-                        .into();
+            // insert exchange
+            let exchange =
+                BatchExchange::new(partial_agg, Order::any().clone(), Distribution::Single).into();
 
-                // insert total agg
-                let total_agg_types = self
-                    .logical
-                    .agg_calls()
-                    .iter()
-                    .enumerate()
-                    .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(partial_output_idx)
-                    })
-                    .collect();
-                let total_agg_logical = LogicalAgg::new(
-                    total_agg_types,
-                    self.logical.group_keys().to_vec(),
-                    exchange,
-                );
-                Ok(BatchSimpleAgg::new(total_agg_logical).into())
-            }
-            _ => {
-                let new_input = self
-                    .input()
-                    .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
-                Ok(self.clone_with_input(new_input).into())
-            }
+            // insert total agg
+            let total_agg_types = self
+                .logical
+                .agg_calls()
+                .iter()
+                .enumerate()
+                .map(|(partial_output_idx, agg_call)| {
+                    agg_call.partial_to_total_agg_call(partial_output_idx)
+                })
+                .collect();
+            let total_agg_logical = LogicalAgg::new(
+                total_agg_types,
+                self.logical.group_keys().to_vec(),
+                exchange,
+            );
+            Ok(BatchSimpleAgg::new(total_agg_logical).into())
+        } else {
+            let new_input = self
+                .input()
+                .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+            Ok(self.clone_with_input(new_input).into())
         }
     }
 }
