@@ -45,7 +45,6 @@ impl Binder {
             BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
-            BinaryOperator::PGRegexMatch => ExprType::BitwiseNot,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::PgBitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::PgBitwiseShiftRight,

@@ -36,6 +36,7 @@ use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
+use crate::vector_op::bitwise_op::general_bitnot;
 
 /// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
@@ -197,8 +198,8 @@ macro_rules! gen_unary_atm_expr  {
             { int16, int16, $general_func },
             { int32, int32, $general_func },
             { int64, int64, $general_func },
-            { float32, float32, $general_func },
-            { float64, float64, $general_func },
+            // { float32, float32, $general_func },
+            // { float64, float64, $general_func },
             $(
                 { $input, $rt, $func },
             )*
@@ -310,6 +311,12 @@ pub fn new_unary_expr(
         }
         (ProstType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
+        (ProstType::BitwiseNot, _, _) => {
+            gen_unary_atm_expr! { "Bitwisenot", child_expr, return_type, general_bitnot,
+                {
+
+                }
+            }
         }
         (expr, ret, child) => {
             return Err(ErrorCode::NotImplemented(format!(
