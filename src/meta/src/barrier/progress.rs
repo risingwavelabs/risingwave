@@ -62,7 +62,7 @@ impl Progress {
                 }
                 *state = new_state;
             }
-            ChainState::Done => unreachable!(),
+            ChainState::Done => panic!("should not report done multiple times"),
         }
     }
 

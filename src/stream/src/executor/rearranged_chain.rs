@@ -215,13 +215,13 @@ impl RearrangedChainExecutor {
 
             // 7. Rearranged task finished.
             // The reason for finish must be that we told it to stop.
-            tracing::debug!(actor = self.actor_id, "rearranged task finished");
+            tracing::trace!(actor = self.actor_id, "rearranged task finished");
             if stop_rearrange_tx.is_some() {
                 tracing::error!(actor = self.actor_id, "rearrangement finished passively");
             }
 
             // 8. Consume remainings.
-            let mut may_finish_progress = |msg: &Message| {
+            let mut finish_on_barrier = |msg: &Message| {
                 if msg.as_barrier().is_some() {
                     self.progress.finish();
                 }
@@ -233,7 +233,7 @@ impl RearrangedChainExecutor {
             for msg in rearranged {
                 let msg: RearrangedMessage = msg?;
                 let Some(msg) = msg.phantom_into() else { continue };
-                may_finish_progress(&msg);
+                finish_on_barrier(&msg);
                 yield msg;
             }
 
@@ -242,12 +242,12 @@ impl RearrangedChainExecutor {
             let mut remaining_upstream = upstream.try_lock().unwrap();
 
             // Consume remaining upstream.
-            tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
+            tracing::trace!(actor = self.actor_id, "begin to consume remaining upstream");
 
             #[for_await]
             for msg in &mut *remaining_upstream {
                 let msg: Message = msg?;
-                may_finish_progress(&msg);
+                finish_on_barrier(&msg);
                 yield msg;
             }
         } else {
