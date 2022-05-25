@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{
     Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
-    Utf8Array,
+    StructArray, Utf8Array,
 };
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -118,13 +118,20 @@ macro_rules! gen_cmp_impl {
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:ident, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
+    (
+        $macro:ident, $general_f:ident, $str_f:ident, $struct_f:ident, $l:expr, $r:expr, $ret:expr
+    ) => {
         match ($l.return_type(), $r.return_type()) {
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
                     $l, $r, $ret, $str_f,
                 ))
             }
+            (DataType::Struct { fields: _ }, DataType::Struct { fields: _ }) => Box::new(
+                BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
+                    $l, $r, $ret, $struct_f,
+                ),
+            ),
             _ => {
                 for_all_cmp_variants! {$macro, $l, $r, $ret, $general_f}
             }
@@ -226,22 +233,22 @@ pub fn new_binary_expr(
 
     match expr_type {
         Type::Equal => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, str_eq, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, str_eq, struct_eq, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, str_ne, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, str_ne, struct_ne, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, str_lt, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, str_lt, struct_lt, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, str_gt, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, str_gt, struct_gt, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, str_ge, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, str_ge, struct_ge, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_le, str_le, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_le, str_le, struct_le, l, r, ret}
         }
         Type::Add => {
             gen_binary_expr_atm! {

@@ -16,6 +16,7 @@ use core::convert::From;
 use std::any::type_name;
 use std::fmt::Debug;
 
+use risingwave_common::array::StructRef;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 
@@ -116,6 +117,44 @@ where
         (None, Some(_)) => Ok(Some(true)),
         (None, None) => Ok(Some(false)),
     }
+}
+
+#[inline(always)]
+fn struct_cmp<F>(l: StructRef, r: StructRef, func: F) -> Result<bool>
+where
+    F: FnOnce(StructRef, StructRef) -> bool,
+{
+    Ok(func(l, r))
+}
+
+#[inline(always)]
+pub fn struct_eq(l: StructRef, r: StructRef) -> Result<bool> {
+    struct_cmp(l, r, |a, b| a == b)
+}
+
+#[inline(always)]
+pub fn struct_ne(l: StructRef, r: StructRef) -> Result<bool> {
+    struct_cmp(l, r, |a, b| a != b)
+}
+
+#[inline(always)]
+pub fn struct_ge(l: StructRef, r: StructRef) -> Result<bool> {
+    struct_cmp(l, r, |a, b| a >= b)
+}
+
+#[inline(always)]
+pub fn struct_gt(l: StructRef, r: StructRef) -> Result<bool> {
+    struct_cmp(l, r, |a, b| a > b)
+}
+
+#[inline(always)]
+pub fn struct_le(l: StructRef, r: StructRef) -> Result<bool> {
+    struct_cmp(l, r, |a, b| a <= b)
+}
+
+#[inline(always)]
+pub fn struct_lt(l: StructRef, r: StructRef) -> Result<bool> {
+    struct_cmp(l, r, |a, b| a < b)
 }
 
 #[inline(always)]
