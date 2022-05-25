@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use paste::paste;
 use serde::{Deserialize, Serialize};
@@ -67,7 +68,7 @@ pub trait SplitReader: Sized {
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
     Pulsar(PulsarSplit),
@@ -185,5 +186,14 @@ mod tests {
         assert_eq!(split.encode_to_bytes(), get_value.encode_to_bytes());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_enum() {
+        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split_impl = SplitImpl::Kafka(split.clone());
+        
+        let s = split_impl.into_kafka();
+        println!("{:?}", s);
     }
 }
