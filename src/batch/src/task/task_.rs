@@ -56,7 +56,7 @@ impl Debug for TaskOutputId {
     }
 }
 
-pub(in crate) enum TaskState {
+pub(crate) enum TaskState {
     Pending,
     Running,
     Blocking,
