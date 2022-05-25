@@ -402,6 +402,16 @@ async fn test_state_table_iter() {
 
     state
         .insert(
+            Row(vec![Some(0_i32.into()), Some(00_i32.into())]),
+            Row(vec![
+                Some(0_i32.into()),
+                Some(00_i32.into()),
+                Some(000_i32.into()),
+            ]),
+        )
+        .unwrap();
+    state
+        .insert(
             Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
             Row(vec![
                 Some(1_i32.into()),
@@ -432,6 +442,17 @@ async fn test_state_table_iter() {
         .unwrap();
 
     let mut iter = state.iter(epoch).await.unwrap();
+
+    let res = iter.next().await.unwrap();
+    assert!(res.is_some());
+    assert_eq!(
+        Row(vec![
+            Some(0_i32.into()),
+            Some(00_i32.into()),
+            Some(000_i32.into())
+        ]),
+        res.unwrap()
+    );
 
     let res = iter.next().await.unwrap();
     assert!(res.is_some());
@@ -486,8 +507,19 @@ async fn test_state_table_iter() {
     let epoch = u64::MAX;
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
-    // [1, 11, 111], [3333, 3333, 3333], [6, 66, 666], [9, 99, 999] exists in cell_based_table.
+    // [0, 00, 000], [1, 11, 111], [3333, 3333, 3333], [6, 66, 666], [9, 99, 999] exists in
+    // cell_based_table
 
+    state
+        .delete(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+            Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
+            ]),
+        )
+        .unwrap();
     state
         .insert(
             Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
@@ -549,9 +581,9 @@ async fn test_state_table_iter() {
     // this row exists in cell_based_table
     assert_eq!(
         Row(vec![
-            Some(1_i32.into()),
-            Some(11_i32.into()),
-            Some(111_i32.into())
+            Some(0_i32.into()),
+            Some(00_i32.into()),
+            Some(000_i32.into())
         ]),
         res.unwrap()
     );
