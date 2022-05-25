@@ -47,6 +47,8 @@ enum HummockErrorInner {
     WaitEpoch(String),
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
+    #[error("CompactionExecutor error {0}.")]
+    CompactionExecutor(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -106,6 +108,10 @@ impl HummockError {
 
     pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> HummockError {
         HummockErrorInner::ExpiredEpoch { safe_epoch, epoch }.into()
+    }
+
+    pub fn compaction_executor(error: impl ToString) -> HummockError {
+        HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {
