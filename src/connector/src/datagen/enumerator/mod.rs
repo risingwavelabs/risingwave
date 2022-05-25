@@ -12,6 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod client;
+use async_trait::async_trait;
 
-pub use client::*;
+use crate::base::SplitEnumerator;
+use crate::datagen::{DatagenProperties, DatagenSplit};
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct DatagenSplitEnumerator {
+    split_num: i32,
+}
+
+#[async_trait]
+impl SplitEnumerator for DatagenSplitEnumerator {
+    type Properties = DatagenProperties;
+    type Split = DatagenSplit;
+
+    async fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
+        let split_num = properties.split_num.unwrap_or(1);
+        Ok(Self { split_num })
+    }
+
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<DatagenSplit>> {
+        let mut splits = vec![];
+        for i in 0..self.split_num {
+            splits.push(DatagenSplit {
+                split_num: self.split_num,
+                split_index: i,
+                start_offset: None,
+            });
+        }
+        Ok(splits)
+    }
+}

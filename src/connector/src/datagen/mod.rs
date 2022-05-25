@@ -26,16 +26,22 @@ pub use split::*;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
+    #[serde(rename = "datagen.split.num")]
+    pub split_num: Option<i32>,
+
     #[serde(
         rename = "datagen.max.chunk.size",
         default = "default_datagen_max_chunk_size"
     )]
+
     pub max_chunk_size: String,
     #[serde(
         rename = "datagen.rows.per.second",
         default = "default_rows_per_second"
     )]
+
     pub rows_per_second: String,
+    
     // Some connector options of the datagen source's fields
     // for example: create datagen source with column v1 int, v2 float
     // 'fields.v1.kind'='sequence',

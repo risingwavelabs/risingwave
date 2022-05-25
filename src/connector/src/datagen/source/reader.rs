@@ -17,16 +17,18 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 
+use crate::datagen::DatagenSplit;
 use super::field_generator::{FieldGeneratorImpl, FieldKind};
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::DatagenProperties;
-use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader};
+use crate::{Column, ConnectorStateV2, DataType, SourceMessage, SplitReader, SplitImpl};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
+    assigned_split: Option<DatagenSplit>,
 }
 
 #[async_trait]
@@ -41,7 +43,7 @@ impl SplitReader for DatagenSplitReader {
     where
         Self: Sized,
     {
-        let _ = state;
+
         let batch_chunk_size = properties.max_chunk_size.parse::<u64>()?;
         let rows_per_second = properties.rows_per_second.parse::<u64>()?;
         let fields_option_map = properties.fields;
@@ -117,13 +119,42 @@ impl SplitReader for DatagenSplitReader {
             }
         }
 
+        let mut generator = DatagenEventGenerator::new(
+            fields_map,
+            batch_chunk_size,
+            rows_per_second,
+        )?;
+
+        let mut assigned_split = DatagenSplit::default();
+
+        match state {
+            ConnectorStateV2::Splits(splits) => {
+                log::debug!("Splits for datagen found! {:?}", splits);
+                for split in splits {
+                    // TODO: currently, assume there's only on split in one reader
+                    let split_id = split.id();
+                    if let SplitImpl::Datagen(n) = split {
+                        generator.split_index = n.split_index;
+                        generator.split_num = n.split_num;
+                        if let Some(s) = n.start_offset {
+                            generator.events_so_far = s;
+                        };
+                        generator.split_id = split_id;
+                        assigned_split = n;
+                        break;
+                    }
+                }
+            }
+            ConnectorStateV2::State(cs) => {
+                log::debug!("Splits for nexmark found! {:?}", cs);
+                todo!()
+            }
+            ConnectorStateV2::None => {}
+        }
+        
         Ok(DatagenSplitReader {
-            generator: DatagenEventGenerator::new(
-                fields_map,
-                0,
-                batch_chunk_size,
-                rows_per_second,
-            )?,
+            generator,
+            assigned_split: Some(assigned_split),
         })
     }
 

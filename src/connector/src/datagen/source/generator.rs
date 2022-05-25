@@ -18,28 +18,32 @@ use bytes::Bytes;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration};
 
-use super::field_generator::{FieldGeneratorImpl, NumericFieldGenerator};
+use super::field_generator::{FieldGeneratorImpl};
 use crate::SourceMessage;
 
+#[derive(Default)]
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
-    pub last_offset: u64,
+    pub events_so_far: u64,
     pub batch_chunk_size: u64,
     pub rows_per_second: u64,
+    pub split_id: String,
+    pub split_num: i32,
+    pub split_index: i32,
+
 }
 
 impl DatagenEventGenerator {
     pub fn new(
         fields_map: HashMap<String, FieldGeneratorImpl>,
-        last_offset: u64,
         batch_chunk_size: u64,
         rows_per_second: u64,
     ) -> Result<Self> {
         Ok(Self {
             fields_map,
-            last_offset,
             batch_chunk_size,
             rows_per_second,
+            ..Default::default()
         })
     }
 
@@ -59,13 +63,13 @@ impl DatagenEventGenerator {
             let value = Value::Object(map);
             let msg = SourceMessage {
                 payload: Some(Bytes::from(value.to_string())),
-                offset: (self.last_offset + i).to_string(),
+                offset: (self.events_so_far + i).to_string(),
                 split_id: 0.to_string(),
             };
 
             res.push(msg);
         }
-        self.last_offset += self.batch_chunk_size;
+        self.events_so_far += self.batch_chunk_size;
         Ok(Some(res))
     }
 }
