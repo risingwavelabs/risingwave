@@ -24,7 +24,9 @@ use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::SstableStore;
-use risingwave_storage::monitor::{HummockMetrics, ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{
+    monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
+};
 use risingwave_storage::object::{parse_object_store, ObjectStoreImpl};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -83,6 +85,7 @@ pub async fn compactor_serve(
         storage_config.block_cache_capacity_mb * (1 << 20),
         storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
+    monitor_cache(sstable_store.clone(), &registry).unwrap();
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
