@@ -16,7 +16,7 @@ use core::convert::From;
 use std::any::type_name;
 use std::fmt::Debug;
 
-use risingwave_common::array::StructRef;
+use risingwave_common::array::{ListRef, StructRef};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 
@@ -118,86 +118,62 @@ where
         (None, None) => Ok(Some(false)),
     }
 }
+#[derive(Clone, Copy, Debug)]
+pub enum Operation {
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+pub(crate) static EQ: Operation = Operation::Eq;
+pub(crate) static NE: Operation = Operation::Ne;
+pub(crate) static LT: Operation = Operation::Lt;
+pub(crate) static GT: Operation = Operation::Gt;
+pub(crate) static LE: Operation = Operation::Le;
+pub(crate) static GE: Operation = Operation::Ge;
 
 #[inline(always)]
-fn struct_cmp<F>(l: StructRef, r: StructRef, func: F) -> Result<bool>
-where
-    F: FnOnce(StructRef, StructRef) -> bool,
-{
-    Ok(func(l, r))
+pub fn struct_cmp(op: Operation) -> fn(StructRef, StructRef) -> Result<bool> {
+    match op {
+        Operation::Eq => |l, r| Ok(l == r),
+        Operation::Ne => |l, r| Ok(l != r),
+        Operation::Lt => |l, r| Ok(l < r),
+        Operation::Gt => |l, r| Ok(l > r),
+        Operation::Le => |l, r| Ok(l <= r),
+        Operation::Ge => |l, r| Ok(l >= r),
+    }
 }
 
 #[inline(always)]
-pub fn struct_eq(l: StructRef, r: StructRef) -> Result<bool> {
-    struct_cmp(l, r, |a, b| a == b)
+pub fn list_cmp(op: Operation) -> fn(ListRef, ListRef) -> Result<bool> {
+    match op {
+        Operation::Eq => |l, r| Ok(l == r),
+        Operation::Ne => |l, r| Ok(l != r),
+        Operation::Lt => |l, r| Ok(l < r),
+        Operation::Gt => |l, r| Ok(l > r),
+        Operation::Le => |l, r| Ok(l <= r),
+        Operation::Ge => |l, r| Ok(l >= r),
+    }
 }
 
 #[inline(always)]
-pub fn struct_ne(l: StructRef, r: StructRef) -> Result<bool> {
-    struct_cmp(l, r, |a, b| a != b)
-}
-
-#[inline(always)]
-pub fn struct_ge(l: StructRef, r: StructRef) -> Result<bool> {
-    struct_cmp(l, r, |a, b| a >= b)
-}
-
-#[inline(always)]
-pub fn struct_gt(l: StructRef, r: StructRef) -> Result<bool> {
-    struct_cmp(l, r, |a, b| a > b)
-}
-
-#[inline(always)]
-pub fn struct_le(l: StructRef, r: StructRef) -> Result<bool> {
-    struct_cmp(l, r, |a, b| a <= b)
-}
-
-#[inline(always)]
-pub fn struct_lt(l: StructRef, r: StructRef) -> Result<bool> {
-    struct_cmp(l, r, |a, b| a < b)
-}
-
-#[inline(always)]
-fn str_cmp<F>(l: &str, r: &str, func: F) -> Result<bool>
-where
-    F: FnOnce(&str, &str) -> bool,
-{
-    Ok(func(l, r))
-}
-
-#[inline(always)]
-pub fn str_eq(l: &str, r: &str) -> Result<bool> {
-    str_cmp(l, r, |a, b| a == b)
-}
-
-#[inline(always)]
-pub fn str_ne(l: &str, r: &str) -> Result<bool> {
-    str_cmp(l, r, |a, b| a != b)
-}
-
-#[inline(always)]
-pub fn str_ge(l: &str, r: &str) -> Result<bool> {
-    str_cmp(l, r, |a, b| a >= b)
-}
-
-#[inline(always)]
-pub fn str_gt(l: &str, r: &str) -> Result<bool> {
-    str_cmp(l, r, |a, b| a > b)
-}
-
-#[inline(always)]
-pub fn str_le(l: &str, r: &str) -> Result<bool> {
-    str_cmp(l, r, |a, b| a <= b)
-}
-
-#[inline(always)]
-pub fn str_lt(l: &str, r: &str) -> Result<bool> {
-    str_cmp(l, r, |a, b| a < b)
+pub fn str_cmp(op: Operation) -> fn(&str, &str) -> Result<bool> {
+    match op {
+        Operation::Eq => |l, r| Ok(l == r),
+        Operation::Ne => |l, r| Ok(l != r),
+        Operation::Lt => |l, r| Ok(l < r),
+        Operation::Gt => |l, r| Ok(l > r),
+        Operation::Le => |l, r| Ok(l <= r),
+        Operation::Ge => |l, r| Ok(l >= r),
+    }
 }
 
 pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
     match (l, r) {
-        (Some(lv), Some(rv)) => Ok(str_ne(lv, rv).ok()),
+        (Some(lv), Some(rv)) => Ok(str_cmp(Operation::Ne)(lv, rv).ok()),
         (Some(_), None) => Ok(Some(true)),
         (None, Some(_)) => Ok(Some(true)),
         (None, None) => Ok(Some(false)),
