@@ -20,7 +20,7 @@ use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
-use crate::binder::{Binder, UNNAMED_SUBQUERY};
+use crate::binder::Binder;
 
 mod generate_series;
 mod join;
