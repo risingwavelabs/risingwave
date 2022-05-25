@@ -167,9 +167,9 @@ pub trait SplitMetaData: Sized {
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
-/// ConnectorState cannot be [`None`] and only contains one [`SplitImpl`]. If no split is assigned
-/// to source executor, ConnectorState is [`None`] and [`DummySplitReader`] is up instead of other split
-/// readers.
+/// `ConnectorState` cannot be [`None`] and only contains one [`SplitImpl`]. If no split is assigned
+/// to source executor, `ConnectorState` is [`None`] and [`DummySplitReader`] is up instead of other
+/// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
 mod tests {
