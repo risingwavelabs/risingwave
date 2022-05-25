@@ -697,7 +697,7 @@ mod tests {
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
         DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
     };
-    use tokio::sync::mpsc::UnboundedSender;
+    use tokio::sync::oneshot::Sender;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
 
@@ -818,7 +818,7 @@ mod tests {
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
         join_handles: Vec<JoinHandle<()>>,
-        shutdown_txs: Vec<UnboundedSender<()>>,
+        shutdown_txs: Vec<Sender<()>>,
     }
 
     impl MockServices {
@@ -833,14 +833,12 @@ mod tests {
                 inner: state.clone(),
             };
 
-            let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let stream_srv = StreamServiceServer::new(fake_service);
             let join_handle = tokio::spawn(async move {
                 tonic::transport::Server::builder()
                     .add_service(stream_srv)
-                    .serve_with_shutdown(addr, async move {
-                        shutdown_rx.recv().await;
-                    })
+                    .serve_with_shutdown(addr, async move { shutdown_rx.await.unwrap() })
                     .await
                     .unwrap();
             });
