@@ -137,38 +137,34 @@ pub(crate) static GE: Operation = Operation::Ge;
 
 #[inline(always)]
 pub fn struct_cmp(op: Operation) -> fn(StructRef, StructRef) -> Result<bool> {
-    match op {
-        Operation::Eq => |l, r| Ok(l == r),
-        Operation::Ne => |l, r| Ok(l != r),
-        Operation::Lt => |l, r| Ok(l < r),
-        Operation::Gt => |l, r| Ok(l > r),
-        Operation::Le => |l, r| Ok(l <= r),
-        Operation::Ge => |l, r| Ok(l >= r),
-    }
+    use crate::gen_cmp;
+    gen_cmp!(op)
 }
 
 #[inline(always)]
 pub fn list_cmp(op: Operation) -> fn(ListRef, ListRef) -> Result<bool> {
-    match op {
-        Operation::Eq => |l, r| Ok(l == r),
-        Operation::Ne => |l, r| Ok(l != r),
-        Operation::Lt => |l, r| Ok(l < r),
-        Operation::Gt => |l, r| Ok(l > r),
-        Operation::Le => |l, r| Ok(l <= r),
-        Operation::Ge => |l, r| Ok(l >= r),
-    }
+    use crate::gen_cmp;
+    gen_cmp!(op)
 }
 
 #[inline(always)]
 pub fn str_cmp(op: Operation) -> fn(&str, &str) -> Result<bool> {
-    match op {
-        Operation::Eq => |l, r| Ok(l == r),
-        Operation::Ne => |l, r| Ok(l != r),
-        Operation::Lt => |l, r| Ok(l < r),
-        Operation::Gt => |l, r| Ok(l > r),
-        Operation::Le => |l, r| Ok(l <= r),
-        Operation::Ge => |l, r| Ok(l >= r),
-    }
+    use crate::gen_cmp;
+    gen_cmp!(op)
+}
+
+#[macro_export]
+macro_rules! gen_cmp {
+    ($op:expr) => {
+        match $op {
+            Operation::Eq => |l, r| Ok(l == r),
+            Operation::Ne => |l, r| Ok(l != r),
+            Operation::Lt => |l, r| Ok(l < r),
+            Operation::Gt => |l, r| Ok(l > r),
+            Operation::Le => |l, r| Ok(l <= r),
+            Operation::Ge => |l, r| Ok(l >= r),
+        }
+    };
 }
 
 pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
