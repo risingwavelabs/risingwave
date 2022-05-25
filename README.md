@@ -92,7 +92,7 @@ in the terminal.
 
 ### Connecting to an External Source
 
-FPlease refer to [get started guide](https://www.risingwave.dev/docs/latest/get-started/) for more information.
+Please refer to [get started guide](https://www.risingwave.dev/docs/latest/get-started/) for more information.
 
 ## Documentation
 
