@@ -138,11 +138,11 @@ impl SharedBufferBatch {
     }
 
     pub fn into_forward_iter(self) -> SharedBufferBatchIterator<Forward> {
-        Self::into_directed_iter::<Forward>(self)
+        self.into_directed_iter()
     }
 
     pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
-        Self::into_directed_iter::<Backward>(self)
+        self.into_directed_iter()
     }
 
     pub fn get_payload(&self) -> &[SharedBufferItem] {

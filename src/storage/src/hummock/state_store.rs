@@ -89,8 +89,8 @@ impl HummockStorage {
             // Generate shared buffer iterators
             for shared_buffer in read_version.shared_buffer {
                 for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
-                    overlapped_iters.push(Box::new(batch.into_directed_iter::<T::Direction>())
-                        as BoxedHummockIterator<T::Direction>);
+                    overlapped_iters
+                        .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
                 }
             }
 
