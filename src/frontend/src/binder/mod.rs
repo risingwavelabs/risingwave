@@ -46,7 +46,6 @@ pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
 
-
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.

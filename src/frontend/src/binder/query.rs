@@ -19,7 +19,6 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
-
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::{Direction, FieldOrder};
@@ -152,7 +151,8 @@ impl Binder {
                 let Cte { alias, query, .. } = cte_table;
                 let table_name = alias.name.value.clone();
                 let bound_query = self.bind_query(query)?;
-                self.cte_to_relation.insert(table_name, (bound_query, alias));
+                self.cte_to_relation
+                    .insert(table_name, (bound_query, alias));
             }
             Ok(())
         }
