@@ -71,7 +71,7 @@ impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         // Ensure input is distributed, batch phase might not distribute it
-        // (e.g. see BatchSeqScan::new vs BatchSeqScan::to_distributed)
+        // (e.g. see distribution of BatchSeqScan::new vs BatchSeqScan::to_distributed)
         let dist_input = self.input().to_distributed()?;
 
         match dist_input.distribution() {
