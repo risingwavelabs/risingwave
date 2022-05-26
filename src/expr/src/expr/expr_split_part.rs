@@ -67,7 +67,7 @@ impl Expression for SplitPartExpression {
                 std::cmp::Ordering::Greater => split.nth(nth_column as usize - 1),
                 std::cmp::Ordering::Less => {
                     let split = split.collect::<Vec<_>>();
-                    let nth_column = split.len() + 1 - nth_column as usize;
+                    let nth_column = (split.len() as i64 + nth_column) as usize;
                     split.get(nth_column).map(<&str>::clone)
                 }
             };
@@ -119,16 +119,51 @@ impl<'a> TryFrom<&'a ExprNode> for SplitPartExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::test_prelude::DataChunkTestExt;
+
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::expr_node::RexNode;
+    use risingwave_pb::expr::expr_node::Type::SplitPart;
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+    use crate::expr::expr_split_part::SplitPartExpression;
+    use crate::expr::test_utils::make_input_ref;
+    use crate::expr::Expression;
 
     #[test]
     fn test_eval_split_part_expr() {
-        let _chunk = DataChunk::from_pretty(
+        let chunk = DataChunk::from_pretty(
             "
-            T                T    T
+            T                T    I
             abc~@~def~@~ghi  ~@~  2
             abc,def,ghi,jkl  ,    -2",
         );
+
+        let in_n0 = make_input_ref(0, TypeName::Varchar);
+        let in_n1 = make_input_ref(1, TypeName::Varchar);
+        let in_n2 = make_input_ref(2, TypeName::Int64);
+
+        let expr_node = ExprNode {
+            expr_type: SplitPart as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Varchar as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![in_n0, in_n1, in_n2],
+            })),
+        };
+        let split_part_expr = SplitPartExpression::try_from(&expr_node).unwrap();
+
+        let actual = split_part_expr.eval(&chunk).unwrap();
+        let actual = actual
+            .iter()
+            .map(|xs| xs.map(|x| x.into_utf8()))
+            .collect::<Vec<_>>();
+
+        let expected = vec![Some("def"), Some("ghi")];
+
+        assert_eq!(expected, actual);
     }
 }
