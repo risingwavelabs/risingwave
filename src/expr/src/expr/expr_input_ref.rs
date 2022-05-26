@@ -90,3 +90,23 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::Row;
+    use risingwave_common::types::{DataType, Datum};
+
+    use crate::expr::{Expression, InputRefExpression};
+
+    #[test]
+    fn test_eval_row_ref_input_ref() {
+        let datums: Vec<Datum> = vec![Some(1.into()), Some(2.into()), None];
+        let input_row = Row::new(datums.clone());
+
+        for (i, expected) in datums.iter().enumerate() {
+            let expr = InputRefExpression::new(DataType::Int32, i);
+            let result = expr.eval_row_ref(&input_row).unwrap();
+            assert_eq!(*expected, result);
+        }
+    }
+}

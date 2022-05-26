@@ -105,8 +105,8 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::array::{DataChunk, ListValue, Row};
+    use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 
     use super::ArrayExpression;
     use crate::expr::{BoxedExpression, Expression, LiteralExpression};
@@ -120,6 +120,18 @@ mod tests {
 
         let arr = expr.eval(&DataChunk::new_dummy(2)).unwrap();
         assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn test_eval_row_ref_array_expr() {
+        let expr = ArrayExpression {
+            element_type: Box::new(DataType::Int32),
+            elements: vec![i32_expr(1.into()), i32_expr(2.into())],
+        };
+
+        let scalar_impl = expr.eval_row_ref(&Row::new(vec![])).unwrap().unwrap();
+        let expected = ListValue::new(vec![Some(1.into()), Some(2.into())]).to_scalar_value();
+        assert_eq!(expected, scalar_impl);
     }
 
     fn i32_expr(v: ScalarImpl) -> BoxedExpression {

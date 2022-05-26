@@ -104,14 +104,18 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayBuilder, ArrayImpl, DataChunk, DecimalArrayBuilder};
+    use risingwave_common::array::{ArrayBuilder, ArrayImpl, DataChunk, DecimalArrayBuilder, Row};
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, Decimal};
 
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
     use crate::expr::{BoxedExpression, InputRefExpression};
 
-    fn do_test(expr: BoxedExpression, expected_result: Vec<bool>) -> Result<()> {
+    fn do_test(
+        expr: BoxedExpression,
+        expected_eval_result: Vec<bool>,
+        expected_eval_row_ref_result: Vec<bool>,
+    ) -> Result<()> {
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;
             builder.append(Some(Decimal::from_str("0.1").unwrap()))?;
@@ -125,19 +129,30 @@ mod tests {
             .build();
         let result_array = expr.eval(&input_chunk).unwrap();
         assert_eq!(3, result_array.len());
-        for (i, v) in expected_result.iter().enumerate() {
+        for (i, v) in expected_eval_result.iter().enumerate() {
             assert_eq!(
                 *v,
                 bool::try_from(result_array.value_at(i).unwrap()).unwrap()
             );
         }
+
+        let rows = vec![
+            Row::new(vec![Some(1.into()), Some(2.into())]),
+            Row::new(vec![None, Some(2.into())]),
+        ];
+
+        for (i, row) in rows.iter().enumerate() {
+            let result = expr.eval_row_ref(row).unwrap().unwrap();
+            assert_eq!(expected_eval_row_ref_result[i], result.into_bool());
+        }
+
         Ok(())
     }
 
     #[test]
     fn test_is_null() -> Result<()> {
         let expr = IsNullExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
-        do_test(Box::new(expr), vec![false, false, true]).unwrap();
+        do_test(Box::new(expr), vec![false, false, true], vec![false, true]).unwrap();
         Ok(())
     }
 
@@ -145,7 +160,7 @@ mod tests {
     fn test_is_not_null() -> Result<()> {
         let expr =
             IsNotNullExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
-        do_test(Box::new(expr), vec![true, true, false]).unwrap();
+        do_test(Box::new(expr), vec![true, true, false], vec![true, false]).unwrap();
         Ok(())
     }
 }

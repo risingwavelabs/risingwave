@@ -374,4 +374,11 @@ mod tests {
         let result = literal.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(*result, array_nonnull!(I32Array, [1]).into());
     }
+
+    #[test]
+    fn test_literal_eval_row_ref_dummy_chunk() {
+        let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
+        let result = literal.eval_row_ref(&Row::new(vec![])).unwrap();
+        assert_eq!(result, Some(1.into()))
+    }
 }

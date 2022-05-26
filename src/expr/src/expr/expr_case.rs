@@ -127,6 +127,7 @@ mod tests {
 
     use risingwave_common::array::column::Column;
     use risingwave_common::array::PrimitiveArray;
+    use risingwave_common::types::Scalar;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
@@ -138,8 +139,17 @@ mod tests {
         Ok(Column::new(array))
     }
 
+    fn test_eval_row_ref(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
+        for (i, row_input) in row_inputs.iter().enumerate() {
+            let row = Row::new(vec![Some(row_input.to_scalar_value())]);
+            let datum = expr.eval_row_ref(&row).unwrap();
+            let expected = expected[i].map(|f| f.into());
+            assert_eq!(datum, expected)
+        }
+    }
+
     #[test]
-    fn test_searched_case() {
+    fn test_eval_searched_case() {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1
         let when_clauses = vec![WhenClause::new(
@@ -171,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn test_without_else() {
+    fn test_eval_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause::new(
@@ -194,5 +204,64 @@ mod tests {
         assert_eq!(output.datum_at(1), None);
         assert_eq!(output.datum_at(2), Some(3.1f32.into()));
         assert_eq!(output.datum_at(3), None);
+    }
+
+    #[test]
+    fn test_eval_row_ref_searched_case() {
+        let ret_type = DataType::Float32;
+        // when x <= 2 then 3.1
+        let when_clauses = vec![WhenClause::new(
+            new_binary_expr(
+                Type::LessThanOrEqual,
+                DataType::Boolean,
+                Box::new(InputRefExpression::new(DataType::Int32, 0)),
+                Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
+            ),
+            Box::new(LiteralExpression::new(
+                DataType::Float32,
+                Some(3.1f32.into()),
+            )),
+        )];
+        // else 4.1
+        let els = Box::new(LiteralExpression::new(
+            DataType::Float32,
+            Some(4.1f32.into()),
+        ));
+        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
+
+        let row_inputs = vec![1, 2, 3, 4, 5];
+        let expected = vec![
+            Some(3.1f32),
+            Some(3.1f32),
+            Some(4.1f32),
+            Some(4.1f32),
+            Some(4.1f32),
+        ];
+
+        test_eval_row_ref(searched_case_expr, row_inputs, expected);
+    }
+
+    #[test]
+    fn test_eval_row_ref_without_else() {
+        let ret_type = DataType::Float32;
+        // when x <= 3 then 3.1
+        let when_clauses = vec![WhenClause::new(
+            new_binary_expr(
+                Type::LessThanOrEqual,
+                DataType::Boolean,
+                Box::new(InputRefExpression::new(DataType::Int32, 0)),
+                Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
+            ),
+            Box::new(LiteralExpression::new(
+                DataType::Float32,
+                Some(3.1f32.into()),
+            )),
+        )];
+        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
+
+        let row_inputs = vec![2, 3, 4, 5];
+        let expected = vec![Some(3.1f32), Some(3.1f32), None, None];
+
+        test_eval_row_ref(searched_case_expr, row_inputs, expected);
     }
 }

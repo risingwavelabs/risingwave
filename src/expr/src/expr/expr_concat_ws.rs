@@ -151,7 +151,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::array::{DataChunk, DataChunkTestExt, Row};
+    use risingwave_common::types::{Datum, Scalar};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -204,5 +205,41 @@ mod tests {
         let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_eval_row_ref_concat_ws_expr() {
+        let input_node1 = make_input_ref(0, TypeName::Varchar);
+        let input_node2 = make_input_ref(1, TypeName::Varchar);
+        let input_node3 = make_input_ref(2, TypeName::Varchar);
+        let input_node4 = make_input_ref(3, TypeName::Varchar);
+        let concat_ws_expr = ConcatWsExpression::try_from(&make_concat_ws_function(
+            vec![input_node1, input_node2, input_node3, input_node4],
+            TypeName::Varchar,
+        ))
+        .unwrap();
+
+        let row_inputs = vec![
+            vec![Some(","), Some("a"), Some("b"), Some("c")],
+            vec![None, Some("a"), Some("b"), Some("c")],
+            vec![Some(","), None, Some("b"), Some("c")],
+            vec![Some(","), None, None, None],
+            vec![None, None, None, None],
+        ];
+
+        let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
+
+        for (i, row_input) in row_inputs.iter().enumerate() {
+            let datum_vec: Vec<Datum> = row_input
+                .iter()
+                .map(|e| e.map(|s| s.to_string().to_scalar_value()))
+                .collect();
+            let row = Row::new(datum_vec);
+
+            let result = concat_ws_expr.eval_row_ref(&row).unwrap();
+            let expected = expected[i].map(|s| s.to_string().to_scalar_value());
+
+            assert_eq!(result, expected);
+        }
     }
 }

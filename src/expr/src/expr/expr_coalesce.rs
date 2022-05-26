@@ -107,8 +107,8 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{DataChunk, PrimitiveArray};
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::array::{DataChunk, PrimitiveArray, Row};
+    use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -161,5 +161,43 @@ mod tests {
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Int32(3)));
         assert_eq!(res.datum_at(3), None);
+    }
+
+    #[test]
+    fn test_eval_row_ref_coalesce_expr() {
+        let input_node1 = make_input_ref(0, TypeName::Int32);
+        let input_node2 = make_input_ref(1, TypeName::Int32);
+        let input_node3 = make_input_ref(2, TypeName::Int32);
+
+        let nullif_expr = CoalesceExpression::try_from(&make_coalesce_function(
+            vec![input_node1, input_node2, input_node3],
+            TypeName::Int32,
+        ))
+        .unwrap();
+
+        let row_inputs = vec![
+            vec![Some(1), None, None, None],
+            vec![None, Some(2), None, None],
+            vec![None, None, Some(3), None],
+            vec![None, None, None, None],
+        ];
+
+        let expected = vec![
+            Some(ScalarImpl::Int32(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int32(3)),
+            None,
+        ];
+
+        for (i, row_input) in row_inputs.iter().enumerate() {
+            let datum_vec = row_input
+                .iter()
+                .map(|o| o.map(|int| int.to_scalar_value()))
+                .collect();
+            let row = Row::new(datum_vec);
+
+            let result = nullif_expr.eval_row_ref(&row).unwrap();
+            assert_eq!(result, expected[i]);
+        }
     }
 }
