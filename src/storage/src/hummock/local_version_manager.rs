@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-use std::mem::swap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Weak};
@@ -24,7 +22,9 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_pb::hummock::HummockVersion;
+#[cfg(test)]
+use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -58,6 +58,7 @@ struct BufferTracker {
 }
 
 impl BufferTracker {
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.upload_size.load(Relaxed) == 0
     }
@@ -180,23 +181,6 @@ impl LocalVersionManager {
         true
     }
 
-    pub fn update_uncommitted_ssts(
-        &self,
-        epoch: u64,
-        sst_info: Vec<SstableInfo>,
-        shared_buffer_batches: Vec<SharedBufferBatch>,
-    ) {
-        let mut guard = self.local_version.write();
-
-        // Record uploaded but uncommitted SSTs and delete batches from shared buffer.
-        guard.add_uncommitted_ssts(epoch, sst_info);
-
-        if let Some(shared_buffer) = guard.get_shared_buffer(epoch) {
-            let mut guard = shared_buffer.write();
-            guard.delete_batch(shared_buffer_batches.as_slice());
-        }
-    }
-
     /// Waits until the local hummock version contains the given committed epoch
     pub async fn wait_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         if epoch == HummockEpoch::MAX {
@@ -290,13 +274,9 @@ impl LocalVersionManager {
 
         let mut handle_epoch = |epoch: &HummockEpoch, shared_buffer: &Arc<RwLock<SharedBuffer>>| {
             let mut guard = shared_buffer.write();
-            let (task_id, task_data) = guard.new_upload_task(|batches| {
-                // Take all batches of an epoch out.
-                let mut ret = BTreeMap::default();
-                swap(&mut ret, batches);
-                ret
-            });
-            tasks.push(UploadTask::new(task_id, *epoch, task_data));
+            if let Some((task_id, task_data)) = guard.new_upload_task() {
+                tasks.push(UploadTask::new(task_id, *epoch, task_data));
+            }
         };
 
         {
@@ -342,13 +322,12 @@ impl LocalVersionManager {
 
         if failed_epoch.len() < upload_result.len() {
             // only acquire the lock when any of the upload task succeed.
-            let mut guard = self.local_version.write();
+            let guard = self.local_version.read();
             for ((epoch, task_id), result) in upload_result {
                 match result {
                     Ok(ssts) => {
-                        guard.add_uncommitted_ssts(epoch, ssts);
                         if let Some(shared_buffer) = guard.get_shared_buffer(epoch) {
-                            shared_buffer.write().succeed_upload_task(task_id);
+                            shared_buffer.write().succeed_upload_task(task_id, ssts);
                         }
                         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
                             conflict_detector.archive_epoch(epoch);
@@ -381,12 +360,12 @@ impl LocalVersionManager {
         self.local_version.read().pinned_version().clone()
     }
 
-    pub fn get_uncommitted_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
+    #[cfg(test)]
+    pub fn get_remote_ssts(&self, epoch: HummockEpoch) -> Vec<SstableInfo> {
         self.local_version
             .read()
-            .get_uncommitted_ssts()
-            .get(&epoch)
-            .cloned()
+            .get_shared_buffer(epoch)
+            .map(|shared_buffer| shared_buffer.read().get_remote_ssts())
             .unwrap_or_default()
     }
 
@@ -564,7 +543,6 @@ impl LocalVersionManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -588,6 +566,7 @@ mod tests {
         )]
     }
 
+    #[allow(dead_code)]
     fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
         let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
         let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
@@ -695,176 +674,5 @@ mod tests {
         let local_version = local_version_manager.get_local_version();
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
         assert!(local_version.get_shared_buffer(epochs[1]).is_none());
-    }
-
-    #[tokio::test]
-    async fn test_update_uncommitted_ssts() {
-        let opt = Arc::new(default_config_for_test());
-        let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-        let local_version_manager = LocalVersionManager::new(
-            opt.clone(),
-            mock_sstable_store(),
-            Arc::new(StateStoreMetrics::unused()),
-            Arc::new(MockHummockMetaClient::new(
-                hummock_manager_ref.clone(),
-                worker_node.id,
-            )),
-            ConflictDetector::new_from_config(opt),
-        )
-        .await;
-
-        let pinned_version = local_version_manager.get_pinned_version();
-        let max_commit_epoch = pinned_version.max_committed_epoch();
-        let initial_id = pinned_version.id();
-        let version = pinned_version.version();
-
-        let epochs: Vec<u64> = vec![max_commit_epoch + 1, max_commit_epoch + 2];
-        let buffer_tracker = Arc::new(AtomicUsize::new(0));
-        let batches: Vec<Vec<(Bytes, StorageValue)>> =
-            epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
-
-        // Fill shared buffer with dummy batches
-        for i in 0..2 {
-            local_version_manager
-                .write_shared_buffer(epochs[i], batches[i].clone(), false)
-                .await
-                .unwrap();
-            let local_version = local_version_manager.get_local_version();
-            assert_eq!(
-                local_version
-                    .get_shared_buffer(epochs[i])
-                    .unwrap()
-                    .read()
-                    .size(),
-                SharedBufferBatch::measure_batch_size(
-                    &LocalVersionManager::build_shared_buffer_item_batches(
-                        batches[i].clone(),
-                        epochs[i]
-                    )
-                )
-            );
-        }
-
-        // Update uncommitted sst for epochs[0]
-        let uploaded_batches: Vec<SharedBufferBatch> = vec![SharedBufferBatch::new(
-            LocalVersionManager::build_shared_buffer_item_batches(batches[0].clone(), epochs[0]),
-            epochs[0],
-            buffer_tracker.clone(),
-        )];
-        let sst1 = gen_dummy_sst_info(1, uploaded_batches.clone());
-        local_version_manager.update_uncommitted_ssts(
-            epochs[0],
-            vec![sst1.clone()],
-            uploaded_batches,
-        );
-        let local_version = local_version_manager.get_local_version();
-        // Check shared buffer
-        assert_eq!(
-            local_version
-                .get_shared_buffer(epochs[0])
-                .unwrap()
-                .read()
-                .size(),
-            0
-        );
-        assert_eq!(
-            local_version
-                .get_shared_buffer(epochs[1])
-                .unwrap()
-                .read()
-                .size(),
-            SharedBufferBatch::measure_batch_size(
-                &LocalVersionManager::build_shared_buffer_item_batches(
-                    batches[1].clone(),
-                    epochs[1]
-                )
-            )
-        );
-
-        // Check pinned version
-        assert_eq!(local_version.pinned_version().version(), version);
-        // Check uncommitted ssts
-        let uncommitted_ssts = local_version.get_uncommitted_ssts();
-        assert_eq!(uncommitted_ssts.len(), 1);
-        let epoch_uncommitted_ssts = uncommitted_ssts.get(&epochs[0]).unwrap();
-        assert_eq!(epoch_uncommitted_ssts.len(), 1);
-        assert_eq!(*epoch_uncommitted_ssts.first().unwrap(), sst1);
-
-        // Update uncommitted sst for epochs[1]
-        let uploaded_batches: Vec<SharedBufferBatch> = vec![SharedBufferBatch::new(
-            LocalVersionManager::build_shared_buffer_item_batches(batches[1].clone(), epochs[1]),
-            epochs[1],
-            buffer_tracker.clone(),
-        )];
-        let sst2 = gen_dummy_sst_info(2, uploaded_batches.clone());
-        local_version_manager.update_uncommitted_ssts(
-            epochs[1],
-            vec![sst2.clone()],
-            uploaded_batches,
-        );
-        let local_version = local_version_manager.get_local_version();
-        // Check shared buffer
-        for epoch in &epochs {
-            assert_eq!(
-                local_version
-                    .get_shared_buffer(*epoch)
-                    .unwrap()
-                    .read()
-                    .size(),
-                0
-            );
-        }
-        // Check pinned version
-        assert_eq!(local_version.pinned_version().version(), version);
-        // Check uncommitted ssts
-        let uncommitted_ssts = local_version.get_uncommitted_ssts();
-        assert_eq!(uncommitted_ssts.len(), 2);
-        let epoch_uncommitted_ssts = uncommitted_ssts.get(&epochs[1]).unwrap();
-        assert_eq!(epoch_uncommitted_ssts.len(), 1);
-        assert_eq!(*epoch_uncommitted_ssts.first().unwrap(), sst2);
-
-        // Update version for epochs[0]
-        let version = HummockVersion {
-            id: initial_id + 1,
-            max_committed_epoch: epochs[0],
-            ..Default::default()
-        };
-        local_version_manager.try_update_pinned_version(version.clone());
-        let local_version = local_version_manager.get_local_version();
-        // Check shared buffer
-        assert!(local_version.get_shared_buffer(epochs[0]).is_none());
-        assert_eq!(
-            local_version
-                .get_shared_buffer(epochs[1])
-                .unwrap()
-                .read()
-                .size(),
-            0
-        );
-        // Check pinned version
-        assert_eq!(local_version.pinned_version().version(), version);
-        // Check uncommitted ssts
-        let uncommitted_ssts = local_version.get_uncommitted_ssts();
-        assert!(uncommitted_ssts.get(&epochs[0]).is_none());
-        let epoch_uncommitted_ssts = uncommitted_ssts.get(&epochs[1]).unwrap();
-        assert_eq!(epoch_uncommitted_ssts.len(), 1);
-        assert_eq!(*epoch_uncommitted_ssts.first().unwrap(), sst2);
-
-        // Update version for epochs[1]
-        let version = HummockVersion {
-            id: initial_id + 2,
-            max_committed_epoch: epochs[1],
-            ..Default::default()
-        };
-        local_version_manager.try_update_pinned_version(version.clone());
-        let local_version = local_version_manager.get_local_version();
-        assert!(local_version.get_shared_buffer(epochs[0]).is_none());
-        assert!(local_version.get_shared_buffer(epochs[1]).is_none());
-        // Check pinned version
-        assert_eq!(local_version.pinned_version().version(), version);
-        // Check uncommitted ssts
-        let uncommitted_ssts = local_version.get_uncommitted_ssts();
-        assert!(uncommitted_ssts.get(&epochs[0]).is_none());
-        assert!(uncommitted_ssts.get(&epochs[1]).is_none());
     }
 }

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_pb::hummock::{SstableInfo, VNodeBitmap};
+use risingwave_pb::hummock::VNodeBitmap;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -32,6 +32,8 @@ use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     HummockIteratorDirection, ReadOptions,
 };
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::utils::prune_ssts;
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
@@ -78,7 +80,7 @@ impl HummockStorage {
         let mut overlapped_iters = vec![];
         let backward = T::direction() == DirectionEnum::Backward;
 
-        let (uncommitted_ssts, pinned_version) = {
+        let (shared_buffer_data, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
 
             // Check epoch validity
@@ -86,31 +88,41 @@ impl HummockStorage {
             let levels = read_version.pinned_version.levels();
             validate_table_key_range(levels)?;
 
-            // Generate shared buffer iterators
-            for shared_buffer in read_version.shared_buffer {
-                for batch in shared_buffer.get_overlap_batches(&key_range, backward) {
-                    overlapped_iters
-                        .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
-                }
-            }
+            let shared_buffer_data = read_version
+                .shared_buffer
+                .iter()
+                .map(|shared_buffer| shared_buffer.get_overlap_data(&key_range, backward, None))
+                .collect_vec();
 
-            (read_version.uncommitted_ssts, read_version.pinned_version)
+            (shared_buffer_data, read_version.pinned_version)
         };
 
-        // Generate iterators for uncommitted ssts by filter out ssts that do not overlap with given
-        // `key_range`
         let mut stats = StoreLocalStatistic::default();
-        let table_infos = prune_ssts(uncommitted_ssts.iter(), &key_range, backward, None);
-        for table_info in table_infos.into_iter().rev() {
-            let table = self
-                .sstable_store
-                .sstable(table_info.id, &mut stats)
-                .await?;
-            overlapped_iters.push(Box::new(T::SstableIteratorType::create(
-                table,
-                self.sstable_store(),
-                read_options.clone(),
-            )));
+
+        for (replicated_batches, uncommitted_data) in shared_buffer_data {
+            for batch in replicated_batches {
+                overlapped_iters
+                    .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
+            }
+            for data in uncommitted_data {
+                match data {
+                    UncommittedData::Batch(batch) => {
+                        overlapped_iters
+                            .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
+                    }
+                    UncommittedData::Sst(table_info) => {
+                        let table = self
+                            .sstable_store
+                            .sstable(table_info.id, &mut stats)
+                            .await?;
+                        overlapped_iters.push(Box::new(T::SstableIteratorType::create(
+                            table,
+                            self.sstable_store(),
+                            read_options.clone(),
+                        )));
+                    }
+                }
+            }
         }
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
@@ -191,6 +203,7 @@ impl HummockStorage {
         );
 
         user_iterator.rewind().await?;
+        stats.report(self.stats.as_ref());
         Ok(HummockStateStoreIter::new(user_iterator))
     }
 
@@ -208,50 +221,69 @@ impl HummockStorage {
         vnode_set: Option<VNodeBitmap>,
     ) -> StorageResult<Option<Bytes>> {
         let mut stats = StoreLocalStatistic::default();
-        let (uncommitted_ssts, pinned_version) = {
+        let (shared_buffer_data, pinned_version) = {
             let read_version = self.local_version_manager.read_version(epoch);
 
             // check epoch validity
             validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
 
-            // Query shared buffer. Return the value without iterating SSTs if found
-            for shared_buffer in read_version.shared_buffer {
-                for batch in shared_buffer.get_overlap_batches(&(key..=key), false) {
-                    match batch.get(key) {
-                        Some(v) => {
-                            self.stats.get_shared_buffer_hit_counts.inc();
-                            return Ok(v.into_user_value().map(|v| v.into()));
-                        }
-                        None => continue,
-                    }
-                }
-            }
+            let shared_buffer_data = read_version
+                .shared_buffer
+                .into_iter()
+                .map(|shared_buffer| {
+                    shared_buffer.get_overlap_data(&(key..=key), false, vnode_set.as_ref())
+                })
+                .collect_vec();
+            (shared_buffer_data, read_version.pinned_version)
+        };
 
-            (read_version.uncommitted_ssts, read_version.pinned_version)
+        // Return `Some(None)` means the key is deleted.
+        let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
+            batch.get(key).map(|v| {
+                self.stats.get_shared_buffer_hit_counts.inc();
+                v.into_user_value().map(|v| v.into())
+            })
         };
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
-
-        // Query uploaded but uncommitted SSTs. Return the value if found.
-        let table_infos = prune_ssts(
-            uncommitted_ssts.iter(),
-            &(key..=key),
-            false,
-            vnode_set.as_ref(),
-        );
+        // TODO: may want to avoid use Arc in read options
         let read_options = Arc::new(ReadOptions::default());
-        for table_info in table_infos.into_iter().rev() {
-            let table = self
-                .sstable_store
-                .sstable(table_info.id, &mut stats)
-                .await?;
-            table_counts += 1;
-            if let Some(v) = self
-                .get_from_table(table, &internal_key, key, read_options.clone(), &mut stats)
-                .await?
-            {
-                return Ok(Some(v));
+
+        // Query shared buffer. Return the value without iterating SSTs if found
+        for (replicated_batches, uncommitted_data) in shared_buffer_data {
+            for batch in replicated_batches {
+                if let Some(v) = get_from_batch(&batch) {
+                    return Ok(v);
+                }
+            }
+            for data in uncommitted_data {
+                match data {
+                    UncommittedData::Batch(batch) => {
+                        if let Some(v) = get_from_batch(&batch) {
+                            return Ok(v);
+                        }
+                    }
+                    UncommittedData::Sst(table_info) => {
+                        let table = self
+                            .sstable_store
+                            .sstable(table_info.id, &mut stats)
+                            .await?;
+                        table_counts += 1;
+                        if let Some(v) = self
+                            .get_from_table(
+                                table,
+                                &internal_key,
+                                key,
+                                read_options.clone(),
+                                &mut stats,
+                            )
+                            .await?
+                        {
+                            return Ok(Some(v));
+                        }
+                    }
+                }
             }
         }
 
@@ -259,44 +291,27 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-             {
-                    let table_infos = prune_ssts(
-                        level.table_infos.iter(),
-                        &(key..=key),
-                        false,
-                        vnode_set.as_ref(),
-                    );
-                    for table_info in table_infos.into_iter().rev() {
-                        let table = self.sstable_store.sstable(table_info.id, &mut stats).await?;
-                        table_counts += 1;
-                        if let Some(v) = self.get_from_table(table, &internal_key, key, read_options.clone(), &mut stats).await? {
-                            return Ok(Some(v));
-                        }
-                    }
-                }
-                /*
-                LevelType::Nonoverlapping => {
-                    let table_idx = search_sst_idx(level, key);
-                    assert!(table_idx < level.table_infos.len());
-                    if vnode_set.is_none()
-                        || bitmap_overlap(
-                            vnode_set.as_ref().unwrap(),
-                            level.table_infos[table_idx].get_vnode_bitmaps(),
-                        )
+            {
+                let table_infos = prune_ssts(
+                    level.table_infos.iter(),
+                    &(key..=key),
+                    false,
+                    vnode_set.as_ref(),
+                );
+                for table_info in table_infos.into_iter().rev() {
+                    let table = self
+                        .sstable_store
+                        .sstable(table_info.id, &mut stats)
+                        .await?;
+                    table_counts += 1;
+                    if let Some(v) = self
+                        .get_from_table(table, &internal_key, key, read_options.clone(), &mut stats)
+                        .await?
                     {
-                        table_counts += 1;
-                        // Because we will keep multiple version of one in the same sst file, we
-                        // do not find it in the next adjacent file.
-                        let table = self
-                            .sstable_store
-                            .sstable(level.table_infos[table_idx].id)
-                            .await?;
-                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
-                            return Ok(Some(v));
-                        }
+                        return Ok(Some(v));
                     }
                 }
-                */
+            }
         }
 
         stats.report(self.stats.as_ref());
@@ -416,10 +431,6 @@ impl StateStore for HummockStorage {
                 .await?;
             Ok(())
         }
-    }
-
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
-        self.local_version_manager.get_uncommitted_ssts(epoch)
     }
 }
 
