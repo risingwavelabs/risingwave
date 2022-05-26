@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -27,9 +25,7 @@ use crate::config::QueryMode;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-use crate::scheduler::{
-    ExecutionContext, ExecutionContextRef, HummockSnapshotManager, LocalQueryExecution,
-};
+use crate::scheduler::{ExecutionContext, ExecutionContextRef, LocalQueryExecution};
 use crate::session::OptimizerContext;
 
 pub static QUERY_MODE: &str = "query_mode";
@@ -146,8 +142,7 @@ async fn local_execute(
         (query, pg_descs)
     };
 
-    let hummock_snapshot_manager =
-        Arc::new(HummockSnapshotManager::new(session.env().meta_client_ref()));
+    let hummock_snapshot_manager = session.env().hummock_snapshot_manager().clone();
 
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(query, hummock_snapshot_manager, "");
