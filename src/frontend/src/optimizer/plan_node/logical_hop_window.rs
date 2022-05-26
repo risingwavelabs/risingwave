@@ -195,15 +195,22 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
     ) -> (Self, ColIndexMapping) {
         let mut time_col = self.time_col.clone();
         time_col.index = input_col_change.map(time_col.index);
+        let mut kept_column = Vec::new();
         let new_output_indices = self
             .output_indices
             .iter()
-            .filter_map(|&idx| match input_col_change.try_map(idx) {
-                Some(new_idx) => Some(new_idx),
+            .enumerate()
+            .filter_map(|(i, &idx)| match input_col_change.try_map(idx) {
+                Some(new_idx) => {
+                    kept_column.push(i);
+                    Some(new_idx)
+                }
                 None => {
                     if idx == self.window_start_col_idx() {
+                        kept_column.push(i);
                         Some(input.schema().len())
                     } else if idx == self.window_end_col_idx() {
+                        kept_column.push(i);
                         Some(input.schema().len() + 1)
                     } else {
                         None
@@ -218,26 +225,10 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             self.window_size,
             Some(new_output_indices),
         );
-        dbg!(&input_col_change);
-        let (mut mapping, new_input_col_num) = input_col_change.into_parts();
-        assert_eq!(new_input_col_num, input.schema().len());
-        for i in &mut mapping {
-            if let Some(idx) = i {
-                if !new_hop.output_indices.contains(idx) {
-                    *i = None;
-                }
-            }
-        }
-        for (idx, &val) in new_hop.output_indices.iter().enumerate() {
-            if val == input.schema().len() || val == input.schema().len() + 1 {
-                mapping.resize(idx + 1, None);
-                mapping[idx] = Some(val);
-            }
-        }
-        // mapping.push(Some(new_input_col_num));
-        // mapping.push(Some(new_input_col_num + 1));
-        dbg!(&ColIndexMapping::new(mapping.clone()));
-        (new_hop, ColIndexMapping::new(mapping))
+        (
+            new_hop,
+            ColIndexMapping::with_remaining_columns(&kept_column, self.output_indices.len()),
+        )
     }
 }
 
@@ -323,7 +314,7 @@ impl ToBatch for LogicalHopWindow {
         let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         // remove output indices
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
-        let plan = BatchHopWindow::new(new_logical.clone()).into();
+        let plan = BatchHopWindow::new(new_logical).into();
         if self.output_indices != default_indices {
             let logical_project = LogicalProject::with_mapping(
                 plan,
@@ -343,16 +334,14 @@ impl ToStream for LogicalHopWindow {
     fn to_stream(&self) -> Result<PlanRef> {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
-        dbg!(new_logical.schema(), &new_logical.base.pk_indices);
         let new_output_indices = new_logical.output_indices.clone();
         let new_internal_column_num = new_logical.internal_column_num();
 
         let default_indices = (0..new_logical.internal_column_num()).collect_vec();
         // remove output indices
         let new_logical = new_logical.clone_with_output_indices(default_indices.clone());
-        let plan = StreamHopWindow::new(new_logical.clone()).into();
+        let plan = StreamHopWindow::new(new_logical).into();
         if self.output_indices != default_indices {
-            dbg!("test");
             let logical_project = LogicalProject::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
@@ -360,7 +349,6 @@ impl ToStream for LogicalHopWindow {
                     new_internal_column_num,
                 ),
             );
-            dbg!(&logical_project.base.pk_indices);
             Ok(StreamProject::new(logical_project).into())
         } else {
             Ok(plan)
@@ -369,22 +357,20 @@ impl ToStream for LogicalHopWindow {
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
-        dbg!(&input_col_change);
         let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.decompose();
         let i2o = self.i2o_col_mapping();
-
+        if !output_indices.contains(&input.schema().len())
+        // we should add window_start so ensure we can derive pk
+        {
+            output_indices.push(input.schema().len());
+        }
         let new_pk_cols_to_add = input
             .pk_indices()
             .iter()
             .cloned()
             .filter(|i| i2o.try_map(*i).is_none());
         output_indices.extend(new_pk_cols_to_add);
-        if !output_indices.contains(&input.schema().len())
-        // we should add window_start so ensure we can derive pk
-        {
-            output_indices.push(input.schema().len());
-        }
         let new_hop = Self::new(
             input,
             time_col,
@@ -392,10 +378,6 @@ impl ToStream for LogicalHopWindow {
             window_size,
             Some(output_indices),
         );
-        dbg!(new_hop.schema(), &new_hop.base.pk_indices);
-        // dbg!(&out_col_change);
-        // let out_col_change = out_col_change.composite(&new_hop.internal2output_col_mapping());
-        // dbg!("new", &out_col_change);
         Ok((new_hop.into(), out_col_change))
     }
 }
