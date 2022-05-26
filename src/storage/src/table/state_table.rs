@@ -167,6 +167,10 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
         Ok(state_table_iter)
     }
 
+    /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
+    /// memory(`mem_table`). If a record exist in both `cell_based_table` and `mem_table`, result in
+    /// `mem_table` is returned according to the operation(RowOp) on it. This is because the data in
+    /// memory is fresher.
     pub async fn next(&mut self) -> StorageResult<Option<Row>> {
         loop {
             let next_flag;
@@ -178,8 +182,8 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     res = None;
                 }
                 (Some((_, row)), None) => {
-                    res = Some(row);
                     next_flag = NextOutcome::Storage;
+                    res = Some(row);
                 }
                 (None, Some((_, row_op))) => {
                     next_flag = NextOutcome::MemTable;
@@ -201,8 +205,8 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                     match cell_based_pk.cmp(&mem_table_pk_bytes) {
                         Ordering::Less => {
                             // cell_based_table_item will be return
-                            res = Some(cell_based_row);
                             next_flag = NextOutcome::Storage;
+                            res = Some(cell_based_row);
                         }
                         Ordering::Equal => {
                             // mem_table_item will be return, while both cell_based_streaming_iter
@@ -233,9 +237,7 @@ impl<'a, S: StateStore> StateTableRowIter<'a, S> {
                                     res = None;
                                 }
                                 RowOp::Update(_) => {
-                                    panic!(
-                                    "There must be a record in shared storage, so this case is unreachable.",
-                                );
+                                    unreachable!();
                                 }
                             }
                             self.cell_based_item = Some((cell_based_pk, cell_based_row));
